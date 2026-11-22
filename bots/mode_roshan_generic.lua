@@ -931,7 +931,7 @@ function Think()
 				end
 			end
 			if caller then
-				Fu.ModeAnnounce(bot, "say_roshan", 20)
+				Fu.ModeAnnounce(bot, "say_roshan", 20, true)
 			end
 		end
 		return

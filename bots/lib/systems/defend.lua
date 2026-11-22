@@ -51,6 +51,7 @@ local UnitType = Dota.UnitType
 local NativeOperators = require(GetScriptDirectory() .. "/lib/vendor/native_operators")
 local vectorAdd = NativeOperators.add
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local getLocationToLocationDistance = Utils.GetLocationToLocationDistance
 local CacheKeys = require(GetScriptDirectory() .. "/lib/systems/cache_keys")
 function getDefendState(bot)
@@ -1118,7 +1119,7 @@ function pingForDefense(bot, lane, desire, building, tier, alliesComing, enemyCo
 		vectorAdd(Fu.AdjustLocationWithOffsetTowardsFountain(building:GetLocation(), 850), RandomVector(50))
 	local retreatingAllies = Fu.GetRetreatingAlliesNearLoc(pingLocation, 1600)
 	if #retreatingAllies == 0 then
-		bot:ActionImmediate_Chat(Localization.Get("say_come_def"), false)
+		ChatRules.SayDecision(bot, Localization.Get("say_come_def"), "say_come_def")
 		bot:ActionImmediate_Ping(pingLocation.x, pingLocation.y, false)
 		defendPings.pingedTime = GameTime()
 		defendPings.lane = lane
@@ -2004,9 +2005,9 @@ function Defend.GetDefendDesire(bot, lane)
 			)
 			local chatLines = Localization.Get(chatKey)
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], chatKey)
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, chatKey)
 			end
 		end
 	end
