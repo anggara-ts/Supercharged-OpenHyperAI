@@ -16,6 +16,8 @@ local DIRE_NW = 15478 + 14006 + 18187 + 11583 + 9891
 local RADIANT_LVL = (18 + 18 + 16 + 16 + 17) / 5
 local DIRE_LVL = (20 + 19 + 22 + 18 + 19) / 5
 
+-- NONE leaves a field unset (a nil in the override table would be skipped by pairs).
+local NONE = {}
 local function inputs(over)
 	local i = {
 		laning = false,
@@ -33,7 +35,11 @@ local function inputs(over)
 		ultsTotal = 3,
 	}
 	for k, v in pairs(over or {}) do
-		i[k] = v
+		if v == NONE then
+			i[k] = nil
+		else
+			i[k] = v
+		end
 	end
 	return i
 end
@@ -47,7 +53,7 @@ T.test("strength: game 074 Radiant (behind 2.6 levels and 10% net worth) does no
 	ok, why = R.Decide(inputs({ theirNw = 30000 }))
 	T.eq(ok, false, "under-read enemy net worth: still no push")
 	T.eq(why, "behind-lvl", "levels gate the net worth read")
-	ok, why = R.Decide(inputs({ theirNw = nil }))
+	ok, why = R.Decide(inputs({ theirNw = NONE }))
 	T.eq(ok, false, "net worth unknown: no push")
 	T.eq(why, "behind-lvl", "levels only")
 end)
@@ -90,7 +96,7 @@ T.test("strength: net worth route needs 15% and a small level lead", function()
 	local ok4, why4 = R.Decide(inputs({ ourNw = 60000, theirNw = 70000, ourLvl = 21, theirLvl = 18 }))
 	T.eq(ok4, false, "+3 levels but 14% behind in net worth: no push")
 	T.eq(why4, "behind-nw", "skip reason")
-	local ok5, why5 = R.Decide(inputs({ ourNw = 60000, theirNw = nil, ourLvl = 19.5, theirLvl = 18 }))
+	local ok5, why5 = R.Decide(inputs({ ourNw = 60000, theirNw = NONE, ourLvl = 19.5, theirLvl = 18 }))
 	T.eq(ok5, false, "net worth unknown and +1.5 levels: no push")
 	T.eq(why5, "no-lead-nw-unknown", "skip reason")
 end)
@@ -125,7 +131,7 @@ T.test("strength: the scale knob and the Aegis move the thresholds", function()
 	T.eq(R.SetScale(9), 2, "scale clamped to 2")
 	T.eq(R.SetScale(0.1), 0.5, "scale clamped to 0.5")
 	R.SetScale(1)
-	local lvlOnly = inputs({ ourNw = nil, theirNw = nil, ourLvl = 19.3, theirLvl = 18 })
+	local lvlOnly = inputs({ ourNw = NONE, theirNw = NONE, ourLvl = 19.3, theirLvl = 18 })
 	T.eq((R.Decide(lvlOnly)), false, "+1.3 levels: no push")
 	lvlOnly.aegis = true
 	T.eq((R.Decide(lvlOnly)), true, "+1.3 levels with the Aegis (threshold 1.2): push")
