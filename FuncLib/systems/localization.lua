@@ -15,6 +15,7 @@ local strings = {
 		welcome = {
 			"Bot chat commands:",
 			"!pos 2 - take position 2, a bot swaps with you. !3pos 5 - the team's 3rd player plays pos 5. Before the horn.",
+			"!pos - every bot says its position (Pos 1 Carry ... Pos 5 Hard Support).",
 			"!sp en / zh / ru / ja - the language of the bots' chat.",
 			"!debug - bots explain more of their decisions in chat (wards etc.); again to stop. After the horn.",
 			"Feedback and known limitations: see the bot script's Workshop page.",
@@ -271,6 +272,7 @@ local strings = {
 		welcome = {
 			"机器人聊天指令：",
 			"!pos 2 - 换到2号位，机器人与你交换。!3pos 5 - 让队伍第3个玩家打5号位。仅限号角响起前。",
+			"!pos - 每个机器人说出自己的位置。",
 			"!sp en / zh / ru / ja - 机器人聊天所用的语言。",
 			"!debug - 机器人在聊天中说明更多决策（如眼位），再输入一次关闭。号角响起后可用。",
 			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
@@ -494,6 +496,7 @@ local strings = {
 		welcome = {
 			"Команды чата для ботов:",
 			"!pos 2 - взять позицию 2, бот поменяется с вами. !3pos 5 - 3-й игрок команды играет позицию 5. До горна.",
+			"!pos - каждый бот назовёт свою позицию.",
 			"!sp en / zh / ru / ja - язык чата ботов.",
 			"!debug - боты пишут в чат больше о своих решениях (варды и т.д.); ещё раз - выключить. После горна.",
 			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
@@ -752,6 +755,7 @@ local strings = {
 		welcome = {
 			"ボット用チャットコマンド：",
 			"!pos 2 - ポジション2に変更（ボットと交換）。!3pos 5 - チームの3番目のプレイヤーがポジション5。ホーン前のみ。",
+			"!pos - 各ボットが自分のポジションを伝えます。",
 			"!sp en / zh / ru / ja - ボットのチャットの言語。",
 			"!debug - ボットが判断（ワードなど）をチャットで詳しく伝えます。もう一度で解除。ホーン後に使用可。",
 			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
