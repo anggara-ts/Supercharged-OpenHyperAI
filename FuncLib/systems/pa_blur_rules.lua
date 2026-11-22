@@ -14,10 +14,14 @@ PaBlurRules.APPROACH_MAX = 2500
 PaBlurRules.LONE_RADIUS = 1200
 -- Keep Blur for a later escape when she is this low.
 PaBlurRules.APPROACH_MIN_HP = 0.4
--- Enemy-area hide: no enemy hero within AREA_CLOSE (the 600 reveal radius plus a step) and at most AREA_MAX_SEEN
--- within 1600.
-PaBlurRules.AREA_CLOSE = 900
-PaBlurRules.AREA_MAX_SEEN = 2
+-- Hide: no enemy hero (seen in the last 5s) and no enemy tower within HIDE_CLEAR (the 600 reveal radius plus a
+-- margin). Maintainer (game 069): only the reveal radius matters, so heroes farther away don't stop it.
+PaBlurRules.HIDE_CLEAR = 800
+-- Farming outside the enemy half: Blur only when an enemy hero was seen within this range in the last 5s.
+PaBlurRules.FARM_SEEN_RADIUS = 1600
+-- Keep the 45s cooldown for an escape when she is under this HP.
+PaBlurRules.HIDE_MIN_HP = 0.5
+PaBlurRules.HIDE_MIN_LEVEL = 7
 
 -- Escape. o: retreating, hitByHero (a hero hit her in the last 3.1s), level, hp (0..1), heroesNear (enemy heroes
 -- within 740), towerNear (an enemy tower within 878). Returns ok, why. Enemy heroes or a tower near no longer stop
@@ -80,15 +84,25 @@ function PaBlurRules.Approach(o)
 	return true, "approach"
 end
 
--- Enemy-area hide (level 7+, in the enemy half). o: hunting (going on someone: only Approach decides that cast, so a
--- target with a friend near is not blurred into), heroesClose (enemy heroes within AREA_CLOSE), heroesSeen (within
--- 1600), towers (enemy towers within 1600). The old rule read the same 1600 list twice ("== 0 and <= 2"), so the
--- "<= 2" part did nothing.
-function PaBlurRules.AreaHide(o)
-	if o.hunting then
-		return false
+-- Hide (#48). o: hunting (going on someone: Approach owns that cast, so a target with a friend near is not
+-- blurred into), level, hp (0..1), inEnemyArea, farming, enemySeenNear (an enemy hero seen within FARM_SEEN_RADIUS
+-- in the last 5s), heroesInReveal (enemy heroes seen within HIDE_CLEAR), towerInReveal. Returns ok, why
+-- (why = area | farm). The old rule read the same 1600 hero list twice ("== 0 and <= 2"); the old farm rule only
+-- cast on ancients or under 28-58% HP.
+function PaBlurRules.Hide(o)
+	if o.hunting or o.level < PaBlurRules.HIDE_MIN_LEVEL or o.hp < PaBlurRules.HIDE_MIN_HP then
+		return false, nil
 	end
-	return (o.heroesClose or 0) == 0 and (o.heroesSeen or 0) <= PaBlurRules.AREA_MAX_SEEN and (o.towers or 0) == 0
+	if (o.heroesInReveal or 0) > 0 or o.towerInReveal then
+		return false, nil
+	end
+	if o.inEnemyArea then
+		return true, "area"
+	end
+	if o.farming and o.enemySeenNear then
+		return true, "farm"
+	end
+	return false, nil
 end
 
 -- The dodge result 1s after a blur-disjoint decision. w: at (decision time), stunned (a stun was seen on her in the

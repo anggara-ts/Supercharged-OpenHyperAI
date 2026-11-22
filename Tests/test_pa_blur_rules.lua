@@ -65,19 +65,35 @@ T.test("pa blur: chase-approach only on a lone hero far enough", function()
 	T.eq(pair(approach({ manaAfter = 30, strikeCost = 50 })), "false mana", "keep the mana for the jump")
 end)
 
-T.test("pa blur: the enemy-area rule reads two hero ranges", function()
+T.test("pa blur: hide only counts the reveal radius", function()
 	local R = load()
-	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 0, towers = 0 }), true, "nobody near")
-	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 2, towers = 0 }), true, "two seen farther than 900")
-	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 3, towers = 0 }), false, "three seen")
-	T.eq(R.AreaHide({ heroesClose = 1, heroesSeen = 1, towers = 0 }), false, "one within 900")
-	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 0, towers = 1 }), false, "a tower")
-	-- Going on a hero 950 away with a friend beside it: Approach says not-alone, the area rule must not cast instead.
-	T.eq(
-		R.AreaHide({ hunting = true, heroesClose = 0, heroesSeen = 2, towers = 0 }),
-		false,
-		"hunting: Approach decides"
-	)
+	local function hide(over)
+		local o = {
+			hunting = false,
+			level = 12,
+			hp = 0.8,
+			inEnemyArea = true,
+			farming = false,
+			enemySeenNear = false,
+			heroesInReveal = 0,
+			towerInReveal = false,
+		}
+		for k, v in pairs(over or {}) do
+			o[k] = v
+		end
+		return R.Hide(o)
+	end
+	T.eq(pair(hide()), "true area", "enemy half, nobody within 800")
+	T.eq(pair(hide({ enemySeenNear = true })), "true area", "heroes farther than 800 don't stop it")
+	T.eq(pair(hide({ heroesInReveal = 1 })), "false nil", "a hero within 800 would see her")
+	T.eq(pair(hide({ towerInReveal = true })), "false nil", "a tower within 800")
+	T.eq(pair(hide({ hp = 0.45 })), "false nil", "under 50%: keep it for the escape")
+	T.eq(pair(hide({ level = 6 })), "false nil", "level 7+")
+	-- Going on a hero with a friend beside it: Approach says not-alone, the hide rule must not cast instead.
+	T.eq(pair(hide({ hunting = true })), "false nil", "hunting: Approach decides")
+	T.eq(pair(hide({ inEnemyArea = false, farming = true, enemySeenNear = true })), "true farm", "farming, enemy seen")
+	T.eq(pair(hide({ inEnemyArea = false, farming = true })), "false nil", "farming with no enemy seen")
+	T.eq(pair(hide({ inEnemyArea = false })), "false nil", "own half, not farming")
 end)
 
 T.test("pa blur: dodge result after 1s", function()

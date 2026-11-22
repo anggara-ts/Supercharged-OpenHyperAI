@@ -164,15 +164,11 @@ function X.SkillsComplement()
 		bot:ActionQueue_UseAbility(fanOfKnivesAbility)
 		return
 	end
-	-- Approaching unseen under Blur: no dagger before she is within the 600 reveal radius anyway. Unverified
-	-- whether a dagger counts as an attack for break_on_attack; holding it costs one dagger slow at most.
-	if not X.IsBlurApproaching() then
-		stiflingDaggerDesire, stiflingDaggerTarget = X.ConsiderQ()
-		if stiflingDaggerDesire > 0 then
-			Fu.SetQueuePtToINT(bot, false)
-			bot:ActionQueue_UseAbilityOnEntity(stiflingDaggerAbility, stiflingDaggerTarget)
-			return
-		end
+	stiflingDaggerDesire, stiflingDaggerTarget = X.ConsiderQ()
+	if stiflingDaggerDesire > 0 then
+		Fu.SetQueuePtToINT(bot, false)
+		bot:ActionQueue_UseAbilityOnEntity(stiflingDaggerAbility, stiflingDaggerTarget)
+		return
 	end
 	phantomStrikeDesire, phantomStrikeTarget = X.ConsiderW()
 	if phantomStrikeDesire > 0 then
@@ -641,28 +637,6 @@ function X.WatchBlurDodge()
 		)
 	)
 end
--- Blur cast to close in on a lone hero (ConsiderE, why=approach) is still running and the target is still out of the
--- 600 reveal radius.
-function X.IsBlurApproaching()
-	local approach = bot._paBlurApproach
-	if approach == nil then
-		return false
-	end
-	local now = DotaTime()
-	local target = approach.target
-	-- The modifier shows up after the 0.3s cast point: the first second counts as running.
-	local running = bot:HasModifier("modifier_phantom_assassin_blur_active") or now <= approach.at + 1
-	if
-		now > approach.untilT
-		or not running
-		or not Fu.IsValidHero(target)
-		or GetUnitToUnitDistance(bot, target) <= PaBlurRules.REVEAL_RADIUS
-	then
-		bot._paBlurApproach = nil
-		return false
-	end
-	return true
-end
 function X.ConsiderE()
 	if not blurAbility:IsFullyCastable() or bot:IsInvisible() then
 		return BOT_ACTION_DESIRE_NONE
@@ -741,7 +715,6 @@ function X.ConsiderE()
 			strikeCost = phantomStrikeAbility:GetManaCost(),
 		})
 		if ok then
-			bot._paBlurApproach = { at = DotaTime(), untilT = DotaTime() + 8, target = botTarget }
 			LogBlur(
 				"approach",
 				"target=%s dist=%d hp=%.2f",
@@ -752,34 +725,27 @@ function X.ConsiderE()
 			return BOT_ACTION_DESIRE_HIGH
 		end
 	end
-	if towerNear then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	if Fu.IsInEnemyArea(bot) and botLevel >= 7 then
-		local heroesClose = Fu.GetNearbyHeroes(bot, PaBlurRules.AREA_CLOSE, true, BOT_MODE_NONE)
-		local heroesSeen = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-		local areaTowers = bot:GetNearbyTowers(1600, true)
-		-- (#48) The old rule read the same 1600 hero list twice ("== 0 and <= 2"). Now: none within 900 (the 600
-		-- reveal radius plus a step), at most 2 within 1600, no tower within 1600, and not while going on someone (the
-		-- approach rule above decides that one: a target with a friend near is not blurred into).
-		if
-			PaBlurRules.AreaHide({
-				hunting = hunting,
-				heroesClose = heroesClose and #heroesClose or 0,
-				heroesSeen = heroesSeen and #heroesSeen or 0,
-				towers = areaTowers and #areaTowers or 0,
-			})
-		then
-			LogBlur("area", "seen=%d hp=%.2f", heroesSeen and #heroesSeen or 0, hpRatio)
-			return BOT_ACTION_DESIRE_HIGH
-		end
-	end
-	if Fu.IsFarming(bot) then
-		local farmTarget = Fu.GetProperTarget(bot)
-		if Fu.IsValid(farmTarget) and (farmTarget:IsAncientCreep() or hpRatio < 0.28) and hpRatio <= 0.58 then
-			LogBlur("farm", "hp=%.2f", hpRatio)
-			return BOT_ACTION_DESIRE_HIGH
-		end
+	-- Hide in the enemy half, or while farming where enemies were seen (#48). Maintainer (game 069): only the reveal
+	-- radius matters (datafeed radius 600): heroes farther away don't see her, and hitting lane or jungle creeps
+	-- does not end Blur while no enemy hero or tower is near. Not while going on someone (the approach rule owns
+	-- that) and not under 50% HP (the 45s cooldown is also her escape).
+	local revealHeroes = Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), PaBlurRules.HIDE_CLEAR)
+	local revealTowers = bot:GetNearbyTowers(PaBlurRules.HIDE_CLEAR, true)
+	local seenNear = Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), PaBlurRules.FARM_SEEN_RADIUS)
+	local inEnemyArea = Fu.IsInEnemyArea(bot)
+	local ok, why = PaBlurRules.Hide({
+		hunting = hunting,
+		level = botLevel,
+		hp = hpRatio,
+		inEnemyArea = inEnemyArea,
+		farming = Fu.IsFarming(bot),
+		enemySeenNear = #seenNear > 0,
+		heroesInReveal = #revealHeroes,
+		towerInReveal = revealTowers ~= nil and #revealTowers > 0,
+	})
+	if ok then
+		LogBlur(why, "enemyArea=%s seen=%d hp=%.2f", inEnemyArea and "yes" or "no", #seenNear, hpRatio)
+		return BOT_ACTION_DESIRE_HIGH
 	end
 	return 0
 end
