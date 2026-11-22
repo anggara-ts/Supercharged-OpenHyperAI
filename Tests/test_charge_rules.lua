@@ -38,7 +38,8 @@ local function save(over)
 		kind = "save",
 		selfHp = 0.8,
 		retreating = false,
-		busy = false,
+		hit = false,
+		away = false,
 		dist = 4000,
 		eta = 6,
 		allies = 1,
@@ -71,7 +72,12 @@ T.test("charge rules: the save charge", function()
 	T.eq(R.ChargeSkipWhy(save({ hitBy = 0, selfHp = 0.2 })), "no-gank", "no gank comes first (it is not logged)")
 	T.eq(R.ChargeSkipWhy(save({ selfHp = 0.35 })), "low-hp", "Spirit Breaker under 40%")
 	T.eq(R.ChargeSkipWhy(save({ retreating = true })), "retreat", "retreating")
-	T.eq(R.ChargeSkipWhy(save({ busy = true })), "busy", "in his own fight")
+	-- maintainer (#208): being hit is no reason to stay; under 40% / retreating only when it is also his escape
+	T.eq(R.ChargeSkipWhy(save({ hit = true })), nil, "being hit does not block the save")
+	T.eq(R.ChargeSkipWhy(save({ hit = true, selfHp = 0.3 })), "low-hp", "low and hit, charging into his attackers")
+	T.eq(R.ChargeSkipWhy(save({ hit = true, away = true, selfHp = 0.3 })), nil, "low and hit, charging away: escape")
+	T.eq(R.ChargeSkipWhy(save({ away = true, selfHp = 0.3 })), "low-hp", "low, not hit: no escape needed")
+	T.eq(R.ChargeSkipWhy(save({ hit = true, away = true, retreating = true })), nil, "retreating, away: escape")
 	T.eq(R.ChargeSkipWhy(save({ dist = 1200 })), "near", "the near rules cover it")
 	T.eq(R.ChargeSkipWhy(save({ tower = true })), "tower", "2 vs 2 under their tower")
 	T.eq(R.ChargeSkipWhy(save({ tower = true, allies = 3, enemies = 2 })), nil, "already ours: tower is fine")
@@ -89,6 +95,24 @@ T.test("charge rules: the teamfight charge", function()
 	T.eq(R.ChargeSkipWhy(fight), "tower", "4 vs 4 under their tower")
 	fight.selfHp = 0.3
 	T.eq(R.ChargeSkipWhy(fight), "low-hp", "low HP first")
+	fight.hit, fight.away, fight.tower = true, true, false
+	T.eq(R.ChargeSkipWhy(fight), nil, "low HP but the charge is his escape")
+end)
+
+T.test("charge rules: away from the attackers", function()
+	local R = rules()
+	local me = { x = 0, y = 0 }
+	local melee = { { x = 150, y = 0 } }
+	T.ok(R.IsAway(me, { x = -3000, y = 0 }, melee), "melee attacker east, charge west")
+	T.ok(not R.IsAway(me, { x = 3000, y = 0 }, melee), "charge through the attacker")
+	T.ok(R.IsAway(me, { x = 0, y = 3000 }, melee), "sideways: the path never gets closer to it")
+	T.ok(not R.IsAway(me, { x = 3000, y = 3000 }, melee), "diagonal past the attacker: gets closer first")
+	local ranged = { { x = 600, y = 0 } }
+	T.ok(not R.IsAway(me, { x = 3000, y = 200 }, ranged), "target beyond a ranged attacker")
+	T.ok(not R.IsAway(me, { x = 3000, y = 1500 }, ranged), "path within 400 of a ranged attacker")
+	T.ok(R.IsAway(me, { x = -2000, y = 3000 }, ranged), "away from a ranged attacker")
+	T.ok(not R.IsAway(me, { x = -3000, y = 0 }, { { x = 150, y = 0 }, { x = -2000, y = 100 } }), "one attacker ahead")
+	T.ok(not R.IsAway(me, { x = -3000, y = 0 }, {}), "no attacker seen: not an escape")
 end)
 
 T.test("charge rules: target score", function()

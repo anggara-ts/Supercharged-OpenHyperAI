@@ -85,7 +85,10 @@ end
 
 -- Why Spirit Breaker does not charge, or nil to charge. s:
 --   kind        "save" (an ally ganked in another lane) or "fight" (a teamfight far away)
---   selfHp      his HP ratio; retreating: his mode is retreat; busy: an enemy hero hit him in the last ~1.5s
+--   selfHp      his HP ratio; retreating: his mode is retreat
+--   hit         an enemy hero hit him in the last ~1.5s; away: the charge heads away from those attackers (IsAway)
+--               Being hit does not block a long charge (maintainer, #208: the charge's speed carries him out too);
+--               under 40% HP or retreating it goes only when it doubles as his escape (hit and away).
 --   dist, eta   to the charge target (ChargeEta)
 --   allies      our heroes at the spot without him (the ganked ally counts); enemies: enemy heroes there
 --   hitBy       (save) enemy heroes that hit the ally recently
@@ -100,14 +103,12 @@ function Rules.ChargeSkipWhy(s)
 			return "no-gank"
 		end
 	end
-	if s.selfHp < Rules.SELF_HP_MIN then
+	local escape = s.hit and s.away
+	if s.selfHp < Rules.SELF_HP_MIN and not escape then
 		return "low-hp"
 	end
-	if s.retreating then
+	if s.retreating and not escape then
 		return "retreat"
-	end
-	if s.busy then
-		return "busy"
 	end
 	if s.dist <= Rules.FAR_DIST then
 		return "near"
@@ -131,6 +132,41 @@ function Rules.ChargeSkipWhy(s)
 		return "tower"
 	end
 	return nil
+end
+
+-- Clearance between an attacker and the charge's path: bash_radius 275 (datafeed) plus room for his hit box.
+Rules.PATH_CLEAR = 400
+
+local function segmentDist(ax, ay, bx, by, px, py)
+	local dx, dy = bx - ax, by - ay
+	local len2 = dx * dx + dy * dy
+	local u = 0
+	if len2 > 0 then
+		u = math.max(0, math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2))
+	end
+	local cx, cy = ax + u * dx - px, ay + u * dy - py
+	return math.sqrt(cx * cx + cy * cy)
+end
+
+-- Does a charge from me to target (tables with x, y) head away from the attackers (array of {x, y})? Away when, for
+-- every attacker, the target is farther from it than I am and the straight path never passes within PATH_CLEAR of
+-- it (he runs through units, so crossing them means charging into them). No attackers: not an escape (false).
+function Rules.IsAway(me, target, attackers)
+	if #attackers == 0 then
+		return false
+	end
+	for _, a in ipairs(attackers) do
+		local mine = math.sqrt((me.x - a.x) ^ 2 + (me.y - a.y) ^ 2)
+		local theirs = math.sqrt((target.x - a.x) ^ 2 + (target.y - a.y) ^ 2)
+		if theirs <= mine then
+			return false
+		end
+		-- an attacker already closer than PATH_CLEAR: the path must not get any closer to it than he is now
+		if segmentDist(me.x, me.y, target.x, target.y, a.x, a.y) < math.min(Rules.PATH_CLEAR, mine) - 1 then
+			return false
+		end
+	end
+	return true
 end
 
 -- Which enemy hero to charge (higher is better). t:

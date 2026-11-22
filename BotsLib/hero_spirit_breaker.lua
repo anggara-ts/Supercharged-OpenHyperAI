@@ -516,15 +516,18 @@ local function logFarSkip(why, kind, ally, target, s)
 	lastFarSkipWhy, lastFarSkipLog = key, DotaTime()
 	print(
 		string.format(
-			"[OHA-SB] t=%.0f spirit_breaker charge-skip why=%s kind=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d",
+			"[OHA-SB] t=%.0f spirit_breaker charge-skip why=%s kind=%s ally=%s target=%s eta=%.1f limit=%d dist=%d ours=%d enemies=%d hit=%s",
 			DotaTime(),
 			why,
 			kind,
 			shortName(ally),
 			shortName(target),
 			s.eta or 0,
+			ChargeRules.MAX_FIGHT_ETA,
+			s.dist or 0,
 			(s.allies or 0) + 1,
-			s.enemies or 0
+			s.enemies or 0,
+			s.hit and "yes" or "no"
 		)
 	)
 end
@@ -536,7 +539,7 @@ local function logFarCharge(kind, ally, target, s, ttd)
 	farChargeTrace = { kind = kind, target = target, eta = s.eta, dist = s.dist, ordered = DotaTime() }
 	print(
 		string.format(
-			"[OHA-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d",
+			"[OHA-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d hit=%s away=%s hp=%.2f",
 			DotaTime(),
 			kind,
 			shortName(ally),
@@ -547,15 +550,34 @@ local function logFarCharge(kind, ally, target, s, ttd)
 			s.enemies - s.allies - 1,
 			s.dist,
 			math.min(ttd or 99, 99),
-			s.hitBy or 0
+			s.hitBy or 0,
+			s.hit and "yes" or "no",
+			s.away and "yes" or "no",
+			s.selfHp
 		)
 	)
+end
+-- Is he being hit, and does a charge onto target head away from the enemy heroes hitting him (ChargeRules.IsAway)?
+-- Attackers: the enemy heroes near him that damaged him in the last 1.5s (unseen ones can't be placed: not away).
+local function escapeState(target)
+	local hit = bot:WasRecentlyDamagedByAnyHero(1.5)
+	if not hit or target == nil then
+		return hit, false
+	end
+	local attackers = {}
+	for _, enemyHero in pairs(nearbyEnemies or {}) do
+		if Fu.IsValidHero(enemyHero) and bot:WasRecentlyDamagedByHero(enemyHero, 1.5) then
+			local loc = enemyHero:GetLocation()
+			attackers[#attackers + 1] = { x = loc.x, y = loc.y }
+		end
+	end
+	local myLoc, targetLoc = bot:GetLocation(), target:GetLocation()
+	return hit, ChargeRules.IsAway({ x = myLoc.x, y = myLoc.y }, { x = targetLoc.x, y = targetLoc.y }, attackers)
 end
 -- The charge target 1600+ away: the enemy hero hurting a ganked ally (save), else the best enemy at a teamfight
 -- (fight, after the laning phase), or nil.
 function X.ConsiderFarCharge()
 	local selfHp = Fu.GetHP(bot)
-	local busy = bot:WasRecentlyDamagedByAnyHero(1.5)
 	local now = DotaTime()
 	local saveTarget, saveAlly, saveState, saveTtd
 	for i = 1, #GetTeamPlayers(GetTeam()) do
@@ -592,7 +614,6 @@ function X.ConsiderFarCharge()
 					kind = "save",
 					selfHp = selfHp,
 					retreating = isRetreating,
-					busy = busy,
 					dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
 					allies = #Fu.GetAlliesNearLoc(ally:GetLocation(), 1200),
 					enemies = enemyCountNear(ally:GetLocation(), enemiesThere),
@@ -606,6 +627,7 @@ function X.ConsiderFarCharge()
 					why = "no-target"
 				else
 					s.tower = inStandingEnemyTowerRange(target:GetLocation())
+					s.hit, s.away = escapeState(target)
 					why = ChargeRules.ChargeSkipWhy(s)
 				end
 				if why ~= nil then
@@ -653,7 +675,6 @@ function X.ConsiderFarCharge()
 		kind = "fight",
 		selfHp = selfHp,
 		retreating = isRetreating,
-		busy = busy,
 		dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
 		allies = #Fu.GetAlliesNearLoc(fightLocation, 1400),
 		enemies = #enemiesThere,
@@ -664,6 +685,7 @@ function X.ConsiderFarCharge()
 		why = "no-target"
 	else
 		s.tower = inStandingEnemyTowerRange(target:GetLocation())
+		s.hit, s.away = escapeState(target)
 		why = ChargeRules.ChargeSkipWhy(s)
 	end
 	if why ~= nil then
