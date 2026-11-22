@@ -552,6 +552,12 @@ function getUnitState()
 	}
 	return unitStateCache
 end
+-- The gate that returned no push this think, for [OHA-PUSH] push-gate (#12, game 072 10:11-10:38: Winter Wyvern's push
+-- of a nearly dead T1 fell to 0 every other think and nobody could tell which rule did it).
+local function NoPush(bot, why)
+	bot._pushGate = why
+	return BotModeDesire.None
+end
 function Push.GetPushDesireHelper(bot, lane)
 	if bot.laneToPush == nil then
 		bot.laneToPush = lane
@@ -573,7 +579,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		KillWindow.LogPushHeld(bot, lane, killWindow, baseThreat.why)
 	end
 	if killWindow.buyback then
-		return BotModeDesire.None
+		return NoPush(bot, "buyback")
 	end
 	local activeMode = bot:GetActiveMode()
 	local isAssignedLane = bot:GetAssignedLane() == lane
@@ -592,24 +598,24 @@ function Push.GetPushDesireHelper(bot, lane)
 		maxPushDesire = math.max(maxPushDesire, advDesire)
 	end
 	if gameState.isLaningPhase and not isAssignedLane and Fu.IsCore(bot) then
-		return BotModeDesire.None
+		return NoPush(bot, "laning-not-assigned")
 	end
 	if gameState.aliveAllyCount <= gameState.aliveEnemyCount - 2 then
-		return BotModeDesire.None
+		return NoPush(bot, "outnumbered-alive")
 	end
 	if wasDefendPinged then
-		return BotModeDesire.None
+		return NoPush(bot, "defend-ping")
 	end
 	-- Base threat still cancels most pushes, but allow finishing a live HG fight.
 	if enemyHeroesAtAncient >= 1 then
 		local isNearEnemyAncient = enemyAncient and GetUnitToUnitDistance(bot, enemyAncient) < 2500
 		local alliesNearby = #Fu.GetAlliesNearLoc(bot:GetLocation(), 1600)
 		if not (isNearEnemyAncient and alliesNearby >= 3 and gameState.aliveAllyCount >= gameState.aliveEnemyCount) then
-			return BotModeDesire.None
+			return NoPush(bot, "base-heroes")
 		end
 	end
 	if laneFrontHasEnemies[lane] then
-		return BotModeDesire.None
+		return NoPush(bot, "lane-front-enemies")
 	end
 	if gameState.isLaningPhase then
 		do
@@ -617,7 +623,7 @@ function Push.GetPushDesireHelper(bot, lane)
 			while i <= 5 do
 				local teamMember = GetTeamMember(i)
 				if teamMember ~= nil and teamMember:GetLevel() < 6 then
-					return BotModeDesire.None
+					return NoPush(bot, "laning-low-level")
 				end
 				i = i + 1
 			end
@@ -641,7 +647,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		#nearbyAllies < #nearbyEnemies and allyCoreCount < enemyCoreCount
 		or #nearbyAllies <= 1 and #nearbyEnemies > 0
 	then
-		return BotModeDesire.None
+		return NoPush(bot, "outnumbered-near")
 	end
 	if activeMode == BotMode.PushTowerTop then
 		bot.laneToPush = Lane.Top
@@ -682,7 +688,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		and gameState.aliveEnemyCount >= 3
 		and not ((advDesire ~= nil or fiveJoiner) and #enemiesNearBot == 0)
 	then
-		return BotModeDesire.None
+		return NoPush(bot, "alone")
 	end
 	if fiveCap ~= nil and advDesire == nil then
 		if fiveJoiner then
@@ -739,7 +745,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		CapPush(0.25, "own-hp")
 	end
 	if Fu.IsDoingRoshan(bot) and #Fu.GetAlliesNearLoc(locationState.roshanLocation, 2800) >= 3 then
-		return BotModeDesire.None
+		return NoPush(bot, "roshan")
 	end
 	local pingingHuman, ping = Fu.GetHumanPing()
 	if pingingHuman ~= nil and ping ~= nil and not ping.normal_ping and DotaTime() > 0 then
@@ -811,7 +817,7 @@ function Push.GetPushDesireHelper(bot, lane)
 					)
 				)
 			end
-			return BotModeDesire.None
+			return NoPush(bot, "behind-stop")
 		end
 	end
 	local attackTarget = bot:GetAttackTarget()
@@ -841,7 +847,7 @@ function Push.GetPushDesireHelper(bot, lane)
 	if hasHumanEnemy then
 		local laneTarget = getLaneTargetBuilding(lane)
 		if laneTarget == nil or not Fu.IsValidBuilding(laneTarget) then
-			return BotModeDesire.None
+			return NoPush(bot, "no-lane-target")
 		end
 	else
 		local distanceToEnemyFountain = getLocationToLocationDistance(bot:GetLocation(), enemyFountainTpPoint)
@@ -850,7 +856,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		local isLaneBarracksAlive = Fu.Utils.IsAnyBarracksOnLaneAlive(false, lane)
 		if isBotNearEnemyFountain and lane == botLaneToPush and isLaneBarracksAlive then
 		elseif not isTeamPushLane then
-			return BotModeDesire.None
+			return NoPush(bot, "not-team-lane")
 		end
 	end
 	local pushingTeammates = 0
@@ -940,6 +946,11 @@ function Push.GetPushDesireHelper(bot, lane)
 			if finish then
 				-- Read by the Roshan yield in Push.GetPushDesire: a tower about to fall goes first.
 				bot._finishTowerAt = DotaTime()
+				-- The finish hold (FinishHoldDesire) keeps this push through the other gates until the tower falls.
+				local hold = bot._finishHold
+				if hold == nil or hold.tower ~= tower or hold.lane ~= lane then
+					bot._finishHold = { lane = lane, tower = tower, start = DotaTime() }
+				end
 				if DotaTime() >= (bot._finishTowerLogAt or -999) then
 					bot._finishTowerLogAt = DotaTime() + 10
 					pcall(
@@ -1058,7 +1069,7 @@ function Push.GetPushDesireHelper(bot, lane)
 				end
 				return lockDesire
 			else
-				return BotModeDesire.None
+				return NoPush(bot, "lock-other-lane")
 			end
 		else
 			lockedPushLane = nil
@@ -1074,7 +1085,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		or allyCoreCount >= 1 and aliveAllyCount >= aliveEnemyCount + 2
 		or enemyAncient and GetUnitToUnitDistance(bot, enemyAncient) < 3500 and #alliesNearBot >= #enemiesNearBot
 	if not canPush then
-		return BotModeDesire.None
+		return NoPush(bot, "cannot-push")
 	end
 	if not gameState.isEarlyGame then
 		if gameState.hasAegis and aliveAllyCount >= 4 then
@@ -1093,7 +1104,7 @@ function Push.GetPushDesireHelper(bot, lane)
 			or aliveEnemyCount <= 2 and aliveAllyCount >= 4
 		)
 	if enemyHeroesOnHighGround >= 2 and DotaTime() - recentDefendTime < 10 then
-		return BotModeDesire.None
+		return NoPush(bot, "hg-defend")
 	end
 	-- Not while gathering below their high ground; with their Ancient open and us ahead, against the enemies seen near
 	-- (PushRules.FewerThanAliveCount, game 068 50:33).
@@ -1106,7 +1117,7 @@ function Push.GetPushDesireHelper(bot, lane)
 			and hpRatio < 0.65
 			and not (killPush and #alliesNearBot >= 2 and #enemiesNearBot < #alliesNearBot)
 		then
-			return BotModeDesire.None
+			return NoPush(bot, "hurt-near-ancient")
 		elseif distanceToEnemyAncient < 6000 and #alliesNearBot < enemyCount and advDesire == nil then
 			CapPush(0.4, "fewer-than-alive")
 		end
@@ -1638,6 +1649,114 @@ local function getLocalizedLine(key)
 	end
 	return nil
 end
+-- Finish hold (#12, game 072 10:11-10:38: Undying and Winter Wyvern had Radiant's bottom T1 at 970 HP with 1006
+-- damage in 5s and nobody defending, but the push fell to 0 every other think, the step walked to creeps 1250 away,
+-- and Wyvern TP'd to a creep-only defend; the tower lived). Once FinishTower fires, the push holds at 0.9 on that lane
+-- through every gate while PushRules.FinishHold says so: no TP out, PushThink hits the tower.
+-- Lines: [OHA-PUSH] finish-hold why=gate:<the gate it overrode> (throttled), finish-drop why=, finish-done.
+local function FinishHoldDesire(bot, lane, desire)
+	local hold = bot._finishHold
+	if hold == nil or hold.lane ~= lane then
+		return desire
+	end
+	local now = DotaTime()
+	local tower = hold.tower
+	local towerAlive = Fu.IsValidBuilding(tower) and tower:IsAlive()
+	local allies, damage5s, enemiesNear = 0, 0, 0
+	if towerAlive then
+		for _, ally in pairs(Fu.GetAlliesNearLoc(tower:GetLocation(), 1200) or {}) do
+			if Fu.IsValidHero(ally) and not ally:IsIllusion() then
+				allies = allies + 1
+				damage5s = damage5s + (ally:GetEstimatedDamageToTarget(true, tower, 5.0, DAMAGE_TYPE_ALL) or 0)
+			end
+		end
+		enemiesNear = #(Fu.GetEnemiesNearLoc(tower:GetLocation(), 1200) or {})
+	end
+	local keep, why = PushRules.FinishHold({
+		towerAlive = towerAlive,
+		glyphed = towerAlive and tower:HasModifier("modifier_fountain_glyph"),
+		baseThreat = (baseThreat.heroes or 0) >= 1,
+		allies = allies,
+		enemiesNear = enemiesNear,
+		damage5s = damage5s,
+		towerHp = towerAlive and tower:GetHealth() or 0,
+		hp = Fu.GetHP(bot),
+		age = now - hold.start,
+	})
+	if not keep then
+		bot._finishHold = nil
+		bot._finishHoldActiveAt = nil
+		if not Fu.IsMeepoClone(bot) then
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s %s why=%s lane=%s held=%.0f allies=%d enemies=%d dmg5s=%d towerHp=%d hp=%.2f",
+					now,
+					ShortHeroName(bot),
+					why == "fell" and "finish-done" or "finish-drop",
+					why,
+					tostring(lane),
+					now - hold.start,
+					allies,
+					enemiesNear,
+					math.floor(damage5s),
+					towerAlive and tower:GetHealth() or 0,
+					Fu.GetHP(bot)
+				)
+			)
+		end
+		return desire
+	end
+	bot._finishHoldActiveAt = now
+	bot._finishTowerAt = now
+	-- No TP away while it holds (game 072: a creep-only defend TP took Wyvern off a 970 HP tower). Read by the TP rule
+	-- wrapper in ability_item_usage_generic.lua.
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 2)
+	if desire < 0.9 then
+		if now >= (bot._finishHoldLogAt or -999) and not Fu.IsMeepoClone(bot) then
+			bot._finishHoldLogAt = now + 5
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s finish-hold why=gate:%s lane=%s desire=%.2f->0.90 dmg5s=%d towerHp=%d allies=%d",
+					now,
+					ShortHeroName(bot),
+					tostring(bot._pushGate or "cap"),
+					tostring(lane),
+					desire,
+					math.floor(damage5s),
+					tower:GetHealth(),
+					allies
+				)
+			)
+		end
+		desire = 0.9
+	end
+	return desire
+end
+-- A lane's push that was on (0.5+) and is now off: one line naming the gate (throttled per bot).
+local function LogPushGate(bot, lane, desire)
+	bot._pushLastDesire = bot._pushLastDesire or {}
+	local was = bot._pushLastDesire[lane] or 0
+	bot._pushLastDesire[lane] = desire
+	if was >= 0.5 and desire <= 0 and bot._pushGate ~= nil then
+		if DotaTime() >= (bot._pushGateLogAt or -999) and not Fu.IsMeepoClone(bot) then
+			bot._pushGateLogAt = DotaTime() + 5
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s push-gate lane=%s why=%s was=%.2f mode=%s",
+					DotaTime(),
+					ShortHeroName(bot),
+					tostring(lane),
+					bot._pushGate,
+					was,
+					tostring(bot:GetActiveMode())
+				)
+			)
+		end
+	end
+end
 -- Lane-done episodes (#12, maintainer 2026-11-22: "stay on the target" first, with stats to choose between it and
 -- handing the push to the building's lane). An episode starts when PushThink keeps a bot on another lane's building
 -- (LaneDoneFrontDistance) and ends when the target falls, the bot leaves push mode for 2s+, stops thinking for 3s+
@@ -1756,7 +1875,10 @@ function Push.GetPushDesire(bot, lane)
 	end
 	-- Set by the helper when this lane's desire was raised for a group push (read below, this call only).
 	bot._pushRaisedAt = nil
+	bot._pushGate = nil
 	local desire = math.min(Push.GetPushDesireHelper(bot, lane), 1)
+	desire = FinishHoldDesire(bot, lane, desire)
+	LogPushGate(bot, lane, desire)
 	-- A Roshan call the team answers outranks a push (#12, game 067 32:11: four bots called a kill-window Roshan and
 	-- a 0.99 kill push won; 20s later every call was dropped window-short). bot._roshDesireNow / _roshDesireAt come
 	-- from mode_roshan_generic.lua's GetDesire.
@@ -2139,6 +2261,21 @@ function Push.PushThink(bot, lane)
 			return
 		else
 			botUnit._fountainRetreatUntil = 0
+		end
+	end
+	-- Finish hold (FinishHoldDesire, #12 game 072): hit the tower, not creeps 1000+ away.
+	do
+		local hold = bot._finishHold
+		if
+			hold ~= nil
+			and hold.lane == lane
+			and DotaTime() - (bot._finishHoldActiveAt or -999) <= 1
+			and Fu.IsValidBuilding(hold.tower)
+			and hold.tower:IsAlive()
+			and Fu.CanBeAttacked(hold.tower)
+		then
+			bot:Action_AttackUnit(hold.tower, true)
+			return
 		end
 	end
 	-- Gathering below the enemy high ground (#12 hg-gather, set by Push.GetPushDesireHelper this think): walk to the

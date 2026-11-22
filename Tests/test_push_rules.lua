@@ -416,3 +416,32 @@ T.test("lane-done episode ends: target fell, died, left push, 20s cap", function
 	s.gap, s.targetAlive = 0.1, false
 	T.eq(R.LaneDoneEpisodeEnd(s), "fell", "target dead")
 end)
+
+T.test("finish hold: keeps a finishable tower through the gates, drops with a reason (game 072 10:27)", function()
+	local R = rules()
+	-- Game 072 t=627: Undying + Winter Wyvern at Radiant's bottom T1, 970 HP, 1006 damage in 5s, nobody defending.
+	local s = { towerAlive = true, allies = 2, enemiesNear = 0, damage5s = 1006, towerHp = 970, hp = 0.77, age = 1 }
+	local keep, why = R.FinishHold(s)
+	T.ok(keep, "hold")
+	T.eq(why, "ok", "why")
+	local function dropWhy(changes)
+		local copy = {}
+		for k, v in pairs(s) do
+			copy[k] = v
+		end
+		for k, v in pairs(changes) do
+			copy[k] = v
+		end
+		local kept, reason = R.FinishHold(copy)
+		T.ok(not kept, reason)
+		return reason
+	end
+	T.eq(dropWhy({ towerAlive = false }), "fell", "tower down")
+	T.eq(dropWhy({ glyphed = true }), "glyph", "Glyph")
+	T.eq(dropWhy({ allies = 1 }), "alone", "one left")
+	T.eq(dropWhy({ enemiesNear = 2 }), "enemies", "defenders came")
+	T.eq(dropWhy({ damage5s = 600 }), "slow", "damage no longer enough")
+	T.eq(dropWhy({ hp = 0.2 }), "low-hp", "low HP")
+	T.eq(dropWhy({ age = 16 }), "timeout", "15s cap")
+	T.eq(dropWhy({ baseThreat = true }), "base", "our base hit")
+end)

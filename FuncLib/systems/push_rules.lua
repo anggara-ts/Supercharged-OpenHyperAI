@@ -273,6 +273,38 @@ function PushRules.FrontWalk(s)
 	return "walk"
 end
 
+-- Finish hold (#12, game 072 10:11-10:38): once a tower can be finished (FinishTower: 2+ allies whose 5s damage beats
+-- its HP), the push stays on it through the other gates while: the tower stands, our base is not hit, it is not
+-- Glyphed (then the creeps are the target again), 2+ of ours are at it, fewer enemy heroes than ours are near it, our
+-- 5s damage still beats its HP, the bot is above 30% HP, and for 15s at most. Returns keep, why.
+function PushRules.FinishHold(s)
+	if not s.towerAlive then
+		return false, "fell"
+	end
+	if s.baseThreat then
+		return false, "base"
+	end
+	if s.glyphed then
+		return false, "glyph"
+	end
+	if (s.allies or 0) < 2 then
+		return false, "alone"
+	end
+	if (s.enemiesNear or 0) >= (s.allies or 0) then
+		return false, "enemies"
+	end
+	if (s.damage5s or 0) < (s.towerHp or 0) then
+		return false, "slow"
+	end
+	if (s.hp or 1) < 0.3 then
+		return false, "low-hp"
+	end
+	if (s.age or 0) > 15 then
+		return false, "timeout"
+	end
+	return true, "ok"
+end
+
 -- When a lane-done episode ends (push.lua LaneDoneTick): the target fell, the bot died or stopped thinking for 3s+,
 -- it was out of push mode for 2s+, or 20s passed. Returns the reason or nil.
 function PushRules.LaneDoneEpisodeEnd(s)
