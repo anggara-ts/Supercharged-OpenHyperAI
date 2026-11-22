@@ -545,9 +545,8 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 		targetName = "camp-" .. tostring(order.camp.type or "?")
 	end
 	Log(
-		"%s order id=%d kind=%s from=%s via=%s lane=%s target=%s verdict=%s why=%s responders=%s queued=%s reply=%s need=%d at=%.0f,%.0f%s",
+		"%s order kind=%s from=%s via=%s lane=%s target=%s verdict=%s why=%s responders=%s queued=%s reply=%s need=%d at=%.0f,%.0f id=%d%s",
 		Short(tickBot),
-		order.id,
 		kind,
 		Short(human),
 		via,
@@ -561,6 +560,7 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 		Rules.Need(kind, facts),
 		loc.x,
 		loc.y,
+		order.id,
 		kind == "fog" and string.format(" missing=%d", MissingEnemies())
 			or (kind == "chase" and string.format(" seen=%.1f", found.seenAgo or -1) or "")
 	)
@@ -851,7 +851,8 @@ function Orders.DefendDesire(bot, lane)
 	return Desire(bot)
 end
 
--- mode_roshan_generic.lua: true while this bot is called to Roshan (a Roshan ping the team agreed with, or `!rosh`).
+-- mode_roshan_generic.lua: while this bot is called to Roshan, "ping" (a Roshan ping the team agreed with: the pit
+-- safety checks still apply) or "order" (an insisted ping or `!rosh`: go anyway); else false.
 function Orders.RoshCalled(bot)
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or order.kind ~= "rosh" then
@@ -860,7 +861,7 @@ function Orders.RoshCalled(bot)
 	if bot:GetActiveMode() == BOT_MODE_ROSHAN then
 		NoteObey(bot, order, entry)
 	end
-	return true
+	return order.via == "ping" and "ping" or "order"
 end
 
 -- mode_farm_generic.lua GetDesire: the camp this bot was sent to (a farm camp object { idx =, cattr = <spawner> })
@@ -971,6 +972,11 @@ function Orders.AssembleDesire(bot)
 			return nil
 		end
 		return Desire(bot)
+	end
+	-- A bot fighting there switches through the attack mode (FocusTarget, with its spells) and is not pulled out of
+	-- its fight; this mode only brings the bots that are not fighting.
+	if (kind == "focus" or kind == "chase") and InFight(bot) then
+		return nil
 	end
 	if TARGET_KINDS[kind] then
 		local target = TargetOf(order)

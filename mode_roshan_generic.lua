@@ -501,11 +501,12 @@ function GetDesireHelper()
 	if Fu.GetEnemiesAroundAncient(bot, 2000) > 2 or Fu.GetHP(GetAncient(bot:GetTeam())) < 0.6 then
 		return Ret(BOT_MODE_DESIRE_NONE, "base-threat")
 	end
-	-- The human's Roshan call (#222, FuncLib/systems/human_orders.lua): a Roshan ping the team agreed with (the
-	-- request checks - too early, outnumbered, too few alive - ran when it was made), an insisted one, or `!rosh`.
-	-- Before the early-game, pit-safety and window checks below, which would refuse it.
-	if isRoshanAlive and HumanOrders.RoshCalled(bot) then
-		return Ret(0.95, "ping")
+	-- The human's Roshan call (#222, FuncLib/systems/human_orders.lua). A Roshan ping the team agreed with (the request
+	-- checks - too early, outnumbered, too few alive - ran when it was made) still needs the damage and a safe pit, as
+	-- before; an insisted ping or `!rosh` goes anyway. Before the early-game and window checks below.
+	local roshCall = isRoshanAlive and HumanOrders.RoshCalled(bot)
+	if roshCall == "order" or roshCall == "ping" and hasEnoughDps and IsRoshanEngageSafe(roshanLocation, false) then
+		return Ret(0.95, roshCall)
 	end
 	local alliesInPit = #(Fu.GetAlliesNearLoc(roshanLocation, 1600) or {})
 	local roshLow = Fu.Utils.IsValidUnit(roshan) and (roshan:GetHealth() / roshan:GetMaxHealth()) < 0.8
