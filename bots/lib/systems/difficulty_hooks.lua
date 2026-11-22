@@ -160,6 +160,13 @@ function H.CastAllowed(unit, kind, ability, target)
 	if profile.reactionDelay <= 0 and profile.castSkipChance <= 0 then
 		return true
 	end
+	-- A dodge item the item think chose this frame (Usage.LogDodge sets bot._dodgeChosen before the order): the
+	-- dodge share already decided whether to react, and its timing window ([react, react + 0.35s],
+	-- dodge_rules.lua Window) is shorter than a reaction hold, so a held dodge order would always land too late.
+	local chosen = bot._dodgeChosen
+	if chosen ~= nil and chosen.t == DotaTime() then
+		return true
+	end
 	local states = unit._ohaDiffCast
 	if states == nil then
 		states = {}
@@ -265,11 +272,6 @@ function H.DodgeAllowed(unit, what)
 		H.Held(bot, "dodge-off", "what=%s unit=%s", tostring(what), shortName(unit))
 	end
 	return allowed
-end
-
--- Added to a dodge item's cast point: the item decides that much earlier, so its held order still lands in time.
-function H.ReactionDelay(bot)
-	return H.Get(bot).reactionDelay
 end
 
 -- Team roam's desire after the hunt / help-fight gate. Returns desire, why.

@@ -235,7 +235,6 @@ T.test("difficulty hooks: Unfair passes every order through unchanged, no roll, 
 	T.eq(desire, 0.8, "roam desire unchanged")
 	T.eq(why, "hunt-carry/hero", "roam why unchanged")
 	T.eq(H.DiveRetreat(bot, enemy), 0, "no dive opinion")
-	T.eq(H.ReactionDelay(bot), 0, "no extra dodge cast point")
 	local smokeArgs = nil
 	local smoke = H.WrapSmoke(bot, function(...)
 		smokeArgs = select("#", ...)
@@ -245,6 +244,62 @@ T.test("difficulty hooks: Unfair passes every order through unchanged, no roll, 
 	T.ok(d == 0.7 and t == "t" and c == "none" and r == "r" and smokeArgs == 1, "smoke rule passes through")
 	T.eq(H.FightsHeroes(bot), true, "fights heroes")
 	T.eq(count.n, 0, "still no random number")
+end)
+
+T.test("difficulty hooks: Unfair - all 15 wrapped order methods are transparent", function()
+	local bot = load(4)
+	local H = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
+	local methods = {}
+	for _, kind in ipairs({ "", "OnLocation", "OnEntity", "OnTree" }) do
+		for _, prefix in ipairs({ "Action_", "ActionPush_", "ActionQueue_" }) do
+			methods[#methods + 1] = prefix .. "UseAbility" .. kind
+		end
+	end
+	for _, prefix in ipairs({ "Action_", "ActionPush_", "ActionQueue_" }) do
+		methods[#methods + 1] = prefix .. "AttackUnit"
+	end
+	T.eq(#methods, 15, "15 methods")
+	local class, calls = {}, {}
+	for _, method in ipairs(methods) do
+		calls[method] = recorder(class, method)
+	end
+	H.InstallUnitHooks(class)
+	local count = countRandom()
+	local ability = bot:GetAbilityInSlot(0)
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	bot._lhTiming = { creep = enemy }
+	for _, method in ipairs(methods) do
+		local r1, r2 = class[method](bot, ability, enemy, nil, "extra")
+		T.eq(r1, "orig-" .. method, method .. " return")
+		T.eq(r2, nil, method .. " one return value")
+		local got = calls[method]
+		T.eq(#got, 1, method .. " reached once")
+		T.ok(got[1].self == bot, method .. " self")
+		T.eq(got[1].n, 4, method .. " arg count (trailing nil kept)")
+		T.ok(got[1].args[1] == ability and got[1].args[2] == enemy, method .. " args")
+		T.ok(got[1].args[3] == nil and got[1].args[4] == "extra", method .. " extra args")
+	end
+	T.eq(count.n, 0, "no random number drawn")
+	T.eq(bot._ohaDiffCast, nil, "no cast state")
+	T.eq(printed("held kind="), 0, "no held line")
+end)
+
+T.test("difficulty hooks: a dodge item chosen this frame is not held (its window is shorter than the hold)", function()
+	local bot = load(2)
+	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbility")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	math.random = function()
+		return 0.9
+	end
+	local bkb = Stub.newAbility("item_black_king_bar", bot, false)
+	bot._dodgeChosen = { t = 600, target = bot }
+	bot:Action_UseAbility(bkb)
+	T.eq(#castCalls, 1, "medium: the dodge goes out on the first call")
+	bot._dodgeChosen = { t = 599, target = bot }
+	Stub.time = 610
+	bot:Action_UseAbility(bkb)
+	T.eq(#castCalls, 1, "not chosen this frame: the reaction hold applies")
+	T.eq(printed("held kind=reaction level=medium ability=item_black_king_bar"), 1, "held line")
 end)
 
 T.test("difficulty hooks: Unfair projectile checks return exactly what they returned", function()

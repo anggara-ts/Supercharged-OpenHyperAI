@@ -1933,8 +1933,7 @@ Usage.LogDodgeError = LogDodgeError
 -- the handle so a change in a patch is followed.
 local function DodgeCastPoint(item)
 	local ok, castPoint = pcall(item.GetCastPoint, item)
-	-- Difficulty (#232): the cast order is held for the level's reaction delay (0 on Unfair), so decide that much earlier.
-	return (ok and type(castPoint) == "number" and castPoint or 0) + Usage.Difficulty.ReactionDelay(bot)
+	return ok and type(castPoint) == "number" and castPoint or 0
 end
 -- [SHy-DODGE] too-late: a projectile that will land before the item can work, so the item is kept. Only for a
 -- projectile seen for the first time in this think (one that was in the window before and passed up for another
