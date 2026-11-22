@@ -60,19 +60,19 @@ Then on GitHub go to **Settings → SSH and GPG keys → New SSH key**, set **Ke
 
 Dota loads bot scripts from `dota 2 beta/game/dota/scripts/vscripts/bots`. The usual way is a copy: `node tools/export-bots.js --test-game` copies the bot scripts of the checked-out commit (plus your uncommitted `bots/customize/general.lua`, the build info and `LICENSE`) there, and nothing else. Run it again after every change; `/prepare-game` does it before a test game. `node tools/export-bots.js` without `--test-game` makes the clean copy of `origin/main` for a Workshop upload (`/prepare-workshop`). Rename an existing `bots` folder first, or let the tool take it over with `--force` (it deletes what is in it).
 
-For quick edits you can instead make that folder a link to your clone, so the game runs whatever branch you have checked out. Don't name the link `bots` while you use the tool (it refuses to write through a link):
+For quick edits you can instead make that folder a link to your clone's `bots/` folder, so the game runs whatever branch you have checked out. Don't name the link `bots` while you use the tool (it refuses to write through a link):
 
 - **Windows** (Command Prompt):
   ```bat
-  mklink /J "C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\bots" "C:\path\to\Supercharged-OpenHyperAI"
+  mklink /J "C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\bots" "C:\path\to\Supercharged-OpenHyperAI\bots"
   ```
 - **macOS:**
   ```bash
-  ln -s ~/path/to/Supercharged-OpenHyperAI "$HOME/Library/Application Support/Steam/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
+  ln -s ~/path/to/Supercharged-OpenHyperAI/bots "$HOME/Library/Application Support/Steam/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
   ```
 - **Linux:**
   ```bash
-  ln -s ~/path/to/Supercharged-OpenHyperAI "$HOME/.local/share/Steam/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
+  ln -s ~/path/to/Supercharged-OpenHyperAI/bots "$HOME/.local/share/Steam/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
   ```
 
 Settings come from `vscripts/game/customize/general.lua` when that file exists (the Workshop installer creates it), otherwise from the repo's `bots/customize/general.lua`. While developing, rename `vscripts/game/customize`, so your edits to the repo copy take effect.
@@ -152,11 +152,13 @@ Match logs go to `local/match-logs/` (git-ignored). They contain your Steam acco
 |---|---|
 | `bots/heroes/hero_<name>.lua` | one file per hero: builds and ability use |
 | `bots/lib/` | shared code: helpers (`Fu`), systems (push, defend, wards, items, roles, logging), hero helpers, Dota constants and libraries |
-| `mode_*_generic.lua`, `hero_selection.lua`, `ability_item_usage_generic.lua`, `item_purchase_generic.lua`, `bot_generic.lua` | engine entry points. Dota loads them only from the repo root, by exact name |
+| `bots/mode_*_generic.lua`, `bots/hero_selection.lua`, `bots/ability_item_usage_generic.lua`, `bots/item_purchase_generic.lua`, `bots/bot_generic.lua` | engine entry points. Dota loads them only from the root of the `bots` folder, by exact name |
 | `bots/customize/` | user settings (`general.lua`) and the release version |
 | `tools/` | Node.js developer tools; see [`tools/README.md`](tools/README.md) |
 | `tests/` | LuaJIT tests with a stub bot API |
 | `docs/` | notes such as what the bot API really exposes |
+| `install/`, `workshop/` | link helpers for Workshop players; the Workshop cover images |
+| `local/` | git-ignored local data: match logs, the verify tracker, generated reports and caches |
 | `.claude/skills/` | step-by-step playbooks for AI agents (Claude Code) |
 
 The optional Fretbots / Buff plugin (extra gold, XP and neutral items for bots) lives on the `plugin-fretbots` branch, with its own README and installer.

@@ -12,10 +12,10 @@
 //            --force            take over a folder this tool did not write (deletes the files already in it)
 //   node tools/export-bots.js --self-test     checks the file selection, the require check and the folder rules
 //
-// What is a bot script: tracked .lua files at the repo root and under bots/heroes/, bots/lib/ and bots/customize/, read
-// from git (never the working tree, so .git, .env, match logs, tests, tools, docs and uncommitted edits never get
-// in). Before writing, every literal require / dofile target must be in the copy. The copy also gets LICENSE (the
-// MIT notice must ship with every copy, #215; a ref from before it had none still exports).
+// What is a bot script: every tracked .lua file under bots/ (#221), read from git (never the working tree, so .git,
+// .env, match logs, tests, tools, docs and uncommitted edits never get in), written to the same path below
+// vscripts/bots (bots/heroes/hero_axe.lua -> vscripts/bots/heroes/hero_axe.lua). The copy also gets LICENSE when
+// the commit has one. Before writing, every literal require / dofile target must be in the copy.
 // Workshop copies (no --test-game): the committed bots/customize/general.lua must hold release defaults (no TEST #N
 // comments, no forced picks, Weak_Hero_Cap 1, no Debug_* = true) or the export stops; after writing, the folder must
 // hold exactly the copied files (no build_info.lua, nothing edited or added), then it prints READY TO UPLOAD.
@@ -29,11 +29,17 @@ const path = require("path");
 const cp = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const RUNTIME_DIRS = ["bots/heroes/", "bots/lib/", "bots/customize/"];
-const LINEUP_FILE = "bots/customize/general.lua";
-const BUILD_INFO_FILE = "bots/customize/build_info.lua";
-// Literal targets that may be absent: bots/customize/version.lua loads build_info with pcall.
-const OPTIONAL_TARGETS = new Set(["bots/customize/build_info"]);
+// The repo folder whose content is vscripts/bots. Paths in a copy (the Map keys below) are relative to it.
+const BOTS_DIR = "bots/";
+// Repo files that go into every copy besides the bot scripts, at the top of the copy: the licence notice (MIT asks
+// for it in all copies, #215).
+const NOTICE_FILES = ["LICENSE"];
+// The local test lineup: in the working tree, and in a copy.
+const LINEUP_REPO_FILE = "bots/customize/general.lua";
+const LINEUP_FILE = "customize/general.lua";
+const BUILD_INFO_FILE = "customize/build_info.lua";
+// Literal targets that may be absent: customize/version.lua loads build_info with pcall.
+const OPTIONAL_TARGETS = new Set(["customize/build_info"]);
 const SCRIPT_REQUIRE = /\b(?:require|dofile)\s*(?:\(\s*|,\s*)GetScriptDirectory\(\)\s*\.\.\s*"\/([^"]+)"(\s*\.\.)?/g;
 const BOTS_REQUIRE = /\brequire\s*\(?\s*"bots[./]([^"]+)"/g;
 const IS_WINDOWS = process.platform === "win32";
@@ -53,23 +59,27 @@ function gitText(args) {
 // ---------------------------------------------------------------- what goes in
 
 // Folders with .lua files the game never loads.
-const NOT_RUNTIME_DIRS = ["tests/", "tools/", "docs/", ".github/", ".claude/", "install/"];
+const NOT_RUNTIME_DIRS = ["tests/", "tools/", "docs/", ".github/", ".claude/", "install/", "workshop/", "local/"];
 
+// A repo path that is a bot script.
 function isBotScript(file) {
-	if (!file.endsWith(".lua")) return false;
-	if (!file.includes("/")) return true;
-	return RUNTIME_DIRS.some((dir) => file.startsWith(dir));
+	return file.startsWith(BOTS_DIR) && file.endsWith(".lua");
 }
 
-// Files that go into every copy besides the bot scripts: the licence notice (MIT asks for it in all copies, #215).
-const NOTICE_FILES = ["LICENSE"];
-
-// What the copy holds: the bot scripts plus the notice files.
-function isExported(file) {
-	return isBotScript(file) || NOTICE_FILES.includes(file);
+// A repo path that goes into the copy, and where (null: not in the copy).
+function exportPath(file) {
+	if (isBotScript(file)) return file.slice(BOTS_DIR.length);
+	if (NOTICE_FILES.includes(file)) return file;
+	return null;
 }
 
-// .lua files in a folder that is in neither list (a new folder): the copy would silently miss them.
+// A path in a copy that the export writes.
+function isExportedName(name) {
+	return name.endsWith(".lua") || NOTICE_FILES.includes(name);
+}
+
+// .lua files outside bots/ and the known folders (a new folder, or an engine file left at the repo root by a
+// branch from before #221): the copy would silently miss them.
 function unplacedLua(files) {
 	return files.filter((file) => file.endsWith(".lua") && !isBotScript(file) &&
 		!NOT_RUNTIME_DIRS.some((dir) => file.startsWith(dir)));
@@ -86,17 +96,24 @@ function collect(ref) {
 			const [mode, type, sha] = line.slice(0, tab).split(" ");
 			return { mode, type, sha, file: line.slice(tab + 1) };
 		});
+	if (!entries.some((entry) => isBotScript(entry.file))) {
+		throw new Error(
+			`${ref} has no ${BOTS_DIR} folder: it is from before the layout change (#221). Export it with its own ` +
+				`tool: git worktree add <tmp> ${ref}, then node <tmp>/Util/export-bots.js --ref ${ref}` // restructure:keep
+		);
+	}
 	const unplaced = unplacedLua(entries.map((entry) => entry.file));
 	if (unplaced.length > 0) {
 		throw new Error(
-			`.lua files in a folder the export does not know: ${unplaced.slice(0, 10).join(", ")}. Add the folder ` +
-				"to RUNTIME_DIRS (the game loads it) or NOT_RUNTIME_DIRS (it does not) in tools/export-bots.js."
+			`.lua files outside ${BOTS_DIR} in a folder the export does not know: ${unplaced.slice(0, 10).join(", ")}. ` +
+				`The game only gets ${BOTS_DIR}: move them there, or add the folder to NOT_RUNTIME_DIRS in ` +
+				"tools/export-bots.js (the game never loads it). A branch from before #221: node tools/restructure.js."
 		);
 	}
 	const selected = [];
 	const leftOut = {};
 	for (const entry of entries) {
-		if (isExported(entry.file)) {
+		if (exportPath(entry.file) !== null) {
 			if (entry.type !== "blob" || entry.mode === "120000") {
 				throw new Error(`${entry.file} is a ${entry.mode === "120000" ? "symlink" : entry.type}, not a file`);
 			}
@@ -108,7 +125,7 @@ function collect(ref) {
 	}
 	const blobs = readBlobs(selected.map((entry) => entry.sha));
 	const files = new Map();
-	selected.forEach((entry, i) => files.set(entry.file, blobs[i]));
+	selected.forEach((entry, i) => files.set(exportPath(entry.file), blobs[i]));
 	return { commit, files, leftOut };
 }
 
@@ -406,7 +423,7 @@ function uncommittedChanges() {
 		.map((line) => ({ isNew: line.startsWith("??"), file: line.slice(3).replace(/^.* -> /, "").replace(/^"|"$/g, "") }));
 	const unplaced = new Set(unplacedLua(changed.map((c) => c.file)));
 	return changed
-		.filter((c) => c.file !== LINEUP_FILE && (isExported(c.file) || unplaced.has(c.file)))
+		.filter((c) => c.file !== LINEUP_REPO_FILE && (exportPath(c.file) !== null || unplaced.has(c.file)))
 		.map((c) => (c.isNew ? `${c.file} (new)` : c.file));
 }
 
@@ -440,14 +457,14 @@ function workshopProblems(source) {
 	return problems;
 }
 
-// The version a copy shows in game: bots/customize/version.lua's number and bots/lib/systems/version.lua's.
+// The version a copy shows in game: customize/version.lua's number and lib/systems/version.lua's.
 function versionOf(files) {
 	const read = (file, pattern) => {
 		const content = files.get(file);
 		const match = content ? pattern.exec(content.toString("utf8")) : null;
 		return match ? match[1] : "?";
 	};
-	return `${read("bots/customize/version.lua", /number\s*=\s*"([^"]+)"/)} / ${read("bots/lib/systems/version.lua", /Version\.number\s*=\s*"([^"]+)"/)}`;
+	return `${read("customize/version.lua", /number\s*=\s*"([^"]+)"/)} / ${read("lib/systems/version.lua", /Version\.number\s*=\s*"([^"]+)"/)}`;
 }
 
 // After a Workshop export: the folder must hold exactly the copied bot scripts and nothing else (no build_info,
@@ -457,7 +474,7 @@ function folderProblems(dest, files) {
 	const onDisk = listFiles(dest);
 	const extra = onDisk.filter((file) => !files.has(file));
 	if (extra.length > 0) problems.push(`files not in the export: ${extra.slice(0, 10).join(", ")}`);
-	const notScripts = onDisk.filter((file) => !isExported(file));
+	const notScripts = onDisk.filter((file) => !isExportedName(file));
 	if (notScripts.length > 0) problems.push(`not bot scripts: ${notScripts.slice(0, 10).join(", ")}`);
 	if (onDisk.includes(BUILD_INFO_FILE)) problems.push(`${BUILD_INFO_FILE} (a test-game file)`);
 	const changed = onDisk.filter((file) => files.has(file) && !fs.readFileSync(path.join(dest, file)).equals(files.get(file)));
@@ -498,12 +515,12 @@ function main(args) {
 	const date = gitText(["log", "-1", "--format=%cd", "--date=format:%Y.%m.%d", commit]);
 	const notes = [];
 	if (args.testGame) {
-		const lineup = path.join(ROOT, LINEUP_FILE);
+		const lineup = path.join(ROOT, LINEUP_REPO_FILE);
 		if (fs.existsSync(lineup)) files.set(LINEUP_FILE, fs.readFileSync(lineup));
 		const branch = ref === "HEAD" ? gitText(["rev-parse", "--abbrev-ref", "HEAD"]) : ref;
 		const { render } = require("./build-info.js");
 		files.set(BUILD_INFO_FILE, Buffer.from(render({ commit: short, branch, dirty: false, date }), "utf8"));
-		notes.push(`lineup: working-tree ${LINEUP_FILE}; ${BUILD_INFO_FILE}: version=${date}-${short} branch=${branch}`);
+		notes.push(`lineup: working-tree ${LINEUP_REPO_FILE}; ${BUILD_INFO_FILE}: version=${date}-${short} branch=${branch}`);
 		if (ref === "HEAD") {
 			const changed = uncommittedChanges();
 			if (changed.length > 0) {
@@ -516,7 +533,7 @@ function main(args) {
 		const problems = lineup ? workshopProblems(lineup.toString("utf8")) : [`${LINEUP_FILE} missing`];
 		if (problems.length > 0) {
 			throw new Error(
-				`${ref} ${short} is not a clean Workshop copy, its committed ${LINEUP_FILE} has local test settings:\n` +
+				`${ref} ${short} is not a clean Workshop copy, its committed ${LINEUP_REPO_FILE} has local test settings:\n` +
 					problems.map((p) => `  ${p}`).join("\n") +
 					"\nCommit the release defaults (Random picks, Weak_Hero_Cap 1, Debug_* off) and export that commit."
 			);
@@ -527,7 +544,7 @@ function main(args) {
 		throw new Error(
 			"required files missing from the copy:\n" +
 				missing.map((m) => `  ${m.file} -> ${m.target}`).join("\n") +
-				"\n(a runtime file outside root/bots/heroes/bots/lib/Customize? add its folder to RUNTIME_DIRS)"
+				`\n(a runtime file outside ${BOTS_DIR}? the game only gets ${BOTS_DIR})`
 		);
 	}
 	const steps = plan(dest, files, manifest.get(dest), args.force);
@@ -578,12 +595,15 @@ function selfTest() {
 
 	const inCopy = ["bots/hero_selection.lua", "bots/heroes/hero_axe.lua", "bots/lib/systems/push.lua", "bots/customize/general.lua"];
 	const notInCopy = ["bots/lib/README.md", "tests/run.lua", "tools/x.lua", "docs/a.lua", ".luacheckrc", "README.md",
-		"install/quick-install-oha.bat", ".env.example", ".github/workflows/lua-check.yml"];
+		"install/quick-install-oha.bat", ".env.example", ".github/workflows/lua-check.yml", "workshop/cover.png"];
 	check("selection: runtime .lua files are in", inCopy.every(isBotScript));
-	check("selection: tests, tools, docs, configs are out", notInCopy.every((file) => !isExported(file)));
-	check("selection: LICENSE ships with the copy, it is not a bot script", isExported("LICENSE") && !isBotScript("LICENSE"));
-	check("selection: .lua in a new folder is reported, known folders are not",
-		unplacedLua(["Lib/new.lua", "tests/run.lua", "bots/heroes/hero_new.lua", "tools/a.md"]).join() === "Lib/new.lua");
+	check("selection: tests, tools, docs, configs are out", notInCopy.every((file) => exportPath(file) === null));
+	check("selection: bots/ is the top of the copy, LICENSE ships with it",
+		exportPath("bots/heroes/hero_axe.lua") === "heroes/hero_axe.lua" && exportPath("bots/bot_generic.lua") === "bot_generic.lua" && // restructure:keep
+			exportPath("LICENSE") === "LICENSE" && !isBotScript("LICENSE"));
+	check("selection: .lua in a new folder or at the repo root is reported, known folders are not",
+		unplacedLua(["Lib/new.lua", "tests/run.lua", "bots/heroes/hero_new.lua", "tools/a.md", "bot_generic.lua"]).join() === // restructure:keep
+			"Lib/new.lua,bot_generic.lua"); // restructure:keep
 
 	const sources = new Map([
 		["a.lua", Buffer.from([
@@ -592,12 +612,12 @@ function selfTest() {
 			'local H = dofile(GetScriptDirectory() .. "/heroes/" .. name)',
 			'local C = require("bots.customize.general")',
 		].join("\n"))],
-		["bots/lib/x.lua", Buffer.from("return {}")],
+		["lib/x.lua", Buffer.from("return {}")],
 	]);
 	const missing = missingRequires(sources);
 	check("requires: a missing dotted target is found, dynamic and optional ones are skipped",
-		missing.length === 1 && missing[0].target === "bots/customize/general");
-	sources.set("bots/customize/general.lua", Buffer.from("return {}"));
+		missing.length === 1 && missing[0].target === "customize/general");
+	sources.set("customize/general.lua", Buffer.from("return {}"));
 	check("requires: nothing missing once the file is there", missingRequires(sources).length === 0);
 
 	const cleanLineup = [
@@ -642,28 +662,28 @@ function selfTest() {
 			apply(dest, files, steps, manifest, {});
 			return steps;
 		};
-		const first = new Map([["a.lua", Buffer.from("1")], ["bots/heroes/b.lua", Buffer.from("2")]]);
+		const first = new Map([["a.lua", Buffer.from("1")], ["heroes/b.lua", Buffer.from("2")]]);
 		const s1 = exportFiles(first);
-		check("export: first copy writes every file", s1.write.length === 2 && listFiles(dest).join() === "bots/heroes/b.lua,a.lua");
+		check("export: first copy writes every file", s1.write.length === 2 && listFiles(dest).join() === "a.lua,heroes/b.lua");
 		const s2 = exportFiles(first);
 		check("export: same copy again changes nothing", s2.write.length === 0 && s2.unchanged.size === 2);
 		fs.writeFileSync(path.join(dest, "notes.txt"), "mine");
 		check("export: a file the tool did not write blocks the copy", throws(() => exportFiles(first), /did not write: notes\.txt/));
 		fs.unlinkSync(path.join(dest, "notes.txt"));
-		const second = new Map([["a.lua", Buffer.from("changed")], ["bots/lib/c.lua", Buffer.from("3")]]);
+		const second = new Map([["a.lua", Buffer.from("changed")], ["lib/c.lua", Buffer.from("3")]]);
 		const s3 = exportFiles(second);
 		check("export: stale files are deleted and empty folders pruned",
-			s3.remove.join() === "bots/heroes/b.lua" && !fs.existsSync(path.join(dest, "bots/heroes")) &&
-			listFiles(dest).join() === "bots/lib/c.lua,a.lua");
+			s3.remove.join() === "heroes/b.lua" && !fs.existsSync(path.join(dest, "heroes")) &&
+			listFiles(dest).join() === "a.lua,lib/c.lua");
 		check("folder check: an exact copy is clean", folderProblems(dest, second).length === 0);
 		fs.writeFileSync(path.join(dest, "a.lua"), "edited");
-		fs.mkdirSync(path.join(dest, "bots/customize"), { recursive: true });
+		fs.mkdirSync(path.join(dest, "customize"), { recursive: true });
 		fs.writeFileSync(path.join(dest, BUILD_INFO_FILE), "return {}");
 		const folderFound = folderProblems(dest, second).join(" | ");
 		check("folder check: an edited file and a build_info are found",
 			/differ from the commit: a\.lua/.test(folderFound) && /build_info\.lua \(a test-game file\)/.test(folderFound));
 		fs.writeFileSync(path.join(dest, "a.lua"), "changed");
-		fs.rmSync(path.join(dest, "bots/customize"), { recursive: true, force: true });
+		fs.rmSync(path.join(dest, "customize"), { recursive: true, force: true });
 		fs.writeFileSync(path.join(dest, "notes.txt"), "mine");
 		exportFiles(second, true);
 		check("export: --force takes over the folder", !fs.existsSync(path.join(dest, "notes.txt")));
@@ -695,4 +715,4 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { isBotScript, isExported, missingRequires, assertDestSafe, plan, apply, removeExport, workshopProblems, folderProblems };
+module.exports = { isBotScript, exportPath, missingRequires, assertDestSafe, plan, apply, removeExport, workshopProblems, folderProblems };
