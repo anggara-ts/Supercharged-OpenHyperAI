@@ -782,6 +782,9 @@ function CDOTA_Bot_Script:Action_AttackUnit(target, isOnce)
 	end
 	return originalActionAttackUnit(self, target, isOnce)
 end
+-- Difficulty levels (#232): reaction delay / skip / Passive gates on every cast and attack order, outside the guards
+-- above. Unfair (today's play) passes every order straight through: FuncLib/systems/difficulty_hooks.lua.
+require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks").InstallUnitHooks(CDOTA_Bot_Script)
 local originalGetAssignedLane = CDOTA_Bot_Script.GetAssignedLane
 function CDOTA_Bot_Script:GetAssignedLane()
 	if not self or self:GetTeam() ~= GetTeam() then
@@ -1078,8 +1081,5 @@ if ChatGuard.originalChat == nil and CDOTA_Bot_Script.ActionImmediate_Chat ~= ni
 		return ChatGuard.originalChat(self, text, allChat)
 	end
 end
--- Difficulty levels (#232): reaction delay / skip / Passive gates on every cast and attack order, outside the guards
--- above. Unfair (today's play) passes every order straight through: FuncLib/systems/difficulty_hooks.lua.
-require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks").InstallUnitHooks(CDOTA_Bot_Script)
 local GlobalOverrides = { orig_GetTeamPlayers = originalGetTeamPlayers, GetTeamPlayers = GetTeamPlayers }
 return GlobalOverrides

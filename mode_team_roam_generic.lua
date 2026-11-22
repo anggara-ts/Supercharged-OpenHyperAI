@@ -229,6 +229,9 @@ function GetDesire()
 		end
 	end
 	local desire = GetDesireHelper()
+	if offerUnit ~= nil then
+		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
+	end
 	-- Difficulty (#232): hero hunts off on Passive / Easy, careful on Medium; no help fights on Passive.
 	desire, roamWhy = TeamRoam.Difficulty.GateRoam(
 		bot,
@@ -238,9 +241,6 @@ function GetDesire()
 		alliesNear and #alliesNear or 0,
 		enemiesNear and #enemiesNear or 0
 	)
-	if offerUnit ~= nil then
-		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
-	end
 	return RoamDone(desire, adjustDesire(desire))
 end
 -- [OHA-ROAM] hunt-end: a hero / courier hunt that ran as team roam stopped (RoamRules.HuntExitWhy, or the hunt found
