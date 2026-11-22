@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -12,31 +13,102 @@ local tAllAbilityBuildList = { { 1, 3, 1, 3, 1, 6, 1, 3, 3, 2, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 224,077 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
-	"item_slippers",
-	"item_circlet",
-	"item_quelling_blade",
+	"item_faerie_fire",
+	"item_magic_stick",
 	"item_magic_wand",
-	"item_wraith_band",
 	"item_power_treads",
 	"item_mask_of_madness",
 	"item_manta",
+	"item_blink",
+	"item_butterfly",
 	"item_black_king_bar",
 	"item_aghanims_shard",
+	"item_swift_blink",
+	"item_satanic",
+	"item_ultimate_scepter_2",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 11,682 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_2"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_circlet",
+	"item_slippers",
+	"item_wraith_band",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_yasha",
+	"item_ultimate_scepter",
+	"item_manta",
+	"item_black_king_bar",
 	"item_butterfly",
+	"item_aghanims_shard",
+	"item_satanic",
+	"item_ultimate_scepter_2",
+	"item_hurricane_pike",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 2,994 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_3"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_circlet",
+	"item_magic_stick",
+	"item_wraith_band",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_mask_of_madness",
+	"item_manta",
+	"item_blink",
+	"item_black_king_bar",
+	"item_butterfly",
+	"item_aghanims_shard",
 	"item_satanic",
 	"item_moon_shard",
-	"item_greater_crit",
-	"item_hydras_breath",
-	"item_travel_boots_2",
 	"item_ultimate_scepter_2",
 }
-sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_1"]
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 2,080 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
+	"item_branches",
+	"item_circlet",
+	"item_magic_stick",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_manta",
+	"item_ultimate_scepter",
+	"item_butterfly",
+	"item_satanic",
+	"item_ultimate_scepter_2",
+	"item_soul_booster",
+	"item_shivas_guard",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,838 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_faerie_fire",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_mask_of_madness",
+	"item_manta",
+	"item_ultimate_scepter",
+	"item_butterfly",
+	"item_black_king_bar",
+	"item_travel_boots",
+	"item_satanic",
+	"item_ultimate_scepter_2",
+	"item_refresher",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
@@ -54,17 +126,16 @@ local lucentBeamAbility = SafeAbility(bot:GetAbilityByName("luna_lucent_beam"), 
 local moonGlaiveAbility = SafeAbility(bot:GetAbilityByName("luna_moon_glaive"), "luna_moon_glaive", "luna")
 local lunarOrbitAbility = SafeAbility(bot:GetAbilityByName("luna_lunar_orbit"), "luna_lunar_orbit", "luna")
 local eclipseAbility = SafeAbility(bot:GetAbilityByName("luna_eclipse"), "luna_eclipse", "luna")
-local talent6 = SafeAbility(bot:GetAbilityByName(sTalentList[6]), "sTalentList[6]", "luna")
 local lucentBeamDesire, lucentBeamTarget
 local moonGlaivesDesire
 local lunarOrbitDesire
 local eclipseDesire
-local bonusBeamDamage = 0
 local botTarget
 local isGoingOnSomeone
 local isRetreating
 local isAttacking
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -73,9 +144,6 @@ function X.SkillsComplement()
 	isAttacking = Fu.IsAttacking(bot)
 	botTarget = Fu.GetProperTarget(bot)
 	Fu.ConsiderTarget()
-	if talent6:IsTrained() then
-		bonusBeamDamage = talent6:GetSpecialValueInt("value")
-	end
 	moonGlaivesDesire = X.ConsiderMoonGlaives()
 	if moonGlaivesDesire > 0 then
 		bot:Action_UseAbility(moonGlaiveAbility)
@@ -121,7 +189,10 @@ function X.ConsiderLucentBeam()
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, lucentBeamAbility:GetCastRange())
 	local abilityLevel = lucentBeamAbility:GetLevel()
-	local damage = lucentBeamAbility:GetSpecialValueInt("beam_damage") + bonusBeamDamage
+	-- The old bonus came from talent 6 (Lunar Orbit speed/damage), not the beam talent.
+	-- 7.42 game files: special_bonus_unique_luna_1 (+80) is linked into luna_lucent_beam "beam_damage", and the
+	-- read includes it once learned (FuncLib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
+	local damage = lucentBeamAbility:GetSpecialValueInt("beam_damage")
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, castRange + 300, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if

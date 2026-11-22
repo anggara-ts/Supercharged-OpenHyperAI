@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -34,107 +35,116 @@ if sRole == "pos_5" then
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 30,187 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
+	"item_mantle",
+	"item_circlet",
 	"item_double_branches",
 	"item_faerie_fire",
-	"item_enchanted_mango",
-	"item_bottle",
+	"item_null_talisman",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_double_null_talisman",
 	"item_witch_blade",
 	"item_force_staff",
-	"item_black_king_bar",
+	"item_dragon_lance",
 	"item_aghanims_shard",
 	"item_hurricane_pike",
+	"item_invis_sword",
+	"item_ultimate_scepter",
+	"item_black_king_bar",
 	"item_devastator",
-	"item_sheepstick",
-	"item_bloodthorn",
-	"item_moon_shard",
-	"item_travel_boots_2",
 	"item_ultimate_scepter_2",
+	"item_silver_edge",
+	"item_sphere",
+	"item_moon_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 3,096 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
+	"item_circlet",
 	"item_double_branches",
-	"item_faerie_fire",
-	"item_enchanted_mango",
-	"item_power_treads",
+	"item_mantle",
+	"item_null_talisman",
 	"item_magic_wand",
+	"item_power_treads",
+	"item_witch_blade",
+	"item_hurricane_pike",
+	"item_aghanims_shard",
+	"item_ultimate_scepter",
+	"item_black_king_bar",
+	"item_devastator",
+	"item_travel_boots",
+	"item_ultimate_scepter_2",
+	"item_silver_edge",
+	"item_refresher",
+	"item_moon_shard",
+	"item_travel_boots_2",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 3,155 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_circlet",
+	"item_mantle",
+	"item_faerie_fire",
+	"item_null_talisman",
+	"item_magic_wand",
+	"item_power_treads",
 	"item_witch_blade",
 	"item_force_staff",
-	"item_hurricane_pike",
-	"item_aghanims_shard",
-	"item_black_king_bar",
-	"item_sheepstick",
-	"item_devastator",
-	"item_travel_boots",
-	"item_orchid",
-	"item_bloodthorn",
-	"item_moon_shard",
-	"item_travel_boots_2",
-	"item_ultimate_scepter_2",
-}
-sRoleItemsBuyList["pos_1"] = {
-	"item_crystal_maiden_outfit",
 	"item_dragon_lance",
-	"item_witch_blade",
-	"item_hurricane_pike",
-	"item_black_king_bar",
 	"item_aghanims_shard",
-	"item_orchid",
-	"item_bloodthorn",
+	"item_hurricane_pike",
+	"item_invis_sword",
+	"item_black_king_bar",
 	"item_devastator",
-	"item_sheepstick",
-	"item_moon_shard",
+	"item_silver_edge",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
+	"item_monkey_king_bar",
+	"item_moon_shard",
 	"item_travel_boots_2",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 83,656 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
-	"item_tango",
-	"item_double_branches",
-	"item_enchanted_mango",
-	"item_enchanted_mango",
 	"item_blood_grenade",
-	"item_arcane_boots",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_mantle",
 	"item_magic_wand",
+	"item_null_talisman",
+	"item_arcane_boots",
 	"item_force_staff",
-	"item_glimmer_cape",
-	"item_guardian_greaves",
+	"item_ultimate_scepter",
 	"item_aghanims_shard",
-	"item_hurricane_pike",
 	"item_refresher",
-	"item_orchid",
-	"item_bloodthorn",
-	"item_sheepstick",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
+	"item_sheepstick",
+	"item_devastator",
+	"item_hand_of_midas",
+	"item_moon_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 86,636 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
-	"item_tango",
-	"item_double_branches",
-	"item_enchanted_mango",
-	"item_enchanted_mango",
 	"item_blood_grenade",
-	"item_arcane_boots",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_mantle",
+	"item_null_talisman",
 	"item_magic_wand",
+	"item_arcane_boots",
 	"item_force_staff",
-	"item_glimmer_cape",
-	"item_pipe",
 	"item_ultimate_scepter",
-	"item_pavise",
-	"item_solar_crest",
 	"item_aghanims_shard",
-	"item_hurricane_pike",
-	"item_sheepstick",
-	"item_orchid",
-	"item_bloodthorn",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
+	"item_hand_of_midas",
+	"item_sheepstick",
+	"item_cyclone",
+	"item_devastator",
+	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_shivas_guard", "item_magic_wand", "item_sheepstick", "item_magic_wand" }
@@ -156,7 +166,6 @@ local glaivesOfWisdomAbility =
 local lastWordAbility = SafeAbility(bot:GetAbilityByName("silencer_last_word"), "silencer_last_word", "silencer")
 local globalSilenceAbility =
 	SafeAbility(bot:GetAbilityByName("silencer_global_silence"), "silencer_global_silence", "silencer")
-local talent4 = nil
 local curseDesire, curseLocation = 0
 local glaivesDesire, glaivesTarget = 0
 local lastWordDesire, lastWordTarget = 0
@@ -165,14 +174,10 @@ local manaReserve, mpRatio, hpRatio, botLevel, nearbyEnemies
 local aetherRange = 0
 local botTarget
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
 		return
 	end
-	talent4 = SafeAbility(
-		bot:GetAbilityByName("special_bonus_unique_silencer_4"),
-		"special_bonus_unique_silencer_4",
-		"silencer"
-	)
 	local context = AbilityContext.Build(bot)
 	manaReserve = 300
 	aetherRange = context.aetherRange
@@ -192,15 +197,10 @@ function X.SkillsComplement()
 		bot:ActionQueue_UseAbilityOnLocation(curseOfTheSilentAbility, curseLocation)
 		return
 	end
-	local lastWordIsAoe
-	lastWordDesire, lastWordTarget, lastWordIsAoe = X.ConsiderE()
+	lastWordDesire, lastWordTarget = X.ConsiderE()
 	if lastWordDesire > 0 then
 		Fu.SetQueuePtToINT(bot, false)
-		if lastWordIsAoe then
-			bot:ActionQueue_UseAbilityOnLocation(lastWordAbility, lastWordTarget)
-		else
-			bot:ActionQueue_UseAbilityOnEntity(lastWordAbility, lastWordTarget)
-		end
+		bot:ActionQueue_UseAbilityOnEntity(lastWordAbility, lastWordTarget)
 		return
 	end
 	glaivesDesire, glaivesTarget = X.ConsiderW()
@@ -536,16 +536,14 @@ function X.ConsiderW()
 end
 function X.ConsiderE()
 	if not Fu.CanCastAbility(lastWordAbility) then
-		return BOT_ACTION_DESIRE_NONE, 0, false
+		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, lastWordAbility:GetCastRange())
 	local damage = lastWordAbility:GetSpecialValueInt("damage")
 	botTarget = Fu.GetProperTarget(bot)
-	local radius = 0
-	local hasAoeTalent = talent4 ~= nil and talent4:IsTrained()
-	if hasAoeTalent then
-		radius = talent4:GetSpecialValueInt("value")
-	end
+	-- Last Word is a unit-target spell in 7.42 (game files: DOTA_ABILITY_BEHAVIOR_UNIT_TARGET), also with the AoE talent
+	-- (special_bonus_unique_silencer_4, +250 "radius" around the target). The old AoE branch ordered it on a point,
+	-- which a unit-target spell refuses; it never ran because the talent was read with "value" (0) as the radius (#46).
 	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -570,16 +568,7 @@ function X.ConsiderE()
 						bot:GetAttributeValue(ATTRIBUTE_INTELLECT) - enemyHero:GetAttributeValue(ATTRIBUTE_INTELLECT)
 					)
 			if Fu.CanKillTarget(enemyHero, totalDamage, DAMAGE_TYPE_MAGICAL) then
-				if hasAoeTalent then
-					local aoe = bot:FindAoELocation(true, true, enemyHero:GetLocation(), 0, radius, 0, 0)
-					if aoe.count >= 2 then
-						return BOT_ACTION_DESIRE_HIGH, aoe.targetloc, true
-					else
-						return BOT_ACTION_DESIRE_HIGH, enemyHero, false
-					end
-				else
-					return BOT_ACTION_DESIRE_HIGH, enemyHero, false
-				end
+				return BOT_ACTION_DESIRE_HIGH, enemyHero
 			end
 		end
 	end
@@ -609,16 +598,7 @@ function X.ConsiderE()
 			end
 		end
 		if mostDangerousEnemy ~= nil then
-			if hasAoeTalent then
-				local aoe = bot:FindAoELocation(true, true, mostDangerousEnemy:GetLocation(), 0, radius, 0, 0)
-				if aoe.count >= 2 then
-					return BOT_ACTION_DESIRE_HIGH, aoe.targetloc, true
-				else
-					return BOT_ACTION_DESIRE_HIGH, mostDangerousEnemy, false
-				end
-			else
-				return BOT_ACTION_DESIRE_HIGH, mostDangerousEnemy, false
-			end
+			return BOT_ACTION_DESIRE_HIGH, mostDangerousEnemy
 		end
 	end
 	if Fu.IsGoingOnSomeone(bot) then
@@ -633,16 +613,7 @@ function X.ConsiderE()
 			and not botTarget:HasModifier("modifier_troll_warlord_battle_trance")
 			and not botTarget:HasModifier("modifier_ursa_enrage")
 		then
-			if hasAoeTalent then
-				local aoe = bot:FindAoELocation(true, true, botTarget:GetLocation(), 0, radius, 0, 0)
-				if aoe.count >= 2 then
-					return BOT_ACTION_DESIRE_HIGH, aoe.targetloc, true
-				else
-					return BOT_ACTION_DESIRE_HIGH, botTarget, false
-				end
-			else
-				return BOT_ACTION_DESIRE_HIGH, botTarget, false
-			end
+			return BOT_ACTION_DESIRE_HIGH, botTarget
 		end
 	end
 	if Fu.IsRetreating(bot) and not Fu.IsRealInvisible(bot) then
@@ -655,16 +626,7 @@ function X.ConsiderE()
 				and Fu.CanCastOnTargetAdvanced(enemyHero)
 				and not Fu.IsDisabled(enemyHero)
 			then
-				if hasAoeTalent then
-					local aoe = bot:FindAoELocation(true, true, enemyHero:GetLocation(), 0, radius, 0, 0)
-					if aoe.count >= 2 then
-						return BOT_ACTION_DESIRE_HIGH, aoe.targetloc, true
-					else
-						return BOT_ACTION_DESIRE_HIGH, enemyHero, false
-					end
-				else
-					return BOT_ACTION_DESIRE_HIGH, enemyHero, false
-				end
+				return BOT_ACTION_DESIRE_HIGH, enemyHero
 			end
 		end
 	end
@@ -675,15 +637,15 @@ function X.ConsiderE()
 			and Fu.IsInRange(bot, botTarget, castRange)
 			and Fu.IsAttacking(bot)
 		then
-			return BOT_ACTION_DESIRE_HIGH, botTarget, false
+			return BOT_ACTION_DESIRE_HIGH, botTarget
 		end
 	end
 	if Fu.IsDoingTormentor(bot) and bot:GetMana() >= 500 then
 		if Fu.IsTormentor(botTarget) and Fu.IsInRange(bot, botTarget, castRange) and Fu.IsAttacking(bot) then
-			return BOT_ACTION_DESIRE_HIGH, botTarget, false
+			return BOT_ACTION_DESIRE_HIGH, botTarget
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE, 0, false
+	return BOT_ACTION_DESIRE_NONE, 0
 end
 function X.ConsiderR()
 	if not Fu.CanCastAbility(globalSilenceAbility) then

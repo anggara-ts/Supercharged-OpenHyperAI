@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -35,73 +36,94 @@ if sRole == "pos_5" then
 end
 local sTeamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 38,831 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
+	"item_magic_stick",
+	"item_ring_of_regen",
+	"item_ancient_janggo",
 	"item_magic_wand",
-	-- Tranquil Boots before Vladmir (Buckler is its first part).
-	"item_boots",
 	"item_tranquil_boots",
-	"item_vladmir",
 	"item_blink",
 	"item_black_king_bar",
-	"item_aghanims_shard",
-	"item_ultimate_scepter",
-	-- Octarine (+450 mana, 25% cooldown) before Refresher: the double Black Hole needs ~1,125-1,465
-	-- mana, more than the pool before Octarine.
-	"item_octarine_core",
-	"item_refresher",
 	sTeamAuraItem,
-	"item_travel_boots",
-	"item_arcane_blink",
-	"item_travel_boots_2",
-	"item_ultimate_scepter_2",
-	"item_moon_shard",
-}
-sRoleItemsBuyList["pos_4"] = {
-	"item_enchanted_mango",
-	"item_double_tango",
-	"item_double_branches",
-	"item_blood_grenade",
-	"item_magic_wand",
-	"item_boots",
-	"item_vladmir",
-	"item_arcane_boots",
-	"item_blink",
-	"item_guardian_greaves",
-	"item_black_king_bar",
-	"item_lotus_orb",
-	"item_gungir",
+	"item_ultimate_scepter",
 	"item_refresher",
-	"item_arcane_blink",
-	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
+	"item_hand_of_midas",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
-sRoleItemsBuyList["pos_5"] = {
-	"item_enchanted_mango",
-	"item_double_tango",
-	"item_double_branches",
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 23,977 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
 	"item_blood_grenade",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_clarity",
 	"item_magic_wand",
-	"item_boots",
+	"item_tranquil_boots",
+	"item_blink",
+	"item_black_king_bar",
+	"item_ultimate_scepter",
+	"item_refresher",
+	"item_octarine_core",
+	"item_ultimate_scepter_2",
+	"item_hand_of_midas",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 12,489 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_clarity",
+	"item_magic_wand",
 	-- Tranquil Boots before Vladmir (Buckler is its first part).
 	"item_tranquil_boots",
-	"item_vladmir",
-	"item_pipe",
 	"item_blink",
-	"item_boots_of_bearing",
 	"item_black_king_bar",
+	"item_ultimate_scepter",
 	"item_refresher",
-	"item_arcane_blink",
-	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
+	"item_octarine_core",
+	"item_hand_of_midas",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 506 matches, built from pos 3 (38,831) (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
-sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_3"]
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 2,980 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_2"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_faerie_fire",
+	"item_magic_wand",
+	"item_tranquil_boots",
+	"item_blink",
+	"item_black_king_bar",
+	sTeamAuraItem,
+	"item_ultimate_scepter",
+	"item_refresher",
+	"item_ultimate_scepter_2",
+	"item_hand_of_midas",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
 X["sBuyList"] = sRoleItemsBuyList[sRole]
-X["sSellList"] = { "item_ultimate_scepter", "item_magic_wand", "item_cyclone", "item_magic_wand" }
+X["sSellList"] = {
+	"item_ultimate_scepter",
+	"item_magic_wand",
+	"item_cyclone",
+	"item_magic_wand",
+	-- Sold once the item before it is owned, to keep six slots (Util/item-builds/generate.js):
+	"item_refresher",
+	"item_ancient_janggo",
+}
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
 	X["sBuyList"], X["sSellList"] = { "PvN_antimage" }, {}
 end
@@ -121,10 +143,6 @@ local demonicConversionAbility =
 local midnightPulseAbility =
 	SafeAbility(bot:GetAbilityByName("enigma_midnight_pulse"), "enigma_midnight_pulse", "enigma")
 local blackHoleAbility = SafeAbility(bot:GetAbilityByName("enigma_black_hole"), "enigma_black_hole", "enigma")
-local maleficeTalent =
-	SafeAbility(bot:GetAbilityByName("special_bonus_unique_enigma_2"), "special_bonus_unique_enigma_2", "enigma")
-local midnightPulseTalent =
-	SafeAbility(bot:GetAbilityByName("special_bonus_unique_enigma_6"), "special_bonus_unique_enigma_6", "enigma")
 local maleficeDesire, maleficeTarget
 local demonicConversionDesire, demonicConversionLocation
 local midnightPulseDesire, midnightPulseLocation
@@ -138,6 +156,7 @@ local isGoingOnSomeone
 local isAttacking
 local isInTeamFight
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -228,10 +247,9 @@ function X.ConsiderMalefice()
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, maleficeAbility:GetCastRange())
 	-- datafeed: Malefice's instance count is "stun_instances" (3); it has no "value", so stunInstances (and the kill damage) was 0.
+	-- 7.42 game files: special_bonus_unique_enigma_2 (+4) is linked into enigma_malefice "stun_instances", and the
+	-- read includes it once learned (FuncLib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
 	local stunInstances = maleficeAbility:GetSpecialValueInt("stun_instances")
-	if maleficeTalent:IsTrained() then
-		stunInstances = stunInstances + maleficeAbility:GetSpecialValueInt("value")
-	end
 	local damage = maleficeAbility:GetSpecialValueInt("damage") * stunInstances
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, castRange + 150, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
@@ -502,10 +520,10 @@ function X.ConsiderMidnightPulse()
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, midnightPulseAbility:GetCastRange())
+	-- The pulse radius talent is special_bonus_unique_enigma_9, not enigma_6 (Black Hole damage).
+	-- 7.42 game files: special_bonus_unique_enigma_9 (+200) is linked into enigma_midnight_pulse "radius", and the
+	-- read includes it once learned (FuncLib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
 	local radius = midnightPulseAbility:GetSpecialValueInt("radius")
-	if midnightPulseTalent:IsTrained() then
-		radius = radius + midnightPulseAbility:GetSpecialValueInt("value")
-	end
 	if isInTeamFight then
 		local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius / 2, 0, 0)
 		local enemiesInRadius = Fu.GetEnemiesNearLoc(aoeLocation.targetloc, radius * 0.8)
