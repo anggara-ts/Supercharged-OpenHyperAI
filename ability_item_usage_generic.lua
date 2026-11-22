@@ -739,6 +739,7 @@ local chatReplyDelay = RandomInt(19, 56) / 10
 local killStreakEndedTime = -999
 local lastGold = 9999
 local lastKills = 999
+local saidFirstBloodAt = nil
 local lastDeaths = 0
 local killStreak = 0
 local replyCount = 0
@@ -794,8 +795,16 @@ function Usage.SetTalkMessage()
 		then
 			local chatLine = Localization.Get("got_first_blood")[RandomInt(1, #Localization.Get("got_first_blood"))]
 			bot:ActionImmediate_Chat(chatLine, true)
+			saidFirstBloodAt = kills
 		end
-		if bot:IsAlive() and gold > lastGold + 300 * turboGoldScale and kills > lastKills then
+		-- One chat line per kill: first blood's bonus gold also passed the kill-gold check below, so the first blood got
+		-- two lines (maintainer, 2026-11-23).
+		if
+			bot:IsAlive()
+			and gold > lastGold + 300 * turboGoldScale
+			and kills > lastKills
+			and saidFirstBloodAt ~= kills
+		then
 			local chatLine = "?"
 			if Fu.Customize.Trash_Talk_Level and Fu.Customize.Trash_Talk_Level >= 2 then
 				-- A normal kill: one of our lines 3 times in 4, "?" once in 4 (#90; it was 2 in 9).
