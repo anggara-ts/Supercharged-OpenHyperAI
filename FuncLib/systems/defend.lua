@@ -46,16 +46,12 @@ local Barracks = Dota.Barracks
 local BotMode = Dota.BotMode
 local BotModeDesire = Dota.BotModeDesire
 local Lane = Dota.Lane
-local Team = Dota.Team
 local Tower = Dota.Tower
 local UnitType = Dota.UnitType
 local NativeOperators = require(GetScriptDirectory() .. "/FuncLib/lib/native_operators")
 local vectorAdd = NativeOperators.add
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local getLocationToLocationDistance = Utils.GetLocationToLocationDistance
-local considerTPToTarget = Utils.ConsiderTPToTarget
-local radiantFountainTpPoint = Utils.RadiantFountainTpPoint
-local direFountainTpPoint = Utils.DireFountainTpPoint
 local CacheKeys = require(GetScriptDirectory() .. "/FuncLib/systems/cache_keys")
 function getDefendState(bot)
 	if not bot._defend then
@@ -298,8 +294,25 @@ local function DefNone(bot, why)
 	return BotModeDesire.None
 end
 local BASE_CREEP_RADIUS = 1400
+-- The Ancient lost HP in the last 3s (read twice a second for the team).
+local ancientHitState = { hp = nil, at = -999, checkAt = -999 }
+local function AncientBeingHit(ancient)
+	if ancient == nil or not ancient:IsAlive() then
+		return false
+	end
+	local now = DotaTime()
+	if now >= ancientHitState.checkAt then
+		ancientHitState.checkAt = now + 0.5
+		local hp = ancient:GetHealth()
+		if ancientHitState.hp ~= nil and hp < ancientHitState.hp then
+			ancientHitState.at = now
+		end
+		ancientHitState.hp = hp
+	end
+	return now - ancientHitState.at <= 3
+end
 -- Our base is being hit: heroes at the Ancient or on high ground, the Ancient
--- below 95%, or a creep wave at the T4s.
+-- losing HP, or a creep wave at the T4s.
 local function ReadBaseThreat(gameState)
 	local ourAncient = gameState.ourAncient
 	local threat = {
@@ -320,7 +333,10 @@ local function ReadBaseThreat(gameState)
 			threat.t4 = threat.t4 + 1
 		end
 	end
-	threat.exposed = threat.heroes >= 1 or threat.hg >= 1 or threat.ancHP < 0.95 or threat.creeps >= 2
+	-- #53 (maintainer 2026-11-22): the Ancient counts while it is losing HP, not while it is below 95% (that never expires:
+	-- game 068 52:00-52:30, all five held at 60% with nothing at the base).
+	threat.hit = AncientBeingHit(ourAncient)
+	threat.exposed = threat.heroes >= 1 or threat.hg >= 1 or threat.hit or threat.creeps >= 2
 	return threat
 end
 function getMostThreatenedLane()
@@ -625,74 +641,339 @@ function noOtherTravelBootsDefender(bot)
 	end
 	return true
 end
+-- Where each lane's T3 stands, remembered after it falls (#53: the rim the bots hold once the T3 is down, game 068
+-- 52:30). Read while the T3 is alive (the defend reads call this from the start of the game).
+local tier3Spots = {}
+local tier3TowerIds = { [Lane.Top] = Tower.Top3, [Lane.Mid] = Tower.Mid3, [Lane.Bot] = Tower.Bot3 }
+local function Tier3Spot(team, lane)
+	tier3Spots[team] = tier3Spots[team] or {}
+	-- All three lanes on every read, so a lane is known before its own defence first asks.
+	for spotLane, id in pairs(tier3TowerIds) do
+		local tower = GetTower(team, id)
+		if isAliveBuilding(tower) then
+			tier3Spots[team][spotLane] = tower:GetLocation()
+		end
+	end
+	return tier3Spots[team][lane]
+end
+local laneBarracksIds = {
+	[Lane.Top] = { Barracks.TopMelee, Barracks.TopRanged },
+	[Lane.Mid] = { Barracks.MidMelee, Barracks.MidRanged },
+	[Lane.Bot] = { Barracks.BotMelee, Barracks.BotRanged },
+}
+-- The high-ground wait point (the rim): 250 behind the lane's T3 toward our Ancient; after the T3 falls, where it stood.
+-- It used to move to a barracks, and with both barracks down to our lane front + 600, which can be mid-map (#53).
+-- A barracks only when the T3 was never seen.
 function getHighGroundWaitPoint(team, lane)
-	local tier3TowerChoice
-	if lane == Lane.Top then
-		tier3TowerChoice = GetTower(team, Tower.Top3)
-	else
-		local otherTier3Tower
-		if lane == Lane.Mid then
-			otherTier3Tower = GetTower(team, Tower.Mid3)
-		else
-			otherTier3Tower = GetTower(team, Tower.Bot3)
-		end
-		tier3TowerChoice = otherTier3Tower
-	end
-	local tier3Tower = tier3TowerChoice
-	local meleeBarracksChoice
-	if lane == Lane.Top then
-		meleeBarracksChoice = GetBarracks(team, Barracks.TopMelee)
-	else
-		local otherMeleeBarracks
-		if lane == Lane.Mid then
-			otherMeleeBarracks = GetBarracks(team, Barracks.MidMelee)
-		else
-			otherMeleeBarracks = GetBarracks(team, Barracks.BotMelee)
-		end
-		meleeBarracksChoice = otherMeleeBarracks
-	end
-	local meleeBarracks = meleeBarracksChoice
-	local rangedBarracksChoice
-	if lane == Lane.Top then
-		rangedBarracksChoice = GetBarracks(team, Barracks.TopRanged)
-	else
-		local otherRangedBarracks
-		if lane == Lane.Mid then
-			otherRangedBarracks = GetBarracks(team, Barracks.MidRanged)
-		else
-			otherRangedBarracks = GetBarracks(team, Barracks.BotRanged)
-		end
-		rangedBarracksChoice = otherRangedBarracks
-	end
-	local rangedBarracks = rangedBarracksChoice
 	local ancient = GetAncient(team)
-	local anchorChoice
-	if Fu.IsValidBuilding(tier3Tower) then
-		anchorChoice = tier3Tower
-	else
-		local barracksAnchor
-		if Fu.IsValidBuilding(meleeBarracks) then
-			barracksAnchor = meleeBarracks
-		else
-			local rangedAnchor
-			if Fu.IsValidBuilding(rangedBarracks) then
-				rangedAnchor = rangedBarracks
-			else
-				rangedAnchor = nil
+	local anchorLocation = Tier3Spot(team, lane)
+	if anchorLocation == nil then
+		for _, id in ipairs(laneBarracksIds[lane] or {}) do
+			local barracks = GetBarracks(team, id)
+			if anchorLocation == nil and isAliveBuilding(barracks) then
+				anchorLocation = barracks:GetLocation()
 			end
-			barracksAnchor = rangedAnchor
 		end
-		anchorChoice = barracksAnchor
 	end
-	local anchor = anchorChoice
-	if anchor and Fu.IsValidBuilding(ancient) then
-		local anchorLocation = anchor:GetLocation()
+	if anchorLocation ~= nil and ancient ~= nil then
 		local ancientLocation = ancient:GetLocation()
 		local direction = Vector(ancientLocation.x - anchorLocation.x, ancientLocation.y - anchorLocation.y, 0)
 		local length = math.max(1, math.sqrt(direction.x * direction.x + direction.y * direction.y))
 		return Vector(anchorLocation.x + direction.x / length * 250, anchorLocation.y + direction.y / length * 250, 0)
 	end
 	return Fu.AdjustLocationWithOffsetTowardsFountain(GetLaneFrontLocation(team, lane, 0), 600)
+end
+local DefendLaneRules = require(GetScriptDirectory() .. "/FuncLib/systems/defend_lane_rules")
+-- #53: every enemy creep with its lane (DefendLaneRules.CreepLane: "base" by our Ancient, else the lane whose path is
+-- nearest), read once a second for the team. Game 068, 41:40: with mid and bottom both down to the T4s, the old count
+-- (creeps within 1600 of each enemy lane front) counted the same creeps for both lanes.
+local creepLaneCache = { at = -99, list = {} }
+local creepLaneIds = { Lane.Top, Lane.Mid, Lane.Bot }
+local function EnemyCreepLanes()
+	local now = DotaTime()
+	if now - creepLaneCache.at < 1 then
+		return creepLaneCache.list
+	end
+	local ancient = GetAncient(ourTeam)
+	local list = {}
+	for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
+		if Fu.IsValid(unit) then
+			local location = unit:GetLocation()
+			local distances = {}
+			for _, lane in ipairs(creepLaneIds) do
+				local along = GetAmountAlongLane(lane, location)
+				distances[lane] = along ~= nil and along.distance or nil
+			end
+			local ancientDist = ancient ~= nil and GetUnitToUnitDistance(unit, ancient) or nil
+			list[#list + 1] = { unit = unit, lane = DefendLaneRules.CreepLane(distances, creepLaneIds, ancientDist) }
+		end
+	end
+	creepLaneCache = { at = now, list = list }
+	return list
+end
+-- The lane's furthest building and its tier. Read again when the cached one (1s) has died, so a lane whose building
+-- just fell doesn't read tier 0 (game 068 t=2457: bottom read tier 0 and lost the lane pick to mid).
+local function LaneBuildingEntry(lane)
+	local entry = Defend.GetFurthestBuildingOnLane(lane)
+	local building = entry ~= nil and entry[1] or nil
+	if building ~= nil and not building:IsAlive() then
+		entry = Defend.GetFurthestBuildingOnLaneHelper(lane)
+		building = entry[1]
+	end
+	if building == nil or not building:IsAlive() then
+		return nil, 0
+	end
+	return building, entry[3] or 0
+end
+-- HP ratio and tier of the lane's furthest building.
+local function LaneBuilding(lane)
+	local building, tier = LaneBuildingEntry(lane)
+	if building == nil then
+		return 1, 0
+	end
+	return building:GetHealth() / math.max(1, building:GetMaxHealth()), tier
+end
+-- Enemy creeps that threaten a lane: its own creeps within reach of its furthest building
+-- (DefendLaneRules.ThreatRadius: 1600 for a T1 / T2, 2600 from a T3 on), and the base creeps once the lane is down to
+-- the T4s. Each creep counts for one lane. Returns the count, the building's location (else the enemy lane front)
+-- and the tier. Once a second per lane for the team.
+local laneThreatCache = {}
+local function LaneThreat(lane)
+	local now = DotaTime()
+	local cached = laneThreatCache[lane]
+	if cached ~= nil and now - cached.at < 1 then
+		return cached.creeps, cached.anchor, cached.tier
+	end
+	local building, tier = LaneBuildingEntry(lane)
+	local anchor = building ~= nil and building:GetLocation() or nil
+	local creeps = 0
+	for _, entry in ipairs(EnemyCreepLanes()) do
+		if Fu.IsValid(entry.unit) then
+			local anchorDist = anchor ~= nil and GetUnitToLocationDistance(entry.unit, anchor) or nil
+			if DefendLaneRules.CountsForLane(entry.lane, lane, tier, anchorDist) then
+				creeps = creeps + 1
+			end
+		end
+	end
+	anchor = anchor or GetLaneFrontLocation(GetOpposingTeam(), lane, 0)
+	laneThreatCache[lane] = { at = now, creeps = creeps, anchor = anchor, tier = tier }
+	return creeps, anchor, tier
+end
+-- #53 (maintainer 2026-11-22): the base defence splits over the threatened rims. A rim is a lane whose T2 is down
+-- (its T3, or where the T3 stood) or "base" (the T4s / the Ancient, its creeps within BASE_RADIUS). Each threatened rim
+-- (DefendLaneRules.RimThreat: a wave at it, a wave walking up with our creeps pushed, enemy heroes there, the Ancient
+-- losing HP, the next wave due soon with our creeps losing it: "early", game 069) gets the nearest bots it needs (RimNeed); a bot keeps its rim until that wave is gone, and a bot no rim
+-- needs leaves the defence (AssignRims). Once a second for the team. Log: [OHA-DEFEND] base-assign on change.
+-- A lane down to its T3 or deeper (T2 down): part of the base / high-ground defence.
+local function IsBaseLane(lane)
+	local _, tier = LaneBuildingEntry(lane)
+	return tier >= 3
+end
+local function UnitLaneOf(unit, ancient)
+	local location = unit:GetLocation()
+	local distances = {}
+	for _, lane in ipairs(creepLaneIds) do
+		local along = GetAmountAlongLane(lane, location)
+		distances[lane] = along ~= nil and along.distance or nil
+	end
+	return DefendLaneRules.CreepLane(
+		distances,
+		creepLaneIds,
+		ancient ~= nil and GetUnitToUnitDistance(unit, ancient) or nil
+	)
+end
+local function IsBigCreep(unit)
+	local name = unit:GetUnitName() or ""
+	return stringIncludes(name, "siege") or stringIncludes(name, "upgraded_mega")
+end
+-- Enemy creeps this close to their lane front are its wave (map-scale choice: one lane wave's spread).
+local WAVE_FRONT_RADIUS = 1200
+local baseAssign = { at = -999, active = false, assign = {}, rims = {}, logKey = {} }
+local function BaseAssignment()
+	local now = DotaTime()
+	if now - baseAssign.at < 1 then
+		return baseAssign
+	end
+	local previous = baseAssign.keep or {}
+	local logKey = baseAssign.logKey or {}
+	local lastThreat = baseAssign.lastThreat or {}
+	baseAssign =
+		{ at = now, active = false, assign = {}, keep = {}, rims = {}, logKey = logKey, lastThreat = lastThreat }
+	local ancient = GetAncient(ourTeam)
+	if ancient == nil or not ancient:IsAlive() then
+		return baseAssign
+	end
+	local ancientLoc = ancient:GetLocation()
+	local rimList = {}
+	for _, lane in ipairs(creepLaneIds) do
+		if IsBaseLane(lane) then
+			local rimLoc = getHighGroundWaitPoint(ourTeam, lane)
+			local front = GetLaneFrontLocation(GetOpposingTeam(), lane, 0)
+			local tpLoc = Fu.GetNearbyLocationToTp(rimLoc)
+			rimList[#rimList + 1] = {
+				lane = lane,
+				loc = rimLoc,
+				enemyAtRim = 0,
+				enemyNear = 0,
+				alliedNear = 0,
+				front = front,
+				waveCreeps = 0,
+				waveAllied = 0,
+				waveEta = front ~= nil and DefendLaneRules.WaveEta(Fu.GetLocationToLocationDistance(front, rimLoc))
+					or nil,
+				tpWalk = tpLoc ~= nil and Fu.GetLocationToLocationDistance(tpLoc, rimLoc) or nil,
+			}
+		end
+	end
+	if #rimList == 0 then
+		return baseAssign
+	end
+	baseAssign.active = true
+	local baseRim = {
+		lane = "base",
+		loc = Fu.AdjustLocationWithOffsetTowardsFountain(ancientLoc, 300),
+		enemyAtRim = 0,
+		enemyNear = 0,
+		alliedNear = 0,
+	}
+	rimList[#rimList + 1] = baseRim
+	local byLane = {}
+	for _, rim in ipairs(rimList) do
+		byLane[rim.lane] = rim
+	end
+	for _, entry in ipairs(EnemyCreepLanes()) do
+		local rim = byLane[entry.lane]
+		if rim ~= nil and Fu.IsValid(entry.unit) then
+			local d = rim == baseRim and 0 or GetUnitToLocationDistance(entry.unit, rim.loc)
+			if d <= DefendLaneRules.HIGH_GROUND_RADIUS then
+				rim.enemyNear = rim.enemyNear + 1
+				if d <= DefendLaneRules.AT_RIM then
+					rim.enemyAtRim = rim.enemyAtRim + 1
+				end
+				if IsBigCreep(entry.unit) then
+					rim.siege = true
+				end
+			end
+			-- The next wave: this lane's enemy creeps at its enemy lane front (game 069 early start).
+			if rim.front ~= nil and GetUnitToLocationDistance(entry.unit, rim.front) <= WAVE_FRONT_RADIUS then
+				rim.waveCreeps = rim.waveCreeps + 1
+			end
+		end
+	end
+	-- Our lane creeps between the wave and the rim (within its wave radius, on its lane), and those meeting the next
+	-- wave at the enemy lane front.
+	for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_CREEPS) or {}) do
+		if Fu.IsValid(unit) then
+			for _, rim in ipairs(rimList) do
+				if rim ~= baseRim then
+					local nearRim = GetUnitToLocationDistance(unit, rim.loc) <= DefendLaneRules.HIGH_GROUND_RADIUS
+					local atFront = rim.front ~= nil and GetUnitToLocationDistance(unit, rim.front) <= WAVE_FRONT_RADIUS
+					if (nearRim or atFront) and UnitLaneOf(unit, ancient) == rim.lane then
+						if nearRim then
+							rim.alliedNear = rim.alliedNear + 1
+						end
+						if atFront then
+							rim.waveAllied = rim.waveAllied + 1
+						end
+					end
+				end
+			end
+		end
+	end
+	local ancientHit = AncientBeingHit(ancient)
+	for _, rim in ipairs(rimList) do
+		local radius = rim == baseRim and DefendLaneRules.BASE_RADIUS or 1600
+		rim.heroes = #Fu.GetLastSeenEnemiesNearLoc(rim == baseRim and ancientLoc or rim.loc, radius)
+		rim.why = DefendLaneRules.RimThreat({
+			heroes = rim.heroes,
+			enemyAtRim = rim.enemyAtRim,
+			enemyNear = rim.enemyNear,
+			alliedNear = rim.alliedNear,
+			ancientHit = rim == baseRim and ancientHit,
+			waveEta = rim.waveEta,
+			waveCreeps = rim.waveCreeps,
+			waveAllied = rim.waveAllied,
+		})
+		rim.need = DefendLaneRules.RimNeed(rim.why, rim.why == "early" and rim.waveCreeps or rim.enemyNear, rim.siege)
+		if rim.why ~= nil then
+			lastThreat[rim.lane] = now
+		end
+		rim.alive = DefendLaneRules.RimAlive(rim.why, rim.enemyNear, now - (lastThreat[rim.lane] or -999))
+	end
+	local bots, names = {}, {}
+	for i = 1, #GetTeamPlayers(ourTeam) do
+		local member = GetTeamMember(i)
+		if
+			member ~= nil
+			and member:IsAlive()
+			and not member:IsIllusion()
+			and IsPlayerBot(member:GetPlayerID())
+			and Fu.GetHP(member) >= 0.3
+		then
+			local dist = {}
+			for _, rim in ipairs(rimList) do
+				dist[rim.lane] = GetUnitToLocationDistance(member, rim.loc)
+			end
+			bots[#bots + 1] = { id = member:GetPlayerID(), dist = dist }
+			names[member:GetPlayerID()] = string.gsub(member:GetUnitName(), "npc_dota_hero_", "")
+		end
+	end
+	local assign, count, keep = DefendLaneRules.AssignRims(rimList, bots, previous)
+	baseAssign.assign, baseAssign.rims, baseAssign.count, baseAssign.keep = assign, byLane, count, keep
+	for _, rim in ipairs(rimList) do
+		local who = {}
+		for id, lane in pairs(assign) do
+			if lane == rim.lane then
+				who[#who + 1] = names[id] or tostring(id)
+			end
+		end
+		table.sort(who)
+		local assigned = #who > 0 and table.concat(who, ",") or "-"
+		local key = string.format("%s|%d|%s", tostring(rim.why), rim.need, assigned)
+		if key ~= logKey[rim.lane] then
+			logKey[rim.lane] = key
+			pcall(
+				print,
+				string.format(
+					"[OHA-DEFEND] t=%.0f %s base-assign lane=%s rim=%.0f,%.0f wave=%d atRim=%d ours=%d heroes=%d next=%d nextOurs=%d nextEta=%.0f need=%d assigned=%s why=%s",
+					now,
+					ourTeam == TEAM_DIRE and "dire" or "radiant",
+					tostring(laneNames[rim.lane] or rim.lane),
+					rim.loc.x,
+					rim.loc.y,
+					rim.enemyNear,
+					rim.enemyAtRim,
+					rim.alliedNear,
+					rim.heroes,
+					rim.waveCreeps or 0,
+					rim.waveAllied or 0,
+					rim.waveEta or -1,
+					rim.need,
+					assigned,
+					tostring(rim.why or "none")
+				)
+			)
+		end
+	end
+	return baseAssign
+end
+-- The defend mode a bot uses for the "base" rim: its current defend lane when that lane is a base lane, else the
+-- first base lane, so the mode doesn't flip between equal lanes.
+local function BaseModeLane(bot)
+	local current = ({
+		[BotMode.DefendTowerTop] = Lane.Top,
+		[BotMode.DefendTowerMid] = Lane.Mid,
+		[BotMode.DefendTowerBot] = Lane.Bot,
+	})[bot:GetActiveMode()]
+	if current ~= nil and IsBaseLane(current) then
+		return current
+	end
+	for _, lane in ipairs(creepLaneIds) do
+		if IsBaseLane(lane) then
+			return lane
+		end
+	end
+	return Lane.Mid
 end
 function Defend.ShouldDefend(bot, building, radius)
 	if not isAliveBuilding(building) then
@@ -968,7 +1249,7 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	-- Three allies pushing together keep pushing, unless our own base is being hit.
 	-- A creep wave at the T4s used to lose the Ancient while the group pushed.
 	local baseThreat = ReadBaseThreat(gameState)
-	local baseHit = baseThreat.ancHP < 0.95 or baseThreat.creeps >= 2 or enemiesAtAncient >= 1
+	local baseHit = baseThreat.hit or baseThreat.creeps >= 2 or enemiesAtAncient >= 1
 	if isGroupPushing and enemiesOnHG < 2 and not baseHit then
 		return DefNone(bot, "push-group")
 	end
@@ -1080,7 +1361,7 @@ function Defend.GetDefendDesireHelper(bot, lane)
 					bot.laneToDefend = lane
 				end
 			end
-		elseif enemiesAtAncient == 0 and (ancientHP < 0.95 or ancientCreeps >= 2) then
+		elseif enemiesAtAncient == 0 and (baseThreat.hit or ancientCreeps >= 2) then
 			-- defendersAtAncient counts every ally within 2500 of the Ancient, this bot included. A hero who
 			-- just respawned is ~1800 away, so it counted itself as the defender already there
 			-- and walked out to farm while creeps hit the base.
@@ -1265,7 +1546,9 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	if tier >= 3 and not baseFloor.active then
 		local hgLoc = building:GetLocation()
 		local hgRadius = Fu.Utils.HG_WAVE_RADIUS or 2600
-		local hgCreeps = Fu.Utils.CountHighGroundWave(team, hgLoc, hgRadius)
+		-- #53: this lane's creeps only (LaneThreat: each creep counts for the lane whose path it is nearest; the base
+		-- creeps for a lane down to the T4s). Utils.CountHighGroundWave split them by the nearest T3 still standing.
+		local hgCreeps = LaneThreat(lane)
 		if hgCreeps >= 2 and #Fu.GetLastSeenEnemiesNearLoc(hgLoc, hgRadius) == 0 then
 			local myDist = GetUnitToLocationDistance(bot, hgLoc)
 			local others = #Fu.Utils.GetAllyIdsInTpToLocation(hgLoc, 2500)
@@ -1568,9 +1851,13 @@ local function LogBaseDefense(bot, defendLane, desire, why, gameState)
 	bot._defendLaneDesire[defendLane] = desire
 	bot._defendLaneWhy[defendLane] = why
 	local now = DotaTime()
-	if now < (bot._defendLogAt or -999) or Fu.IsMeepoClone(bot) then
+	-- Checked at most once a second (#52): the line prints at most every 5s, but until it printed the threat and
+	-- high-ground wave reads below (every enemy creep, once per high-ground building) ran on every defend desire of
+	-- all three lanes. The lane desires above are still stored on every call.
+	if now < (bot._defendLogAt or -999) or now < (bot._defendLogCheckAt or -999) or Fu.IsMeepoClone(bot) then
 		return
 	end
+	bot._defendLogCheckAt = now + 1
 	local threat = ReadBaseThreat(gameState)
 	local hgBuilding, hgCreeps = Fu.Utils.HighGroundCreepWaveNear(bot, 30000)
 	if not threat.exposed and hgBuilding == nil then
@@ -1607,6 +1894,11 @@ local function LogBaseDefense(bot, defendLane, desire, why, gameState)
 		)
 	)
 end
+local defendModeLane = {
+	[BotMode.DefendTowerTop] = Lane.Top,
+	[BotMode.DefendTowerMid] = Lane.Mid,
+	[BotMode.DefendTowerBot] = Lane.Bot,
+}
 function Defend.GetDefendDesire(bot, lane)
 	if
 		bot:IsInvulnerable()
@@ -1697,9 +1989,25 @@ function Defend.GetDefendDesire(bot, lane)
 		if FarmDefend.ClaimDecisionChat("defend_commit") then
 			local chatKey = lane == Lane.Top and "say_defend_top"
 				or (lane == Lane.Mid and "say_defend_mid" or "say_defend_bot")
-			if gameState.enemiesAtAncient >= 1 or gameState.enemiesOnHG >= 1 then
+			-- #53, game 068 41:40: "Defend mid!" while bottom pushed; both lanes were down to the T4s. A lane whose
+			-- furthest building is a T4 or the Ancient is a base defence.
+			local _, chatTier = LaneBuilding(lane)
+			if gameState.enemiesAtAncient >= 1 or gameState.enemiesOnHG >= 1 or chatTier >= 4 then
 				chatKey = "say_base_defend"
 			end
+			pcall(
+				print,
+				string.format(
+					"[OHA-DEFEND] t=%.0f %s defend-chat key=%s lane=%s tier=%d heroesAtAnc=%d hg=%d",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					chatKey,
+					tostring(laneNames[lane]),
+					chatTier,
+					gameState.enemiesAtAncient or 0,
+					gameState.enemiesOnHG or 0
+				)
+			)
 			local chatLines = Localization.Get(chatKey)
 			if type(chatLines) == "table" and #chatLines > 0 then
 				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
@@ -1713,23 +2021,507 @@ function Defend.GetDefendDesire(bot, lane)
 	LogBaseDefense(bot, lane, desire, why, gameState)
 	return desire
 end
+function Defend.OnEnd() end
+-- #53, game 066 81:41-81:55: Elder Titan defended the bottom high ground (11-21 creeps) until the base-lane gate let
+-- go for a moment; mid (8 creeps) then read 0.85 against bottom's 0.37, the engine switched him to mid, and he TP'd
+-- to the far end of the map. A defender keeps the lane whose defend mode it is in (and for 10s after it leaves that
+-- mode) unless another lane is clearly worse (DefendLaneRules.KeepLane); that lane is capped just below the held one.
+-- Compares the final desires (after the group cap and the skirmish cut), so it wraps Defend.GetDefendDesire.
+local function HoldDefendLane(bot, lane, desire, reason)
+	local now = DotaTime()
+	local activeLane = defendModeLane[bot:GetActiveMode()]
+	if activeLane ~= nil then
+		bot._defendHeldLane, bot._defendHeldAt = activeLane, now
+	elseif bot._defendHeldLane ~= nil and now - (bot._defendHeldAt or -999) > DefendLaneRules.HOLD_SECONDS then
+		bot._defendHeldLane = nil
+	end
+	bot._defendLaneRead = bot._defendLaneRead or {}
+	bot._defendLaneRead[lane] = { desire = desire, at = now }
+	local heldLane = bot._defendHeldLane
+	if heldLane == nil or heldLane == lane or desire <= 0 then
+		return desire
+	end
+	local heldRead = bot._defendLaneRead[heldLane]
+	if heldRead == nil or now - heldRead.at > 1 or desire < heldRead.desire then
+		return desire
+	end
+	local heldCreeps, heldFront, heldTier = LaneThreat(heldLane)
+	local otherCreeps, otherFront, otherTier = LaneThreat(lane)
+	local heldHp = LaneBuilding(heldLane)
+	local otherHp = LaneBuilding(lane)
+	local held = {
+		desire = heldRead.desire,
+		creeps = heldCreeps,
+		heroes = #Fu.GetLastSeenEnemiesNearLoc(heldFront, DefendLaneRules.ThreatRadius(heldTier)),
+		hp = heldHp,
+		tier = heldTier,
+	}
+	local other = {
+		desire = desire,
+		creeps = otherCreeps,
+		heroes = #Fu.GetLastSeenEnemiesNearLoc(otherFront, DefendLaneRules.ThreatRadius(otherTier)),
+		hp = otherHp,
+		tier = otherTier,
+		why = reason,
+	}
+	local keep, why = DefendLaneRules.KeepLane(held, other, now - (bot._defendHeldAt or -999))
+	local decision = why
+	if (decision ~= bot._lanePickLast or now >= (bot._lanePickLogAt or -999)) and why ~= "no-held" then
+		bot._lanePickLast = decision
+		bot._lanePickLogAt = now + 5
+		-- Numbers in chose/other order (game 069: they were held/other, so after a switch they read swapped).
+		local chose, rest, choseLane, restLane, choseFront = held, other, heldLane, lane, heldFront
+		if not keep then
+			chose, rest, choseLane, restLane, choseFront = other, held, lane, heldLane, otherFront
+		end
+		pcall(
+			print,
+			string.format(
+				"[OHA-DEFEND] t=%.0f %s lane-pick chose=%s other=%s held=%s myDist=%d threat=%d/%d heroes=%d/%d hp=%.2f/%.2f tier=%d/%d desire=%.2f/%.2f otherWhy=%s why=%s",
+				now,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[choseLane]),
+				tostring(laneNames[restLane]),
+				tostring(laneNames[heldLane]),
+				math.floor(GetUnitToLocationDistance(bot, choseFront)),
+				chose.creeps,
+				rest.creeps,
+				chose.heroes,
+				rest.heroes,
+				chose.hp,
+				rest.hp,
+				chose.tier,
+				rest.tier,
+				chose.desire,
+				rest.desire,
+				tostring(reason),
+				decision
+			)
+		)
+	end
+	if keep then
+		return math.max(0, heldRead.desire - 0.05)
+	end
+	return desire
+end
+-- #53: in a base defence (BaseAssignment) a bot defends only the rim it was given: that lane's defend mode reads at
+-- least 0.7 (0.85 for 6+ creeps or a siege / mega creep) while its wave is alive, every other base lane 0. A bot no rim
+-- needs reads 0 on the base lanes and leaves the defence for farm or push. Urgent reasons (group-up, heroes at the
+-- Ancient, the last stand, a human ping) and lanes with a standing T3 or a T1 / T2 are left alone. Enemy heroes at a
+-- rim pull every bot there, at the desire the defend rules gave (outnumbered rules as before).
+local BASE_ASSIGN_KEEP = { ["group-up"] = true, ["ancient-heroes"] = true, ["ancient-last-stand"] = true, ping = true }
+-- Cuts the floor never lifts (they may still be zeroed for another lane): outnumbered by enemy heroes, and a siege
+-- group-up on another lane.
+local BASE_ASSIGN_NO_RAISE = { ["hg-outnumbered"] = true, outnumbered = true, ["group-up-other-lane"] = true }
+-- [OHA-DEFEND] rim-early: this bot's ETA to its early rim against the wave's (walk, or TP when ready and faster).
+local function EarlyStart(bot, rimLane, rim)
+	local tp = Fu.Utils.GetItemFromFullInventory(bot, "item_tpscroll")
+	local myEta, via = DefendLaneRules.DefenderEta(
+		GetUnitToLocationDistance(bot, rim.loc),
+		bot:GetCurrentMovementSpeed(),
+		Fu.CanCastAbility(tp),
+		rim.tpWalk
+	)
+	local start = DefendLaneRules.StartEarly(rim.waveEta, myEta)
+	local key = tostring(rimLane) .. "|" .. tostring(start) .. "|" .. via
+	if key ~= bot._rimEarlyKey or DotaTime() >= (bot._rimEarlyLogAt or -999) then
+		bot._rimEarlyKey = key
+		bot._rimEarlyLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[OHA-DEFEND] t=%.0f %s rim-early lane=%s waveEta=%.0f myEta=%.0f via=%s start=%s next=%d nextOurs=%d",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[rimLane] or rimLane),
+				rim.waveEta or -1,
+				myEta,
+				via,
+				tostring(start),
+				rim.waveCreeps or 0,
+				rim.waveAllied or 0
+			)
+		)
+	end
+	return start
+end
+local function BaseAssignDesire(bot, lane, desire, why)
+	if BASE_ASSIGN_KEEP[why or ""] or bot:IsIllusion() or not bot:IsHero() or not IsBaseLane(lane) then
+		return desire
+	end
+	local assignment = BaseAssignment()
+	if not assignment.active then
+		return desire
+	end
+	local rimLane = assignment.assign[bot:GetPlayerID()]
+	local result, reason = desire, why
+	if rimLane == nil then
+		result, reason = 0, "base-not-needed"
+	elseif (rimLane == "base" and BaseModeLane(bot) or rimLane) ~= lane then
+		result, reason = 0, "base-assigned-other"
+	else
+		local rim = assignment.rims[rimLane]
+		-- An early rim (the next wave still on its way): raise only once this bot would reach the rim with or just
+		-- after the wave (DefendLaneRules.StartEarly), not as soon as the wave is seen.
+		local start = rim ~= nil and (rim.why ~= "early" or EarlyStart(bot, rimLane, rim))
+		if start and rim.alive and rim.why ~= "heroes" and not BASE_ASSIGN_NO_RAISE[why or ""] then
+			local floor = (rim.enemyNear >= 6 or rim.siege) and 0.85 or 0.7
+			if floor > desire then
+				result, reason = floor, "base-assign"
+			end
+		end
+	end
+	bot._defendWhy = reason
+	-- Throttled per lane: the three lanes' reads of one think give different reasons.
+	local key = tostring(rimLane) .. "|" .. tostring(reason)
+	bot._baseAssignLog = bot._baseAssignLog or {}
+	local last = bot._baseAssignLog[lane] or {}
+	if result ~= desire and (key ~= last.key or DotaTime() >= (last.at or -999)) then
+		bot._baseAssignLog[lane] = { key = key, at = DotaTime() + 5 }
+		pcall(
+			print,
+			string.format(
+				"[OHA-DEFEND] t=%.0f %s base-desire lane=%s rim=%s desire=%.2f->%.2f why=%s was=%s",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[lane]),
+				tostring(laneNames[rimLane] or rimLane or "none"),
+				desire,
+				result,
+				reason,
+				tostring(why)
+			)
+		)
+	end
+	return result
+end
+-- #53, game 069: 5 of 10 T1 / T2 that fell had no lane-* line for that lane in the 30s before. Diagnostic: a T1 / T2
+-- losing HP with no ally within 1600 prints why nobody came: each living bot's mode and its final defend desire for
+-- that lane with the reason (dead, roshan, defend-other, desire below the mode, cut by a defend rule).
+-- [OHA-DEFEND] tower-undefended lane= tier= hp= creeps= heroes= why=<class:count,...> bots=<hero:mode/desire(why),...>
+-- (once a second for the team, each lane at most every 10s).
+local laneReads = {}
+local undefended = { checkAt = -999, logAt = {}, hp = {} }
+local function NoteLaneRead(bot, lane, desire, why)
+	local id = bot:GetPlayerID()
+	laneReads[id] = laneReads[id] or {}
+	laneReads[id][lane] = { desire = desire, why = why, at = DotaTime() }
+end
+local function CheckUndefended()
+	local now = DotaTime()
+	if now < undefended.checkAt then
+		return
+	end
+	undefended.checkAt = now + 1
+	for _, lane in ipairs(creepLaneIds) do
+		local building, tier = LaneBuildingEntry(lane)
+		if building ~= nil and tier <= 2 then
+			local hp = building:GetHealth() / math.max(1, building:GetMaxHealth())
+			local last = undefended.hp[lane]
+			local losing = last ~= nil and last.unit == building and hp < last.hp
+			undefended.hp[lane] = { unit = building, hp = hp }
+			local location = building:GetLocation()
+			if losing and now >= (undefended.logAt[lane] or -999) and #Fu.GetAlliesNearLoc(location, 1600) == 0 then
+				undefended.logAt[lane] = now + 10
+				local classes, order, bots = {}, {}, {}
+				for i = 1, #GetTeamPlayers(ourTeam) do
+					local member = GetTeamMember(i)
+					if member ~= nil then
+						local name = string.gsub(member:GetUnitName(), "npc_dota_hero_", "")
+						local class, detail
+						if not member:IsAlive() then
+							class, detail = "dead", name .. ":dead"
+						else
+							local mode = member:GetActiveMode()
+							local read = (laneReads[member:GetPlayerID()] or {})[lane]
+							local desire = read ~= nil and now - read.at <= 2 and read.desire or nil
+							local readWhy = read ~= nil and tostring(read.why) or "?"
+							if mode == BotMode.Roshan then
+								class = "roshan"
+							elseif defendModeLane[mode] ~= nil then
+								class = "defend-other"
+							elseif desire ~= nil and desire > 0 then
+								class = "below-" .. ModeName(mode)
+							elseif desire ~= nil then
+								class = "cut-" .. readWhy
+							else
+								class = "no-read"
+							end
+							detail = string.format(
+								"%s:%s/%.2f(%s)",
+								name,
+								ModeName(mode),
+								desire or -1,
+								desire ~= nil and readWhy or "-"
+							)
+						end
+						if classes[class] == nil then
+							classes[class] = 0
+							order[#order + 1] = class
+						end
+						classes[class] = classes[class] + 1
+						bots[#bots + 1] = detail
+					end
+				end
+				local why = {}
+				for _, class in ipairs(order) do
+					why[#why + 1] = class .. ":" .. classes[class]
+				end
+				pcall(
+					print,
+					string.format(
+						"[OHA-DEFEND] t=%.0f %s tower-undefended lane=%s tier=%d hp=%.2f creeps=%d heroes=%d why=%s bots=%s",
+						now,
+						ourTeam == TEAM_DIRE and "dire" or "radiant",
+						tostring(laneNames[lane]),
+						tier,
+						hp,
+						(LaneThreat(lane)),
+						#Fu.GetLastSeenEnemiesNearLoc(location, 1600),
+						table.concat(why, ","),
+						table.concat(bots, ",")
+					)
+				)
+			end
+		end
+	end
+end
+do
+	local getDefendDesire = Defend.GetDefendDesire
+	Defend.GetDefendDesire = function(bot, lane)
+		local desire = getDefendDesire(bot, lane)
+		if bot == nil or not bot:IsAlive() then
+			return desire
+		end
+		desire = BaseAssignDesire(bot, lane, desire, bot._defendWhy)
+		desire = HoldDefendLane(bot, lane, desire, bot._defendWhy)
+		NoteLaneRead(bot, lane, desire, bot._defendWhy)
+		CheckUndefended()
+		return desire
+	end
+end
+-- #53: the defend modes' Think (mode_defend_tower_*_generic.lua). It replaces Valve's defend Think, which walked the bot
+-- to the lane's furthest building (game 068: the T4s, then the Ancient; 0 hg-step lines in games 064-068 because this
+-- had no caller). Every path issues one order through DefendStep, which logs
+-- [OHA-DEFEND] hg-step step= lane= why= dist= ancDist= (each step at most every 5s). Teleports stay with the TP rule
+-- (ability_item_usage_generic.lua: DefendLaneRules.DefendTpBlock and the bot._defendTpAt stamp); this only holds it.
+-- How far out from the rim a bot walks to meet a wave (map-scale choice: the ramp below the T3, not the T2 area).
+local STEP_DOWN = 1600
+local function StableOffset(bot)
+	local now = DotaTime()
+	if bot._defendOffset == nil or now >= (bot._defendOffsetUntil or -999) then
+		bot._defendOffset = Fu.RandomForwardVector(150)
+		bot._defendOffsetUntil = now + 4
+	end
+	return bot._defendOffset
+end
+local function DefendStep(bot, lane, step, why, order, target, info)
+	local now = DotaTime()
+	local targetLoc = order == "attack" and target:GetLocation() or target
+	-- Throttled per step name, so two steps that alternate print at most twice per 5s.
+	bot._defendStepLogAt = bot._defendStepLogAt or {}
+	if now >= (bot._defendStepLogAt[step] or -999) then
+		bot._defendStepLogAt[step] = now + 5
+		local ancient = GetAncient(ourTeam)
+		pcall(
+			print,
+			string.format(
+				"[OHA-DEFEND] t=%.0f %s hg-step step=%s lane=%s why=%s dist=%d ancDist=%d spot=%s toSpot=%d tier=%d wave=%d heroes=%d allies=%d order=%s target=%s",
+				now,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				step,
+				tostring(laneNames[lane]),
+				tostring(why),
+				math.floor(GetUnitToLocationDistance(bot, targetLoc)),
+				ancient ~= nil and math.floor(GetUnitToUnitDistance(bot, ancient)) or -1,
+				tostring(laneNames[info.spotLane] or info.spotLane),
+				info.spotLoc ~= nil and math.floor(GetUnitToLocationDistance(bot, info.spotLoc)) or -1,
+				info.tier or 0,
+				info.wave or 0,
+				info.heroes or 0,
+				info.allies or 0,
+				order,
+				order == "attack" and (string.gsub(target:GetUnitName() or "?", "^npc_dota_", "")) or "-"
+			)
+		)
+	end
+	if order == "attack" then
+		bot:Action_AttackUnit(target, true)
+	elseif order == "move" then
+		bot:Action_MoveToLocation(target)
+	else
+		bot:Action_AttackMove(target)
+	end
+end
+local function CreepScore(creep)
+	local score = creep:GetAttackDamage() * creep:GetAttackSpeed() * (1 - Fu.GetHP(creep))
+	local name = creep:GetUnitName() or ""
+	if stringIncludes(name, "siege") then
+		score = score + 10000
+	elseif stringIncludes(name, "shadow_shaman_ward") then
+		score = score + 9000
+	elseif stringIncludes(name, "warlock_golem") then
+		score = score + 8000
+	end
+	return score
+end
+-- A lone TP into 3+ enemy heroes waits until 2 allies are there or teleporting there (game 037: Kez, Meepo, Night Stalker
+-- and Hoodwink TP'd into the bottom siege one after another). Holds the TP rule through bot._noTpUntil.
+local function DefendTpHold(bot, lane, spot)
+	if spot == nil or GetUnitToLocationDistance(bot, spot) <= 4000 then
+		return
+	end
+	local enemiesThere = #Fu.GetLastSeenEnemiesNearLoc(spot, 2000)
+	if enemiesThere < 3 then
+		return
+	end
+	local alliesThere = #Fu.Utils.GetAllyIdsInTpToLocation(spot, 2500)
+	for _, ally in ipairs(Fu.GetAlliesNearLoc(spot, 2000)) do
+		if ally ~= bot then
+			alliesThere = alliesThere + 1
+		end
+	end
+	if alliesThere >= 2 then
+		return
+	end
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, DotaTime() + 1)
+	if DotaTime() >= (bot._defendTpHoldLogAt or -999) then
+		bot._defendTpHoldLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[OHA-TP] t=%.0f %s defend-tp hold lane=%s enemies=%d allies=%d to=%.0f,%.0f",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[lane]),
+				enemiesThere,
+				alliesThere,
+				spot.x,
+				spot.y
+			)
+		)
+	end
+end
+-- Our heroes who can take part at a spot: this bot, and the allies within radius of it.
+local function AlliesWithin(bot, location, radius)
+	local count = 1
+	for _, ally in ipairs(Fu.GetAlliesNearLoc(location, radius)) do
+		if ally ~= bot and not ally:IsIllusion() then
+			count = count + 1
+		end
+	end
+	return count
+end
+local function NearestAttackableHero(location, radius, bot)
+	local best, bestDist = nil, math.huge
+	for _, enemy in ipairs(Fu.GetEnemiesNearLoc(location, radius)) do
+		if Fu.IsValidHero(enemy) and Fu.CanBeAttacked(enemy) then
+			local d = GetUnitToUnitDistance(bot, enemy)
+			if d < bestDist then
+				best, bestDist = enemy, d
+			end
+		end
+	end
+	return best, bestDist
+end
+-- T1 / T2 still standing: hold the building, take on heroes there when we can, clear its creeps.
+local function LaneDefendThink(bot, lane, building, info)
+	local defendLocation = building:GetLocation()
+	local offset = StableOffset(bot)
+	local enemies = Fu.GetEnemiesNearLoc(defendLocation, defendRadius)
+	local allies = Fu.GetAlliesNearLoc(defendLocation, defendRadius)
+	info.heroes, info.allies, info.spotLoc = #enemies, #allies, defendLocation
+	if #enemies >= 1 then
+		local ancient = GetAncient(ourTeam)
+		local ancientLow = ancient ~= nil and ancient:IsAlive() and Fu.GetHP(ancient) < 0.5
+		local now = DotaTime()
+		local even = #allies >= #enemies or ancientLow or Fu.WeAreStronger(bot, 2500)
+		if even then
+			bot._laneEvenSince = bot._laneEvenSince or now
+		else
+			bot._laneEvenSince = nil
+		end
+		local stayBack = DefendLaneRules.LaneStayBack(now, even, bot._laneBackUntil, bot._laneEvenSince)
+		if not stayBack then
+			local attackRange = bot:GetAttackRange()
+			local engageRange = attackRange < 900 and 900 or math.min(attackRange, defendRadius)
+			local target, targetDist = NearestAttackableHero(defendLocation, defendRadius, bot)
+			if target ~= nil and targetDist <= engageRange then
+				return DefendStep(bot, lane, "lane-fight", "heroes-at-building", "attack", target, info)
+			end
+			return DefendStep(
+				bot,
+				lane,
+				"lane-defend",
+				"heroes-at-building",
+				"move",
+				vectorAdd(defendLocation, offset),
+				info
+			)
+		end
+		-- Outnumbered: back, and hold there (DefendLaneRules.LaneStayBack) instead of flipping back in each think.
+		if not even then
+			bot._laneBackUntil = now + DefendLaneRules.LANE_BACK_SECONDS
+		end
+		local fallback = Fu.AdjustLocationWithOffsetTowardsFountain(defendLocation, 400)
+		return DefendStep(
+			bot,
+			lane,
+			"lane-back",
+			even and "hold-back" or "outnumbered",
+			"move",
+			vectorAdd(fallback, offset),
+			info
+		)
+	end
+	bot._laneEvenSince = nil
+	local best, bestScore, nearest, nearestDist = nil, -1, nil, math.huge
+	for _, entry in ipairs(EnemyCreepLanes()) do
+		local creep = entry.unit
+		if
+			Fu.IsValid(creep)
+			and GetUnitToLocationDistance(creep, defendLocation) <= DefendLaneRules.TOWER_RADIUS
+			and Fu.CanBeAttacked(creep)
+		then
+			info.wave = info.wave + 1
+			local d = GetUnitToUnitDistance(bot, creep)
+			if d <= 900 then
+				local score = CreepScore(creep)
+				if score > bestScore then
+					best, bestScore = creep, score
+				end
+			end
+			if d < nearestDist then
+				nearest, nearestDist = creep, d
+			end
+		end
+	end
+	if best ~= nil then
+		return DefendStep(bot, lane, "lane-creep", "creeps-near", "attack", best, info)
+	end
+	if nearest ~= nil then
+		return DefendStep(bot, lane, "lane-wave", "creeps-at-building", "attack", nearest, info)
+	end
+	if GetUnitToLocationDistance(bot, defendLocation) > 500 then
+		return DefendStep(bot, lane, "lane-defend", "walk", "move", vectorAdd(defendLocation, offset), info)
+	end
+	return DefendStep(bot, lane, "lane-defend", "hold", "attack-move", vectorAdd(defendLocation, offset), info)
+end
 function Defend.DefendThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
-	local defendState = getDefendState(bot)
-	if not defendState.defendLoc then
-		defendState.defendLoc = GetLaneFrontLocation(ourTeam, lane, 0)
-	end
-	local botLocation = bot:GetLocation()
-	local safeDefendLoc = Fu.AdjustLocationWithOffsetTowardsFountain(defendState.defendLoc, 300)
-	-- Group-up (GetDefendDesireHelper): go to the group point (by TP if far) and hold there; hit an
-	-- enemy hero that comes within reach.
-	if (bot._defendGroupUpUntil or -1) > DotaTime() and bot._defendGroupUpPoint ~= nil then
+	local now = DotaTime()
+	local offset = StableOffset(bot)
+	local ancient = GetAncient(ourTeam)
+	local ancientLoc = ancient ~= nil and ancient:GetLocation() or Fu.GetTeamFountain()
+	local homeSpot = Fu.AdjustLocationWithOffsetTowardsFountain(ancientLoc, 300)
+	local building, tier = LaneBuildingEntry(lane)
+	local info = { tier = tier, wave = 0, heroes = 0, spotLane = lane }
+	-- Group-up (GetDefendDesireHelper): go to the group point and hold there; hit an enemy hero that comes within reach.
+	if (bot._defendGroupUpUntil or -1) > now and bot._defendGroupUpPoint ~= nil then
 		local point = bot._defendGroupUpPoint
-		if not bot._roshDipActive and considerTPToTarget(bot, point, true) then
-			return
-		end
+		info.spotLoc = point
 		local reach = math.max(700, bot:GetAttackRange() + 150)
 		local closeEnemies = bot:GetNearbyHeroes(reach, true, BotMode.None) or {}
 		if
@@ -1737,362 +2529,139 @@ function Defend.DefendThink(bot, lane)
 			and Fu.CanBeAttacked(closeEnemies[1])
 			and GetUnitToLocationDistance(bot, point) <= 1200
 		then
-			bot:Action_AttackUnit(closeEnemies[1], true)
-			return
+			return DefendStep(bot, lane, "group-up", "enemy-in-reach", "attack", closeEnemies[1], info)
 		end
 		if GetUnitToLocationDistance(bot, point) > 300 then
-			bot:Action_MoveToLocation(vectorAdd(point, Fu.RandomForwardVector(150)))
+			return DefendStep(bot, lane, "group-up", "walk", "move", vectorAdd(point, offset), info)
 		end
-		return
+		return DefendStep(bot, lane, "group-up", "hold", "attack-move", vectorAdd(point, offset), info)
 	end
-	local isOwnLane = not Fu.IsInLaningPhase() or Fu.GetExpectedLane(bot) == lane
-	-- A lone TP into 3+ enemy heroes waits until 2 allies are there or teleporting there (game 037:
-	-- Kez, Meepo, Night Stalker and Hoodwink TP'd into the bottom siege one after another).
-	local tpHold = false
-	do
-		local enemiesThere = #Fu.GetLastSeenEnemiesNearLoc(defendState.defendLoc, 2000)
-		if enemiesThere >= 3 and GetUnitToLocationDistance(bot, defendState.defendLoc) > 4000 then
-			local alliesThere = #Fu.Utils.GetAllyIdsInTpToLocation(defendState.defendLoc, 2500)
-			for _, ally in ipairs(Fu.GetAlliesNearLoc(defendState.defendLoc, 2000)) do
-				if ally ~= bot then
-					alliesThere = alliesThere + 1
+	-- Enemy heroes at our Ancient (within 1400: the T4s and the Ancient, not the rims ~1800-2100 out, which are the
+	-- high-ground steps' call): every defender goes home.
+	local heroesAtAncient = ancient ~= nil and #Fu.GetLastSeenEnemiesNearLoc(ancientLoc, DefendLaneRules.BASE_RADIUS)
+		or 0
+	if heroesAtAncient > 0 then
+		info.heroes, info.spotLoc = heroesAtAncient, homeSpot
+		local target, targetDist = NearestAttackableHero(ancientLoc, DefendLaneRules.BASE_RADIUS + 400, bot)
+		if target ~= nil and targetDist <= 1600 then
+			return DefendStep(bot, lane, "ancient-heroes", "fight", "attack", target, info)
+		end
+		if GetUnitToLocationDistance(bot, homeSpot) > 600 then
+			return DefendStep(bot, lane, "ancient-heroes", "walk", "move", homeSpot, info)
+		end
+		return DefendStep(bot, lane, "ancient-heroes", "hold", "attack-move", vectorAdd(ancientLoc, offset), info)
+	end
+	-- Hit by heroes and outnumbered around the bot: step back toward the fountain.
+	if bot:WasRecentlyDamagedByAnyHero(2) then
+		local enemiesNearMe = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
+		if #enemiesNearMe > #Fu.GetAlliesNearLoc(bot:GetLocation(), 1200) and not Fu.WeAreStronger(bot, 1600) then
+			info.heroes = #enemiesNearMe
+			local away = Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 600)
+			return DefendStep(bot, lane, "back-off", "hit-outnumbered", "move", away, info)
+		end
+	end
+	local baseDefence = building == nil or tier >= 4
+	if not baseDefence and tier <= 2 then
+		DefendTpHold(bot, lane, building:GetLocation())
+		return LaneDefendThink(bot, lane, building, info)
+	end
+	-- High ground: the T3 is the furthest building, or it is down. Hold the rim and meet the wave there.
+	-- In a base defence the bot holds the rim the team gave it (BaseAssignment): a lane's rim, or "base" (the T4s / the
+	-- Ancient). Without one (an urgent defence, or a T3 still standing) the mode lane's rim.
+	local spotLane = lane
+	local assignment = IsBaseLane(lane) and BaseAssignment() or nil
+	local rimLane = assignment ~= nil and assignment.active and assignment.assign[bot:GetPlayerID()] or nil
+	if rimLane ~= nil then
+		spotLane = rimLane
+	end
+	info.spotLane = spotLane
+	local rim = spotLane == "base" and homeSpot or getHighGroundWaitPoint(ourTeam, spotLane)
+	DefendTpHold(bot, lane, rim)
+	-- The wave: an assigned bot meets only its own rim's wave (no walking to another rim); otherwise the lane's wave and
+	-- the base creeps.
+	local best, bestScore, nearest, nearestDist = nil, -1, nil, math.huge
+	for _, entry in ipairs(EnemyCreepLanes()) do
+		local creep = entry.unit
+		local mine = entry.lane == spotLane or rimLane == nil and entry.lane == "base"
+		if
+			mine
+			and Fu.IsValid(creep)
+			and (entry.lane == "base" or GetUnitToLocationDistance(creep, rim) <= STEP_DOWN)
+			and Fu.CanBeAttacked(creep)
+		then
+			info.wave = info.wave + 1
+			local d = GetUnitToUnitDistance(bot, creep)
+			if d <= 1200 then
+				local score = CreepScore(creep)
+				if score > bestScore then
+					best, bestScore = creep, score
 				end
 			end
-			if alliesThere < 2 then
-				tpHold = true
-				if DotaTime() >= (bot._defendTpHoldLogAt or -999) then
-					bot._defendTpHoldLogAt = DotaTime() + 5
-					pcall(
-						print,
-						string.format(
-							"[OHA-TP] t=%.0f %s defend-tp hold lane=%s enemies=%d allies=%d to=%.0f,%.0f",
-							DotaTime(),
-							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-							tostring(laneNames[lane]),
-							enemiesThere,
-							alliesThere,
-							defendState.defendLoc.x,
-							defendState.defendLoc.y
-						)
-					)
-				end
-			end
-		end
-	end
-	if isOwnLane and not tpHold and not bot._roshDipActive and considerTPToTarget(bot, defendState.defendLoc, true) then
-		return
-	end
-	local distanceToDefendLoc = GetUnitToLocationDistance(bot, defendState.defendLoc)
-	if distanceToDefendLoc > 2000 then
-		local midpoint =
-			Vector((botLocation.x + defendState.defendLoc.x) / 2, (botLocation.y + defendState.defendLoc.y) / 2, 0)
-		local enemiesOnPath = Fu.GetLastSeenEnemiesNearLoc(midpoint, 1200)
-		if #enemiesOnPath >= 1 then
-			local deltaX = defendState.defendLoc.x - botLocation.x
-			local deltaY = defendState.defendLoc.y - botLocation.y
-			local length = math.max(1, math.sqrt(deltaX * deltaX + deltaY * deltaY))
-			local offsetX = -deltaY / length * 1200
-			local offsetY = deltaX / length * 1200
-			local fountainTpPoint = ourTeam == Team.Radiant and radiantFountainTpPoint or direFountainTpPoint
-			local sideA = Vector(midpoint.x + offsetX, midpoint.y + offsetY, 0)
-			local sideB = Vector(midpoint.x - offsetX, midpoint.y - offsetY, 0)
-			local detourLocation = getLocationToLocationDistance(sideA, fountainTpPoint)
-						< getLocationToLocationDistance(sideB, fountainTpPoint)
-					and sideA
-				or sideB
-			do
-				local fraction = 1
-				while fraction >= 0.2 do
-					local candidate = Vector(
-						midpoint.x + (detourLocation.x - midpoint.x) * fraction,
-						midpoint.y + (detourLocation.y - midpoint.y) * fraction,
-						0
-					)
-					if IsLocationPassable(candidate) then
-						detourLocation = candidate
-						break
-					end
-					fraction = fraction - 0.2
-				end
-			end
-			bot:Action_MoveToLocation(detourLocation)
-			return
-		end
-	end
-	local nearbyEnemies = Fu.GetLastSeenEnemiesNearLoc(botLocation, 1600)
-	if bot:WasRecentlyDamagedByAnyHero(5) and #nearbyEnemies > #defendState.nInRangeEnemy then
-		bot:Action_MoveToLocation(vectorAdd(safeDefendLoc, Fu.RandomForwardVector(100)))
-		return
-	end
-	if isBaseDefenseActive() then
-		local building = unpack(Defend.GetFurthestBuildingOnLane(lane))
-		local ancient = GetAncient(ourTeam)
-		local anchorBuilding = isAliveBuilding(building) and building or ancient
-		local anchorLocation = anchorBuilding:GetLocation()
-		local safeLocation = Fu.AdjustLocationWithOffsetTowardsFountain(anchorLocation, 200)
-		local enemiesNearAnchor = Fu.GetEnemiesNearLoc(anchorLocation, 1600)
-		if Fu.IsValidHero(enemiesNearAnchor[1]) and Fu.IsInRange(bot, enemiesNearAnchor[1], 1600) then
-			bot:Action_AttackUnit(enemiesNearAnchor[1], true)
-			return
-		end
-		local distanceToAnchor = GetUnitToLocationDistance(bot, anchorLocation)
-		if distanceToAnchor > 1200 then
-			bot:Action_MoveToLocation(vectorAdd(safeLocation, Fu.RandomForwardVector(200)))
-			return
-		end
-		bot:Action_AttackMove(vectorAdd(anchorLocation, Fu.RandomForwardVector(300)))
-		return
-	end
-	local attackRange = bot:GetAttackRange()
-	local engageRange = attackRange < 900 and 900 or math.min(attackRange, defendRadius)
-	if not defendState.defendLoc then
-		defendState.defendLoc = GetLaneFrontLocation(ourTeam, lane, 0)
-	end
-	local building, healthScore, tier = unpack(Defend.GetFurthestBuildingOnLane(lane))
-	local defendLocation = defendState.defendLoc
-	if isAliveBuilding(building) then
-		defendLocation = building:GetLocation()
-	end
-	if not defendLocation then
-		defendLocation = GetLaneFrontLocation(ourTeam, lane, 0)
-	end
-	local ancient = GetAncient(ourTeam)
-	local ancientLocation = ancient ~= nil and ancient:GetLocation() or defendLocation
-	if Fu.Utils.GetLocationToLocationDistance(defendLocation, ancientLocation) < 2000 then
-		if isAliveBuilding(building) then
-			defendLocation = building:GetLocation()
-		else
-			defendLocation = getHighGroundWaitPoint(ourTeam, lane)
-		end
-	end
-	do
-		local baseAncient = GetAncient(ourTeam)
-		if baseAncient ~= nil then
-			local baseAncientLocation = baseAncient:GetLocation()
-			local enemiesAtAncient = Fu.GetEnemiesNearLoc(baseAncientLocation, 2500)
-			if
-				#enemiesAtAncient > 0
-				and Fu.Utils.GetLocationToLocationDistance(defendLocation, baseAncientLocation) > 2000
-			then
-				local enemyAtAncient = enemiesAtAncient[1]
-				if Fu.IsValidHero(enemyAtAncient) and Fu.CanBeAttacked(enemyAtAncient) then
-					local distanceToEnemy = GetUnitToUnitDistance(bot, enemyAtAncient)
-					if distanceToEnemy < 2500 then
-						bot:Action_AttackUnit(enemyAtAncient, true)
-						return
-					else
-						bot:Action_MoveToLocation(enemyAtAncient:GetLocation())
-						return
-					end
-				end
+			if d < nearestDist then
+				nearest, nearestDist = creep, d
 			end
 		end
 	end
-	if tier >= 3 then
-		local highGroundSpot = getHighGroundWaitPoint(ourTeam, lane)
-		local enemiesOnHG = getGameState().enemiesOnHG
-		local enemiesAtHighGround = Fu.GetLastSeenEnemiesNearLoc(highGroundSpot, 1200)
-		local alliesAtHighGround = Fu.GetAlliesNearLoc(highGroundSpot, 1400)
-		-- Only creeps at our high ground (no enemy hero seen there). Pull them into the fountain
-		-- when they will follow: none of them is busy with one of our units, none of our creeps is
-		-- near, and our next wave is not about to arrive (lane creeps spawn every 30s; arriving at
-		-- the high ground they take the aggro and break the pull, so only from 4s to 22s into
-		-- each 30s). The hero takes their aggro with one attack, then walks to the fountain while
-		-- they chase. As soon as they stop chasing, or any of that changes, it is regular attacks.
-		-- Before, it always walked back toward the fountain, even with the creeps busy with ours
-		-- (game 016, 43:15: Medusa backing off, nothing followed).
-		if #enemiesAtHighGround == 0 then
-			local now = DotaTime()
-			local enemyCreeps = bot:GetNearbyCreeps(1200, true) or {}
-			local onMe, busy, nearest, nearestDistance = 0, false, nil, math.huge
-			for _, creep in pairs(enemyCreeps) do
-				if Fu.IsValid(creep) then
-					local creepTarget = creep:GetAttackTarget()
-					if creepTarget == bot then
-						onMe = onMe + 1
-					elseif creepTarget ~= nil and creepTarget:GetTeam() == bot:GetTeam() then
-						busy = true
-					end
-					local distance = GetUnitToUnitDistance(bot, creep)
-					if distance < nearestDistance and Fu.CanBeAttacked(creep) then
-						nearest, nearestDistance = creep, distance
-					end
-				end
-			end
-			local ourCreeps = #(bot:GetNearbyLaneCreeps(1200, false) or {}) > 0
-			local phase = now % 30
-			local spawnOk = phase >= 4 and phase <= 22
-			local pullOk = nearest ~= nil
-				and not busy
-				and not ourCreeps
-				and spawnOk
-				and Fu.GetHP(bot) >= 0.5
-				and bot:DistanceFromFountain() > 900
-			if pullOk then
-				if onMe >= 1 then
-					if now >= (bot._hgPullLogAt or -999) then
-						bot._hgPullLogAt = now + 5
-						pcall(
-							print,
-							string.format(
-								"[OHA-DEFEND] t=%.0f %s hg-pull following=%d fountainDist=%d",
-								now,
-								(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-								onMe,
-								math.floor(bot:DistanceFromFountain())
-							)
-						)
-					end
-					bot:Action_MoveToLocation(Fu.GetTeamFountain())
-					return
-				end
-				if now - (bot._hgPullTriedAt or -99) > 6 then
-					bot._hgPullTriedAt = now
-					bot:Action_AttackUnit(nearest, true)
-					return
-				end
-			end
-			local best, bestScore = nil, -1
-			for _, creep in pairs(bot:GetNearbyCreeps(1200, true) or {}) do
-				if Fu.IsValid(creep) and Fu.CanBeAttacked(creep) then
-					local name = creep:GetUnitName()
-					local score = creep:GetAttackDamage() * creep:GetAttackSpeed() * (1 - Fu.GetHP(creep))
-					if stringIncludes(name, "siege") then
-						score = score + 10000
-					end
-					if score > bestScore then
-						best, bestScore = creep, score
-					end
-				end
-			end
-			if best ~= nil then
-				bot:Action_AttackUnit(best, true)
-				return
-			end
-			-- No creep within 1200 of him, but the wave the defense counted (within the
-			-- high-ground radius of the building, or of our Ancient) is elsewhere: go hit the
-			-- nearest of it. He used to attack-move around the building and wait (game 020,
-			-- 67:20-68:06: Techies in the Dire base, 6-14 creeps on the high ground, none
-			-- within reach of him, no attack).
-			local hgRadius = Fu.Utils.HG_WAVE_RADIUS or 2600
-			local hgAncient = GetAncient(ourTeam)
-			local waveCreep, waveCreepDistance = nil, math.huge
-			for _, creep in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
-				if
-					Fu.IsValid(creep)
-					and Fu.CanBeAttacked(creep)
-					and (
-						GetUnitToLocationDistance(creep, highGroundSpot) <= hgRadius
-						or hgAncient ~= nil and GetUnitToUnitDistance(creep, hgAncient) <= hgRadius
-					)
-				then
-					local distance = GetUnitToUnitDistance(bot, creep)
-					if distance < waveCreepDistance then
-						waveCreep, waveCreepDistance = creep, distance
-					end
-				end
-			end
-			if waveCreep ~= nil then
-				bot:Action_AttackUnit(waveCreep, true)
-				return
-			end
-			-- Diagnostic (#12, game 038 49:36: defenders stood at the Ancient while a wave fought our creeps
-			-- further out). Nothing within reach: where is the nearest enemy creep and what is it hitting?
-			if DotaTime() >= (bot._hgIdleLogAt or -999) then
-				bot._hgIdleLogAt = DotaTime() + 5
-				local nearestCreep, nearestDistance = nil, math.huge
-				for _, creep in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
-					if Fu.IsValid(creep) then
-						local distance = GetUnitToUnitDistance(bot, creep)
-						if distance < nearestDistance then
-							nearestCreep, nearestDistance = creep, distance
-						end
-					end
-				end
-				local creepTarget = nearestCreep ~= nil and nearestCreep:GetAttackTarget() or nil
-				pcall(
-					print,
-					string.format(
-						"[OHA-DEFEND] t=%.0f %s hg-idle nearestCreep=%d creepHits=%s toHgSpot=%d hgRadius=%d",
-						DotaTime(),
-						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-						nearestCreep ~= nil and math.floor(nearestDistance) or -1,
-						creepTarget ~= nil and tostring(creepTarget:GetUnitName()) or "none",
-						nearestCreep ~= nil and math.floor(GetUnitToLocationDistance(nearestCreep, highGroundSpot))
-							or -1,
-						hgRadius
-					)
-				)
-			end
-		end
-		if enemiesOnHG == 0 and #enemiesAtHighGround > 0 and #alliesAtHighGround >= #enemiesAtHighGround + 1 then
-			local attackMoveLocation = vectorAdd(highGroundSpot, Fu.RandomForwardVector(120))
-			bot:Action_AttackMove(attackMoveLocation)
-		else
-			local safeSpot = Fu.AdjustLocationWithOffsetTowardsFountain(highGroundSpot, 200)
-			local attackMoveLocation = vectorAdd(safeSpot, Fu.RandomForwardVector(120))
-			bot:Action_AttackMove(attackMoveLocation)
-		end
-		return
+	local stronger = Fu.WeAreStronger(bot, 2500)
+	local waveTarget = best or nearest
+	local waveSafe = false
+	if waveTarget ~= nil then
+		local heroesByWave = #Fu.GetLastSeenEnemiesNearLoc(waveTarget:GetLocation(), 1200)
+		waveSafe = heroesByWave == 0
+			or stronger
+			or AlliesWithin(bot, waveTarget:GetLocation(), 2000) >= heroesByWave + 1
 	end
-	local enemiesNearDefendLoc = Fu.GetEnemiesNearLoc(defendLocation, defendRadius)
-	local enemyCount = #enemiesNearDefendLoc
-	local distanceToDefendLoc = GetUnitToLocationDistance(bot, defendLocation)
-	local alliesNearDefendLoc = Fu.GetAlliesNearLoc(defendLocation, defendRadius)
-	if enemyCount >= 1 then
-		local ourAncient = GetAncient(ourTeam)
-		local ancientLow = ourAncient and Fu.CanBeAttacked(ourAncient) and Fu.GetHP(ourAncient) < 0.5
-		if #alliesNearDefendLoc >= enemyCount or ancientLow or Fu.WeAreStronger(bot, 2500) then
-			if Fu.IsValidHero(enemiesNearDefendLoc[1]) and Fu.IsInRange(bot, enemiesNearDefendLoc[1], engageRange) then
-				bot:Action_AttackUnit(enemiesNearDefendLoc[1], true)
-				return
-			end
-			local nearbyEnemies = bot:GetNearbyHeroes(defendRadius, true, BotMode.None)
-			if Fu.IsValidHero(nearbyEnemies[1]) and Fu.IsInRange(bot, nearbyEnemies[1], engageRange) then
-				bot:Action_AttackUnit(nearbyEnemies[1], true)
-				return
-			end
-			bot:Action_MoveToLocation(vectorAdd(defendLocation, Fu.RandomForwardVector(200)))
-			return
-		else
-			local fallbackLocation = Fu.AdjustLocationWithOffsetTowardsFountain(defendLocation, 400)
-			bot:Action_MoveToLocation(vectorAdd(fallbackLocation, Fu.RandomForwardVector(100)))
-			return
+	local heroesAtRim = #Fu.GetLastSeenEnemiesNearLoc(rim, 1600)
+	local alliesAtRim = AlliesWithin(bot, rim, 2500)
+	info.heroes, info.allies, info.spotLoc = heroesAtRim, alliesAtRim, rim
+	local step = DefendLaneRules.HighGroundStep({
+		heroesAtAncient = 0,
+		heroesAtRim = heroesAtRim,
+		alliesAtRim = alliesAtRim,
+		stronger = stronger,
+		waveNear = best ~= nil,
+		wave = info.wave,
+		waveSafe = waveSafe,
+		ancientHit = AncientBeingHit(ancient),
+	})
+	local why = rimLane ~= nil and "base-assigned"
+		or (baseDefence and "base-unassigned" or (tier == 3 and "t3" or "lane"))
+	if step == "hg-fight" then
+		-- Only a hero within reach of the bot: no chase down the ramp, out of the T3's range.
+		local attackRange = bot:GetAttackRange()
+		local engageRange = attackRange < 900 and 900 or math.min(attackRange, defendRadius)
+		local target, targetDist = NearestAttackableHero(rim, 1600, bot)
+		if target ~= nil and targetDist <= engageRange then
+			return DefendStep(bot, lane, step, why, "attack", target, info)
 		end
-	end
-	if enemyCount == 0 then
-		local nearbyCreeps = bot:GetNearbyCreeps(900, true)
-		if nearbyCreeps and #nearbyCreeps > 0 then
-			local bestCreep = nil
-			local bestScore = -1
-			for _, creep in ipairs(nearbyCreeps) do
-				if Fu.IsValid(creep) and Fu.CanBeAttacked(creep) then
-					local unitName = creep:GetUnitName()
-					local score = creep:GetAttackDamage() * creep:GetAttackSpeed() * (1 - Fu.GetHP(creep))
-					if stringIncludes(unitName, "siege") then
-						score = score + 10000
-					elseif stringIncludes(unitName, "shadow_shaman_ward") then
-						score = score + 9000
-					elseif stringIncludes(unitName, "warlock_golem") then
-						score = score + 8000
-					end
-					if score > bestScore then
-						bestCreep = creep
-						bestScore = score
-					end
-				end
-			end
-			if bestCreep then
-				bot:Action_AttackUnit(bestCreep, true)
-				return
-			end
+		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(rim, offset), info)
+	elseif step == "hg-back" then
+		-- With the T3 standing, just behind it; once it is down, back to the Ancient.
+		local backSpot = homeSpot
+		-- isAliveBuilding, not Fu.IsValidBuilding: that rejects an invulnerable T3 (Glyph, or its T2 still up; game 069).
+		if tier == 3 and isAliveBuilding(GetTower(ourTeam, tier3TowerIds[lane])) then
+			backSpot = Fu.AdjustLocationWithOffsetTowardsFountain(rim, 400)
 		end
+		if GetUnitToLocationDistance(bot, backSpot) > 400 then
+			return DefendStep(bot, lane, step, why, "move", backSpot, info)
+		end
+		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(backSpot, offset), info)
+	elseif step == "hg-near" and best ~= nil then
+		return DefendStep(bot, lane, step, why, "attack", best, info)
+	elseif step == "hg-wave" and nearest ~= nil then
+		return DefendStep(bot, lane, step, why, "attack", nearest, info)
+	elseif step == "ancient-hit" then
+		if GetUnitToLocationDistance(bot, homeSpot) > 1200 then
+			return DefendStep(bot, lane, step, why, "move", homeSpot, info)
+		end
+		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(ancientLoc, offset), info)
 	end
-	if distanceToDefendLoc > 500 then
-		bot:Action_MoveToLocation(vectorAdd(defendLocation, Fu.RandomForwardVector(200)))
-	else
-		bot:Action_AttackMove(vectorAdd(defendLocation, Fu.RandomForwardVector(300)))
+	if info.wave > 0 then
+		why = why .. "+wave-unsafe"
 	end
+	if GetUnitToLocationDistance(bot, rim) > 1200 then
+		return DefendStep(bot, lane, "hg-spot", why, "move", vectorAdd(rim, offset), info)
+	end
+	return DefendStep(bot, lane, "hg-spot", why, "attack-move", vectorAdd(rim, offset), info)
 end
-function Defend.OnEnd() end
 return Defend

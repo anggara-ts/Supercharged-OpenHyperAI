@@ -16,7 +16,7 @@ no unit-test harness: the checks below plus a real bot game are the test.
 | `FuncLib/hero/` | Shared hero code: minions/illusions, Rubick's stolen spells (`rubick_hero/`), sub-units. |
 | `FuncLib/data/` | Static tables (hero names, matchups, position weights, spell lists). |
 | `FuncLib/dota/` | Dota API names and constants (`index`, `enums`, `interfaces`, `heroes`). |
-| `FuncLib/lib/` | Generic libraries: `json` (dkjson), `http_req`, `native_operators`. |
+| `FuncLib/lib/` | Generic libraries: `json` (dkjson), `native_operators`. |
 | `mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, rune, ward, ...). |
 | `ability_item_usage_generic.lua`, `item_purchase_generic.lua`, `hero_selection.lua`, `bot_generic.lua` | Item/ability use, buying, drafting, per-bot think. |
 | `Customize/general.lua` | User settings and **local test lineups**. |
@@ -44,6 +44,8 @@ Adding `mode_<name>_generic.lua` replaces Valve's built-in mode **entirely**: th
   (`mode_rune_generic.lua` walks a bot to the river spot and holds it for the item mode). Our own item mode
   (own drops, Gem, Rapier, tokens only) stopped the river gold being taken, so it was removed (2026-11-17).
   The cost: bots may still pick up another hero's dropped item.
+  A GetDesire-only `mode_item_generic.lua` was tried (#141, game 063): Valve's item Think did not run behind it
+  and no river rune was picked up.
 - **Evasive maneuvers (`mode_evasive_maneuvers_generic.lua`)** - Valve's projectile/AoE dodging. Overriding
   it would drop the dodging. Where it gets bots killed (low HP, outnumbered), `mode_retreat_generic.lua`
   returns a desire above it instead (`[OHA-RETREAT] over-evasive`).
@@ -101,7 +103,12 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
    `Tests/stub_api.lua`. A real bug that isn't fixed in the same PR stays as `T.xfail(name, reason, fn)` plus an
    issue; an XPASS means it got fixed, so remove the xfail.
 
-Run them locally before pushing. After pushing, don't block on CI: start a background wait (e.g. `gh pr checks <pr> --watch` run in the background) and keep working; look at the result before merging or when it reports a failure.
+Locally, before pushing: StyLua (`stylua --check` on the changed files; the commit hook runs it too) and a syntax
+check. **The test suite runs in CI, not locally** (maintainer, 2026-11-22): without LuaJIT the local runner is slow,
+and several agents running it at once hog the laptop's CPU for the same result CI gives on every push. Run one test
+file locally only to debug a failure. After pushing, don't block on CI: start a background wait (e.g.
+`gh pr checks <pr> --watch` run in the background) and keep working; fix a red run with a new commit, and look at
+the result before merging.
 
 **pre-commit hooks.** Once per clone: `pip install pre-commit` then `pre-commit install --install-hooks`
 (`.pre-commit-config.yaml`; installs the commit hooks and the post-checkout/commit/merge/rewrite hooks that
@@ -150,8 +157,12 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
 
 ## Testing in a game
 
-1. The local dev setup links `dota 2 beta/game/dota/scripts/vscripts/bots` to this repo, so the game runs the
-   checked-out branch. Start a Custom Lobby, server **Local Host**, bots set to **Local Dev Script** (Valve
+1. The game runs a copy of the build in `dota 2 beta/game/dota/scripts/vscripts/bots`, made by
+   `node Util/export-bots.js --test-game` (`/prepare-game` runs it): the bot scripts of `HEAD`, the uncommitted
+   test lineup and a `Customize/build_info.lua` for that commit, nothing else. Editing or switching branches in
+   the clone during a game changes nothing in it; run the export again after a change. (An old dev setup links
+   `vscripts/bots` to the clone; the tool refuses to write through a link, so rename it, e.g. `bots-dev`.)
+   Start a Custom Lobby, server **Local Host**, bots set to **Local Dev Script** (Valve
    only offers bot scripts in lobbies, and third-party scripts only load on a Local Host server).
 2. Launch Dota with `-condebug` so the console is written to `game/dota/console*.log`.
 3. The game prints `[OHA-BUILD]` (exact commit) at the start. After the game, `node Util/after-game.js` splits
@@ -210,7 +221,9 @@ Tools: `gh` (GitHub CLI, logged in), `Util/issue-prs.js`, `Util/verify.js`, `Uti
    lists PRs that conflict (fix the conflict in that PR, not in test/next), writes `Util/verify/test-build.json`
    and switches the working tree to it, carrying `Customize/general.lua` (other modified files make it refuse;
    `--dry-run` only reports, `--no-switch` builds without switching). Never push `test/next`. Then run
-   `node Util/build-info.js` (a reset fires no hook) so `[OHA-BUILD]` names the build, and play. PRs no longer
+   `node Util/build-info.js` (a reset fires no hook) and, once the lineup is final,
+   `node Util/export-bots.js --test-game`, which copies the build into `vscripts/bots` with a `build_info.lua`
+   so `[OHA-BUILD]` names it, and play. PRs no longer
    need to be stacked to be tested together: branch each one from `main`.
 7. **During the game** the maintainer may post observations with game times ("2:50 kez and tusk won't hit
    dawnbreaker trapped in ice shards"). Check each against the running log (newest `console*.log`, grep a
@@ -286,16 +299,55 @@ game, an outdated mechanic, or an idea that has a better alternative. Not every 
 |---|---|
 | `/start-issue` | file findings or requests as grouped issue cards with task items and a priority |
 | `/create-pr` | code done: checks, signed commit, CI, change-log description, tracker entry |
-| `/prepare-game` | before playing: tracker status, `test-build.js`, lineup, what the game tests |
+| `/prepare-game` | before playing: tracker status, `test-build.js`, lineup, copy into `vscripts/bots`, what the game tests |
+| `/prepare-workshop` | a Workshop upload: clean copy of `origin/main` or a release tag (no lineup, git, env, tests, logs) in `vscripts/bots` |
 | `/check-live-event` | the maintainer reports an event during a live game |
 | `/review-game` | the game ended: `after-game.js`, tracker, PR comments, findings, issues, next lineup |
 | `/merge-pr` | a PR is READY TO MERGE: mute proven logs, tick checks, squash-merge, tick issue items |
 | `/goodnight` | the maintainer is away: fix every open, unresolved issue in priority order, one ready PR each, build the next game |
 | `/release` | a release: next version, release notes from the PRs merged since the last tag (dry run by default), then version files, tag and GitHub release on "publish" |
 
+## Working notes for AI agents
+
+Project knowledge belongs in this repo (this file, `Docs/`, `.claude/skills/`), not in an agent's local memory
+(maintainer, 2026-11-22): when a session learns a rule, a fact or a working preference, write it here in the PR it
+came with (or a small `docs/` PR).
+
+- **Reporting.** End every summary to the maintainer with the test-game readiness as the last sentence ("Ready
+  for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
+  reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
+  that quotes it), so later sessions and agents see it.
+- **Commits** are authored as the maintainer's GitHub account `anggara-ts` with its GitHub no-reply e-mail
+  (`10489830+anggara-ts@users.noreply.github.com`), set in the repo-local git config; check `git config user.name`
+  in a fresh clone or worktree.
+- **Game facts.** Besides the hero datafeed, `.../datafeed/itemdata?language=english&item_id=N` (costs, values; no
+  component list: use cost arithmetic for recipes) and `.../datafeed/itemlist?language=english` (item ids). Herodata
+  enum fields: `damage` 2 = magical, 4 = pure; `immunity` 3 = pierces debuff immunity, 4 = does not; `dispellable`
+  3 = not dispellable. When the data can't settle a point, say it is unverified.
+- **Parallel agents** (used by `/goodnight` and fix rounds): one issue per agent, each in its own `git worktree`
+  branched from `origin/main`, never in the main clone (it stays on `test/next` with the uncommitted lineup). Give
+  every agent one shared brief file (these rules, the latest game's log and review, which files another agent owns)
+  and name only its issue in the prompt. Run waves of a few agents, highest priority first; an agent stopped by a
+  usage limit keeps its worktree and is resumed, not restarted. Check each result yourself (CI, diff against the
+  asked scope, tracker) before reporting it; say plainly when a PR covers less than asked.
+- **Parallel game reviewers** are read-only: they return `node Util/verify.js set <pr> <item> <verdict> "<note>"`
+  lines and findings, and the lead applies them one by one (the tracker file and the PR descriptions are not safe
+  for concurrent writes).
+- **Windows / Git Bash quirks** (the maintainer's laptop): `gh` is not on PATH in a new shell
+  (`export PATH="$PATH:/c/Program Files/GitHub CLI"`); a doubled backslash in a heredoc or `node -e` string
+  arrives as one and apostrophes break `node -e '...'`, so write scripts to files; run `git commit -F - <<'EOF'` as
+  its own command; never chain `<check> | tail && git commit` (the chain sees tail's exit code).
+- **Local test settings.** The maintainer's uncommitted `Customize/general.lua` keeps `Weak_Hero_Cap = 5` while
+  testing (shipped default 1): remind the maintainer to set it back when a test series ends.
+- **After every Dota patch** check the `[OHA-API]` dump for changes, and whether outposts and watchers work for
+  bots again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[OHA-OUTPOST] capture-off`;
+  #111, discussion #50); remind the maintainer to re-implement them when Valve fixes it.
+
 ## Things not to do
 
 - Do not commit `Customize/general.lua` test lineups, match logs, or anything with the Steam ID.
+- Do not upload the clone or a link to it to the Workshop (it has `.git`, `.env`, match logs, the test lineup):
+  upload the clean copy from `/prepare-workshop` (`node Util/export-bots.js`).
 - Do not commit `.env` or print, log or paste its values (API tokens; template and docs: `.env.example`,
   CONTRIBUTING.md step 6).
 - Do not force-push, rewrite published history, or skip signing.
