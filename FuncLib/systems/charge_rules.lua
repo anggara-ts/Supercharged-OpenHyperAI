@@ -23,6 +23,16 @@ Rules.MAX_FIGHT_ETA = 7
 -- Spirit Breaker himself below this HP ratio does not charge into a fight or a gank.
 Rules.SELF_HP_MIN = 0.4
 Rules.TOWER_RANGE = 700
+-- A save needs the ally in real danger (game 072 t=863: a 14.5s charge for an ally at ttd=99 ran him into four
+-- heroes under their tier 1): dying within DANGER_MARGIN seconds after he lands, or under DANGER_HP while hit.
+Rules.DANGER_MARGIN = 5
+Rules.DANGER_HP = 0.5
+-- A running long charge is re-checked (CancelWhy) until he is this close to the target: then he is committed.
+Rules.COMMIT_DIST = 600
+-- The tower cancel must come before he is inside the tower's range + this margin.
+Rules.TOWER_MARGIN = 300
+-- The ally counts as safe (save no longer needed) after it has looked safe this long.
+Rules.SAFE_FOR = 1.0
 -- HP-loss samples: kept for KEEP seconds; the rate is read from a sample MIN_AGE..MAX_AGE seconds old.
 Rules.SAMPLE_KEEP = 2.0
 Rules.SAMPLE_MIN_AGE = 0.5
@@ -93,6 +103,7 @@ end
 --   allies      our heroes at the spot without him (the ganked ally counts); enemies: enemy heroes there
 --   hitBy       (save) enemy heroes that hit the ally recently
 --   allyHp, lossRate   (save) the ally's health and HP lost per second (LossRate; nil = no sample yet)
+--   allyHpRatio (save) the ally's HP ratio
 --   tower       the target stands in a standing enemy tower's range
 function Rules.ChargeSkipWhy(s)
 	-- first: not a gank at all (the caller doesn't log this one: lane harass on any ally would flood the log)
@@ -117,14 +128,19 @@ function Rules.ChargeSkipWhy(s)
 		if s.lossRate == nil then
 			return "no-sample"
 		end
-		if Rules.TimeToDie(s.allyHp, s.lossRate) <= s.eta then
+		local ttd = Rules.TimeToDie(s.allyHp, s.lossRate)
+		if ttd <= s.eta then
 			return "too-late"
+		end
+		if ttd > s.eta + Rules.DANGER_MARGIN and (s.allyHpRatio or 1) >= Rules.DANGER_HP then
+			return "no-danger"
 		end
 	elseif s.eta > Rules.MAX_FIGHT_ETA then
 		return "too-far"
 	end
-	-- after he lands: him + the allies there, at most one down
-	if s.allies + 1 < s.enemies - 1 then
+	-- after he lands: him + the allies there not outnumbered (the same test as CancelWhy, so a charge never starts
+	-- in a state its first re-check would cancel; maintainer, #208 game 072: "ours < enemies" cancels)
+	if s.allies + 1 < s.enemies then
 		return "outnumbered"
 	end
 	-- a tower in range of the landing spot: only when our side already wins there without him
@@ -132,6 +148,49 @@ function Rules.ChargeSkipWhy(s)
 		return "tower"
 	end
 	return nil
+end
+
+-- Why a running long charge should be cancelled now, or nil to keep charging. c:
+--   kind        "save" or "fight"; distLeft: him to the target
+--   allyDead    (save) the ally died; allySafeFor: seconds the ally has looked safe (no enemy hero near it, or not
+--               hit and not losing HP above DANGER_HP, or back home)
+--   ours        our heroes within reach of the target when he lands, him included; enemies: enemy heroes seen or
+--               last seen there
+--   tower       the target stands in a standing enemy tower's range; towerDist: him to that tower
+function Rules.CancelWhy(c)
+	local towerEdge = Rules.TOWER_RANGE + Rules.TOWER_MARGIN
+	if c.tower and c.towerDist ~= nil and c.towerDist <= towerEdge then
+		-- already inside the tower's range + margin: cancelling now leaves him under the tower anyway
+		return nil
+	end
+	if c.distLeft < Rules.COMMIT_DIST then
+		return nil
+	end
+	if c.kind == "save" then
+		if c.allyDead then
+			return "ally-dead"
+		end
+		if (c.allySafeFor or 0) >= Rules.SAFE_FOR then
+			return "ally-safe"
+		end
+	end
+	if c.ours < c.enemies then
+		return "outnumbered"
+	end
+	-- the fight is ours there when our side outnumbers theirs without him
+	if c.tower and c.ours - 1 <= c.enemies then
+		return "tower"
+	end
+	return nil
+end
+
+-- Does a ganked ally still need the save? Safe when no enemy hero is near it, it is back home, or nobody hit it
+-- lately, it is not losing HP and it is at DANGER_HP or more. lossRate nil (no sample): not safe on that count.
+function Rules.AllySafe(enemiesNear, atHome, hitRecently, lossRate, hpRatio)
+	if enemiesNear == 0 or atHome then
+		return true
+	end
+	return not hitRecently and lossRate ~= nil and lossRate <= 0 and hpRatio >= Rules.DANGER_HP
 end
 
 -- Clearance between an attacker and the charge's path: bash_radius 275 (datafeed) plus room for his hit box.

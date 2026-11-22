@@ -58,14 +58,23 @@ end
 T.test("charge rules: the save charge", function()
 	local R = rules()
 	T.eq(R.ChargeSkipWhy(save()), nil, "1 ally hit by 2, lives 9s, charge lands in 6s: go (2 vs 2)")
-	T.eq(R.ChargeSkipWhy(save({ enemies = 3, hitBy = 3 })), nil, "2 vs 3 after he lands: one down is fine")
+	T.eq(
+		R.ChargeSkipWhy(save({ enemies = 3, hitBy = 3 })),
+		"outnumbered",
+		"2 vs 3 after he lands: CancelWhy would stop it"
+	)
 	T.eq(R.ChargeSkipWhy(save({ enemies = 4, hitBy = 3 })), "outnumbered", "2 vs 4: no")
 	T.eq(R.ChargeSkipWhy(save({ lossRate = 200 })), "too-late", "dies in 4.5s, lands in 6s")
 	T.eq(R.ChargeSkipWhy(save({ lossRate = 150 })), "too-late", "dies at the moment he lands")
 	local noSample = save()
 	noSample.lossRate = nil -- (an override table cannot carry a nil)
 	T.eq(R.ChargeSkipWhy(noSample), "no-sample", "no HP history yet: no guess")
-	T.eq(R.ChargeSkipWhy(save({ lossRate = 0 })), nil, "hit but not losing HP: lives")
+	T.eq(R.ChargeSkipWhy(save({ lossRate = 0 })), "no-danger", "hit but not losing HP: no save needed")
+	T.eq(R.ChargeSkipWhy(save({ lossRate = 0, allyHpRatio = 0.4 })), nil, "under 50% and hit: danger")
+	-- game 072 t=863: a 14.5s charge for Largo at ttd=99 ran him into four heroes under Dire's tier 1
+	T.eq(R.ChargeSkipWhy(save({ eta = 14.5, lossRate = 900 / 99, allyHpRatio = 0.7 })), "no-danger", "game 072")
+	T.eq(R.ChargeSkipWhy(save({ eta = 6, lossRate = 900 / 12 })), "no-danger", "dies 6s after he lands: no")
+	T.eq(R.ChargeSkipWhy(save({ eta = 6, lossRate = 900 / 10 })), nil, "dies 4s after he lands: go")
 	T.eq(R.ChargeSkipWhy(save({ hitBy = 1, enemies = 1 })), "no-gank", "a 1 v 1 is no gank")
 	T.eq(R.ChargeSkipWhy(save({ hitBy = 1, enemies = 2 })), nil, "hit by 1 while 2 enemies are on 1 ally: gank")
 	T.eq(R.ChargeSkipWhy(save({ hitBy = 0, enemies = 3 })), "no-gank", "enemies near but nobody hits it")
@@ -97,6 +106,41 @@ T.test("charge rules: the teamfight charge", function()
 	T.eq(R.ChargeSkipWhy(fight), "low-hp", "low HP first")
 	fight.hit, fight.away, fight.tower = true, true, false
 	T.eq(R.ChargeSkipWhy(fight), nil, "low HP but the charge is his escape")
+end)
+
+local function running(over)
+	local c =
+		{ kind = "save", distLeft = 4000, ours = 2, enemies = 2, tower = false, allyDead = false, allySafeFor = 0 }
+	for k, v in pairs(over or {}) do
+		c[k] = v
+	end
+	return c
+end
+
+T.test("charge rules: cancel a running long charge", function()
+	local R = rules()
+	T.eq(R.CancelWhy(running()), nil, "2 v 2, ally still in trouble: keep going")
+	T.eq(R.CancelWhy(running({ allyDead = true })), "ally-dead", "the ally died")
+	T.eq(R.CancelWhy(running({ allySafeFor = 0.5 })), nil, "safe for a moment only")
+	T.eq(R.CancelWhy(running({ allySafeFor = 1.2 })), "ally-safe", "the ally got away")
+	T.eq(R.CancelWhy(running({ allySafeFor = 5, kind = "fight" })), nil, "a fight charge has no ally to check")
+	-- game 072 t=878: allies=0 enemies=4 at Dire's mid tier 1
+	T.eq(R.CancelWhy(running({ ours = 1, enemies = 4 })), "outnumbered", "game 072: alone against four")
+	T.eq(R.CancelWhy(running({ tower = true, towerDist = 2500 })), "tower", "2 v 2 under their tower")
+	T.eq(R.CancelWhy(running({ tower = true, towerDist = 2500, ours = 4 })), nil, "4 v 2: the fight is ours")
+	T.eq(R.CancelWhy(running({ tower = true, towerDist = 950, ours = 1, enemies = 4 })), nil, "inside range + 300")
+	T.eq(R.CancelWhy(running({ tower = true, towerDist = 1010 })), "tower", "just outside range + 300")
+	T.eq(R.CancelWhy(running({ distLeft = 500, ours = 1, enemies = 3 })), nil, "next to the target: committed")
+end)
+
+T.test("charge rules: when a ganked ally no longer needs the save", function()
+	local R = rules()
+	T.ok(R.AllySafe(0, false, true, 300, 0.2), "no enemy near it")
+	T.ok(R.AllySafe(2, true, true, 300, 0.2), "back home")
+	T.ok(R.AllySafe(2, false, false, 0, 0.6), "not hit, not losing HP, above half")
+	T.ok(not R.AllySafe(2, false, false, 0, 0.3), "not hit but low with enemies near")
+	T.ok(not R.AllySafe(2, false, true, 0, 0.9), "still being hit")
+	T.ok(not R.AllySafe(2, false, false, nil, 0.9), "no HP sample: not safe")
 end)
 
 T.test("charge rules: away from the attackers", function()
