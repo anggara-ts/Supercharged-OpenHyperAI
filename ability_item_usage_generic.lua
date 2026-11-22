@@ -9436,7 +9436,7 @@ local function UseGlyphIfNeeded()
 		GlyphState.pending = nil
 		print(
 			string.format(
-				"[OHA-GLYPH] t=%.0f %s glyph-result why=%s tower=%s fortified=%s cd=%.0f charges=%d",
+				"[OHA-GLYPH] t=%.0f %s glyph-result cast=%s tower=%s fortified=%s cd=%.1f charges=%d",
 				now,
 				string.gsub(botName, "npc_dota_hero_", ""),
 				pending.why,
