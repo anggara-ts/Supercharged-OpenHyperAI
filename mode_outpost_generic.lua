@@ -219,6 +219,10 @@ local function InvulnerableHoldDesire()
 	return nil
 end
 function GetDesire()
+	-- The item swap probe's hold (#218, FuncLib/systems/swap_probe.lua): stand still, above every other mode.
+	if DotaTime() < (bot._swapProbeHoldUntil or -1) then
+		return 2.5
+	end
 	-- Before the invulnerable gate (game 064: the gate returned 0 as soon as the shift made Puck invulnerable, so the
 	-- hold never ran inside the shift; 6 of 10 shifts broke at 0.1-1.2s, and hold-left age= equalled after=).
 	if bot:IsInvulnerable() then
