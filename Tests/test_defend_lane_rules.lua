@@ -206,3 +206,27 @@ T.test("base split: a hero pull is not kept after the heroes leave; a held wave 
 	T.eq(R.RimAlive(nil, 3, 6), false, "held for 6s: free the bots")
 	T.eq(R.RimAlive(nil, 0, 1), false, "cleared")
 end)
+
+T.test("early start (game 069): the next wave's ETA against the defender's", function()
+	local R = rules()
+	-- A wave 4000 out: 4000 / 325 = 12.3s.
+	local waveEta = R.WaveEta(4000)
+	T.near(waveEta, 12.3, 0.1)
+	-- A defender 6000 away walking at 300: 20s, later than the wave minus 3s: start now.
+	local myEta, via = R.DefenderEta(6000, 300, false, nil)
+	T.near(myEta, 20, 0.01)
+	T.eq(via, "walk")
+	T.eq(R.StartEarly(waveEta, myEta), true, "6000 away: start")
+	-- 1500 away: 5s, it can wait.
+	T.eq(R.StartEarly(waveEta, (R.DefenderEta(1500, 300, false, nil))), false, "1500 away: not yet")
+	-- 9000 away with a TP ready: 3s channel + 600 walk from the tower = 5s beats 30s of walking; not yet.
+	myEta, via = R.DefenderEta(9000, 300, true, 600)
+	T.near(myEta, 5, 0.01)
+	T.eq(via, "tp")
+	T.eq(R.StartEarly(waveEta, myEta), false, "TP ready: not yet")
+	-- RimThreat: the next wave counts only while our creeps meeting it are fewer, and within 25s.
+	T.eq(R.RimThreat({ waveEta = 12, waveCreeps = 4, waveAllied = 1 }), "early")
+	T.eq(R.RimThreat({ waveEta = 12, waveCreeps = 4, waveAllied = 4 }), nil, "our creeps meet it")
+	T.eq(R.RimThreat({ waveEta = 40, waveCreeps = 4, waveAllied = 0 }), nil, "too far off")
+	T.eq(R.RimNeed("early", 4, true), 2)
+end)

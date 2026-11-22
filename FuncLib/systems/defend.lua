@@ -759,14 +759,15 @@ local function LaneThreat(lane)
 	laneThreatCache[lane] = { at = now, creeps = creeps, anchor = anchor, tier = tier }
 	return creeps, anchor, tier
 end
--- #53 (maintainer 2026-11-22): the base defence splits over the threatened rims. A rim is a lane whose T3 is down
--- (where the T3 stood) or "base" (the T4s / the Ancient, its creeps within BASE_RADIUS). Each threatened rim
+-- #53 (maintainer 2026-11-22): the base defence splits over the threatened rims. A rim is a lane whose T2 is down
+-- (its T3, or where the T3 stood) or "base" (the T4s / the Ancient, its creeps within BASE_RADIUS). Each threatened rim
 -- (DefendLaneRules.RimThreat: a wave at it, a wave walking up with our creeps pushed, enemy heroes there, the Ancient
--- losing HP) gets the nearest bots it needs (RimNeed); a bot keeps its rim until that wave is gone, and a bot no rim
+-- losing HP, the next wave due soon with our creeps losing it: "early", game 069) gets the nearest bots it needs (RimNeed); a bot keeps its rim until that wave is gone, and a bot no rim
 -- needs leaves the defence (AssignRims). Once a second for the team. Log: [OHA-DEFEND] base-assign on change.
-local function LaneT3Down(lane)
-	local tower = GetTower(ourTeam, tier3TowerIds[lane])
-	return not Fu.IsValidBuilding(tower)
+-- A lane down to its T3 or deeper (T2 down): part of the base / high-ground defence.
+local function IsBaseLane(lane)
+	local _, tier = LaneBuildingEntry(lane)
+	return tier >= 3
 end
 local function UnitLaneOf(unit, ancient)
 	local location = unit:GetLocation()
@@ -785,6 +786,8 @@ local function IsBigCreep(unit)
 	local name = unit:GetUnitName() or ""
 	return stringIncludes(name, "siege") or stringIncludes(name, "upgraded_mega")
 end
+-- Enemy creeps this close to their lane front are its wave (map-scale choice: one lane wave's spread).
+local WAVE_FRONT_RADIUS = 1200
 local baseAssign = { at = -999, active = false, assign = {}, rims = {}, logKey = {} }
 local function BaseAssignment()
 	local now = DotaTime()
@@ -803,13 +806,22 @@ local function BaseAssignment()
 	local ancientLoc = ancient:GetLocation()
 	local rimList = {}
 	for _, lane in ipairs(creepLaneIds) do
-		if LaneT3Down(lane) then
+		if IsBaseLane(lane) then
+			local rimLoc = getHighGroundWaitPoint(ourTeam, lane)
+			local front = GetLaneFrontLocation(GetOpposingTeam(), lane, 0)
+			local tpLoc = Fu.GetNearbyLocationToTp(rimLoc)
 			rimList[#rimList + 1] = {
 				lane = lane,
-				loc = getHighGroundWaitPoint(ourTeam, lane),
+				loc = rimLoc,
 				enemyAtRim = 0,
 				enemyNear = 0,
 				alliedNear = 0,
+				front = front,
+				waveCreeps = 0,
+				waveAllied = 0,
+				waveEta = front ~= nil and DefendLaneRules.WaveEta(Fu.GetLocationToLocationDistance(front, rimLoc))
+					or nil,
+				tpWalk = tpLoc ~= nil and Fu.GetLocationToLocationDistance(tpLoc, rimLoc) or nil,
 			}
 		end
 	end
@@ -842,18 +854,28 @@ local function BaseAssignment()
 					rim.siege = true
 				end
 			end
+			-- The next wave: this lane's enemy creeps at its enemy lane front (game 069 early start).
+			if rim.front ~= nil and GetUnitToLocationDistance(entry.unit, rim.front) <= WAVE_FRONT_RADIUS then
+				rim.waveCreeps = rim.waveCreeps + 1
+			end
 		end
 	end
-	-- Our lane creeps between the wave and the rim (within its wave radius, on its lane).
+	-- Our lane creeps between the wave and the rim (within its wave radius, on its lane), and those meeting the next
+	-- wave at the enemy lane front.
 	for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_CREEPS) or {}) do
 		if Fu.IsValid(unit) then
 			for _, rim in ipairs(rimList) do
-				if
-					rim ~= baseRim
-					and GetUnitToLocationDistance(unit, rim.loc) <= DefendLaneRules.HIGH_GROUND_RADIUS
-					and UnitLaneOf(unit, ancient) == rim.lane
-				then
-					rim.alliedNear = rim.alliedNear + 1
+				if rim ~= baseRim then
+					local nearRim = GetUnitToLocationDistance(unit, rim.loc) <= DefendLaneRules.HIGH_GROUND_RADIUS
+					local atFront = rim.front ~= nil and GetUnitToLocationDistance(unit, rim.front) <= WAVE_FRONT_RADIUS
+					if (nearRim or atFront) and UnitLaneOf(unit, ancient) == rim.lane then
+						if nearRim then
+							rim.alliedNear = rim.alliedNear + 1
+						end
+						if atFront then
+							rim.waveAllied = rim.waveAllied + 1
+						end
+					end
 				end
 			end
 		end
@@ -868,8 +890,11 @@ local function BaseAssignment()
 			enemyNear = rim.enemyNear,
 			alliedNear = rim.alliedNear,
 			ancientHit = rim == baseRim and ancientHit,
+			waveEta = rim.waveEta,
+			waveCreeps = rim.waveCreeps,
+			waveAllied = rim.waveAllied,
 		})
-		rim.need = DefendLaneRules.RimNeed(rim.why, rim.enemyNear, rim.siege)
+		rim.need = DefendLaneRules.RimNeed(rim.why, rim.why == "early" and rim.waveCreeps or rim.enemyNear, rim.siege)
 		if rim.why ~= nil then
 			lastThreat[rim.lane] = now
 		end
@@ -910,7 +935,7 @@ local function BaseAssignment()
 			pcall(
 				print,
 				string.format(
-					"[OHA-DEFEND] t=%.0f %s base-assign lane=%s rim=%.0f,%.0f wave=%d atRim=%d ours=%d heroes=%d need=%d assigned=%s why=%s",
+					"[OHA-DEFEND] t=%.0f %s base-assign lane=%s rim=%.0f,%.0f wave=%d atRim=%d ours=%d heroes=%d next=%d nextOurs=%d nextEta=%.0f need=%d assigned=%s why=%s",
 					now,
 					ourTeam == TEAM_DIRE and "dire" or "radiant",
 					tostring(laneNames[rim.lane] or rim.lane),
@@ -920,6 +945,9 @@ local function BaseAssignment()
 					rim.enemyAtRim,
 					rim.alliedNear,
 					rim.heroes,
+					rim.waveCreeps or 0,
+					rim.waveAllied or 0,
+					rim.waveEta or -1,
 					rim.need,
 					assigned,
 					tostring(rim.why or "none")
@@ -928,11 +956,6 @@ local function BaseAssignment()
 		end
 	end
 	return baseAssign
-end
--- A lane down past its T3 (or to the T4s / the Ancient) is part of the base defence.
-local function IsBaseLane(lane)
-	local _, tier = LaneBuildingEntry(lane)
-	return tier >= 4 or tier == 3 and LaneT3Down(lane)
 end
 -- The defend mode a bot uses for the "base" rim: its current defend lane when that lane is a base lane, else the
 -- first base lane, so the mode doesn't flip between equal lanes.
@@ -2084,6 +2107,38 @@ local BASE_ASSIGN_KEEP = { ["group-up"] = true, ["ancient-heroes"] = true, ["anc
 -- Cuts the floor never lifts (they may still be zeroed for another lane): outnumbered by enemy heroes, and a siege
 -- group-up on another lane.
 local BASE_ASSIGN_NO_RAISE = { ["hg-outnumbered"] = true, outnumbered = true, ["group-up-other-lane"] = true }
+-- [OHA-DEFEND] rim-early: this bot's ETA to its early rim against the wave's (walk, or TP when ready and faster).
+local function EarlyStart(bot, rimLane, rim)
+	local tp = Fu.Utils.GetItemFromFullInventory(bot, "item_tpscroll")
+	local myEta, via = DefendLaneRules.DefenderEta(
+		GetUnitToLocationDistance(bot, rim.loc),
+		bot:GetCurrentMovementSpeed(),
+		Fu.CanCastAbility(tp),
+		rim.tpWalk
+	)
+	local start = DefendLaneRules.StartEarly(rim.waveEta, myEta)
+	local key = tostring(rimLane) .. "|" .. tostring(start) .. "|" .. via
+	if key ~= bot._rimEarlyKey or DotaTime() >= (bot._rimEarlyLogAt or -999) then
+		bot._rimEarlyKey = key
+		bot._rimEarlyLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[OHA-DEFEND] t=%.0f %s rim-early lane=%s waveEta=%.0f myEta=%.0f via=%s start=%s next=%d nextOurs=%d",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[rimLane] or rimLane),
+				rim.waveEta or -1,
+				myEta,
+				via,
+				tostring(start),
+				rim.waveCreeps or 0,
+				rim.waveAllied or 0
+			)
+		)
+	end
+	return start
+end
 local function BaseAssignDesire(bot, lane, desire, why)
 	if BASE_ASSIGN_KEEP[why or ""] or bot:IsIllusion() or not bot:IsHero() or not IsBaseLane(lane) then
 		return desire
@@ -2100,7 +2155,10 @@ local function BaseAssignDesire(bot, lane, desire, why)
 		result, reason = 0, "base-assigned-other"
 	else
 		local rim = assignment.rims[rimLane]
-		if rim ~= nil and rim.alive and rim.why ~= "heroes" and not BASE_ASSIGN_NO_RAISE[why or ""] then
+		-- An early rim (the next wave still on its way): raise only once this bot would reach the rim with or just
+		-- after the wave (DefendLaneRules.StartEarly), not as soon as the wave is seen.
+		local start = rim ~= nil and (rim.why ~= "early" or EarlyStart(bot, rimLane, rim))
+		if start and rim.alive and rim.why ~= "heroes" and not BASE_ASSIGN_NO_RAISE[why or ""] then
 			local floor = (rim.enemyNear >= 6 or rim.siege) and 0.85 or 0.7
 			if floor > desire then
 				result, reason = floor, "base-assign"

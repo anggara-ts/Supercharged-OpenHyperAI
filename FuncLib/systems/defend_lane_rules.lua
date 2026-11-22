@@ -157,7 +157,9 @@ DefendLaneRules.CREEPS_PER_HERO = 5
 -- Is a rim threatened? s.enemyAtRim (within AT_RIM), s.enemyNear (within WAVE_RADIUS, at-rim ones included),
 -- s.alliedNear (our lane creeps within WAVE_RADIUS), s.heroes (enemy heroes seen at the rim), s.ancientHit (base rim
 -- only: the Ancient lost HP in the last seconds).
--- Returns the reason ("heroes", "wave", "pushed", "ancient-hit") or nil. A wave further out that our creeps hold
+-- s.waveEta / s.waveCreeps / s.waveAllied: the next wave on the lane (enemy creeps at its enemy lane front), its ETA
+-- to the rim (WaveEta) and our creeps meeting it there.
+-- Returns the reason ("heroes", "wave", "pushed", "ancient-hit", "early") or nil. A wave further out that our creeps hold
 -- (as many of ours as of theirs) is no threat.
 function DefendLaneRules.RimThreat(s)
 	if (s.heroes or 0) > 0 then
@@ -173,7 +175,46 @@ function DefendLaneRules.RimThreat(s)
 	if s.ancientHit then
 		return "ancient-hit"
 	end
+	-- #53, game 069 (maintainer: the bots start walking when the creeps reach the T3, too late): the next wave further
+	-- down the lane (its enemy lane front) with fewer of our creeps meeting it, within EARLY_HORIZON seconds.
+	if
+		s.waveEta ~= nil
+		and s.waveEta <= DefendLaneRules.EARLY_HORIZON
+		and (s.waveCreeps or 0) >= 2
+		and (s.waveAllied or 0) < s.waveCreeps
+	then
+		return "early"
+	end
 	return nil
+end
+-- Early start (#53, game 069). Game data (installed scripts/npc/npc_units.txt, read 2026-11-22): lane creeps
+-- (melee, ranged, siege, mega) have MovementSpeed 325; item_tpscroll AbilityChannelTime 3.0 (items.txt, 7.42).
+-- EARLY_MARGIN (s) and EARLY_HORIZON (s) are choices.
+DefendLaneRules.CREEP_SPEED = 325
+DefendLaneRules.TP_CHANNEL = 3
+DefendLaneRules.EARLY_MARGIN = 3
+DefendLaneRules.EARLY_HORIZON = 25
+-- Seconds the wave needs to walk distLeft to the rim.
+function DefendLaneRules.WaveEta(distLeft)
+	return math.max(0, distLeft or 0) / DefendLaneRules.CREEP_SPEED
+end
+-- Seconds the defender needs: walking, or a TP (channel + walk from the landing building) when one is ready and
+-- faster. Returns the time and "walk" or "tp".
+function DefendLaneRules.DefenderEta(walkDist, moveSpeed, tpReady, tpWalkDist)
+	local speed = math.max(100, moveSpeed or 300)
+	local walk = math.max(0, walkDist or 0) / speed
+	if tpReady and tpWalkDist ~= nil then
+		local tp = DefendLaneRules.TP_CHANNEL + math.max(0, tpWalkDist) / speed
+		if tp < walk then
+			return tp, "tp"
+		end
+	end
+	return walk, "walk"
+end
+-- Start for an early rim now? When the defender would reach it with the wave or just after (myEta >= waveEta -
+-- EARLY_MARGIN), so it arrives with or before the wave.
+function DefendLaneRules.StartEarly(waveEta, myEta)
+	return waveEta ~= nil and myEta ~= nil and myEta >= waveEta - DefendLaneRules.EARLY_MARGIN
 end
 -- Defenders a rim needs: everyone for enemy heroes there (the high-ground fight rules decide fight or fall back), else
 -- 1 per CREEPS_PER_HERO creeps (at least 1), +1 for a siege or mega creep, at most 5.
