@@ -3,7 +3,7 @@ This is a place for you to customize the Open Hyper AI bots.
 
 1. When modiftying this file, be VERY careful to the spelling, punctuation and variable names - it's very easy to cause
    syntax errors and mess up the entire logic for all bots, and could be hard for you to debug.
-2. In the case you saw the bots having some random names or picks (heroes not what you have set or without "OHA-DEV" name suffix),
+2. In the case you saw the bots having some random names or picks (heroes not what you have set or without the "SHy" name suffix),
    that means you had made some mistakes/errors while modifying this file.
 3. In any case this file got messed up and caused the bots to malfunction, you can try to restore the file. Either you have a
    copy to replace, or resubscribe the script, or download from github.
@@ -141,7 +141,7 @@ Customize.Dire_Names = {
 	"Random",
 }
 
--- Set to true to show team name tags in bot names (e.g. "LQD.miCKe.OHA-DEV"), or false to hide them (e.g. "miCKe.OHA-DEV").
+-- Set to true to show team name tags in bot names (e.g. "LQD.miCKe.SHy"), or false to hide them (e.g. "miCKe.SHy").
 Customize.Show_Team_Names = false
 
 -- Set custom team name tags for each side. Leave as '' to use a random pro team name.

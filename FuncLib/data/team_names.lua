@@ -1,4 +1,4 @@
--- Bot name lists. defaultPostfix is the OHA-DEV tag on bot names.
+-- Bot name lists. defaultPostfix is the SHy tag on bot names (Supercharged OpenHyperAI).
 if GetScriptDirectory == nil then
 	GetScriptDirectory = function()
 		return "bots"
@@ -7,7 +7,7 @@ end
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
 local TeamNames = {}
-TeamNames.defaultPostfix = "OHA-DEV"
+TeamNames.defaultPostfix = "SHy"
 TeamNames.maxTeamSize = 12
 local teamList = {
 	{ name = "XG", players = { "Ame", "Xm", "Xxs", "XinQ", "xNova" } },
