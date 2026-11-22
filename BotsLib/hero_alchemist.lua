@@ -204,10 +204,9 @@ function X.SkillsComplement()
 		bot:Action_UseAbilityOnLocation(acidSprayAbility, acidSprayLocation)
 		return
 	end
-	local berserkPotionWhy
-	berserkPotionDesire, berserkPotionTarget, berserkPotionWhy = X.ConsiderBerserkPotion()
+	berserkPotionDesire, berserkPotionTarget = X.ConsiderBerserkPotion()
 	if berserkPotionDesire > 0 then
-		X.OrderBerserkPotion(berserkPotionTarget, berserkPotionWhy)
+		bot:Action_UseAbilityOnEntity(berserkPotionAbility, berserkPotionTarget)
 		return
 	end
 end
@@ -759,7 +758,7 @@ function X.ConsiderBerserkPotion()
 	local blocked = X.BerserkPotionBlocked()
 	if blocked ~= nil then
 		X.LogBerserkSkip(blocked)
-		return BOT_ACTION_DESIRE_NONE, nil, nil
+		return BOT_ACTION_DESIRE_NONE, nil
 	end
 	-- Every rule needs an enemy hero near: none within 1600, nothing to read.
 	local enemies = {}
@@ -770,7 +769,7 @@ function X.ConsiderBerserkPotion()
 	end
 	if #enemies == 0 then
 		X.LogBerserkSkip("no-enemies")
-		return BOT_ACTION_DESIRE_NONE, nil, nil
+		return BOT_ACTION_DESIRE_NONE, nil
 	end
 	local castRange = berserkPotionAbility:GetCastRange()
 	local allies = Fu.GetNearbyHeroes(bot, castRange + 100, false, BOT_MODE_NONE) or {}
@@ -830,14 +829,30 @@ function X.ConsiderBerserkPotion()
 	local index, why = BerserkPotionRules.Pick(candidates)
 	if index == nil then
 		X.LogBerserkSkip("no-target")
-		return BOT_ACTION_DESIRE_NONE, nil, nil
+		return BOT_ACTION_DESIRE_NONE, nil
 	end
-	return BOT_ACTION_DESIRE_HIGH, units[index], why
+	local target = units[index]
+	if X.NoteBerserkPotionOrder(target, why) then
+		return BOT_ACTION_DESIRE_NONE, nil
+	end
+	return BOT_ACTION_DESIRE_HIGH, target
 end
--- Throw it and log it at most once per 3 s. A target ordered for 3 s in range with no throw was refused: it is left
--- out for BERSERK_POTION_REFUSED_HOLD s (berserk-refused).
-function X.OrderBerserkPotion(target, why)
+-- A brew in hand: another change may hold the other casts while brewing, so those seconds are not an order.
+-- 7.42 abilities_english.txt: DOTA_Tooltip_modifier_alchemist_unstable_concoction; the throw ability is shown only
+-- while brewing (datafeed note: "While brewing, this ability is replaced by Unstable Concoction Throw").
+function X.IsBrewingForPotion()
+	return bot:HasModifier("modifier_alchemist_unstable_concoction")
+		or (unstableConcoctionThrowAbility:GetCastRange() > 0 and not unstableConcoctionThrowAbility:IsHidden())
+end
+-- The throw ConsiderBerserkPotion returns (SkillsComplement casts it): log it at most once per 3 s. A target ordered
+-- for 3 s in range with no throw was refused: it is left out for BERSERK_POTION_REFUSED_HOLD s (berserk-refused) and
+-- this returns true. Not counted while brewing (X.IsBrewingForPotion).
+function X.NoteBerserkPotionOrder(target, why)
 	local name = shortName(target)
+	if X.IsBrewingForPotion() then
+		bot._potionOrder = nil
+		return false
+	end
 	local inRange = GetUnitToUnitDistance(bot, target) <= berserkPotionAbility:GetCastRange()
 	local order, refused = BerserkPotionRules.OrderStep(
 		bot._potionOrder,
@@ -861,7 +876,7 @@ function X.OrderBerserkPotion(target, why)
 				BERSERK_POTION_REFUSED_HOLD
 			)
 		)
-		return
+		return true
 	end
 	bot._potionSkipWhy = nil
 	if DotaTime() >= (bot._potionLogAt or -999) then
@@ -880,6 +895,6 @@ function X.OrderBerserkPotion(target, why)
 			)
 		)
 	end
-	bot:Action_UseAbilityOnEntity(berserkPotionAbility, target)
+	return false
 end
 return X

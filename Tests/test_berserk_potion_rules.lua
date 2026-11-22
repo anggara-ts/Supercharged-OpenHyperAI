@@ -76,14 +76,29 @@ T.test("berserk potion: the Alchemist rule runs on the stub", function()
 	enemyHero._loc = bot:GetLocation()
 	-- A new think (the first call above logged a skip).
 	Stub.time = (Stub.time or 0) + 5
-	local okR, desireR, target, why = pcall(X.ConsiderBerserkPotion)
+	local okR, desireR, target = pcall(X.ConsiderBerserkPotion)
 	T.ok(okR, "ConsiderBerserkPotion when castable: " .. tostring(desireR))
 	T.eq(desireR, BOT_ACTION_DESIRE_HIGH, "thrown")
 	T.ok(target == bot, "at himself (self-cast allowed: no target flags in the game data)")
-	T.eq(why, "dispel", "to remove the root")
-	local okO = pcall(X.OrderBerserkPotion, target, why)
-	T.ok(okO, "the order runs")
 	T.eq(bot._potionOrder and bot._potionOrder.name, "alchemist", "the order is remembered for the refused check")
+	-- Ordered every think for 3 s in range and never thrown (the stub's cooldown stays ready): refused, held out.
+	for _ = 1, 7 do
+		Stub.time = Stub.time + 0.5
+		desireR = X.ConsiderBerserkPotion()
+	end
+	T.eq(desireR, BOT_ACTION_DESIRE_NONE, "refused: no more orders at himself")
+	T.ok((bot._potionRefused or {}).alchemist ~= nil, "himself held out")
+	-- While brewing a concoction, the seconds do not count.
+	bot._potionRefused, bot._potionOrder = nil, nil
+	bot.HasModifier = function(_, name)
+		return name == "modifier_alchemist_unstable_concoction"
+	end
+	for _ = 1, 8 do
+		Stub.time = Stub.time + 0.5
+		desireR = X.ConsiderBerserkPotion()
+	end
+	T.eq(desireR, BOT_ACTION_DESIRE_HIGH, "still wanted while brewing")
+	T.eq(bot._potionRefused, nil, "not counted as refused while brewing")
 end)
 
 T.test("berserk potion: a refused order needs 3 s of orders in range with no throw", function()
