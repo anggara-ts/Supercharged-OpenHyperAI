@@ -44,6 +44,102 @@ function EscapeRules.Direction(bx, by, enemies, hx, hy, homeWeight)
 	return x / len, y / len
 end
 
+-- The escape direction from (bx, by) for a jump of `length` toward safety (sx, sy: the nearest standing allied tower
+-- or our fountain), bent away from the threats only inside that (#36, game 071, 34:06: the exit Orb went away from
+-- Undying 106 away but 547 farther from home, toward the Dire top T2, and the Jaunt to it never came).
+-- Candidates every BEND_STEP degrees off the safe direction, up to MAX_BEND (any of them still brings her closer to
+-- safety); a candidate is out when its path comes closer to an enemy than min(PASS_RADIUS, how near that enemy is now)
+-- (she may not walk into or past a threat). Among the rest: the best cos(bend) + AWAY_BEND x (the share pointing away
+-- from the enemies, each weighted 1 / distance). Only when every candidate in the cone passes a threat, the whole
+-- circle is tried ("away": it may take her farther from home); when that fails too, EscapeRules.Direction
+-- ("fallback"). enemies: a list of { x, y }. Returns dx, dy, how ("safe" | "bent" | "away" | "fallback").
+EscapeRules.MAX_BEND = 75
+EscapeRules.BEND_STEP = 15
+EscapeRules.PASS_RADIUS = 350
+EscapeRules.AWAY_BEND = 0.5
+local function ClosestOnSegment(bx, by, dx, dy, length, px, py)
+	local t = (px - bx) * dx + (py - by) * dy
+	t = math.max(0, math.min(length, t))
+	local cx, cy = bx + dx * t, by + dy * t
+	return math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
+end
+function EscapeRules.SafeDirection(bx, by, enemies, sx, sy, length)
+	enemies = enemies or {}
+	length = length or 1000
+	local hx, hy = sx - bx, sy - by
+	local hLen = math.sqrt(hx * hx + hy * hy)
+	if hLen < 1 then
+		local x, y = EscapeRules.Direction(bx, by, enemies, sx, sy)
+		return x, y, "fallback"
+	end
+	hx, hy = hx / hLen, hy / hLen
+	local ax, ay = 0, 0
+	for _, enemy in ipairs(enemies) do
+		local ex, ey = bx - enemy.x, by - enemy.y
+		local dist = math.max(1, math.sqrt(ex * ex + ey * ey))
+		ax, ay = ax + ex / (dist * dist), ay + ey / (dist * dist)
+	end
+	local aLen = math.sqrt(ax * ax + ay * ay)
+	if aLen > 0 then
+		ax, ay = ax / aLen, ay / aLen
+	end
+	local function clear(dx, dy)
+		for _, enemy in ipairs(enemies) do
+			local nowDist = math.sqrt((enemy.x - bx) * (enemy.x - bx) + (enemy.y - by) * (enemy.y - by))
+			local limit = math.min(EscapeRules.PASS_RADIUS, nowDist) - 1
+			if ClosestOnSegment(bx, by, dx, dy, length, enemy.x, enemy.y) < limit then
+				return false
+			end
+		end
+		return true
+	end
+	local function best(maxBend)
+		local bestX, bestY, bestScore, bestBend = nil, nil, nil, nil
+		for bend = -maxBend, maxBend, EscapeRules.BEND_STEP do
+			local rad = math.rad(bend)
+			local dx = hx * math.cos(rad) - hy * math.sin(rad)
+			local dy = hx * math.sin(rad) + hy * math.cos(rad)
+			if clear(dx, dy) then
+				local score = math.cos(rad) + EscapeRules.AWAY_BEND * (dx * ax + dy * ay)
+				if bestScore == nil or score > bestScore + 1e-9 then
+					bestX, bestY, bestScore, bestBend = dx, dy, score, bend
+				end
+			end
+		end
+		return bestX, bestY, bestBend
+	end
+	local x, y, bend = best(EscapeRules.MAX_BEND)
+	if x ~= nil then
+		return x, y, bend == 0 and "safe" or "bent"
+	end
+	x, y = best(180)
+	if x ~= nil then
+		return x, y, "away"
+	end
+	x, y = EscapeRules.Direction(bx, by, enemies, sx, sy)
+	return x, y, "fallback"
+end
+
+-- An escape Waning Rift (its move: max_distance 350, cast range 0, cast point 0.1, cooldown 15/14/13/12; silence
+-- 2-3.5s in radius 400; datafeed hero 13, 7.42) when she is under RIFT_ESCAPE_HP with an enemy hero on her or at
+-- least RIFT_ESCAPE_UNITS creeps / zombies / summons attacking her, and no Jaunt to an Orb gets her out now (#36,
+-- game 071, 34:04-34:15: Orb down, a 14-17 creep wave and zombies on her, no escape Rift at any point).
+EscapeRules.RIFT_ESCAPE_HP = 0.35
+EscapeRules.RIFT_ESCAPE_UNITS = 2
+function EscapeRules.EscapeRiftNow(hp, heroOnHer, unitAttackers, exitJauntReady)
+	if exitJauntReady == true or (hp or 1) >= EscapeRules.RIFT_ESCAPE_HP then
+		return false
+	end
+	return heroOnHer == true or (unitAttackers or 0) >= EscapeRules.RIFT_ESCAPE_UNITS
+end
+
+-- A low-HP shift against units only (no hero hit in the last 1.5s, no stun or projectile due) only delays the death
+-- inside a creep wave or among zombies (game 071, t=2051: a second shift in place at 5% HP among 14-17 creeps, dead
+-- at 2055). When she can move out (a Rift, or a Jaunt to an Orb that gets her out), she does that instead; a shift is
+-- for hero damage or a stun. With no way to move, the shift stays.
+function EscapeRules.MoveOutInsteadOfShift(why, heroHit, threatDue, canMoveOut)
+	return why == "low-hp-units" and heroHit ~= true and threatDue ~= true and canMoveOut == true
+end
 -- Is a point (px, py) on the escape side of (bx, by) for the direction (dx, dy)? For a Jaunt to the orb: it must
 -- take her the way the escape goes (game 064, t=2600: a danger Jaunt to an orb flying away from base).
 function EscapeRules.IsOnEscapeSide(bx, by, px, py, dx, dy)

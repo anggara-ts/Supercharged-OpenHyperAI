@@ -317,9 +317,30 @@ function X.BlinkState(blinkItem)
 	end
 	return "cooldown"
 end
--- The point for an escape jump of `distance`: away from the visible enemy heroes within 1600 (the nearest counts
--- most) and toward our fountain (EscapeRules.Direction). Replaces Fu.GetEscapeLoc() (our Ancient once 2500 from the
--- fountain) for her escapes: game 064, 43:23, she died moving away from base.
+-- Where safety is for an escape: the nearest standing allied tower within SAFE_TOWER_RANGE, else our fountain
+-- (#36, game 071). Returns the location and "tower" | "fountain".
+local SAFE_TOWER_RANGE = 5000
+function X.SafePoint()
+	local best, bestDist = nil, SAFE_TOWER_RANGE
+	for id = TOWER_TOP_1 or 0, TOWER_BASE_2 or 10 do
+		local okTower, tower = pcall(GetTower, GetTeam(), id)
+		tower = okTower and tower or nil
+		if tower ~= nil and not tower:IsNull() and tower:IsAlive() then
+			local dist = GetUnitToUnitDistance(bot, tower)
+			if dist < bestDist then
+				best, bestDist = tower, dist
+			end
+		end
+	end
+	if best ~= nil then
+		return best:GetLocation(), "tower"
+	end
+	return Fu.GetTeamFountain(), "fountain"
+end
+-- The point for an escape jump of `distance`: toward safety (X.SafePoint), bent away from the visible enemy heroes
+-- within 1600 only inside that (EscapeRules.SafeDirection, game 071 34:06: the exit Orb went 547 farther from home).
+-- The path check looks at least 600 ahead, so a short jump does not head into a threat behind it. Returns the point,
+-- the unit direction and how (safe | bent | away | fallback, kept in bot._escapeHow for the escape-action line).
 function X.EscapePoint(distance)
 	local here = bot:GetLocation()
 	local enemies = {}
@@ -329,8 +350,9 @@ function X.EscapePoint(distance)
 			enemies[#enemies + 1] = { x = at.x, y = at.y }
 		end
 	end
-	local home = Fu.GetTeamFountain()
-	local dx, dy = EscapeRules.Direction(here.x, here.y, enemies, home.x, home.y)
+	local safe, safeKind = X.SafePoint()
+	local dx, dy, how = EscapeRules.SafeDirection(here.x, here.y, enemies, safe.x, safe.y, math.max(distance or 0, 600))
+	bot._escapeHow = tostring(how) .. "/" .. tostring(safeKind)
 	return Vector(here.x + dx * distance, here.y + dy * distance, here.z), dx, dy
 end
 -- One line per escape action (#36, game 064: no line named the escape action or where it went).
@@ -351,7 +373,7 @@ function X.LogEscapeAction(spell, why, point)
 	pcall(
 		print,
 		string.format(
-			"[OHA-PUCK] t=%.0f escape-action spell=%s why=%s to=%.0f,%.0f jump=%.0f home=%.0f->%.0f nearest=%s:%.0f->%.0f enemies=%d hp=%.2f blink=%s",
+			"[OHA-PUCK] t=%.0f escape-action spell=%s why=%s to=%.0f,%.0f jump=%.0f home=%.0f->%.0f nearest=%s:%.0f->%.0f enemies=%d hp=%.2f blink=%s dir=%s",
 			DotaTime(),
 			spell,
 			why,
@@ -365,7 +387,9 @@ function X.LogEscapeAction(spell, why, point)
 			nearest ~= nil and GetUnitToLocationDistance(nearest, point) or -1,
 			#Fu.GetEnemiesNearLoc(here, 1200),
 			Fu.GetHP(bot),
-			X.BlinkState(X.BlinkItem())
+			X.BlinkState(X.BlinkItem()),
+			-- How the last escape direction was picked (EscapeRules.SafeDirection) and toward what.
+			tostring(bot._escapeHow or "-")
 		)
 	)
 end
@@ -635,6 +659,25 @@ function X.ExitOrbJaunt()
 	end
 	local check = X.ExitJauntCheck(orbAt)
 	if not check.ok then
+		-- Game 071, t=2046-2049: the exit Orb flew out and no Jaunt came, with nothing in the log to say why.
+		if DotaTime() - thrownAt > 1.0 and DotaTime() >= (bot._exitOrbSkipLogAt or -999) then
+			bot._exitOrbSkipLogAt = DotaTime() + 3
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUCK] t=%.0f phase-exit skip=jaunt why=%s when=exit-orb dist=%.0f need=%.0f gain=%.0f enemies=%d->%d since=%.2f hp=%.2f",
+					DotaTime(),
+					tostring(check.why),
+					check.dist,
+					check.need,
+					check.gain or -1,
+					check.enemiesHere,
+					check.enemiesThere,
+					DotaTime() - thrownAt,
+					Fu.GetHP(bot)
+				)
+			)
+		end
 		return false
 	end
 	bot._exitOrbAt = nil
@@ -796,6 +839,27 @@ function X.HpLoss()
 		end
 	end
 	return highest - Fu.GetHP(bot)
+end
+-- An enemy hero within 600 that hit her in the last 2s.
+function X.HeroOnHer()
+	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, 600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemyHero) and bot:WasRecentlyDamagedByHero(enemyHero, 2.0) then
+			return true
+		end
+	end
+	return false
+end
+-- A Jaunt to an Orb in flight gets her out now (X.ExitJauntCheck).
+function X.ExitJauntReady()
+	if not etherealJauntAbility:IsFullyCastable() or bot:IsRooted() then
+		return false
+	end
+	local orbAt = X.OrbInFlight()
+	return orbAt ~= nil and X.ExitJauntCheck(orbAt).ok == true
+end
+-- An escape Rift is wanted now (EscapeRules.EscapeRiftNow): low, a hero or 2+ units on her, no Jaunt out.
+function X.EscapeRiftWanted()
+	return EscapeRules.EscapeRiftNow(Fu.GetHP(bot), X.HeroOnHer(), X.UnitAttackers(), X.ExitJauntReady())
 end
 -- Enemy non-hero units (creeps, zombies, summons) within 700 attacking her.
 function X.UnitAttackers()
@@ -1500,6 +1564,15 @@ function X.ConsiderWaningRift()
 			return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation()
 		end
 	end
+	-- Low and being hit, with no Jaunt out right now: Rift toward safety for its move (EscapeRules.EscapeRiftNow, game
+	-- 071 34:04-34:15). Its silence still hits heroes near where she lands.
+	X.riftWhy = "escape-low"
+	local okLow, lowRift = pcall(X.EscapeRiftWanted)
+	if okLow and lowRift then
+		local escapePoint = X.EscapePoint(moveDistance - 10)
+		X.LogEscapeAction("rift", "escape-low", escapePoint)
+		return BOT_ACTION_DESIRE_HIGH, escapePoint
+	end
 	X.riftWhy = "stuck"
 	if Fu.IsStuck(bot) then
 		local escapeLocation = Fu.GetEscapeLoc()
@@ -1713,6 +1786,33 @@ function X.ConsiderPhaseShift()
 	local creepHit = lowHp and bot:WasRecentlyDamagedByCreep(1.0)
 	local lowHpWhy = lowHp and EscapeRules.LowHpPhase(Fu.GetHP(bot), hpLoss, creepHit, attackers) or nil
 	if lowHpWhy ~= nil then
+		-- Units only, nothing due from a hero, and a Rift out is ready: move out, no shift in place
+		-- (EscapeRules.MoveOutInsteadOfShift, game 071 t=2051). The Rift goes in ConsiderWaningRift (why=escape-low).
+		local heroHit = bot:WasRecentlyDamagedByAnyHero(1.5)
+		local okLinear, linearThreat =
+			pcall(Fu.FindLinearProjectileIncoming, bot, phaseShiftAbility:GetCastPoint(), "cyclone")
+		local threatDue = okLinear and linearThreat ~= nil
+			or Fu.IsStunProjectileIncoming(bot, 1000)
+			or Fu.IsUnitTargetProjectileIncoming(bot, 1000)
+		local okRift, riftWanted = pcall(X.EscapeRiftWanted)
+		local canMoveOut = waningRiftAbility:IsFullyCastable() and okRift and riftWanted == true
+		if EscapeRules.MoveOutInsteadOfShift(lowHpWhy, heroHit, threatDue, canMoveOut) then
+			if DotaTime() >= (bot._moveOutLogAt or -999) then
+				bot._moveOutLogAt = DotaTime() + 3
+				pcall(
+					print,
+					string.format(
+						"[OHA-PUCK] t=%.0f phase skip=move-out why=%s hp=%.2f attackers=%d creeps=%d",
+						DotaTime(),
+						lowHpWhy,
+						Fu.GetHP(bot),
+						attackers,
+						#(bot:GetNearbyCreeps(700, true) or {})
+					)
+				)
+			end
+			return BOT_ACTION_DESIRE_NONE
+		end
 		X.phaseWhy = lowHpWhy
 		if DotaTime() >= (bot._lowHpPhaseLogAt or -999) then
 			bot._lowHpPhaseLogAt = DotaTime() + 3

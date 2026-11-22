@@ -170,6 +170,56 @@ T.test("escape rules: a close dodge Phase Shift goes out at once (game 067, t=30
 	T.eq(R.PhaseDodgeResult(0.2, nil), "cast", "unknown time")
 end)
 
+T.test("escape rules: the escape heads toward safety, bent away from threats (game 071, 34:06)", function()
+	local R = load()
+	local function homeDist(x, y, hx, hy)
+		return math.sqrt((hx - x) * (hx - x) + (hy - y) * (hy - y))
+	end
+	-- Game 071 t=2046: Puck (Radiant) at about -1400,5880, Undying 106 away on the home side, our fountain about
+	-- -6750,-6250 (home 13315). The old Direction sent the exit Orb to 165,5752: 547 farther from home.
+	local bx, by, hx, hy = -1400, 5880, -6750, -6250
+	local undying = { x = -1490, y = 5825 }
+	local dx, dy, how = R.SafeDirection(bx, by, { undying }, hx, hy, 1600)
+	local before = homeDist(bx, by, hx, hy)
+	local after = homeDist(bx + dx * 1600, by + dy * 1600, hx, hy)
+	T.ok(after < before, "1600 jump gets closer to home: " .. before .. " -> " .. after)
+	T.eq(how, "bent", "bent off the home line around Undying")
+	local ux, uy = undying.x - bx, undying.y - by
+	T.ok(dx * ux + dy * uy <= 0, "does not move toward Undying")
+	local oldX, oldY = R.Direction(bx, by, { undying }, hx, hy)
+	T.ok(homeDist(bx + oldX * 1600, by + oldY * 1600, hx, hy) > before, "the old rule went farther from home")
+	-- Nobody near: straight to safety.
+	local sx, sy, sHow = R.SafeDirection(0, 0, {}, -1000, 0, 1000)
+	T.near(sx, -1, 1e-6, "straight west")
+	T.near(sy, 0, 1e-6, "no bend")
+	T.eq(sHow, "safe", "safe")
+	-- An enemy 300 ahead on the home line, far enough to go round: bent, still closer to home.
+	local rx, ry, rHow = R.SafeDirection(0, 0, { { x = -600, y = 0 } }, -3000, 0, 1600)
+	T.eq(rHow, "bent", "round the enemy on the home line")
+	T.ok(rx < 0, "still toward home")
+	-- Enemies on every side of the home cone: only then away.
+	local ring = {}
+	for deg = 0, 345, 15 do
+		ring[#ring + 1] = { x = math.cos(math.rad(deg)) * 200, y = math.sin(math.rad(deg)) * 200 }
+	end
+	local _, _, ringHow = R.SafeDirection(0, 0, ring, -3000, 0, 1600)
+	T.eq(ringHow, "fallback", "surrounded: the old rule")
+end)
+
+T.test("escape rules: escape Rift and moving out of a wave (game 071, 34:04-34:15)", function()
+	local R = load()
+	T.eq(R.EscapeRiftNow(0.14, false, 6, false), true, "game 071 t=2049: 14% HP, 6 units on her")
+	T.eq(R.EscapeRiftNow(0.2, true, 0, false), true, "a hero on her")
+	T.eq(R.EscapeRiftNow(0.2, true, 0, true), false, "a Jaunt out is ready")
+	T.eq(R.EscapeRiftNow(0.6, true, 6, false), false, "healthy")
+	T.eq(R.EscapeRiftNow(0.2, false, 1, false), false, "one creep")
+	T.eq(R.MoveOutInsteadOfShift("low-hp-units", false, false, true), true, "game 071 t=2051: units only, Rift ready")
+	T.eq(R.MoveOutInsteadOfShift("low-hp-units", true, false, true), false, "game 071 t=2044: hero hit too: shift")
+	T.eq(R.MoveOutInsteadOfShift("low-hp-units", false, true, true), false, "a stun due: shift")
+	T.eq(R.MoveOutInsteadOfShift("low-hp-units", false, false, false), false, "no way out: shift")
+	T.eq(R.MoveOutInsteadOfShift("low-hp-hit", false, false, true), false, "low-hp-hit stays a shift")
+end)
+
 T.test("puck: the escape helpers run on the stub", function()
 	T.stub.reset({ hero = "npc_dota_hero_puck", slot = 2 })
 	local ok, X = T.stub.load("BotsLib/hero_puck")
@@ -188,6 +238,10 @@ T.test("puck: the escape helpers run on the stub", function()
 		"PhaseDodgeThreat",
 		"OrbFlightTime",
 		"OffensiveRiftBlocked",
+		"SafePoint",
+		"HeroOnHer",
+		"ExitJauntReady",
+		"EscapeRiftWanted",
 		"AskDodgeHold",
 		"ExitOrbJaunt",
 		"ConsiderIllusoryOrbRaw",
