@@ -1,6 +1,6 @@
 -- Shared bot system: human orders (#222). The human's pings and chat commands become team orders for the bots.
 --   * A ping is a REQUEST: the bots check it (bots/lib/systems/human_order_rules.lua) and one bot says why when they
---     don't go. The same ping again within ~5s is an INSIST: they go anyway. A chat command (`!push top`) is an
+--     don't go. The same ping again within 2s is an INSIST: they go anyway. A chat command (`!push top`) is an
 --     ORDER. One bot answers ("On my way!", or the reason).
 --   * What a ping means comes from what it is on: an enemy hero (focus in a fight, gank elsewhere), an enemy
 --     building or wave near their tower (push), our building or a wave coming to ours (defend), a neutral camp

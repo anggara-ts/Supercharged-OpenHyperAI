@@ -42,16 +42,17 @@ T.test("human orders: chat commands parse, other commands do not", function()
 	T.eq(R.ParseChat(nil), nil, "nil text")
 end)
 
-T.test("human orders: the same ping again within 5s is an insist", function()
+T.test("human orders: the same ping again within 2s is an insist", function()
 	local R = rules()
 	local first = { time = 100, x = 4825, y = -3676 }
 	T.eq(R.IsInsist(nil, first), false, "no previous ping")
 	T.eq(R.IsInsist(first, first), false, "the same ping read twice")
-	T.eq(R.IsInsist(first, { time = 103, x = 4900, y = -3700 }), true, "79 away, 3s later")
+	T.eq(R.IsInsist(first, { time = 101.5, x = 4900, y = -3700 }), true, "79 away, 1.5s later")
+	T.eq(R.IsInsist(first, { time = 103, x = 4900, y = -3700 }), false, "3s later: too slow for an insist")
 	T.eq(R.IsInsist(first, { time = 106, x = 4825, y = -3676 }), false, "6s later")
-	T.eq(R.IsInsist(first, { time = 102, x = 5300, y = -3676 }), false, "475 away")
+	T.eq(R.IsInsist(first, { time = 101, x = 5300, y = -3676 }), false, "475 away")
 	local onHero = { time = 100, x = 0, y = 0, targetKey = "hero15" }
-	T.eq(R.IsInsist(onHero, { time = 102, x = 900, y = 0, targetKey = "hero15" }), true, "same hero, moved")
+	T.eq(R.IsInsist(onHero, { time = 101.8, x = 900, y = 0, targetKey = "hero15" }), true, "same hero, moved")
 end)
 
 T.test("human orders: building names give lane and tier", function()

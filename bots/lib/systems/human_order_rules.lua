@@ -3,13 +3,13 @@
 -- run them with plain numbers; bots/lib/systems/human_orders.lua reads the world and acts on the results.
 --
 -- The maintainer's design (2026-11-23, issue #222): a ping is a REQUEST (the bots check it and may refuse with a
--- reason); the same ping again within ~5s is INSIST (they go even if they disagree); a chat command (`!push top`)
+-- reason); the same ping again within 2s is INSIST (they go even if they disagree); a chat command (`!push top`)
 -- is an ORDER. An X-ping (the "danger" ping) means "back off" around the spot; on our own building it still asks
 -- for a defence.
 local Rules = {}
 
 -- The same spot (or the same target) pinged again within this many seconds, this close, is an insist.
-Rules.INSIST_SECONDS = 5
+Rules.INSIST_SECONDS = 2 -- maintainer 2026-11-23: "narrow it to 2 pings in 2 seconds"
 Rules.INSIST_RADIUS = 300
 -- How long an order lasts when nothing ends it earlier (design: "~20-30s or until done").
 Rules.ORDER_SECONDS = 25
