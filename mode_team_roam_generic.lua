@@ -228,6 +228,11 @@ function GetDesire()
 		end
 	end
 	local desire = GetDesireHelper()
+	if roamWhy == "rosh-drop" then
+		-- Not cut by the push / laning caps: in a push mode right after Roshan 0.97 became 0.5, below Valve's
+		-- item mode, and another hero picked the Aegis up (#15).
+		return RoamDone(desire, desire)
+	end
 	if offerUnit ~= nil then
 		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
 	end
@@ -856,6 +861,9 @@ function Think()
 		return
 	end
 	if Item.TryPickupRoshanDrop(bot) then
+		return
+	end
+	if Item.TryGuardRoshanDrop(bot) then
 		return
 	end
 	if isAvoidingTower and towerAvoidLocation ~= nil then

@@ -992,6 +992,31 @@ function CDOTA_Bot_Script:ActionImmediate_SwapItems(slotA, slotB)
 	end
 	return nil
 end
+-- An item a bot put aside for the Aegis is never sold (#15, maintainer 2026-11-23: "do not mark the item to
+-- sell"): FuncLib/systems/item.lua sets bot._roshKeep[name] = until; every sell rule goes through this method.
+local originalSellItem = CDOTA_Bot_Script.ActionImmediate_SellItem
+function CDOTA_Bot_Script:ActionImmediate_SellItem(item)
+	local keep = self._roshKeep
+	if keep ~= nil and item ~= nil and not item:IsNull() then
+		local name = item:GetName()
+		if keep[name] ~= nil and DotaTime() < keep[name] then
+			if DotaTime() >= (self._roshKeepLogAt or -99) then
+				self._roshKeepLogAt = DotaTime() + 10
+				pcall(
+					print,
+					string.format(
+						"[OHA-ITEM] t=%.0f %s sell-skip item=%s why=aegis-aside",
+						DotaTime(),
+						(string.gsub(self:GetUnitName(), "npc_dota_hero_", "")),
+						(string.gsub(name, "^item_", ""))
+					)
+				)
+			end
+			return nil
+		end
+	end
+	return originalSellItem(self, item)
+end
 local originalMethodGetUnitToLocationDistance = CDOTA_Bot_Script.GetUnitToLocationDistance
 function CDOTA_Bot_Script:GetUnitToLocationDistance(unit, location)
 	if location == nil then

@@ -12,6 +12,8 @@ local COSTS = {
 	item_glimmer_cape = 2150,
 	item_ultimate_scepter = 4200,
 	item_ward_observer = 0,
+	item_ward_sentry = 0,
+	item_clarity = 50,
 }
 
 -- A hero with a bag, and a ground the drop / pick-up orders act on only when the test says so (land()).
@@ -185,4 +187,161 @@ T.test("roshan drop: a dropped item nobody can reach is given up with a line", f
 	T.ok(not Item.TryPickupRoshanDrop(unit), "gives up after 30s")
 	T.eq(world.printed("room lost magic_wand why=timeout"), 1, "the loss is logged")
 	T.eq(Item.RoshanDropDesire(unit), 0, "the desire drops")
+end)
+
+T.test("roshan drop: the item put aside for the Aegis comes back, is not sold, and goes back to a main slot", function()
+	-- Maintainer, 2026-11-23: put even a high-value item aside for the Aegis, "but do not mark the item to sell".
+	local unit, Item, world = scene(FULL_MAIN, { "item_ward_observer" })
+	world.putOnGround("item_aegis")
+	Stub.time = 2294
+	Item.TryPickupRoshanDrop(unit)
+	world.land()
+	Item.TryPickupRoshanDrop(unit)
+	world.land()
+	Stub.time = Stub.time + 1.5
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "pick item_magic_wand", "fetches the Magic Wand")
+	world.land()
+	T.ok(not Item.TryPickupRoshanDrop(unit), "done")
+	T.eq(world.printed("aegis%-room item=magic_wand how=drop pickedBack=yes"), 1, "the result line")
+	unit:ActionImmediate_SellItem(unit:GetItemInSlot(unit:FindItemSlot("item_magic_wand")))
+	T.eq(world.printed("sell%-skip item=magic_wand why=aegis%-aside"), 1, "the sale is refused")
+	-- The Aegis is used: its slot is free, the Magic Wand waits in the backpack.
+	for slot = 0, 5 do
+		if world.bag[slot] ~= nil and world.bag[slot]:GetName() == "item_aegis" then
+			world.bag[slot] = nil
+		end
+	end
+	Stub.time = Stub.time + 60
+	T.ok(Item.RoshanDropDesire(unit) > 0, "team roam brings it back")
+	T.ok(not Item.TryPickupRoshanDrop(unit), "only from team roam's Think")
+	unit.GetActiveMode = function()
+		return BOT_MODE_TEAM_ROAM
+	end
+	T.ok(Item.TryPickupRoshanDrop(unit), "puts it down")
+	T.eq(world.orders[#world.orders], "drop item_magic_wand", "drop order")
+	world.land()
+	T.ok(Item.TryPickupRoshanDrop(unit), "picks it up")
+	T.eq(world.orders[#world.orders], "pick item_magic_wand", "pick order")
+	world.land()
+	Stub.time = Stub.time + 1.5
+	T.ok(not Item.TryPickupRoshanDrop(unit), "done")
+	T.ok(unit:FindItemSlot("item_magic_wand") <= 5, "back in a main slot")
+	T.eq(world.printed("aegis%-restore item=magic_wand how=drop pickedBack=yes"), 1, "the restore line")
+	T.eq(Item.RoshanDropDesire(unit), 0, "nothing left to do")
+end)
+
+T.test("roshan drop: with the whole bag full a cheaper backpack item is left for the item put aside", function()
+	local unit, Item, world = scene(FULL_MAIN, { "item_clarity", "item_ward_observer", "item_ward_sentry" })
+	world.putOnGround("item_aegis")
+	Stub.time = 2294
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "drop item_magic_wand", "the Aegis is worth an item, even with a full backpack")
+	world.land()
+	Item.TryPickupRoshanDrop(unit)
+	world.land()
+	Stub.time = Stub.time + 1.5
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "drop item_clarity", "the Clarity makes room for the Magic Wand")
+	T.eq(world.printed("room left clarity for=magic_wand cost=50"), 1, "logged")
+	world.land()
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "pick item_magic_wand", "then the Magic Wand")
+	world.land()
+	Stub.time = Stub.time + 1.5
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.printed("aegis%-room item=magic_wand how=drop pickedBack=yes"), 1, "it came back")
+	T.eq(world.printed("room dropped"), 1, "one item dropped for the Aegis itself")
+end)
+
+-- A team with the Aegis lying next to slot 1, and kills per team slot.
+local function claimScene(killsBySlot)
+	local unit = Stub.reset({ hero = "npc_dota_hero_keeper_of_the_light" })
+	local Item = require(GetScriptDirectory() .. "/FuncLib/systems/item")
+	local team = Stub.teams[unit:GetTeam()]
+	local kills = {}
+	for slot, ally in ipairs(team) do
+		kills[ally:GetPlayerID()] = killsBySlot[slot] or 0
+	end
+	_G.GetHeroKills = function(pid)
+		return kills[pid] or 0
+	end
+	local aegis = {
+		GetName = function()
+			return "item_aegis"
+		end,
+		IsNull = function()
+			return false
+		end,
+	}
+	local loc = team[1]:GetLocation()
+	_G.GetDroppedItemList = function()
+		return { { item = aegis, location = loc } }
+	end
+	local function printed(pattern)
+		local count = 0
+		for _, line in ipairs(Stub.printed) do
+			if string.find(line, pattern) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+	local function short(slot)
+		return (string.gsub(team[slot]:GetUnitName(), "npc_dota_hero_", ""))
+	end
+	return unit, Item, team, loc, printed, short
+end
+
+T.test("aegis claim: the best KDA near takes it, one claimer for the team, one line", function()
+	local _, Item, team, loc, printed, short = claimScene({ 1, 2, 9, 0, 3 })
+	for step = 0, 3 do
+		Stub.time = 1869 + step
+		for slot = 1, 5 do
+			T.eq(Item.ShouldClaimRoshanDrop(team[slot], loc, "item_aegis"), slot == 3, "slot " .. slot)
+		end
+	end
+	T.eq(printed("aegis%-claim hero=" .. short(3) .. " kda=9.00 why=best%-kda"), 1, "one claim line")
+	T.eq(printed("aegis%-claim"), 1, "and no other")
+end)
+
+T.test("aegis claim: a claimer that makes no progress is released to the next best KDA", function()
+	local _, Item, team, loc, printed, short = claimScene({ 1, 5, 9, 0, 3 })
+	Stub.time = 1869
+	T.ok(Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "slot 3 first")
+	for step = 1, 6 do
+		Stub.time = 1869 + step * 2
+		Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis")
+	end
+	T.ok(Item.ShouldClaimRoshanDrop(team[2], loc, "item_aegis"), "slot 2 next")
+	T.ok(not Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "slot 3 is out")
+	T.eq(printed("aegis%-claim hero=" .. short(2) .. ".*released=" .. short(3) .. ":stuck"), 1, "the release")
+end)
+
+T.test("aegis guard: an ally that is not the claimer keeps away from the Aegis", function()
+	local unit, Item, team, loc, printed = claimScene({ 0, 0, 0, 0, 0 })
+	local mySlot = nil
+	for slot, ally in ipairs(team) do
+		if ally == unit then
+			mySlot = slot
+		end
+	end
+	local kills = {}
+	for slot, ally in ipairs(team) do
+		kills[ally:GetPlayerID()] = slot == mySlot and 0 or slot
+	end
+	_G.GetHeroKills = function(pid)
+		return kills[pid] or 0
+	end
+	unit._loc = loc
+	local moved = nil
+	unit.Action_MoveToLocation = function(_, where)
+		moved = where
+	end
+	Stub.time = 1869
+	T.eq(Item.RoshanDropDesire(unit), 1.02, "above Valve's item mode (1.00 at Roshan drops)")
+	T.ok(Item.TryGuardRoshanDrop(unit), "steps away")
+	T.ok(moved ~= nil and GetUnitToLocationDistance(unit, loc) < 1, "was at the Aegis")
+	T.ok(math.abs(moved.x - loc.x) + math.abs(moved.y - loc.y) > 1000, "moves out of reach")
+	T.eq(printed("aegis%-guard what=aegis owner="), 1, "logged")
 end)
