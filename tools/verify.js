@@ -46,13 +46,15 @@ const fs = require("fs");
 const path = require("path");
 const cp = require("child_process");
 
-const DIR = path.join(__dirname, "verify");
+const { LOCAL_DIR, normTags } = require("./shared.js");
+
+const DIR = path.join(LOCAL_DIR, "verify");
 const FILE = path.join(DIR, "tracker.json");
 const ROOT = path.join(__dirname, "..");
 const LINEUP = path.join(ROOT, "bots/customize", "general.lua");
 const OVERRIDES = path.join(ROOT, "bots/lib", "systems", "global_overrides.lua");
 const HEROES_TSV = path.join(__dirname, "role-weights", "heroes.tsv");
-const ROWS = path.join(__dirname, "role-weights", "rows.json");
+const ROWS = path.join(LOCAL_DIR, "role-weights", "rows.json");
 const GH = process.env.GH || (process.platform === "win32" ? "C:\\Program Files\\GitHub CLI\\gh.exe" : "gh");
 
 function load() {
@@ -236,7 +238,7 @@ function parseVerify(body) {
 			})
 			.trim();
 		if (expect) parseRules(expect); // throws on a typo
-		const patterns = [...text.matchAll(/`([^`]+)`/g)].map((x) => x[1]).filter((p) => /\[SHy-/.test(p) || /\w/.test(p));
+		const patterns = [...text.matchAll(/`([^`]+)`/g)].map((x) => x[1]).filter((p) => /\[SHy-/.test(normTags(p)) || /\w/.test(p));
 		const item = { text, patterns, status: "pending", note: "", seen: {} };
 		if (expect) item.expect = expect;
 		if (heroList) item.heroes = heroList;
@@ -263,7 +265,7 @@ function cmdAdd(pr) {
 	let kept = 0;
 	if (old) {
 		for (const it of items) {
-			const o = old.items.find((x) => x.text === it.text);
+			const o = old.items.find((x) => normTags(x.text) === normTags(it.text));
 			if (!o) continue;
 			kept++;
 			for (const k of ["status", "note", "seen", "samples", "auto"]) if (o[k] !== undefined) it[k] = o[k];
@@ -287,7 +289,8 @@ function cmdAdd(pr) {
 
 function cmdCheck(log, game, only) {
 	const db = load();
-	const text = fs.readFileSync(log, "utf8").split(/\r?\n/);
+	// An old log prints [OHA-...]: compare in the new form (tools/shared.js normTags). // restructure:keep
+	const text = normTags(fs.readFileSync(log, "utf8")).split(/\r?\n/);
 	const g = game || path.basename(log).replace(/\.log$/, "");
 	const heroesInLog = new Set();
 	for (const l of text) for (const m of l.matchAll(/npc_dota_hero_([a-z0-9_]+)/g)) heroesInLog.add(m[1]);
@@ -307,7 +310,7 @@ function cmdCheck(log, game, only) {
 			}
 			const hitIdx = new Set();
 			const counts = it.patterns.map((p) => {
-				const ws = words(p);
+				const ws = words(normTags(p));
 				const hits = [];
 				if (ws.length)
 					text.forEach((l, i) => {
@@ -386,7 +389,7 @@ function syncPrBody(pr) {
 		if (/^##\s/.test(lines[i])) break;
 		const m = lines[i].match(/^(\s*[-*]\s+)(?:\[[ xX]\]\s+)?(.*)$/);
 		if (!m) continue;
-		const item = p.items.find((x) => x.text === parsed[k].text);
+		const item = p.items.find((x) => normTags(x.text) === normTags(parsed[k].text));
 		k++;
 		const done = !!item && (item.status === "pass" || item.status === "skip");
 		const next = `${m[1]}[${done ? "x" : " "}] ${m[2]}`;
@@ -568,7 +571,8 @@ function muteCandidates(pr) {
 	pr.items.forEach((it, idx) => {
 		if (it.status !== "pass") return;
 		let tag = null;
-		for (const p of it.patterns) {
+		for (const raw of it.patterns) {
+			const p = normTags(raw);
 			const m = p.match(/\[SHy-[A-Z0-9_]+\]/);
 			if (m) tag = m[0];
 			if (!tag) continue;
@@ -578,7 +582,7 @@ function muteCandidates(pr) {
 			// the log matcher ignores key= words, so a matched line may not carry them: also try without
 			const eq = tokens.findIndex((t) => t.includes("="));
 			const loose = eq >= 0 && (cut < 0 || eq < cut) ? tokens.slice(0, eq).join(" ") : rest;
-			out.push({ item: idx + 1, text: it.text, p, tag, rest, loose, sample: it.samples && it.samples[p] });
+			out.push({ item: idx + 1, text: it.text, p, tag, rest, loose, sample: it.samples && it.samples[raw] });
 		}
 	});
 	return out;

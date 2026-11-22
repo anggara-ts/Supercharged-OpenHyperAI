@@ -1129,7 +1129,7 @@ local function modulePath(name)
 	end
 	rest = string.gsub(rest, "%.lua$", "")
 	rest = string.gsub(rest, "[.\\]", "/")
-	return Stub.root .. "/" .. rest .. ".lua"
+	return Stub.root .. "/bots/" .. rest .. ".lua"
 end
 Stub.modulePath = modulePath
 
@@ -1290,10 +1290,14 @@ function Stub.reset(opts)
 	return Stub.bot
 end
 
--- Loads a bot script the way the game does (dofile with a "bots/..." path); returns ok, result.
+-- Loads a bot script the way the game does (dofile with a "bots/..." path); returns ok, result. name is
+-- bots-relative ("heroes/hero_axe") or a repo path that starts with bots/ ("bots/heroes/hero_axe").
 function Stub.load(name)
+	if not string.find(name, "^bots[/.]") then
+		name = "bots/" .. name
+	end
 	return xpcall(function()
-		return stubDofile("bots/" .. name)
+		return stubDofile(name)
 	end, function(err)
 		return debug and debug.traceback and debug.traceback(tostring(err), 2) or tostring(err)
 	end)
