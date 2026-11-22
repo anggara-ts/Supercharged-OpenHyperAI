@@ -138,11 +138,15 @@ T.test("zeus: Nimbus waits in an ally's fight while Zeus or a hurt ally may need
 	T.eq(X.NimbusFightHold(3000, 0.9, 0.9), nil, "far fight, healthy allies: cast")
 end)
 
-T.test("zeus: no Heavenly Jump into more enemies than allies or away from the target", function()
+T.test("zeus: no Heavenly Jump into more (or as many, 2+) enemies than allies or away from the target", function()
 	local X = zeus()
 	T.eq(X.JumpEngageProblem(false, 1, 2, 0, 1), "not-ahead", "target behind")
 	-- Game 063, 15:38: four enemies, Zeus alone.
 	T.eq(X.JumpEngageProblem(true, 4, 1, 1, 1), "outnumbered", "4 v 1")
-	T.eq(X.JumpEngageProblem(true, 2, 2, 2, 1), "landing-crowded", "two enemies at the landing")
+	T.eq(X.JumpEngageProblem(true, 2, 2, 2, 1), "even", "2 v 2 (game 071: not into several enemies when even)")
+	T.eq(X.JumpEngageProblem(true, 3, 3, 1, 2), "even", "3 v 3")
+	T.eq(X.JumpEngageProblem(true, 2, 3, 2, 1), "landing-crowded", "ahead in the area, two enemies at the landing")
+	T.eq(X.JumpEngageProblem(true, 2, 3, 1, 2), nil, "3 v 2")
+	T.eq(X.JumpEngageProblem(true, 1, 1, 1, 1), nil, "1 v 1")
 	T.eq(X.JumpEngageProblem(true, 1, 2, 1, 1), nil, "even at the landing")
 end)

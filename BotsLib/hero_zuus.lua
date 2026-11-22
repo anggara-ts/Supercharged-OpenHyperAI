@@ -1190,6 +1190,11 @@ function X.JumpEngageProblem(targetAhead, enemiesArea, alliesArea, enemiesNextTo
 	if enemiesArea > alliesArea then
 		return "outnumbered"
 	end
+	-- Maintainer, game 071: no jump into several enemies when our side is only even with them (2v2, 3v3 ...); a 1v1
+	-- jump with an ally or alone on one target stays allowed.
+	if enemiesArea >= 2 and enemiesArea >= alliesArea then
+		return "even"
+	end
 	if enemiesNextTo > alliesNextTo then
 		return "landing-crowded"
 	end
