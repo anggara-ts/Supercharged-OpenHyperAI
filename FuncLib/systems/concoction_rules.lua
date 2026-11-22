@@ -62,6 +62,42 @@ function ConcoctionRules.FinishedWithoutBrew(health, ownHit, ownInReach, allyPen
 	return nil
 end
 
+-- #34, games 068-069: the allies on an enemy hero. byAttack: allied heroes whose attack target it is; near: allied
+-- heroes within reach of it; lossRate: HP per second it loses now. The attackers when there are any, else the allies
+-- near it while it loses at least ALLY_LOSS_MIN HP per second (spells: the API has no "damaged by" read on an enemy
+-- handle that works, game 069). Its own regeneration shows as no loss.
+ConcoctionRules.ALLY_LOSS_MIN = 30
+function ConcoctionRules.AlliesOn(byAttack, near, lossRate)
+	if (byAttack or 0) > 0 then
+		return byAttack
+	end
+	if (lossRate or 0) >= ConcoctionRules.ALLY_LOSS_MIN then
+		return near or 0
+	end
+	return 0
+end
+
+-- #34, game 069: help brews skipped the HP-rate stop (t=1498 Io at 24%, alliesOn=3 lossRate=892, dead 0.8s in). Seconds
+-- brewed at which a help throw goes out (ConcoctionRules.HelpThrowNow): held at HELD_MIN_BREWED; runner and Blink once
+-- the stun reaches ESCAPE_STUN (a straight line from minStun to maxStun over brewTime); a teleport at its last safe
+-- moment (tpLeft - landTime - TP_MARGIN), at once when the time left is unknown.
+function ConcoctionRules.HelpThrowAt(kind, minStun, maxStun, brewTime, tpLeft, landTime)
+	if kind == "tp" then
+		if tpLeft == nil or tpLeft <= 0 then
+			return 0
+		end
+		return math.max(0, tpLeft - (landTime or 0) - ConcoctionRules.TP_MARGIN)
+	end
+	if kind == "runner" or kind == "blink" then
+		if maxStun == nil or minStun == nil or maxStun <= minStun or brewTime == nil or brewTime <= 0 then
+			return brewTime or 0
+		end
+		local share = (ConcoctionRules.ESCAPE_STUN - minStun) / (maxStun - minStun)
+		return math.max(0, math.min(1, share)) * brewTime
+	end
+	return ConcoctionRules.HELD_MIN_BREWED
+end
+
 -- What to do with a brew for a hero the allies are finishing (maintainer, 2026-11-21):
 --   escapeKind     "runner" (moving, not facing him), "tp" (teleporting or channeling), "blink" (Blink ready and
 --                  moving), or nil (held / not escaping)

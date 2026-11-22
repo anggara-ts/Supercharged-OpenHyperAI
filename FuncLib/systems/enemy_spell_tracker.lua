@@ -374,6 +374,43 @@ function EnemySpells.State(heroName, spell, now)
 	return EnemySpells.StateAt(entry.at, entry.cooldown, now), entry
 end
 
+-- #34, game 069 t=2697: a brew started on Dark Willow the second she cast Shadow Realm (the callback had reported it,
+-- castAgo=0.0); she was untargetable for 5s and the brew blew up on him. Is an escape's buff on the hero now?
+--   modifier   one of the MODIFIERS is on it (whoever cast it: hidden or untargetable either way)
+--   just-cast  a recorded cast of a listed escape within JUST_CAST seconds (or its buff duration, if shorter): the
+--              callback fires at the cast, before the buff reads. Not the whole buff: a Skeleton Walk lasts up to
+--              45s but ends when Clinkz attacks, and a visible Clinkz after that is a fair target.
+-- Returns the spell and "modifier" / "just-cast", or nil.
+EnemySpells.JUST_CAST = 1.0
+function EnemySpells.JustCast(castAt, now, buffDuration)
+	if castAt == nil then
+		return false
+	end
+	return now - castAt >= 0 and now - castAt < math.min(EnemySpells.JUST_CAST, buffDuration or EnemySpells.JUST_CAST)
+end
+local escapeSpells = {}
+for _, spell in pairs(EnemySpells.MODIFIERS) do
+	escapeSpells[spell] = true
+end
+function EnemySpells.EscapeActive(hero, heroName, now)
+	for modifier, spell in pairs(EnemySpells.MODIFIERS) do
+		local ok, has = pcall(function()
+			return hero:HasModifier(modifier)
+		end)
+		if ok and has then
+			return spell, "modifier"
+		end
+	end
+	for spell, entry in pairs(casts[heroName] or {}) do
+		if
+			escapeSpells[spell] and EnemySpells.JustCast(entry.at, now, EnemySpells.BuffDuration(spell, entry.level))
+		then
+			return spell, "just-cast"
+		end
+	end
+	return nil
+end
+
 local function HeroName(unit)
 	local ok, name = pcall(function()
 		return unit:GetUnitName()

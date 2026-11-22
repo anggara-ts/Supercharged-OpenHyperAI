@@ -1090,11 +1090,9 @@ T.test("alchemist: no engage brew on a hero allies kill with spells before the t
 		c.isEngaging = true
 		return c
 	end
-	-- An ally next to it hits it with spells: not its attack target, but it damaged it within 1s.
+	-- An ally next to it hits it with spells: not its attack target (game 069: WasRecentlyDamagedByHero on an enemy
+	-- never reads true), so it counts as near while the target loses HP.
 	local ally = Stub.teams[GetTeam()][2]
-	enemy.WasRecentlyDamagedByHero = function(_, unit)
-		return unit == ally
-	end
 	-- Seen losing 400 HP per second while still out of the start distance.
 	enemy._loc = bot._loc + Vector(2000, 0, 0)
 	ally._loc = enemy._loc + Vector(300, 0, 0)
@@ -1104,7 +1102,7 @@ T.test("alchemist: no engage brew on a hero allies kill with spells before the t
 		X.SkillsComplement()
 	end
 	T.eq(state.brewing, false, "too far to start")
-	-- 400 HP at 400 (max damage 360 does not kill it): at 400/s it dies before a throw at 2s lands.
+	-- 400 HP at 400 (max damage 360 does not kill it): at 333/s it dies before a throw at 2s lands.
 	enemy._loc = bot._loc + Vector(400, 0, 0)
 	ally._loc = enemy._loc + Vector(300, 0, 0)
 	enemy._hp = 400
@@ -1113,21 +1111,39 @@ T.test("alchemist: no engage brew on a hero allies kill with spells before the t
 	T.eq(state.brewing, false, "no engage brew")
 	T.ok(
 		printedLine(
-			"concoction no%-brew why=finish%-hit by=hp%-rate rule=engage .* alliesOn=1 byAttack=0 byHit=1 lossRate=333"
+			"concoction no%-brew why=finish%-hit by=hp%-rate rule=engage .* alliesOn=1 byAttack=0 near=1"
+				.. " lossRate=333 horizon=2%.6 horizonFor=engage"
 		),
 		"line"
 	)
-	-- The rate rule is for engage starts only: at 30% (max damage kills it) the help brew still starts, with the
-	-- check's values on the start line (no horizon on the kill path).
+	-- Game 069 t=1498: at 30% (max damage kills it, the allies are finishing it) the help brew is stopped too: the
+	-- held help throw goes at 0.3s and lands at about 0.9s, by when 333/s has taken its 300 HP.
 	enemy._hp = 300
+	bot._alchFinishHitLogAt = nil
 	Stub.time = 2002
 	X.SkillsComplement()
+	T.eq(state.brewing, false, "no help brew")
+	T.ok(
+		printedLine("concoction no%-brew why=finish%-hit by=hp%-rate rule=kill .* horizon=0%.9 horizonFor=help"),
+		"help horizon"
+	)
+	-- It stops losing HP, the ally attacks it (from beyond its attack range: no hit pending): the help brew starts, the
+	-- check's values on the start line.
+	ally._loc = enemy._loc + Vector(700, 0, 0)
+	ally.GetAttackTarget = function()
+		return enemy
+	end
+	for i = 1, 8 do
+		Stub.time = 2002 + i * 0.25
+		X.SkillsComplement()
+	end
 	context.Build = build
-	T.eq(state.brewing, true, "kill path: the help brew starts")
+	T.eq(state.brewing, true, "the help brew starts")
 	T.ok(printedLine("concoction help%-start rule=kill .* allies=1 kind=held"), "help line")
 	T.ok(
 		printedLine(
-			"concoction start why=help .* alliesOn=1 byAttack=0 byHit=1 allyPending=0 lossRate=%d+ horizon=0%.0"
+			"concoction start why=help .* alliesOn=1 byAttack=1 near=1 allyPending=0 lossRate=%d+ horizon=0%.9"
+				.. " horizonFor=help"
 		),
 		"start line"
 	)
@@ -1249,3 +1265,62 @@ T.test(
 		)
 	end
 )
+
+T.test("concoction rules: allies on a target, the help throw time (game 069)", function()
+	Stub.reset({ hero = "npc_dota_hero_alchemist" })
+	local R = require(GetScriptDirectory() .. "/FuncLib/systems/concoction_rules")
+	T.eq(R.AlliesOn(2, 3, 0), 2, "attackers count")
+	T.eq(R.AlliesOn(0, 3, 892), 3, "no attacker, losing HP fast: the allies near it (spells)")
+	T.eq(R.AlliesOn(0, 3, 10), 0, "barely losing HP: nobody on it")
+	T.eq(R.AlliesOn(0, 0, 892), 0, "nobody near")
+	T.eq(R.HelpThrowAt("held", 0.25, 2.7, 5.0), 0.3, "held: thrown at once")
+	-- Runner: a 1.0s stun at max_stun 2.7 (level 3, datafeed hero 73) needs (1.0 - 0.25) / 2.45 of 5s.
+	T.near(R.HelpThrowAt("runner", 0.25, 2.7, 5.0), 1.53, 0.01, "runner")
+	T.near(R.HelpThrowAt("tp", 0.25, 2.7, 5.0, 3.0, 0.6), 1.8, 0.001, "TP: 3.0 left - 0.6 flight - 0.6 margin")
+	T.eq(R.HelpThrowAt("tp", 0.25, 2.7, 5.0, nil, 0.6), 0, "TP time unknown: at once")
+end)
+
+T.test("enemy spells: an escape buff on the hero, or a cast this second (game 069 t=2697)", function()
+	Stub.reset({ hero = "npc_dota_hero_alchemist" })
+	local E = enemySpells()
+	T.eq(E.JustCast(100, 100.5, 5), true, "half a second after the cast")
+	T.eq(E.JustCast(100, 101.2, 5), false, "past 1s: the modifier reads by now")
+	T.eq(E.JustCast(100, 100.5, 0.4), false, "past a shorter buff")
+	T.eq(E.JustCast(nil, 100, 5), false, "never seen")
+	local willow = observedEnemy("npc_dota_hero_dark_willow", "dark_willow_shadow_realm", 4)
+	T.eq(E.EscapeActive(willow, "npc_dota_hero_dark_willow", 100), nil, "nothing on her")
+	E.Record("npc_dota_hero_dark_willow", "dark_willow_shadow_realm", 100, 4, nil, "callback")
+	local spell, how = E.EscapeActive(willow, "npc_dota_hero_dark_willow", 100.2)
+	T.eq(spell, "dark_willow_shadow_realm", "cast reported this second")
+	T.eq(how, "just-cast", "how")
+	T.eq(E.EscapeActive(willow, "npc_dota_hero_dark_willow", 102), nil, "2s later, no modifier read: not active")
+	willow.mods.modifier_dark_willow_shadow_realm_buff = true
+	spell, how = E.EscapeActive(willow, "npc_dota_hero_dark_willow", 102)
+	T.eq(how, "modifier", "the buff on her")
+	T.eq(spell, "dark_willow_shadow_realm", "spell")
+	-- A disable cast just now is not an escape.
+	E.Reset()
+	willow.mods.modifier_dark_willow_shadow_realm_buff = nil
+	E.Record("npc_dota_hero_dark_willow", "dark_willow_cursed_crown", 200, 2, nil, "callback")
+	T.eq(E.EscapeActive(willow, "npc_dota_hero_dark_willow", 200.2), nil, "Cursed Crown is no escape")
+end)
+
+T.test("alchemist: no brew start on a hero inside her escape (game 069 t=2697)", function()
+	local X = load()
+	local state = startBrew(X, 2697, true)
+	-- Shadow Realm reported by the callback this second, cooldown known: "cooldown", which used to let the brew go.
+	enemySpells().Record(state.enemy:GetUnitName(), "dark_willow_shadow_realm", 2697, 4, nil, "callback")
+	X.SkillsComplement()
+	T.eq(state.brewing, false, "no brew")
+	T.ok(
+		printedLine(
+			"concoction no%-brew why=escape%-active rule=kill target=npc_dota_hero_%S+ escape=dark_willow_shadow_realm"
+				.. " how=just%-cast"
+		),
+		"line"
+	)
+	-- Once the cast is over a second old and no buff reads on her, the brew starts.
+	Stub.time = 2698.5
+	X.SkillsComplement()
+	T.eq(state.brewing, true, "brew after")
+end)
