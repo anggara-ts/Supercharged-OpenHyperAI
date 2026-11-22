@@ -83,5 +83,50 @@ T.test("berserk potion: the Alchemist rule runs on the stub", function()
 	T.eq(why, "dispel", "to remove the root")
 	local okO = pcall(X.OrderBerserkPotion, target, why)
 	T.ok(okO, "the order runs")
-	T.eq(bot._potionOrder and bot._potionOrder.why, "dispel", "the order is remembered for the refused check")
+	T.eq(bot._potionOrder and bot._potionOrder.name, "alchemist", "the order is remembered for the refused check")
+end)
+
+T.test("berserk potion: a refused order needs 3 s of orders in range with no throw", function()
+	local R = load()
+	local order, refused = R.OrderStep(nil, "alchemist", 100, true, true)
+	T.eq(refused, false, "first order")
+	for t = 100.5, 102.5, 0.5 do
+		order, refused = R.OrderStep(order, "alchemist", t, true, true)
+		T.eq(refused, false, "still waiting at " .. t)
+	end
+	order, refused = R.OrderStep(order, "alchemist", 103, true, true)
+	T.eq(refused, true, "3 s in range, cooldown never started: refused")
+	T.eq(order, nil, "record cleared")
+end)
+
+T.test("berserk potion: death, a lapse, a new target or walking in range start the count again", function()
+	local R = load()
+	-- Thrown at t=100, died at 101, back after the cooldown: the first new order is not a refusal.
+	local order = R.OrderStep(nil, "alchemist", 100, true, true)
+	local refused
+	order, refused = R.OrderStep(order, "alchemist", 230, true, true)
+	T.eq(refused, false, "after a long gap")
+	T.eq(order.inRangeAt, 230, "count restarted")
+	-- The reason lapsed for 2 s between orders.
+	order = R.OrderStep(nil, "puck", 300, true, true)
+	order, refused = R.OrderStep(order, "puck", 304, true, true)
+	T.eq(refused, false, "gap of 4 s")
+	-- Another target.
+	order = R.OrderStep(nil, "puck", 400, true, true)
+	order, refused = R.OrderStep(order, "zuus", 403.5, true, true)
+	T.eq(refused, false, "new target")
+	-- Walking toward the target out of range does not count.
+	order = R.OrderStep(nil, "puck", 500, false, true)
+	for t = 500.5, 503, 0.5 do
+		order, refused = R.OrderStep(order, "puck", t, false, true)
+		T.eq(refused, false, "out of range at " .. t)
+	end
+	order, refused = R.OrderStep(order, "puck", 503.5, true, true)
+	T.eq(refused, false, "just came in range")
+	-- The throw happened (cooldown started): never a refusal.
+	order = R.OrderStep(nil, "puck", 600, true, true)
+	order, refused = R.OrderStep(order, "puck", 600.5, true, false)
+	order, refused = R.OrderStep(order, "puck", 603.5, true, false)
+	T.eq(refused, false, "on cooldown")
+	T.ok(order ~= nil, "record kept")
 end)

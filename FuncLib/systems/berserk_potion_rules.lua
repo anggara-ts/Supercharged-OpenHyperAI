@@ -58,4 +58,28 @@ function BerserkPotionRules.Pick(candidates)
 	return bestIndex, bestWhy
 end
 
+-- A refused order starts no cooldown and would repeat every think. The order counts as refused only when the same
+-- target was ordered on every think (no gap over ORDER_GAP s) for ORDER_WAIT s in cast range and the cooldown has
+-- still not started. A gap (he died, the reason ended, another spell took the think) starts the count again.
+BerserkPotionRules.ORDER_GAP = 1
+BerserkPotionRules.ORDER_WAIT = 3
+
+-- One order think. order: the record from the last think (or nil); name: the target; now: game time; inRange: the
+-- target is within cast range; cooldownReady: the potion has not been thrown. Returns the new record, refused.
+function BerserkPotionRules.OrderStep(order, name, now, inRange, cooldownReady)
+	if order == nil or order.name ~= name or now - order.last > BerserkPotionRules.ORDER_GAP then
+		order = { name = name, last = now, inRangeAt = nil }
+	end
+	order.last = now
+	if not inRange then
+		order.inRangeAt = nil
+		return order, false
+	end
+	order.inRangeAt = order.inRangeAt or now
+	if cooldownReady and now - order.inRangeAt >= BerserkPotionRules.ORDER_WAIT then
+		return nil, true
+	end
+	return order, false
+end
+
 return BerserkPotionRules

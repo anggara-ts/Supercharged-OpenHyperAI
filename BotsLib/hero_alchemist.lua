@@ -693,8 +693,7 @@ local BerserkPotionRules = require(GetScriptDirectory() .. "/FuncLib/systems/ber
 local hasDispelLib, DispelLib = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/dispel")
 -- 7.42 abilities_english.txt: DOTA_Tooltip_modifier_alchemist_berserk_potion.
 local BERSERK_POTION_MODIFIER = "modifier_alchemist_berserk_potion"
--- An order not followed by the cooldown within this many seconds was refused or cut; that ally waits HOLD seconds.
-local BERSERK_POTION_ORDER_WAIT = 3
+-- A target whose order was refused (BerserkPotionRules.OrderStep) is left out for this many seconds.
 local BERSERK_POTION_REFUSED_HOLD = 10
 local function shortName(unit)
 	return unit ~= nil and (string.gsub(unit:GetUnitName(), "npc_dota_hero_", "")) or "-"
@@ -756,31 +755,7 @@ function X.BerserkPotionBlocked()
 	end
 	return nil
 end
--- The last order: if the cooldown has not started BERSERK_POTION_ORDER_WAIT s later, the order was refused or cut
--- (a refused order starts no cooldown and would repeat every think); that ally is left out for a while.
-function X.CheckBerserkPotionOrder()
-	local order = bot._potionOrder
-	if order == nil or DotaTime() < order.at + BERSERK_POTION_ORDER_WAIT then
-		return
-	end
-	bot._potionOrder = nil
-	if berserkPotionAbility:IsCooldownReady() then
-		bot._potionRefused = bot._potionRefused or {}
-		bot._potionRefused[order.name] = DotaTime() + BERSERK_POTION_REFUSED_HOLD
-		pcall(
-			print,
-			string.format(
-				"[OHA-ALCHEMIST] t=%.0f alchemist berserk-refused target=%s why=%s hold=%d",
-				DotaTime(),
-				order.name,
-				order.why,
-				BERSERK_POTION_REFUSED_HOLD
-			)
-		)
-	end
-end
 function X.ConsiderBerserkPotion()
-	X.CheckBerserkPotionOrder()
 	local blocked = X.BerserkPotionBlocked()
 	if blocked ~= nil then
 		X.LogBerserkSkip(blocked)
@@ -830,15 +805,16 @@ function X.ConsiderBerserkPotion()
 				end
 			end
 			local recentlyHit = allyHero:WasRecentlyDamagedByAnyHero(2.0)
-			local attackTarget = allyHero == bot and Fu.GetProperTarget(bot) or allyHero:GetAttackTarget()
+			local attackTarget = Fu.GetProperTarget(allyHero)
 			local fighting = Fu.IsValidHero(attackTarget)
 				and attackTarget:GetTeam() ~= bot:GetTeam()
 				and GetUnitToUnitDistance(allyHero, attackTarget) <= allyHero:GetAttackRange() + 150
-			local analysis = hasDispelLib and DispelLib.AnalyzeDebuffs(allyHero) or nil
+			-- The debuff scan (32 modifier reads) only where the dispel rule can fire.
+			local analysis = hasDispelLib and (threatNear or recentlyHit) and DispelLib.AnalyzeDebuffs(allyHero) or nil
 			units[#units + 1] = allyHero
 			candidates[#candidates + 1] = {
 				buffed = allyHero:HasModifier(BERSERK_POTION_MODIFIER),
-				basicScore = analysis ~= nil and analysis.basicScore or 0,
+				basicScore = analysis and analysis.basicScore or 0,
 				rootSilence = (allyHero:IsRooted() or allyHero:IsSilenced())
 					and not allyHero:IsStunned()
 					and not allyHero:IsHexed(),
@@ -858,12 +834,34 @@ function X.ConsiderBerserkPotion()
 	end
 	return BOT_ACTION_DESIRE_HIGH, units[index], why
 end
--- Throw it, remember the order (CheckBerserkPotionOrder) and log it at most once per 3 s.
+-- Throw it and log it at most once per 3 s. A target ordered for 3 s in range with no throw was refused: it is left
+-- out for BERSERK_POTION_REFUSED_HOLD s (berserk-refused).
 function X.OrderBerserkPotion(target, why)
 	local name = shortName(target)
-	local order = bot._potionOrder
-	if order == nil or order.name ~= name then
-		bot._potionOrder = { at = DotaTime(), name = name, why = why }
+	local inRange = GetUnitToUnitDistance(bot, target) <= berserkPotionAbility:GetCastRange()
+	local order, refused = BerserkPotionRules.OrderStep(
+		bot._potionOrder,
+		name,
+		DotaTime(),
+		inRange,
+		berserkPotionAbility:IsCooldownReady()
+	)
+	bot._potionOrder = order
+	if refused then
+		bot._potionRefused = bot._potionRefused or {}
+		bot._potionRefused[name] = DotaTime() + BERSERK_POTION_REFUSED_HOLD
+		pcall(
+			print,
+			string.format(
+				"[OHA-ALCHEMIST] t=%.0f alchemist berserk-refused target=%s why=%s self=%s hold=%d",
+				DotaTime(),
+				name,
+				why or "-",
+				tostring(target == bot),
+				BERSERK_POTION_REFUSED_HOLD
+			)
+		)
+		return
 	end
 	bot._potionSkipWhy = nil
 	if DotaTime() >= (bot._potionLogAt or -999) then
