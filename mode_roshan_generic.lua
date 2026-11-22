@@ -14,6 +14,7 @@ end
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local KillWindow = require(GetScriptDirectory() .. "/FuncLib/systems/kill_window")
 local ObjectiveTravel = require(GetScriptDirectory() .. "/FuncLib/systems/objective_travel")
+local HumanOrders = require(GetScriptDirectory() .. "/FuncLib/systems/human_orders")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
 local isRoshanAlive = false
 Fu.Utils.GameStates = Fu.Utils.GameStates or {}
@@ -500,6 +501,12 @@ function GetDesireHelper()
 	if Fu.GetEnemiesAroundAncient(bot, 2000) > 2 or Fu.GetHP(GetAncient(bot:GetTeam())) < 0.6 then
 		return Ret(BOT_MODE_DESIRE_NONE, "base-threat")
 	end
+	-- The human's Roshan call (#222, FuncLib/systems/human_orders.lua): a Roshan ping the team agreed with (the
+	-- request checks - too early, outnumbered, too few alive - ran when it was made), an insisted one, or `!rosh`.
+	-- Before the early-game, pit-safety and window checks below, which would refuse it.
+	if isRoshanAlive and HumanOrders.RoshCalled(bot) then
+		return Ret(0.95, "ping")
+	end
 	local alliesInPit = #(Fu.GetAlliesNearLoc(roshanLocation, 1600) or {})
 	local roshLow = Fu.Utils.IsValidUnit(roshan) and (roshan:GetHealth() / roshan:GetMaxHealth()) < 0.8
 	-- Early game: no fresh pit. Only stay if Roshan is already low and allies are in it.
@@ -624,12 +631,8 @@ function GetDesireHelper()
 		if DotaTime() < humanInviteCooldownUntil then
 			return Ret(BOT_ACTION_DESIRE_NONE, "human-cooldown")
 		end
-		local humanPlayer, ping = Fu.GetHumanPing()
-		local isPingAtRoshan = humanPlayer ~= nil
-			and ping ~= nil
-			and ping.normal_ping
-			and Fu.GetDistance(ping.location, Fu.GetCurrentRoshanLocation()) < 600
-			and DotaTime() < ping.time + 5.0
+		-- A Roshan ping the team agreed with, an insisted one or `!rosh` (#222, FuncLib/systems/human_orders.lua).
+		local isPingAtRoshan = HumanOrders.RoshCalled(bot)
 		if not isPingAtRoshan then
 			-- Soft invite without shouting: quiet staging desire only while safe.
 			-- Old behavior announced then dropped after 15s — looked like false invites.
@@ -655,21 +658,6 @@ function GetDesireHelper()
 		end
 	end
 	if isRoshanAlive and hasEnoughDps then
-		local humanPlayer, ping = Fu.GetHumanPing()
-		if humanPlayer ~= nil and DotaTime() > 5.0 then
-			if
-				ping ~= nil
-				and ping.normal_ping
-				and GetUnitToLocationDistance(humanPlayer, roshanLocation) < 4500
-				and Fu.GetDistance(ping.location, roshanLocation) < 600
-				and DotaTime() < ping.time + 5.0
-			then
-				if IsRoshanEngageSafe(roshanLocation, false) then
-					return Ret(0.95, "ping")
-				end
-				return Ret(BOT_MODE_DESIRE_NONE, "ping-unsafe")
-			end
-		end
 		if DotaTime() < (Fu.IsModeTurbo() and 15 * 60 or 20 * 60) and not killRosh then
 			return Ret(BOT_MODE_DESIRE_NONE, "too-early-no-kill")
 		end

@@ -13,6 +13,8 @@ local CustomizeGeneral = require(GetScriptDirectory() .. "/Customize/general")
 local FarmDefend = require(GetScriptDirectory() .. "/FuncLib/systems/farm_defend")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local FarmRules = require(GetScriptDirectory() .. "/FuncLib/systems/farm_rules")
+-- Human orders (#222): a camp the human pinged (FuncLib/systems/human_orders.lua).
+local HumanOrders = require(GetScriptDirectory() .. "/FuncLib/systems/human_orders")
 local bot = GetBot()
 local FarmMode = {}
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
@@ -744,6 +746,12 @@ function GetDesire()
 			end
 			return 0
 		end
+	end
+	-- A camp the human pinged (#222): this bot was picked to clear it; farm's camp code below does it.
+	local orderCamp, orderDesire = HumanOrders.FarmCamp(bot)
+	if orderCamp ~= nil then
+		SetPreferredCamp(orderCamp, "human-order")
+		return orderDesire
 	end
 	local ok, desire = pcall(GetDesireHelper)
 	if not ok then
@@ -1551,6 +1559,10 @@ function Think()
 		end
 	end
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- The human's camp (#222): walk to it without stopping for lane creeps; at the camp the code below clears it.
+	if HumanOrders.FarmThink(bot) then
 		return
 	end
 	-- Enemy-half withdraw (GetDesireHelper): walk to our nearest tower, no stopping for creeps.

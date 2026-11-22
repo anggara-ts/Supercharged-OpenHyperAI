@@ -849,6 +849,10 @@ end
 function Usage.SetReplyHumanTime(chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
+	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!no` (FuncLib/systems/human_orders.lua).
+	if require(GetScriptDirectory() .. "/FuncLib/systems/human_orders").OnChat(chatEvent) then
+		return
+	end
 	if string.find(chatText, "!sp") or string.find(chatText, "!speak") then
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
