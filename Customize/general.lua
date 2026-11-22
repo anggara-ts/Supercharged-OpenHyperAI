@@ -120,11 +120,8 @@ Customize.Weak_Penalty = { type = "exp", base = 0.6 }
 -- Exact match on unit names by default; set Customize.Strict_Ban_Match = false to allow guarded substring matches (length ≥ 6).
 Customize.Strict_Ban_Match = true
 
--- To allow bots do trash talking in different scenarios: got fb, killing a human, etc. Disable this also disables GPT chat.
+-- To allow bots do trash talking in different scenarios: got fb, killing a human, etc.
 Customize.Allow_Trash_Talk = true
-
--- To allow bots response with GPT generated text to your chats in global channel. Disable Allow_Trash_Talk can disable this.
-Customize.Allow_AI_GPT_Response = true
 
 -- Set the level of bots' trash talks. Disable Allow_Trash_Talk can disable this.
 -- 1 => no trash talks from ally bots, no taunt from enemy after it gets a kill. 2 => ally bots also trash talk to you, allow taunt from enemy after it gets a kill.
@@ -148,11 +145,6 @@ Customize.Show_Team_Names = false
 -- Examples: "TEAM1", "OG", "NAVI", etc.
 Customize.Radiant_Team_Name = ""
 Customize.Dire_Team_Name = ""
-
--- The desire level that the bots will group up and push the same lane.
--- 1 is mild meaning bots will group up only when convenient; 3 is bots will almost always try to push together.
--- Group pushing may increase the difficulty but can reduce the game experience.
-Customize.Force_Group_Push_Level = 1
 
 -- Set how frequently you want the bots to push.
 -- 1 is default, bot may choose to farm more in game. 2 is balanced for push vs farm. 3 is almost no farm, all push.
