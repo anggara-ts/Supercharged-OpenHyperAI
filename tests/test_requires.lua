@@ -11,6 +11,7 @@ local T = ...
 local EXTERNAL = {
 	["game/botsinit"] = "Valve's bot framework",
 	["game/customize/general"] = "optional user settings in game/, falls back to bots/customize/general",
+	["game/Customize/general"] = "the same, the folder name before #221 (Linux is case-sensitive)", -- restructure:keep
 }
 
 -- Repo paths that may legitimately be absent.
@@ -69,10 +70,11 @@ for _, path in ipairs(sources) do
 		for _, ref in ipairs(findTargets(T.read(path))) do
 			local target = ref.target
 			local resolved = nil
+			-- resolved: the repo path (the bots folder is bots/ in the repo)
 			if not ref.literal then
-				resolved = target
+				resolved = "bots/" .. target
 			elseif string.find(target, "^bots[./]") then
-				resolved = string.gsub(string.sub(target, 6), "%.", "/")
+				resolved = "bots/" .. string.gsub(string.sub(target, 6), "%.", "/")
 			end
 			if resolved ~= nil then
 				checked = checked + 1
