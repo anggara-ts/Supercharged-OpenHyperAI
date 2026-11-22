@@ -4,6 +4,7 @@ local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
+local ChargeRules = require(GetScriptDirectory() .. "/FuncLib/systems/charge_rules")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
 local sRole = Fu.Item.GetRoleItemsBuyList(bot)
@@ -157,6 +158,8 @@ local isEngaging
 local isRetreating
 local isAttacking
 function X.SkillsComplement()
+	-- before every gate: the save charge needs each ally's HP history when the charge comes off cooldown
+	X.SampleAllyHp()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -230,39 +233,10 @@ function X.ConsiderChargeOfDarkness()
 			end
 		end
 	end
-	local teamFightLocation = Fu.GetTeamFightLocation(bot)
-	if
-		teamFightLocation ~= nil
-		and GetUnitToLocationDistance(bot, teamFightLocation) > 1600
-		and not Fu.IsInLaningPhase()
-	then
-		-- Review fix: this charged nearbyEnemies[1], the nearest enemy within 1600 of Spirit Breaker, i.e. NOT
-		-- one at the fight (which is 1600+ away), and needed an enemy next to him to fire at all.
-		-- Charge (global cast range) an enemy hero standing at the fight instead.
-		if not Fu.IsLocationInChrono(teamFightLocation) and not isRetreating then
-			for _, enemyHero in pairs(Fu.GetEnemiesNearLoc(teamFightLocation, 1200)) do
-				if
-					Fu.IsValidHero(enemyHero)
-					and Fu.CanCastOnNonMagicImmune(enemyHero)
-					and not Fu.IsSuspiciousIllusion(enemyHero)
-					and not Fu.IsLocationInChrono(enemyHero:GetLocation())
-				then
-					if DotaTime() - (X.lastChargeLog or -99) > 10 then
-						X.lastChargeLog = DotaTime()
-						pcall(
-							print,
-							string.format(
-								"[OHA-SB] t=%.0f charge-fight target=%s dist=%d",
-								DotaTime(),
-								enemyHero:GetUnitName(),
-								GetUnitToUnitDistance(bot, enemyHero)
-							)
-						)
-					end
-					return BOT_ACTION_DESIRE_HIGH, enemyHero
-				end
-			end
-		end
+	-- #47: a long charge to another lane, to save a ganked ally (also in the laning phase) or join a teamfight
+	local farTarget = X.ConsiderFarCharge()
+	if farTarget ~= nil then
+		return BOT_ACTION_DESIRE_HIGH, farTarget
 	end
 	if isEngaging then
 		local bestTarget = nil
@@ -423,6 +397,238 @@ function X.ConsiderChargeOfDarkness()
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- #47: the long charge to another lane. Each ally's HP is sampled every 0.2s (player ID -> samples) so the save
+-- knows how fast the ally is losing HP; the rules are in FuncLib/systems/charge_rules.lua.
+local allyHpSamples = {}
+local lastHpSampleTime = -99
+local lastFarChargeLog = -99
+local lastFarSkipWhy, lastFarSkipLog = nil, -99
+function X.SampleAllyHp()
+	local now = DotaTime()
+	if now - lastHpSampleTime < 0.2 then
+		return
+	end
+	lastHpSampleTime = now
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local member = GetTeamMember(i)
+		if member ~= nil and member ~= bot then
+			local id = member:GetPlayerID()
+			if member:IsAlive() then
+				allyHpSamples[id] = allyHpSamples[id] or {}
+				ChargeRules.PushSample(allyHpSamples[id], now, member:GetHealth())
+			else
+				allyHpSamples[id] = nil
+			end
+		end
+	end
+end
+local function shortName(unit)
+	return unit ~= nil and string.gsub(unit:GetUnitName(), "npc_dota_hero_", "") or "-"
+end
+-- Seconds from the cast to the arrival. Datafeed hero_id=71 (2026-11-22): movement_speed 275/325/375/425 bonus,
+-- windup_time 1.5, min_movespeed_bonus_pct 25, AbilityCastPoint 0.1; read from the ability, these are fallbacks.
+local function chargeEta(dist)
+	local bonus = chargeOfDarknessAbility:GetSpecialValueInt("movement_speed")
+	if bonus == nil or bonus <= 0 then
+		bonus = 275 + 50 * math.max(0, chargeOfDarknessAbility:GetLevel() - 1)
+	end
+	local windup = chargeOfDarknessAbility:GetSpecialValueFloat("windup_time")
+	if windup == nil or windup <= 0 then
+		windup = 1.5
+	end
+	local minPct = chargeOfDarknessAbility:GetSpecialValueInt("min_movespeed_bonus_pct")
+	if minPct == nil or minPct <= 0 then
+		minPct = 25
+	end
+	return ChargeRules.ChargeEta(dist, bot:GetCurrentMovementSpeed(), bonus, windup, minPct, 0.1, ChargeRules.MAX_SPEED)
+end
+-- Fu.CanCastOnNonMagicImmune: visible, not magic immune, not invulnerable, not an illusion
+local function canChargeHero(enemyHero)
+	return Fu.IsValidHero(enemyHero)
+		and Fu.CanCastOnNonMagicImmune(enemyHero)
+		and not Fu.IsSuspiciousIllusion(enemyHero)
+		and not Fu.IsLocationInChrono(enemyHero:GetLocation())
+end
+local function inStandingEnemyTowerRange(location)
+	for _, building in pairs(GetUnitList(UNIT_LIST_ENEMY_BUILDINGS)) do
+		if
+			Fu.IsValidBuilding(building)
+			and building:IsTower()
+			and GetUnitToLocationDistance(building, location) <= ChargeRules.TOWER_RANGE
+		then
+			return true
+		end
+	end
+	return false
+end
+-- enemy heroes at a spot: the ones we see, or more when the last-seen info (3s) or incoming TPs say so
+local function enemyCountNear(location, visible)
+	return math.max(#visible, #Fu.Utils.GetLastSeenEnemyIdsNearLocation(location, 1200))
+end
+local function logFarSkip(why, kind, ally, target, s)
+	local key = why .. kind .. shortName(ally)
+	if key == lastFarSkipWhy or DotaTime() - lastFarSkipLog < 3 then
+		return
+	end
+	lastFarSkipWhy, lastFarSkipLog = key, DotaTime()
+	print(
+		string.format(
+			"[OHA-SB] t=%.0f spirit_breaker charge-skip why=%s kind=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d",
+			DotaTime(),
+			why,
+			kind,
+			shortName(ally),
+			shortName(target),
+			s.eta or 0,
+			(s.allies or 0) + 1,
+			s.enemies or 0
+		)
+	)
+end
+local function logFarCharge(kind, ally, target, s, ttd)
+	if DotaTime() - lastFarChargeLog < 3 then
+		return
+	end
+	lastFarChargeLog = DotaTime()
+	print(
+		string.format(
+			"[OHA-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d",
+			DotaTime(),
+			kind,
+			shortName(ally),
+			shortName(target),
+			s.eta,
+			s.allies + 1,
+			s.enemies,
+			s.enemies - s.allies - 1,
+			s.dist,
+			math.min(ttd or 99, 99),
+			s.hitBy or 0
+		)
+	)
+end
+-- The charge target 1600+ away: the enemy hero hurting a ganked ally (save), else the best enemy at a teamfight
+-- (fight, after the laning phase), or nil.
+function X.ConsiderFarCharge()
+	local selfHp = Fu.GetHP(bot)
+	local busy = bot:WasRecentlyDamagedByAnyHero(1.5)
+	local now = DotaTime()
+	local saveTarget, saveAlly, saveState, saveTtd
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local ally = GetTeamMember(i)
+		if
+			Fu.IsValidHero(ally)
+			and ally ~= bot
+			and not ally:IsIllusion()
+			and GetUnitToUnitDistance(bot, ally) > ChargeRules.FAR_DIST
+		then
+			local enemiesThere = Fu.GetEnemiesNearLoc(ally:GetLocation(), 1200)
+			local hitBy, target, targetScore = 0, nil, nil
+			for _, enemyHero in pairs(enemiesThere) do
+				local hits = enemyHero:GetAttackTarget() == ally or ally:WasRecentlyDamagedByHero(enemyHero, 1.5)
+				if hits then
+					hitBy = hitBy + 1
+				end
+				if canChargeHero(enemyHero) then
+					local score = ChargeRules.TargetScore({
+						hp = Fu.GetHP(enemyHero),
+						core = Fu.IsCore(enemyHero),
+						hitsAlly = hits,
+						distToSpot = GetUnitToUnitDistance(enemyHero, ally),
+					})
+					if targetScore == nil or score > targetScore then
+						target, targetScore = enemyHero, score
+					end
+				end
+			end
+			-- nobody hits the ally: no gank, nothing to check or log
+			if hitBy > 0 then
+				local samples = allyHpSamples[ally:GetPlayerID()] or {}
+				local s = {
+					kind = "save",
+					selfHp = selfHp,
+					retreating = isRetreating,
+					busy = busy,
+					dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
+					allies = #Fu.GetAlliesNearLoc(ally:GetLocation(), 1200),
+					enemies = enemyCountNear(ally:GetLocation(), enemiesThere),
+					hitBy = hitBy,
+					allyHp = ally:GetHealth(),
+					lossRate = ChargeRules.LossRate(samples, now, ally:GetHealth()),
+				}
+				s.eta = chargeEta(s.dist)
+				local why
+				if target == nil then
+					why = "no-target"
+				else
+					s.tower = inStandingEnemyTowerRange(target:GetLocation())
+					why = ChargeRules.ChargeSkipWhy(s)
+				end
+				if why ~= nil then
+					logFarSkip(why, "save", ally, target, s)
+				else
+					-- several ganked allies: the one that dies first (and still lives until he lands)
+					local ttd = ChargeRules.TimeToDie(s.allyHp, s.lossRate)
+					if saveTtd == nil or ttd < saveTtd then
+						saveTarget, saveAlly, saveState, saveTtd = target, ally, s, ttd
+					end
+				end
+			end
+		end
+	end
+	if saveTarget ~= nil then
+		logFarCharge("save", saveAlly, saveTarget, saveState, saveTtd)
+		return saveTarget
+	end
+	if Fu.IsInLaningPhase() then
+		return nil
+	end
+	local fightLocation = Fu.GetTeamFightLocation(bot)
+	if
+		fightLocation == nil
+		or GetUnitToLocationDistance(bot, fightLocation) <= ChargeRules.FAR_DIST
+		or Fu.IsLocationInChrono(fightLocation)
+	then
+		return nil
+	end
+	local enemiesThere = Fu.GetEnemiesNearLoc(fightLocation, 1400)
+	local target, targetScore = nil, nil
+	for _, enemyHero in pairs(enemiesThere) do
+		if canChargeHero(enemyHero) then
+			local score = ChargeRules.TargetScore({
+				hp = Fu.GetHP(enemyHero),
+				core = Fu.IsCore(enemyHero),
+				distToSpot = GetUnitToLocationDistance(enemyHero, fightLocation),
+			})
+			if targetScore == nil or score > targetScore then
+				target, targetScore = enemyHero, score
+			end
+		end
+	end
+	local s = {
+		kind = "fight",
+		selfHp = selfHp,
+		retreating = isRetreating,
+		busy = busy,
+		dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
+		allies = #Fu.GetAlliesNearLoc(fightLocation, 1400),
+		enemies = #enemiesThere,
+	}
+	s.eta = chargeEta(s.dist)
+	local why
+	if target == nil then
+		why = "no-target"
+	else
+		s.tower = inStandingEnemyTowerRange(target:GetLocation())
+		why = ChargeRules.ChargeSkipWhy(s)
+	end
+	if why ~= nil then
+		logFarSkip(why, "fight", nil, target, s)
+		return nil
+	end
+	logFarCharge("fight", nil, target, s, nil)
+	return target
 end
 function X.ConsiderBulldoze()
 	if not bulldozeAbility:IsFullyCastable() then
