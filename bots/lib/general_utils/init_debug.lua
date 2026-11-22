@@ -4,7 +4,8 @@ local function installDebugHelpers(Fu)
 	function Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, sBuyList, sSellList)
 		local bot = GetBot()
 		local heroName = bot:GetUnitName()
-		local modulePath, heroConfig = "game/customize/hero/" .. string.gsub(heroName, "npc_dota_hero_", ""), nil
+		local heroFile = string.gsub(heroName, "npc_dota_hero_", "")
+		local modulePath, heroConfig = "game/customize/hero/" .. heroFile, nil
 		-- The handlers only keep the message. Logging from inside them showed up as
 		-- "Script Runtime Error: error in error handling" for every bot at -89s (a per-hero
 		-- Customize file is optional, so a failed require is normal).
@@ -16,7 +17,16 @@ local function installDebugHelpers(Fu)
 			return err
 		end)
 		if not (loaded and heroConfig) then
-			modulePath = GetScriptDirectory() .. "/customize/hero/" .. string.gsub(heroName, "npc_dota_hero_", "")
+			-- The folder name before #221 (Linux and macOS file systems are case-sensitive).
+			modulePath = "game/Customize/hero/" .. heroFile -- restructure:keep
+			loaded = xpcall(function()
+				heroConfig = require(modulePath)
+			end, function(err)
+				return err
+			end)
+		end
+		if not (loaded and heroConfig) then
+			modulePath = GetScriptDirectory() .. "/customize/hero/" .. heroFile
 			loaded = xpcall(function()
 				heroConfig = require(modulePath)
 			end, function(err)
