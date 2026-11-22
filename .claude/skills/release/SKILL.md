@@ -16,13 +16,13 @@ on an earlier or general approval.
 - `git fetch origin --tags`. The last release is the newest `v*` tag (`git tag --list "v*" --sort=-v:refname`).
 - Next version: minor + 1 (`v0.2` -> `v0.3`) unless the maintainer names another (a major bump for a big change).
 - Version files (bumped only in the release PR):
-  - `Customize/version.lua`, `number = "YYYY.MM.DD-NNN"`: the release date, and NNN = the previous NNN plus the
+  - `bots/customize/version.lua`, `number = "YYYY.MM.DD-NNN"`: the release date, and NNN = the previous NNN plus the
     number of commits on main since the last tag (`git rev-list --count <tag>..origin/main`), zero-padded to 3.
-  - `FuncLib/systems/version.lua`, `Version.number = "0.<game patch> - YYYY/MM/DD"`: the Dota patch the release is
+  - `bots/lib/systems/version.lua`, `Version.number = "0.<game patch> - YYYY/MM/DD"`: the Dota patch the release is
     for (e.g. `0.7.42`) and the release date.
 
 ## 2. Draft
-`node Util/release-notes.js` prints a draft: one line per merged PR since the last tag (title without its
+`node tools/release-notes.js` prints a draft: one line per merged PR since the last tag (title without its
 conventional prefix, plus the change-log entry headings from the PR body), in the sections Patch, New, Fixes,
 Project, and a hidden "Left out" list: reverts, PRs reverted later in the range, and PRs whose change-log entries
 are all `cleanup` (logs, diagnostics, tests). `--json` gives the same data.
@@ -51,7 +51,7 @@ in one line each. Stop here unless publishing was asked for.
 
 ## 5. Ready to publish?
 - `main` CI is green (`gh run list --branch main --limit 3`), and a game on a build of `main` alone ran clean
-  (no freeze, no `[OHA-ERROR]`): if not, say so and stop.
+  (no freeze, no `[SHy-ERROR]`): if not, say so and stop.
 - No open PR the maintainer named as part of this release is still open.
 
 ## 6. Release PR
