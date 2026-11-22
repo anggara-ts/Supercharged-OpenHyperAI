@@ -113,8 +113,8 @@ end)
 T.test("curse log: line formats", function()
 	local C = load()
 	T.eq(
-		C.HitLine(612.4, "npc_dota_hero_lion", "spell", "npc_dota_hero_axe", "lion_finger_of_death", 2.25, " dmgType=2"),
-		"[OHA-CURSE] t=612 lion hit kind=spell hero=lion target=axe ability=lion_finger_of_death curseLeft=2.2 dmgType=2",
+		C.HitLine(612.4, "npc_dota_hero_lion", "spell", "npc_dota_hero_axe", "lion_finger_of_death", 2.4, " dmgType=2"),
+		"[OHA-CURSE] t=612 lion hit kind=spell hero=lion target=axe ability=lion_finger_of_death curseLeft=2.4 dmgType=2",
 		"spell hit"
 	)
 	T.eq(
