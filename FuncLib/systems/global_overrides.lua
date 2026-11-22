@@ -720,6 +720,18 @@ local function IsVector(value)
 	end)
 	return ok and type(x) == "number"
 end
+-- [OHA-CURSE] (FuncLib/systems/curse_log.lua): a unit-target spell or item ordered on an enemy under Winter's Curse.
+-- Log only, the cast goes on unchanged. Loaded on first use.
+local CurseLog = nil
+local function LogCurseCast(self, ability, target)
+	if CurseLog == nil then
+		local ok, curseLog = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/curse_log")
+		CurseLog = ok and curseLog or false
+	end
+	if CurseLog then
+		pcall(CurseLog.OnCast, self, ability, target)
+	end
+end
 local function GuardCast(method, targetKind)
 	local original = CDOTA_Bot_Script[method]
 	if original == nil then
@@ -748,6 +760,9 @@ local function GuardCast(method, targetKind)
 		if targetKind == "tree" and target == nil then
 			CastRefused(self, ability, method, "nil-tree")
 			return nil
+		end
+		if targetKind == "entity" then
+			LogCurseCast(self, ability, target)
 		end
 		-- A no-target cast takes only the ability. Do not hand the engine an extra nil.
 		if targetKind == "none" then

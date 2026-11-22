@@ -35,6 +35,7 @@ local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_t
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local CurseLog = require(GetScriptDirectory() .. "/FuncLib/systems/curse_log")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -10510,6 +10511,8 @@ function ItemUsageThink()
 	pcall(Usage.ProbeHiddenItems)
 	pcall(Usage.LogHomeWalk)
 	pcall(Usage.WatchDodgeResults)
+	-- [OHA-CURSE]: right-clicks on enemies under Winter's Curse (log only).
+	pcall(CurseLog.Watch, bot)
 	PartEnd("watchers", tWatch)
 	local okQ, cleared = pcall(Usage.WatchStuckQueue)
 	if okQ and cleared then
