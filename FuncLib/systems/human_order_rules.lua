@@ -307,18 +307,24 @@ function Rules.PickResponders(kind, cands, need)
 		end
 		return ka < kb
 	end)
-	local obey, queue, ignore = {}, {}, {}
+	-- Free bots first; bots still fighting fill the places left (they go after the fight).
+	local obey, queue, ignore, waiting = {}, {}, {}, {}
 	for _, c in ipairs(sorted) do
 		local answer = Rules.Answer(kind, c.state)
 		if c.dist > maxDist then
 			answer = "far"
 		end
-		if answer == "obey" and #obey + #queue < need then
+		if answer == "obey" and #obey < need then
 			obey[#obey + 1] = c.id
-		elseif answer == "queue" and #obey + #queue < need then
-			queue[#queue + 1] = c.id
+		elseif answer == "queue" then
+			waiting[#waiting + 1] = c.id
 		elseif answer == "ignore" then
 			ignore[#ignore + 1] = { id = c.id, why = c.state }
+		end
+	end
+	for _, id in ipairs(waiting) do
+		if #obey + #queue < need then
+			queue[#queue + 1] = id
 		end
 	end
 	return obey, queue, ignore
