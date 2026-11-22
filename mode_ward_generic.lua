@@ -250,17 +250,17 @@ local function AnnounceWard(kind)
 		key = kind == "sentry" and "say_ward_sentry_offense" or "say_ward_observer_offense"
 	end
 	local text = PickChat(key, kind == "sentry" and "Planting sentry." or "Planting observer.")
-	-- The ward lines are decision chat: team chat only with `!debug` ("placing ward also goes to !debug",
-	-- maintainer 2026-11-23).
-	ChatRules.SayDecision(bot, text, key)
-	local extra = string.format(
-		"[debug] ward %s role=%s at (%.0f, %.0f)",
-		kind,
-		tostring(role or "n/a"),
-		wardSpot and wardSpot.location.x or 0,
-		wardSpot and wardSpot.location.y or 0
-	)
-	ChatRules.SayDecision(bot, extra, "ward_debug")
+	ChatRules.SayDecision(bot, text, key) -- only with `!debug` ("placing ward also goes to !debug", maintainer 2026-11-23)
+	if Fu.Utils.DebugMode or Fu.Utils.GameStates.verboseChat then
+		local extra = string.format(
+			"[debug] ward %s role=%s at (%.0f, %.0f)",
+			kind,
+			tostring(role or "n/a"),
+			wardSpot and wardSpot.location.x or 0,
+			wardSpot and wardSpot.location.y or 0
+		)
+		bot:ActionImmediate_Chat(extra, false)
+	end
 end
 function GetDesire()
 	DumpWards()
