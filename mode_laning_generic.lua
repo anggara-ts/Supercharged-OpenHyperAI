@@ -3,9 +3,9 @@ local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
 local LaneHarassRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_harass_rules")
+local LaneTowerRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_tower_rules")
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
 local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
-local LaneTowerRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_tower_rules")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -93,6 +93,27 @@ local function LogInEnemyTower()
 			return
 		end
 	end
+end
+-- Creep score (#71, maintainer game 050: "check all heroes' creep stats"). Last hits and denies every minute
+-- until 15:00, then every 5 minutes. (Finished games also have the engine's end-of-match numbers.)
+local function LogCreepScore()
+	local now = DotaTime()
+	if now < 0 or now < (bot._csLogAt or -999) or bot:IsIllusion() then
+		return
+	end
+	bot._csLogAt = now + (now < 900 and 60 or 300)
+	pcall(
+		print,
+		string.format(
+			"[OHA-CS] t=%.0f %s lh=%d dn=%d lvl=%d nw=%d",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			bot:GetLastHits(),
+			bot:GetDenies(),
+			bot:GetLevel(),
+			bot:GetNetWorth()
+		)
+	)
 end
 -- [OHA-AGGRO] pull-result (#71, maintainer: "please add the result log, that would be helpful to see if it worked"):
 -- ~0.5s after a pull, how many of the enemy creeps that were within 500 of the bot at the order now attack it.
@@ -222,27 +243,6 @@ local function InTowerExitZone(location)
 		return false
 	end
 	return LaneTowerRules.InZone(GetUnitToLocationDistance(zone.tower, location), zone.reach)
-end
--- Creep score (#71, maintainer game 050: "check all heroes' creep stats"). Last hits and denies every minute
--- until 15:00, then every 5 minutes. (Finished games also have the engine's end-of-match numbers.)
-local function LogCreepScore()
-	local now = DotaTime()
-	if now < 0 or now < (bot._csLogAt or -999) or bot:IsIllusion() then
-		return
-	end
-	bot._csLogAt = now + (now < 900 and 60 or 300)
-	pcall(
-		print,
-		string.format(
-			"[OHA-CS] t=%.0f %s lh=%d dn=%d lvl=%d nw=%d",
-			now,
-			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-			bot:GetLastHits(),
-			bot:GetDenies(),
-			bot:GetLevel(),
-			bot:GetNetWorth()
-		)
-	)
 end
 -- Last-hit attempts in the laning phase (#71, maintainer game 050 6:30: Weaver's hits look late; she missed 42
 -- last hits, Kez 11). The first attack (or walk-in) order on a creep starts an attempt with the creep's HP and when

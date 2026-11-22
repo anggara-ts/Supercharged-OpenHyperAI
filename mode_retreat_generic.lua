@@ -1,8 +1,8 @@
 -- Retreat mode. Also pulls a bot off a wisdom-shrine walk that has become dangerous.
 local Retreat = {}
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
-local RetreatRules = require(GetScriptDirectory() .. "/FuncLib/systems/retreat_rules")
 local LaneTowerRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_tower_rules")
+local RetreatRules = require(GetScriptDirectory() .. "/FuncLib/systems/retreat_rules")
 local bot = GetBot()
 local hpRatio, mpRatio, botName, botHealth, healthRegen, manaRegen, botLocation, botTarget
 local botLevel, activeMode
@@ -278,45 +278,6 @@ local function CountRealHeroes(radius, enemy)
 	end
 	return count
 end
--- Valve's evasive mode turns this file off (tag 142). Game 037: 33 of 52 Radiant deaths ended in it,
--- and those bots lost ground to the fountain in their last 3.5s (retreat deaths gained ~200). Low
--- (under 40%) with enemy heroes near and outnumbered or being hit: retreat above evasive (it reads
--- up to 1.00 as the active mode, and the active mode reads ~10% above its desire: 1.25 clears
--- even a raw 1.00 with that bonus). Held 3s once retreat is the active mode, renewed while under
--- 50% HP with an enemy hero near or a hero hit, so evasive cannot take the next think back.
-local function OverEvasiveDesire()
-	local now = DotaTime()
-	local hp = Fu.GetHP(bot)
-	local enemyN = CountRealHeroes(1200, true)
-	local allyN = CountRealHeroes(1200, false)
-	local hit = bot:WasRecentlyDamagedByAnyHero(1.5)
-	local holding = bot._overEvasiveUntil ~= nil and now < bot._overEvasiveUntil and activeMode == BOT_MODE_RETREAT
-	local start = activeMode == BOT_MODE_EVASIVE_MANEUVERS and hp < 0.4 and enemyN >= 1 and (enemyN > allyN or hit)
-	if start or holding and hp < 0.5 and (enemyN >= 1 or hit) then
-		bot._overEvasiveUntil = now + 3
-		if now >= (bot._overEvasiveLogAt or -999) then
-			bot._overEvasiveLogAt = now + 3
-			pcall(
-				print,
-				string.format(
-					"[OHA-RETREAT] t=%.0f %s over-evasive %s hp=%.2f enemies=%d allies=%d hit=%s mode=%d desire=%.2f",
-					now,
-					HeroName(),
-					start and "start" or "hold",
-					hp,
-					enemyN,
-					allyN,
-					tostring(hit),
-					activeMode or -1,
-					BOT_DESIRE_OVERRIDE * 1.25
-				)
-			)
-		end
-		return BOT_DESIRE_OVERRIDE * 1.25
-	end
-	bot._overEvasiveUntil = nil
-	return 0
-end
 -- Retreat over evasive inside an enemy tower's range in the laning phase (#71, game 071 5:47-5:55: Largo, 58% HP, in
 -- Dire's top T1 range and hit by Phantom Assassin, stayed in Valve's evasive mode at 0.60 and died there). Under 60% HP,
 -- inside the tower's reach + 100 (LaneTowerRules) and hit there (the tower shoots it, or a hero hit it in the last
@@ -377,6 +338,45 @@ local function TowerEscapeDesire()
 		)
 	end
 	return BOT_DESIRE_OVERRIDE * 1.25
+end
+-- Valve's evasive mode turns this file off (tag 142). Game 037: 33 of 52 Radiant deaths ended in it,
+-- and those bots lost ground to the fountain in their last 3.5s (retreat deaths gained ~200). Low
+-- (under 40%) with enemy heroes near and outnumbered or being hit: retreat above evasive (it reads
+-- up to 1.00 as the active mode, and the active mode reads ~10% above its desire: 1.25 clears
+-- even a raw 1.00 with that bonus). Held 3s once retreat is the active mode, renewed while under
+-- 50% HP with an enemy hero near or a hero hit, so evasive cannot take the next think back.
+local function OverEvasiveDesire()
+	local now = DotaTime()
+	local hp = Fu.GetHP(bot)
+	local enemyN = CountRealHeroes(1200, true)
+	local allyN = CountRealHeroes(1200, false)
+	local hit = bot:WasRecentlyDamagedByAnyHero(1.5)
+	local holding = bot._overEvasiveUntil ~= nil and now < bot._overEvasiveUntil and activeMode == BOT_MODE_RETREAT
+	local start = activeMode == BOT_MODE_EVASIVE_MANEUVERS and hp < 0.4 and enemyN >= 1 and (enemyN > allyN or hit)
+	if start or holding and hp < 0.5 and (enemyN >= 1 or hit) then
+		bot._overEvasiveUntil = now + 3
+		if now >= (bot._overEvasiveLogAt or -999) then
+			bot._overEvasiveLogAt = now + 3
+			pcall(
+				print,
+				string.format(
+					"[OHA-RETREAT] t=%.0f %s over-evasive %s hp=%.2f enemies=%d allies=%d hit=%s mode=%d desire=%.2f",
+					now,
+					HeroName(),
+					start and "start" or "hold",
+					hp,
+					enemyN,
+					allyN,
+					tostring(hit),
+					activeMode or -1,
+					BOT_DESIRE_OVERRIDE * 1.25
+				)
+			)
+		end
+		return BOT_DESIRE_OVERRIDE * 1.25
+	end
+	bot._overEvasiveUntil = nil
+	return 0
 end
 -- Monkey King's Jingu charges heal 20-80% of each hit (game data, lifesteal): like Satanic's Unholy
 -- Rage (tag 142), don't back off while they last and he is hitting a hero in an even fight. The
@@ -525,9 +525,9 @@ function GetDesire()
 	local now = DotaTime()
 	if not bot:IsAlive() then
 		bot._retreatDeadAt = now
+		bot._towerEscapeUntil = nil
 		bot._hardRetreatUntil = nil
 		bot._overEvasiveUntil = nil
-		bot._towerEscapeUntil = nil
 	end
 	if now - (bot._retreatDesireAt or -999) > 1.5 then
 		bot._retreatResumeAt = now
@@ -619,9 +619,9 @@ function GetDesireHelper()
 		or Fu.GetModifierTime(bot, "modifier_oracle_false_promise_timer") > 3
 		or JinguFightOn()
 	then
+		bot._towerEscapeUntil = nil
 		bot._hardRetreatUntil = nil
 		bot._overEvasiveUntil = nil
-		bot._towerEscapeUntil = nil
 		return RetreatTag(142, BOT_MODE_DESIRE_NONE)
 	end
 	if activeMode == BOT_MODE_EVASIVE_MANEUVERS or bot._towerEscapeUntil ~= nil then
