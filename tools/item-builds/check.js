@@ -25,7 +25,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..", "..");
-const CACHE = path.join(__dirname, "cache");
+const CACHE = path.join(ROOT, "local", "item-builds", "cache");
 const argv = process.argv.slice(2);
 const REFRESH = argv.includes("--refresh");
 const option = (name) => {
@@ -193,7 +193,7 @@ async function main() {
 		}
 		if (lines.length) out.push(`## ${hero.displayName} (\`${key}\`)`, ...lines, "");
 	}
-	fs.writeFileSync(path.join(__dirname, "report.md"), out.join("\n") + "\n");
+	fs.writeFileSync(path.join(ROOT, "local", "item-builds", "report.md"), out.join("\n") + "\n");
 	console.log(`${checked} heroes checked, ${flagged} hero-positions flagged -> local/item-builds/report.md`);
 }
 main().catch((e) => {
