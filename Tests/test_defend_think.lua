@@ -150,22 +150,65 @@ T.test("defend think: meet the wave at the rim, not further than the step-down",
 	T.ok(dist(order[2], MID_T3) <= 500, "holds the rim")
 end)
 
-T.test("defend think: heroes at the rim send a lone defender back, heroes at the Ancient call everyone home", function()
+T.test(
+	"defend think: heroes at the rim: back alone, fight with the team; heroes at the Ancient call everyone home",
+	function()
+		local g = setup()
+		local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
+		Fu.WeAreStronger = function()
+			return false
+		end
+		think(g) -- the T3 seen standing
+		g.towers[g.Dota.Tower.Mid3]._alive = false
+		local dire = Stub.teams[TEAM_DIRE]
+		for i = 1, 3 do
+			dire[i]._loc = Vector(MID_T3.x + 200 * i, MID_T3.y, 0)
+		end
+		-- Our other four far away (top lane): alone against three, back to the Ancient (the T3 is down).
+		local radiant = Stub.teams[TEAM_RADIANT]
+		for i = 2, 5 do
+			radiant[i]._loc = Vector(-6000, 3000, 0)
+		end
+		local order = think(g)
+		T.eq(lastStep(), "hg-back")
+		T.ok(dist(order[2], ANCIENT) <= 800, "back at the Ancient")
+		-- Three allies by the Ancient, within reach of the rim (2500): four against three, fight at the rim.
+		for i = 2, 4 do
+			radiant[i]._loc = Vector(ANCIENT.x + 300, ANCIENT.y + 300 * i, 0)
+		end
+		order = think(g)
+		T.eq(lastStep(), "hg-fight")
+		T.ok(dist(order[2], MID_T3) <= 1200, "at the rim, no chase")
+		dire[1]._loc = Vector(ANCIENT.x + 500, ANCIENT.y, 0)
+		think(g)
+		T.eq(lastStep(), "ancient-heroes")
+	end
+)
+
+T.test("defend think: a base defence keeps one rim while the enemy fronts move", function()
 	local g = setup()
-	think(g) -- the T3 seen standing
+	-- Top and mid both down to the T4s (their T3s seen, then dead); bottom keeps its T3.
+	think(g)
 	g.towers[g.Dota.Tower.Mid3]._alive = false
-	local dire = Stub.teams[TEAM_DIRE]
-	for i = 1, 3 do
-		dire[i]._loc = Vector(MID_T3.x + 200 * i, MID_T3.y, 0)
+	g.towers[g.Dota.Tower.Top3]._alive = false
+	local TOP_T3 = { x = -6600, y = -1800 }
+	local fronts = { [LANE_TOP] = Vector(-6400, -2500, 0), [LANE_MID] = Vector(-1000, -1000, 0) }
+	_G.GetLaneFrontLocation = function(_, lane)
+		return fronts[lane] or Vector(0, 0, 0)
 	end
 	local order = think(g)
-	T.ok(lastStep() == "hg-back" or lastStep() == "hg-fight", "step " .. tostring(lastStep()))
-	if lastStep() == "hg-back" then
-		T.ok(dist(order[2], ANCIENT) <= 800, "back at the Ancient")
+	T.eq(lastStep(), "hg-spot")
+	T.ok(dist(order[2], TOP_T3) <= 1500, "the top rim (front nearest): " .. dist(order[2], TOP_T3))
+	-- The fronts swap: the spot stays at the top rim, no walk across the base.
+	fronts[LANE_TOP], fronts[LANE_MID] = Vector(-1000, 4000, 0), Vector(-4500, -4000, 0)
+	for _ = 1, 4 do
+		order = think(g)
+		T.ok(dist(order[2], TOP_T3) <= 1500, "still the top rim: " .. dist(order[2], TOP_T3))
 	end
-	dire[1]._loc = Vector(ANCIENT.x + 500, ANCIENT.y, 0)
-	think(g)
-	T.eq(lastStep(), "ancient-heroes")
+	-- A wave walks up mid: the spot goes to it.
+	creep(g, MID_T3.x + 400, MID_T3.y + 400)
+	order = think(g)
+	T.ok(lastStep() == "hg-wave" or lastStep() == "hg-near", "meets the mid wave: " .. tostring(lastStep()))
 end)
 
 T.test("defend think: no Ancient, no buildings: still one order", function()

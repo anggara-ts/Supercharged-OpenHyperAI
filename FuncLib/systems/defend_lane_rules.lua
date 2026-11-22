@@ -119,7 +119,7 @@ end
 -- Ancient only for enemy heroes there, or for an Ancient being hit with no wave to meet.
 --   s.heroesAtAncient  enemy heroes seen near our Ancient
 --   s.heroesAtRim      enemy heroes seen near the rim
---   s.alliesAtRim      our heroes near the rim (this bot included)
+--   s.alliesAtRim      our heroes who can take part at the rim (this bot included, allies within 2500)
 --   s.stronger         Fu.WeAreStronger around the bot
 --   s.waveNear         a wave creep within reach of the bot
 --   s.wave             wave creeps (near the rim or the Ancient)

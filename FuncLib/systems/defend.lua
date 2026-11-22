@@ -627,10 +627,12 @@ local tier3Spots = {}
 local tier3TowerIds = { [Lane.Top] = Tower.Top3, [Lane.Mid] = Tower.Mid3, [Lane.Bot] = Tower.Bot3 }
 local function Tier3Spot(team, lane)
 	tier3Spots[team] = tier3Spots[team] or {}
-	local id = tier3TowerIds[lane]
-	local tower = id ~= nil and GetTower(team, id) or nil
-	if Fu.IsValidBuilding(tower) then
-		tier3Spots[team][lane] = tower:GetLocation()
+	-- All three lanes on every read, so a lane is known before its own defence first asks.
+	for spotLane, id in pairs(tier3TowerIds) do
+		local tower = GetTower(team, id)
+		if Fu.IsValidBuilding(tower) then
+			tier3Spots[team][spotLane] = tower:GetLocation()
+		end
 	end
 	return tier3Spots[team][lane]
 end
@@ -1873,7 +1875,7 @@ end
 -- #53: the defend modes' Think (mode_defend_tower_*_generic.lua). It replaces Valve's defend Think, which walked the bot
 -- to the lane's furthest building (game 068: the T4s, then the Ancient; 0 hg-step lines in games 064-068 because this
 -- had no caller). Every path issues one order through DefendStep, which logs
--- [OHA-DEFEND] hg-step step= lane= why= dist= ancDist= (on a new step, else every 5s). Teleports stay with the TP rule
+-- [OHA-DEFEND] hg-step step= lane= why= dist= ancDist= (each step at most every 5s). Teleports stay with the TP rule
 -- (ability_item_usage_generic.lua: DefendLaneRules.DefendTpBlock and the bot._defendTpAt stamp); this only holds it.
 -- How far out from the rim a bot walks to meet a wave (map-scale choice: the ramp below the T3, not the T2 area).
 local STEP_DOWN = 1600
@@ -1888,9 +1890,10 @@ end
 local function DefendStep(bot, lane, step, why, order, target, info)
 	local now = DotaTime()
 	local targetLoc = order == "attack" and target:GetLocation() or target
-	if step ~= bot._defendStepLast or now >= (bot._defendStepLogAt or -999) then
-		bot._defendStepLast = step
-		bot._defendStepLogAt = now + 5
+	-- Throttled per step name, so two steps that alternate print at most twice per 5s.
+	bot._defendStepLogAt = bot._defendStepLogAt or {}
+	if now >= (bot._defendStepLogAt[step] or -999) then
+		bot._defendStepLogAt[step] = now + 5
 		local ancient = GetAncient(ourTeam)
 		pcall(
 			print,
@@ -1951,8 +1954,7 @@ end
 -- A base defence (the lane is down to the T4s or the Ancient) holds one rim for the whole team, picked from the threat,
 -- not from the mode's lane label (game 068 t=3120-3137: the base lane flipped top / mid every few seconds with no
 -- creeps). The lane of the wave nearest our Ancient on a base lane; else of the enemy heroes seen at a base rim; else the
--- base lane whose enemy lane front is nearest our Ancient. A new pick replaces the old one at once only for a wave,
--- otherwise after 8s.
+-- base lane whose enemy lane front is nearest our Ancient (kept until a wave or heroes move it).
 local baseSpot = { lane = nil, why = nil, at = -999, checkAt = -999 }
 local function BaseSpotLane(fallbackLane)
 	local now = DotaTime()
@@ -2007,17 +2009,23 @@ local function BaseSpotLane(fallbackLane)
 			end
 		end
 	end
-	pick = pick or baseLanes[1]
-	local keepOld = baseSpot.lane ~= nil
-		and rims[baseSpot.lane] ~= nil
+	pick, why = pick or baseLanes[1], why or "first"
+	-- A wave takes the spot at once; heroes replace a front pick at once, a wave or heroes pick after 8s; a front pick
+	-- never replaces a spot that is still a base lane (enemy lane fronts move with every wave).
+	local oldIsBase = baseSpot.lane ~= nil and rims[baseSpot.lane] ~= nil
+	local keepOld = oldIsBase
 		and pick ~= baseSpot.lane
 		and why ~= "wave"
-		and now - baseSpot.at < 8
+		and (
+			why == "front"
+			or why == "first"
+			or why == "heroes" and baseSpot.why ~= "front" and baseSpot.why ~= "first" and now - baseSpot.at < 8
+		)
 	if not keepOld then
 		if pick ~= baseSpot.lane then
 			baseSpot.at = now
 		end
-		baseSpot.lane, baseSpot.why = pick, why or "first"
+		baseSpot.lane, baseSpot.why = pick, why
 	end
 	return baseSpot.lane, baseSpot.why
 end
@@ -2057,6 +2065,16 @@ local function DefendTpHold(bot, lane, spot)
 			)
 		)
 	end
+end
+-- Our heroes who can take part at a spot: this bot, and the allies within radius of it.
+local function AlliesWithin(bot, location, radius)
+	local count = 1
+	for _, ally in ipairs(Fu.GetAlliesNearLoc(location, radius)) do
+		if ally ~= bot and not ally:IsIllusion() then
+			count = count + 1
+		end
+	end
+	return count
 end
 local function NearestAttackableHero(location, radius, bot)
 	local best, bestDist = nil, math.huge
@@ -2105,8 +2123,8 @@ local function LaneDefendThink(bot, lane, building, info)
 		local creep = entry.unit
 		if
 			Fu.IsValid(creep)
-			and Fu.CanBeAttacked(creep)
 			and GetUnitToLocationDistance(creep, defendLocation) <= DefendLaneRules.TOWER_RADIUS
+			and Fu.CanBeAttacked(creep)
 		then
 			info.wave = info.wave + 1
 			local d = GetUnitToUnitDistance(bot, creep)
@@ -2210,9 +2228,10 @@ function Defend.DefendThink(bot, lane)
 		local creep = entry.unit
 		local creepRim = rims[entry.lane]
 		if
-			Fu.IsValid(creep)
+			(entry.lane == "base" or creepRim ~= nil)
+			and Fu.IsValid(creep)
+			and (entry.lane == "base" or GetUnitToLocationDistance(creep, creepRim) <= STEP_DOWN)
 			and Fu.CanBeAttacked(creep)
-			and (entry.lane == "base" or creepRim ~= nil and GetUnitToLocationDistance(creep, creepRim) <= STEP_DOWN)
 		then
 			info.wave = info.wave + 1
 			local d = GetUnitToUnitDistance(bot, creep)
@@ -2234,14 +2253,14 @@ function Defend.DefendThink(bot, lane)
 		local heroesByWave = #Fu.GetLastSeenEnemiesNearLoc(waveTarget:GetLocation(), 1200)
 		waveSafe = heroesByWave == 0
 			or stronger
-			or #Fu.GetAlliesNearLoc(waveTarget:GetLocation(), 1200) >= heroesByWave + 1
+			or AlliesWithin(bot, waveTarget:GetLocation(), 2000) >= heroesByWave + 1
 	end
 	local heroesAtRim = #Fu.GetLastSeenEnemiesNearLoc(rim, 1600)
 	info.heroes = heroesAtRim
 	local step = DefendLaneRules.HighGroundStep({
 		heroesAtAncient = 0,
 		heroesAtRim = heroesAtRim,
-		alliesAtRim = #Fu.GetAlliesNearLoc(rim, 1600),
+		alliesAtRim = AlliesWithin(bot, rim, 2500),
 		stronger = stronger,
 		waveNear = best ~= nil,
 		wave = info.wave,
@@ -2250,16 +2269,24 @@ function Defend.DefendThink(bot, lane)
 	})
 	local why = baseDefence and ("base-" .. tostring(spotWhy)) or (tier == 3 and "t3" or "lane")
 	if step == "hg-fight" then
-		local target = NearestAttackableHero(rim, 1600, bot)
-		if target ~= nil then
+		-- Only a hero within reach of the bot: no chase down the ramp, out of the T3's range.
+		local attackRange = bot:GetAttackRange()
+		local engageRange = attackRange < 900 and 900 or math.min(attackRange, defendRadius)
+		local target, targetDist = NearestAttackableHero(rim, 1600, bot)
+		if target ~= nil and targetDist <= engageRange then
 			return DefendStep(bot, lane, step, why, "attack", target, info)
 		end
 		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(rim, offset), info)
 	elseif step == "hg-back" then
-		if GetUnitToLocationDistance(bot, homeSpot) > 400 then
-			return DefendStep(bot, lane, step, why, "move", homeSpot, info)
+		-- With the T3 standing, just behind it; once it is down, back to the Ancient.
+		local backSpot = homeSpot
+		if tier == 3 and Fu.IsValidBuilding(GetTower(ourTeam, tier3TowerIds[lane])) then
+			backSpot = Fu.AdjustLocationWithOffsetTowardsFountain(rim, 400)
 		end
-		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(ancientLoc, offset), info)
+		if GetUnitToLocationDistance(bot, backSpot) > 400 then
+			return DefendStep(bot, lane, step, why, "move", backSpot, info)
+		end
+		return DefendStep(bot, lane, step, why, "attack-move", vectorAdd(backSpot, offset), info)
 	elseif step == "hg-near" and best ~= nil then
 		return DefendStep(bot, lane, step, why, "attack", best, info)
 	elseif step == "hg-wave" and nearest ~= nil then
