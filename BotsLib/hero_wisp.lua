@@ -349,7 +349,7 @@ local function readyFightSpells(hero)
 			and not ability:IsHidden()
 			and ability:IsFullyCastable()
 			and (
-				bit.band(DOTA_UNIT_TARGET_TEAM_ENEMY, ability:GetTargetTeam()) ~= 0
+				bit.band(DOTA_UNIT_TARGET_TEAM_ENEMY, ability:GetTargetTeam() or 0) ~= 0
 				or (ability:GetAbilityDamage() or 0) > 0
 			)
 		then
