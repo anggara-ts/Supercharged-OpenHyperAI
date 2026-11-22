@@ -2398,4 +2398,102 @@ function Push.FindBestHGTarget(bot, maxDistance, targetLocation)
 	end
 	return meleeBarracks or rangedBarracks or tier3Tower or otherBuilding
 end
+-- Lanes our creeps press (#12, PushRules.LaneUnderPressure): the lane's next target is their T3 or deeper and our
+-- lane front, with 2+ of our lane creeps within 1000 of it, stands within 1500 of that target. Per team, every 2s.
+-- Returns the count and a "top,mid" style list for the logs.
+local pressureByTeam = {}
+function Push.CreepPressureLanes()
+	local team = GetTeam()
+	local cached = pressureByTeam[team]
+	if cached ~= nil and DotaTime() - cached.at < 2 then
+		return cached.count, cached.names
+	end
+	local creeps = GetUnitList(UnitType.AlliedCreeps) or {}
+	local count, names = 0, {}
+	for _, lane in ipairs({ Lane.Top, Lane.Mid, Lane.Bot }) do
+		local tier = Push.GetLaneBuildingTier(lane)
+		local target = tier >= 3 and getLaneTargetBuilding(lane) or nil
+		if target ~= nil then
+			local front = GetLaneFrontLocation(team, lane, 0)
+			local atFront = 0
+			for _, creep in ipairs(creeps) do
+				if
+					creep ~= nil
+					and not creep:IsNull()
+					and creep:IsAlive()
+					and creep:IsCreep()
+					and GetUnitToLocationDistance(creep, front) <= 1000
+				then
+					atFront = atFront + 1
+					if atFront >= 2 then
+						break
+					end
+				end
+			end
+			if PushRules.LaneUnderPressure(tier, GetUnitToLocationDistance(target, front), atFront) then
+				count = count + 1
+				names[#names + 1] = lane == Lane.Top and "top" or (lane == Lane.Mid and "mid" or "bot")
+			end
+		end
+	end
+	local list = #names > 0 and table.concat(names, ",") or "-"
+	pressureByTeam[team] = { at = DotaTime(), count = count, names = list }
+	return count, list
+end
+-- Roshan first (#12, PushRules.RoshanFirst, maintainer 2026-11-22): every enemy alive, their base open, Roshan up,
+-- no advantage window and our base not hit: the Aegis before the high ground. Read by mode_roshan_generic.lua.
+-- Per team, every 1s; one [OHA-ROSH] aegis-first line when it turns on or off.
+local roshanFirstByTeam = {}
+function Push.RoshanFirstState(bot)
+	local team = GetTeam()
+	local state = roshanFirstByTeam[team]
+	if state ~= nil and DotaTime() - state.at < 1 then
+		return state.on, state.why, state.pressure
+	end
+	local gameState = getGlobalGameState()
+	refreshThreatState(team)
+	local adv = ReadAdvantage(gameState, bot)
+	local baseOpen = false
+	for _, lane in ipairs({ Lane.Top, Lane.Mid, Lane.Bot }) do
+		if Push.GetLaneBuildingTier(lane) >= 3 then
+			baseOpen = true
+			break
+		end
+	end
+	local _, ahead = AncientOpenAndAhead(gameState)
+	local pressure, pressureNames = Push.CreepPressureLanes()
+	local baseHeroes = baseThreat.heroes or 0
+	local on, why = PushRules.RoshanFirst({
+		enemiesAlive = gameState.aliveEnemyCount or 0,
+		enemyPlayers = #GetTeamPlayers(GetOpposingTeam()),
+		alliesAlive = gameState.aliveAllyCount or 0,
+		baseOpen = baseOpen,
+		roshAlive = Fu.IsRoshanAlive(),
+		ourAegis = gameState.hasAegis == true,
+		advantage = adv.desire ~= nil and not gameState.isLaningPhase,
+		baseThreat = baseHeroes >= 1 or Utils.BaseUnderCreeps(bot),
+		ahead = ahead,
+		pressureLanes = pressure,
+	})
+	local was = state ~= nil and state.on or false
+	if on ~= was then
+		pcall(
+			print,
+			string.format(
+				"[OHA-ROSH] t=%.0f %s aegis-first %s why=%s alive=%d/%d baseOpen=%s ahead=%s pressure=%s",
+				DotaTime(),
+				team == TEAM_DIRE and "dire" or "radiant",
+				on and "on" or "off",
+				why,
+				gameState.aliveAllyCount or 0,
+				gameState.aliveEnemyCount or 0,
+				tostring(baseOpen),
+				tostring(ahead),
+				pressureNames
+			)
+		)
+	end
+	roshanFirstByTeam[team] = { at = DotaTime(), on = on, why = why, pressure = pressure }
+	return on, why, pressure
+end
 return Push

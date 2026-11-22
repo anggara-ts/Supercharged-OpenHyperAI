@@ -15,6 +15,11 @@ local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local KillWindow = require(GetScriptDirectory() .. "/FuncLib/systems/kill_window")
 local ObjectiveTravel = require(GetScriptDirectory() .. "/FuncLib/systems/objective_travel")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
+local Push = require(GetScriptDirectory() .. "/FuncLib/systems/push")
+local PushRules = require(GetScriptDirectory() .. "/FuncLib/systems/push_rules")
+local RoshanRules = require(GetScriptDirectory() .. "/FuncLib/systems/roshan_rules")
+-- Roshan first (Push.RoshanFirstState, #12): read once per GetDesireHelper; the numbers rule and the call use it.
+local aegisFirstNow = false
 local isRoshanAlive = false
 Fu.Utils.GameStates = Fu.Utils.GameStates or {}
 Fu.Utils.GameStates.roshHandle = Fu.Utils.GameStates.roshHandle or nil
@@ -320,7 +325,8 @@ local function EnemiesHeldAtBase()
 			creeps = creeps + 1
 		end
 	end
-	if creeps < 4 then
+	-- Or a lane our creeps press at their T3 or deeper (Push.CreepPressureLanes, #12: that wave pulls them home).
+	if creeps < 4 and Push.CreepPressureLanes() < 1 then
 		return 0
 	end
 	for _, pid in ipairs(GetTeamPlayers(GetOpposingTeam())) do
@@ -347,6 +353,12 @@ local function ContestingEnemies(roshanLocation)
 end
 -- Numbers rule for a fresh take. Returns ok, why.
 local function FreshTakeNumbers(alliesAlive, enemiesAlive, missing)
+	-- Roshan first (#12, maintainer 2026-11-22): every enemy alive, their base open and us ahead (or our creeps at their
+	-- T3): the Aegis before the high ground, with 4+ of ours and at least their number alive. The pit check
+	-- (contested) and the group's HP fit (RoshanRules.GroupFit) still apply.
+	if aegisFirstNow and alliesAlive >= 4 and alliesAlive >= enemiesAlive then
+		return true, "aegis-first"
+	end
 	if enemiesAlive >= alliesAlive then
 		return false, string.format("even(%dv%d)", alliesAlive, enemiesAlive)
 	end
@@ -387,6 +399,21 @@ local function IsRoshanEngageSafe(roshanLocation, finishing)
 	-- Fresh take: need a real numbers edge or missing enemies — never full 5v5.
 	return FreshTakeNumbers(alliesAlive, enemiesAlive, missing)
 end
+-- Roshan's damage per second on `ally`: his own estimate when he can be seen (learned for later), else the last
+-- learned value, else RoshanRules.FALLBACK_DPS (measured from the step-out lines).
+local function RoshanDpsOn(ally)
+	local states = Fu.Utils.GameStates
+	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
+		local ok, estimate = pcall(function()
+			return roshan:GetEstimatedDamageToTarget(true, ally, 3.0, DAMAGE_TYPE_PHYSICAL)
+		end)
+		if ok and type(estimate) == "number" and estimate > 0 then
+			states.roshDpsSeen = estimate / 3
+			return estimate / 3
+		end
+	end
+	return states.roshDpsSeen or RoshanRules.FALLBACK_DPS
+end
 -- Time the group needs: the GatherMinimum-th closest joiner walks to the rally, then the
 -- group kills Roshan. Everyone computes the same number, so the team goes or stays together.
 local function TakeTimeNeeded(roshanLocation)
@@ -403,11 +430,17 @@ local function TakeTimeNeeded(roshanLocation)
 			local secondsPerAttack = ally:GetSecondsPerAttack()
 			local hit = (secondsPerAttack ~= nil and secondsPerAttack > 0) and ally:GetAttackDamage() / secondsPerAttack
 				or 0
-			etas[#etas + 1] = { eta = eta, dps = hit }
+			etas[#etas + 1] = {
+				eta = eta,
+				dps = hit,
+				hp = ally:GetHealth(),
+				maxHp = ally:GetMaxHealth(),
+				roshDps = RoshanDpsOn(ally),
+			}
 		end
 	end
 	if #etas == 0 then
-		return 999, 999, 999
+		return 999, 999, 999, {}, 0, 1, 1
 	end
 	table.sort(etas, function(first, second)
 		return first.eta < second.eta
@@ -418,18 +451,28 @@ local function TakeTimeNeeded(roshanLocation)
 	-- the closest heroes changed (game 014: called at need=31, dropped 5s later at need=55;
 	-- 19 calls, 19 drops, no Roshan all game).
 	local groupDps = 0
+	local members = {}
 	for wasRoshanAlive = 1, #etas do
 		if wasRoshanAlive <= gatherCount or etas[wasRoshanAlive].eta <= etas[gatherCount].eta + 15 then
 			groupDps = groupDps + etas[wasRoshanAlive].dps
+			members[#members + 1] = etas[wasRoshanAlive]
 		end
 	end
 	local roshHp = 6000 + 130 * math.max(0, DotaTime() / 60)
+	local roshMax = roshHp
 	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
 		roshHp = roshan:GetHealth()
+		roshMax = roshan:GetMaxHealth()
 	end
 	-- Roshan's armor takes roughly half of right-click damage.
 	local killTime = math.max(8, math.min(60, roshHp / math.max(1, groupDps * 0.5)))
-	return etas[gatherCount].eta + killTime, etas[gatherCount].eta, killTime
+	return etas[gatherCount].eta + killTime, etas[gatherCount].eta, killTime, members, groupDps, roshHp, roshMax
+end
+-- The group coming can tank Roshan to half HP (RoshanRules.GroupFit, #12 game 068). Returns ok, why.
+local function GroupFitsTake(roshanLocation)
+	local _, _, _, members, groupDps, roshHp, roshMax = TakeTimeNeeded(roshanLocation)
+	local ok, why = RoshanRules.GroupFit({ members = members, groupDps = groupDps, roshHp = roshHp, roshMax = roshMax })
+	return ok, why, #members
 end
 -- A take that only works because of a kill must fit inside that kill's window.
 -- Returns ok, why.
@@ -445,8 +488,17 @@ local function TakeFitsWindow(roshanLocation)
 	local everyone = math.max(0, Fu.GetNumOfAliveHeroes(true) - EnemiesHeldAtBase())
 		+ (killWindowState.fresh or 0)
 		+ back
-	if FreshTakeNumbers(alliesAlive, everyone, missing) then
-		return true, "no-window-needed"
+	local numbersOk, numbersWhy = FreshTakeNumbers(alliesAlive, everyone, missing)
+	if numbersOk then
+		local groupOk, groupWhy, coming = GroupFitsTake(roshanLocation)
+		if not groupOk then
+			return false, groupWhy
+		end
+		-- With every enemy alive the Aegis take goes with 4+ (not the 2-3 of a kill window).
+		if numbersWhy == "aegis-first" and coming < 4 then
+			return false, string.format("aegis-first-few(n=%d)", coming)
+		end
+		return true, (numbersWhy == "aegis-first" and "aegis-first+" or "no-window-needed+") .. groupWhy
 	end
 	local left = KillWindow.WindowLeft()
 	if left == nil then
@@ -458,7 +510,13 @@ local function TakeFitsWindow(roshanLocation)
 	if need + 3 > window then
 		return false, string.format("window-short(need=%.0f eta=%.0f kill=%.0f left=%.0f)", need, eta, kill, window)
 	end
-	return true, string.format("window(need=%.0f left=%.0f)", need, window)
+	-- The group that comes has to tank Roshan to half HP, with 70%+ average HP (#12, game 068: kill-window calls
+	-- right after fights; Roshan left at 60% and 78%).
+	local groupOk, groupWhy = GroupFitsTake(roshanLocation)
+	if not groupOk then
+		return false, groupWhy
+	end
+	return true, string.format("window(need=%.0f left=%.0f)+%s", need, window, groupWhy)
 end
 -- Looser window check for a call that is already running (own call that passed the full check
 -- in the last 20s, or a teammate's call): only drop when the window no longer covers the walk
@@ -513,6 +571,9 @@ function GetDesireHelper()
 	if not Fu.Utils.IsValidUnit(roshan) then
 		FindRoshan()
 	end
+	-- Roshan first (#12, Push.RoshanFirstState): read before the numbers rule, which it relaxes.
+	local okFirst, firstOn = pcall(Push.RoshanFirstState, bot)
+	aegisFirstNow = okFirst and firstOn == true
 	local roshanLocation = Fu.GetCurrentRoshanLocation()
 	local alliesAlive = Fu.GetNumOfAliveHeroes(false)
 	local contestingEnemies = ContestingEnemies(roshanLocation)
@@ -726,6 +787,44 @@ function GetDesireHelper()
 			desire = desire * 0.6
 		end
 		local why = "timer"
+		-- Creep pressure (#12, maintainer idea 2026-11-22): our waves at their T3 or deeper pull their heroes home;
+		-- +0.1 per lane, at most +0.2, after every check above. The applied value is what the line prints (the
+		-- non-call desire is clamped to VERYHIGH below and in GetDesire).
+		local pressureLanes, pressureNames = Push.CreepPressureLanes()
+		if pressureLanes >= 1 then
+			local before = Clamp(desire, 0, BOT_MODE_DESIRE_VERYHIGH)
+			desire = desire + PushRules.CreepPressureBonus(pressureLanes)
+			local applied = Clamp(desire, 0, BOT_MODE_DESIRE_VERYHIGH) - before
+			if
+				(pressureLanes ~= bot._roshPressureLanes or DotaTime() >= (bot._roshPressureLogAt or -999))
+				and not Fu.IsMeepoClone(bot)
+			then
+				bot._roshPressureLanes = pressureLanes
+				bot._roshPressureLogAt = DotaTime() + 20
+				RoshLog(
+					"pressure lanes=%d which=%s bonus=%.2f desire=%.2f",
+					pressureLanes,
+					pressureNames,
+					applied,
+					desire
+				)
+			end
+			why = "timer+pressure"
+		else
+			bot._roshPressureLanes = 0
+		end
+		-- Roshan first (#12, maintainer 2026-11-22): every enemy alive, their base open, Roshan up: a gather call (the
+		-- same 0.92 as a kill-window take, so the push yields in push.lua), also while the team is on the high ground,
+		-- which is what it replaces. The fit above already passed (numbers, group HP, tanking).
+		if
+			aegisFirstNow
+			and not killRosh
+			and DotaTime() - (bot._finishTowerAt or -999) > 2
+			and not bot:WasRecentlyDamagedByAnyHero(2.0)
+			and #(bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {}) == 0
+		then
+			return Ret(0.92, "aegis-first", true)
+		end
 		if killRosh then
 			local floor = BOT_MODE_DESIRE_VERYHIGH
 			if desire < floor then
