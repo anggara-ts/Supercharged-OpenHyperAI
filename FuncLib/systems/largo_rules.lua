@@ -163,6 +163,33 @@ function LargoRules.CanStartSong(mana, songCost, songsPerBeat, beats)
 	return mana >= songCost * (songsPerBeat or 1) * (beats or LargoRules.TOGGLE_ON_BEATS)
 end
 
+-- Croak of Genius: on whom (#198, maintainer 2026-11-22). The buff cuts the hero's mana costs by 15%
+-- (mana_cost_reduction 15, Croak costs 40, datafeed hero_id=155), and Largo's own buff is not shortened when he spends
+-- mana. Aghanim's Shard (on the innate Encore: "HasShardUpgrade" "1" under largo_encore in the 7.42
+-- npc_dota_hero_largo.txt; datafeed shard text): "Whenever Largo applies a Unit Target buff to a friendly hero, he also
+-- gets the buff. If Largo targets himself, the buff is also applied to the nearest allied hero within the cast range."
+-- o: hasShard; allyWants (an ally is going on a hero, the cast that existed before); allyIsCore; selfWants (Largo is
+-- singing or about to, or starts a costly combo, and has no buff); alone (no other ally hero within 1200).
+-- Returns "ally" | "self" | nil and why ("shard-share" | "ally" | "self-mana"):
+--   Shard: the ally who needs it, Largo gets it too; else himself (the nearest ally gets it too).
+--   No Shard: himself when alone or no ally needs it. With both: a core ally's fight wins (the damage reverb of a
+--   core is worth more than 15% off the songs), a support ally's loses to Largo's songs.
+function LargoRules.CroakTarget(o)
+	if o.hasShard and o.allyWants then
+		return "ally", "shard-share"
+	end
+	if o.selfWants and (o.alone or not o.allyWants) then
+		return "self", "self-mana"
+	end
+	if o.allyWants and (o.allyIsCore or not o.selfWants) then
+		return "ally", "ally"
+	end
+	if o.selfWants then
+		return "self", "self-mana"
+	end
+	return nil, nil
+end
+
 -- Catchy Lick pulls an ally pullDistance (375) toward Largo. A dispel lick on an ally that is fighting in range of its
 -- target would drag it out of range: only when the debuff already stops it fighting (sleep, stun) or it is not
 -- in range of its target anyway. distToTarget nil: no target.

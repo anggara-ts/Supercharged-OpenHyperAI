@@ -93,6 +93,26 @@ T.test("largo: a dispel lick never drags a fighting ally out of its range", func
 	T.ok(R.DispelPullOk(true, nil, 150, 375, false), "no target")
 end)
 
+T.test("largo: Croak of Genius on himself or an ally", function()
+	local R = load()
+	local function pick(o)
+		local target, why = R.CroakTarget(o)
+		return tostring(target) .. "/" .. tostring(why)
+	end
+	T.eq(pick({}), "nil/nil", "nobody needs it")
+	T.eq(pick({ selfWants = true, alone = true }), "self/self-mana", "alone before a song")
+	T.eq(pick({ selfWants = true }), "self/self-mana", "no ally fighting: himself")
+	T.eq(pick({ allyWants = true }), "ally/ally", "an ally fighting, Largo has no use for it")
+	T.eq(pick({ allyWants = true, allyIsCore = true, selfWants = true }), "ally/ally", "no Shard: a core's fight wins")
+	T.eq(
+		pick({ allyWants = true, selfWants = true }),
+		"self/self-mana",
+		"no Shard: a support's fight loses to the songs"
+	)
+	T.eq(pick({ hasShard = true, allyWants = true, selfWants = true }), "ally/shard-share", "Shard: Largo gets it too")
+	T.eq(pick({ hasShard = true, selfWants = true, alone = true }), "self/self-mana", "Shard, alone: himself")
+end)
+
 -- The level-up list from the hero file with the real ability slots (Tests/data/hero_abilities.lua).
 T.test("largo: talents at 20 and 25 are two Lick charges and twice the stomps", function()
 	local data = assert(loadstring(T.read("Tests/data/hero_abilities.lua"), "hero_abilities"))()

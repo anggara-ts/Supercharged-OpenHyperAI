@@ -146,7 +146,7 @@ local goodVibrationsAbility =
 	SafeAbility(bot:GetAbilityByName("largo_song_good_vibrations"), "largo_song_good_vibrations", "largo")
 local catchyLickDesire, catchyLickTarget, catchyLickReason
 local frogstompDesire, frogstompLocation, frogstompReason, frogstompCount
-local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage
+local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason
 local isAttacking = false
 local botTarget
 local nearbyAllies, nearbyEnemies
@@ -218,13 +218,14 @@ function X.SkillsComplement()
 	if not canUseAbility then
 		return
 	end
-	croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage = X.ConsiderCroakOfGenius()
+	croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason = X.ConsiderCroakOfGenius()
 	if croakOfGeniusDesire > 0 then
 		LogLargo(
 			"croak",
 			3,
-			"croak-cast target=%s dmg=%d hp=%.2f",
+			"croak-cast target=%s why=%s dmg=%d hp=%.2f",
 			ShortName(croakOfGeniusTarget),
+			croakOfGeniusReason or "?",
 			croakOfGeniusDamage or 0,
 			Fu.GetHP(croakOfGeniusTarget)
 		)
@@ -664,9 +665,32 @@ function X.ConsiderFrogstomp()
 	return BOT_ACTION_DESIRE_NONE, 0, nil, 0
 end
 
+-- Largo wants Croak of Genius on himself (#198): no buff yet, and he is singing, about to start a song, or starting a
+-- Lick + Frogstomp combo on a hero. The buff cuts his mana costs by 15% for its whole 15-30s (mana_cost_reduction 15,
+-- duration 15/20/25/30; "Duration is not reduced for Largo himself", datafeed hero_id=155).
+function X.CroakSelfWanted()
+	if bot:HasModifier("modifier_largo_croak_of_genius_buff") then
+		return false
+	end
+	if bot:HasModifier(RHAPSODY_MODIFIER) then
+		return true
+	end
+	if Fu.CanCastAbility(amphibianRhapsodyAbility) then
+		local first = LargoRules.ChooseSongs(X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius")))
+		if first ~= nil then
+			return true
+		end
+	end
+	return isGoingOnSomeone
+		and Fu.IsValidHero(botTarget)
+		and Fu.IsInRange(bot, botTarget, 1000)
+		and Fu.CanCastAbility(catchyLickAbility)
+		and Fu.CanCastAbility(frogstompAbility)
+end
+
 function X.ConsiderCroakOfGenius()
 	if not Fu.CanCastAbility(croakOfGeniusAbility) then
-		return BOT_ACTION_DESIRE_NONE, nil, 0
+		return BOT_ACTION_DESIRE_NONE, nil, 0, nil
 	end
 	local castRange = croakOfGeniusAbility:GetCastRange()
 	local bestAlly = nil
@@ -674,6 +698,7 @@ function X.ConsiderCroakOfGenius()
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
+			and allyHero ~= bot
 			and Fu.IsInRange(bot, allyHero, castRange + 300)
 			and Fu.IsGoingOnSomeone(allyHero)
 			and not allyHero:IsIllusion()
@@ -698,10 +723,32 @@ function X.ConsiderCroakOfGenius()
 			end
 		end
 	end
-	if bestAlly then
-		return BOT_ACTION_DESIRE_HIGH, bestAlly, bestDamage
+	local alone = true
+	for _, allyHero in pairs(nearbyAllies) do
+		if
+			allyHero ~= bot
+			and Fu.IsValidHero(allyHero)
+			and not allyHero:IsIllusion()
+			and Fu.IsInRange(bot, allyHero, 1200)
+		then
+			alone = false
+			break
+		end
 	end
-	return BOT_ACTION_DESIRE_NONE, nil, 0
+	local target, why = LargoRules.CroakTarget({
+		hasShard = Fu.HasAghanimsShard(bot),
+		allyWants = bestAlly ~= nil,
+		allyIsCore = bestAlly ~= nil and Fu.IsCore(bestAlly),
+		selfWants = X.CroakSelfWanted(),
+		alone = alone,
+	})
+	if target == "ally" then
+		return BOT_ACTION_DESIRE_HIGH, bestAlly, bestDamage, why
+	end
+	if target == "self" then
+		return BOT_ACTION_DESIRE_HIGH, bot, 0, why
+	end
+	return BOT_ACTION_DESIRE_NONE, nil, 0, nil
 end
 
 function X.IsGoodToHeal(hero)
