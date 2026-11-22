@@ -10,6 +10,35 @@ then
 	return
 end
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
+local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
+local HeroDisplayNames = require(GetScriptDirectory() .. "/FuncLib/data/hero_display_names")
+local function getHeroDisplayName(unit)
+	if unit == nil then
+		return ""
+	end
+	local unitName = unit:GetUnitName()
+	local locale = Localization.GetLocale()
+	local localizedNames = HeroDisplayNames[locale] or HeroDisplayNames["en"]
+	return localizedNames[unitName] or HeroDisplayNames["en"][unitName] or unitName
+end
+local function sayModeChat(chatKey, target, cooldown)
+	if bot.lastModeChatTime == nil then
+		bot.lastModeChatTime = {}
+	end
+	local lastChatTime = bot.lastModeChatTime[chatKey] or -999
+	if GameTime() - lastChatTime < (cooldown or 30) then
+		return
+	end
+	bot.lastModeChatTime[chatKey] = GameTime()
+	local lines = Localization.Get(chatKey)
+	if lines ~= nil and #lines > 0 then
+		local line = lines[RandomInt(1, #lines)]
+		if target then
+			line = string.gsub(line, "{target}", getHeroDisplayName(target))
+		end
+		bot:ActionImmediate_Chat(line, false)
+	end
+end
 -- Human orders (#222): pings and chat commands (FuncLib/systems/human_orders.lua).
 local HumanOrders = require(GetScriptDirectory() .. "/FuncLib/systems/human_orders")
 local HOLD_DESIRE = 0.4
