@@ -5,6 +5,8 @@ local Localization = require(GetScriptDirectory() .. "/lib/systems/localization"
 local LaneHarassRules = require(GetScriptDirectory() .. "/lib/systems/lane_harass_rules")
 local LastHitRules = require(GetScriptDirectory() .. "/lib/systems/last_hit_rules")
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
+local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -614,7 +616,7 @@ local function AnnounceOffsideHarass(target)
 		return
 	end
 	bot.sOffsideHarassChatTime = now
-	bot:ActionImmediate_Chat("Harassing " .. PrettyHeroName(target), false)
+	ChatRules.SayDecision(bot, "Harassing " .. PrettyHeroName(target), "harass")
 end
 -- Right-clicking a hero pulls every enemy lane creep within 500 that is not already on us.
 local function CreepAggroCounts(hero)
@@ -1424,11 +1426,51 @@ function PickOneAnnouncer()
 	bot.isAnnouncer = playerId == lowestBotId
 	hasPickedAnnouncer = true
 end
+-- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
+-- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (update: 22 Nov
+-- 2026)", maintainer 2026-11-23), the others only commands that work then: !pos / !Npos (pre-game only,
+-- hero_selection.lua) and !sp (any time). No !debug hint (maintainer, 2026-11-23). No URL: chat links are not
+-- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
+-- announcer) don't repeat it.
+local WELCOME_START = -80
+local WELCOME_GAP = 2
+local function SayWelcome()
+	if not bot.isAnnouncer or GetGameState() ~= GAME_STATE_PRE_GAME or DotaTime() < WELCOME_START then
+		return
+	end
+	local lines = Localization.Get("welcome")
+	local team = GetTeam()
+	local nextLine = TeamMemory.Get(team, "welcomeNext") or 1
+	if type(lines) ~= "table" or nextLine > #lines then
+		return
+	end
+	if DotaTime() < (TeamMemory.Get(team, "welcomeAt") or -999) + WELCOME_GAP then
+		return
+	end
+	TeamMemory.Set(team, "welcomeNext", nextLine + 1)
+	TeamMemory.Set(team, "welcomeAt", DotaTime())
+	local versionOk, versionModule = pcall(require, GetScriptDirectory() .. "/customize/version")
+	local versionText, dateText = ChatRules.WelcomeVersion(versionOk and versionModule or nil)
+	bot:ActionImmediate_Chat(ChatRules.FillWelcomeLine(lines[nextLine], versionText, dateText), false)
+	if nextLine == #lines then
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s welcome lines=%d locale=%s version=%s date=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				#lines,
+				tostring(Localization.GetLocale()),
+				(string.gsub(versionText, " ", "_")),
+				(string.gsub(dateText, " ", "_"))
+			)
+		)
+	end
+end
 function AnnounceMessages()
-	-- Welcome + map version is sent during hero pick (hero_selection.lua), not here.
 	if DotaTime() > 60 then
 		return
 	end
+	pcall(SayWelcome)
 	if GetGameMode() ~= GAMEMODE_1V1MID and not hasAnnouncedPositions then
 		if DotaTime() >= 0 and humanCount > 0 and botCount > 0 then
 			bot:ActionImmediate_Chat(
