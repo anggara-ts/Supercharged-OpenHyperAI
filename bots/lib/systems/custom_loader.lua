@@ -4,15 +4,23 @@ function LoadCustomize()
 	if cachedSettings then
 		return cachedSettings
 	end
-	local modulePath, settings = "game/customize/general", nil
+	-- The player's copy in vscripts/game/customize. Before #221 that folder name was capitalised, and Linux and macOS
+	-- file systems are case-sensitive, so the old name is tried second.
+	local settings = nil
 	-- Handler only keeps the message (see init_debug: logging inside it errored).
 	local loadErr = nil
-	local loadOk, loadResult = xpcall(function()
-		settings = require(modulePath)
-	end, function(err)
-		loadErr = err
-		return err
-	end)
+	local loadOk = false
+	for _, modulePath in ipairs({ "game/customize/general", "game/Customize/general" }) do -- restructure:keep
+		loadOk = xpcall(function()
+			settings = require(modulePath)
+		end, function(err)
+			loadErr = loadErr or err
+			return err
+		end)
+		if loadOk and settings then
+			break
+		end
+	end
 	if not (loadOk and settings) and loadErr ~= nil and log then
 		pcall(log, "[WARN] When loading customized file: %s", tostring(loadErr))
 	end
