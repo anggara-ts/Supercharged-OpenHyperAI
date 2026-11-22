@@ -24,6 +24,16 @@ confirmed or disproved.
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[OHA-API] slots`, #172, game 064).
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
+- **Attack timing reads (#71).** `GetAttackPoint()` is the hero's attack point in seconds at 1.0 attack speed (the
+  `[OHA-LH] probe` lines: Earth Spirit 0.35, Puck 0.5, the game files' `AttackAnimationPoint`); the wind-up is
+  `GetAttackPoint() / GetAttackSpeed()`. Attack activity is `GetAnimActivity() == 1503`, also through the backswing.
+  `GetAnimCycle()` runs 0..1 through the attack animation (a human Leshrac's `[OHA-HUMAN] state` lines read up to 0.97
+  in the backswing, game 074). Its exact unit is unverified: in games 060-073, 144 `[OHA-LH] release` / `cancel` lines
+  gave cycle / seconds into the wind-up = 0.99 on average (0.83 after dividing by attack speed). The code reads the
+  open part of a wind-up as `(GetAttackPoint() - GetAnimCycle()) / GetAttackSpeed()` (the bot's own swing and allied
+  heroes' swings), with `GameTime() - GetLastAttackTime()` telling a backswing from a new wind-up.
+  `GetAttackTarget`, `GetAnimActivity` and `GetAnimCycle` work on a human ally's handle (`[OHA-HUMAN] state`, game
+  074); `GetLastAttackTime` on one is not checked yet.
 
 ## 7.42 check (2026-11-19)
 

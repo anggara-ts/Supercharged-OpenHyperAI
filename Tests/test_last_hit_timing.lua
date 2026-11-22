@@ -404,3 +404,117 @@ T.test("team roam's overlay owns a hit (#171 bot._lhOwn): no arm, no order, one 
 	Timing.Tick(bot)
 	T.eq(state.orders[1], "attack", "the sure walk-in attacks once the overlay let go")
 end)
+
+-- An allied hero in the bot's team slots (GetTeamMember) winding up on creep (#71, maintainer 2026-11-23).
+local function addSwinger(creep, props)
+	local ally = GetTeamMember(2)
+	ally._loc = creep:GetLocation() + Vector(-100, 0, 0)
+	ally.GetAttackTarget = function()
+		return props.attacking and creep or nil
+	end
+	ally.GetAnimActivity = function()
+		return props.attacking and 1503 or 0
+	end
+	ally.GetAnimCycle = function()
+		return props.cycle or 0.1
+	end
+	ally.GetAttackPoint = function()
+		return props.point or 0.3
+	end
+	ally.GetAttackSpeed = function()
+		return 1
+	end
+	ally.GetLastAttackTime = function()
+		return props.lastAttack or -50
+	end
+	ally.GetAttackDamage = function()
+		return props.damage or 50
+	end
+	return ally
+end
+
+local function yieldLines(why)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "yield why=" .. why, 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("ally swing: an ally's wind-up that kills the creep first is counted", function()
+	local _, Timing, _, creep = setup(40)
+	Stub.time = 1200
+	local props = { attacking = true, cycle = 0.1 }
+	addSwinger(creep, props)
+	local predictedHp, _, incomingKills, swingKill = Timing.Predict(creep, 45, 0.5)
+	T.ok(incomingKills, "40 HP, the ally's 50 lands in 0.2s, before our hit at 0.5s")
+	T.ok(swingKill ~= nil and swingKill.ally == GetTeamMember(2), "the ally's swing made it")
+	T.near(swingKill.eta, 0.2, 1e-9, "(0.3 - 0.1) / 1, melee: no flight")
+	T.near(predictedHp, 40.8 - 50, 1e-9, "its hit is taken off the predicted HP")
+	props.cycle = 0.35
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "past its attack point: the hit is out")
+	props.cycle, props.lastAttack = 0.1, GameTime() - 0.1
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "its previous attack's backswing: no new wind-up")
+	props.lastAttack, props.point = nil, 0.9
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "its hit lands after ours (0.8s): not counted")
+	props.point = 0.3
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5, 0, GetTeamMember(2))), "left out (exclude)")
+	props.attacking = false
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "not attacking it")
+end)
+
+T.test("ally swing: the bot does not walk in on a creep an ally's swing kills, logs it once", function()
+	local _, Timing, bot, creep, state = setup(40)
+	Stub.time = 1300
+	local props = { attacking = true, cycle = 0.05 }
+	addSwinger(creep, props)
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "no attack: the ally takes it")
+	T.eq(yieldLines("ally-swing"), 1, "one [OHA-LH] yield line for this creep")
+	-- The ally cancels its swing: the bot may take it.
+	props.attacking = false
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "the ally stopped: the sure hit goes")
+end)
+
+T.test("ally swing: a support leaves the creep its core is swinging at (core-swing)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1400
+	local props = { attacking = true, cycle = 0.05, damage = 20 }
+	local ally = addSwinger(creep, props)
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and 5 or hero == ally and 1 or getPosition(hero)
+	end
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "our hit would kill (40 - 20 < 45) but the core is swinging at it")
+	T.eq(yieldLines("core-swing"), 1, "logged once")
+	T.eq(yieldLines("ally-swing"), 0, "the core's 20 does not kill it alone")
+	-- A core bot does not yield to another core's swing that does not kill.
+	Fu.GetPosition = function(hero)
+		return hero == bot and 2 or hero == ally and 1 or getPosition(hero)
+	end
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "a core takes it")
+	Fu.GetPosition = getPosition
+end)

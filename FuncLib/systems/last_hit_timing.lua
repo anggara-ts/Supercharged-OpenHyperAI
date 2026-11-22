@@ -71,16 +71,139 @@ function X.TowerShotBefore(bot, creep, hitDelay)
 	return 0
 end
 
+-- Allied heroes (bot or human; not bot, not exclude) winding up on creep now (#71, maintainer 2026-11-23,
+-- LastHitRules.SwingRemaining): a list of { ally, eta (seconds until the hit lands: rest of the wind-up + flight),
+-- damage (GetAttackDamage, the average, after armour: crits and Quelling Blade not counted), cycle, since }. Team
+-- slots 1-5 cover humans; illusions are not team members. Game 074's [OHA-HUMAN] state lines read GetAttackTarget,
+-- GetAnimActivity and GetAnimCycle on a human hero; GetLastAttackTime on one is unverified (a wrong value only drops
+-- the backswing test).
+function X.AllySwings(bot, creep, exclude)
+	local list = {}
+	local now = GameTime()
+	for slot = 1, 5 do
+		local ally = GetTeamMember(slot)
+		if
+			ally ~= nil
+			and ally ~= bot
+			and ally ~= exclude
+			and Fu.IsValidHero(ally)
+			and ally:GetAttackTarget() == creep
+			and ally:GetAnimActivity() == ATTACK_ACTIVITY
+			and GetUnitToUnitDistance(ally, creep) <= Rules.ALLY_SWING_RANGE
+		then
+			local since = now - ally:GetLastAttackTime()
+			local cycle = ally:GetAnimCycle()
+			local remaining = Rules.SwingRemaining(
+				ally:GetAttackPoint(),
+				ally:GetAttackSpeed(),
+				cycle,
+				since,
+				ally:GetSecondsPerAttack()
+			)
+			if remaining ~= nil then
+				list[#list + 1] = {
+					ally = ally,
+					eta = remaining + X.TravelTime(ally, creep),
+					damage = creep:GetActualIncomingDamage(ally:GetAttackDamage(), DAMAGE_TYPE_PHYSICAL),
+					cycle = cycle,
+					since = since,
+				}
+			end
+		end
+	end
+	return list
+end
+
 -- The creep's HP when our hit lands in delay seconds: predictedHp, ourHit (our damage on it after armour),
--- incomingKills (the other hits alone kill it first). Same sums as Fu.WillKillTarget, with the tower shot as a hit
--- that lands first.
-function X.Predict(creep, damage, delay, towerShot)
+-- incomingKills (the other hits alone kill it first), swingKill (the allied swing that made incomingKills true, or
+-- nil). Same sums as Fu.WillKillTarget, with the tower shot as a hit that lands first and the allied heroes' swings
+-- landing before ours (X.AllySwings; exclude: a hero left out, e.g. the core whose own hit BackupFacts adds).
+function X.Predict(creep, damage, delay, towerShot, exclude)
 	towerShot = towerShot or 0
 	local effectiveHealth = creep:GetHealth() + creep:GetHealthRegen() * delay + 0.8
 	local incoming = Fu.GetTotalAttackWillRealDamage(creep, delay)
 	local ourHit = creep:GetActualIncomingDamage(damage, DAMAGE_TYPE_PHYSICAL)
-	local incomingKills = incoming >= effectiveHealth - 1 or (towerShot > 0 and towerShot >= creep:GetHealth())
-	return effectiveHealth - incoming - towerShot, ourHit, incomingKills
+	local swingDamage, firstSwing = Rules.SwingDamage(X.AllySwings(GetBot(), creep, exclude), delay)
+	local othersKill, bySwing = Rules.OthersKill(effectiveHealth, incoming, swingDamage)
+	local towerKills = towerShot > 0 and towerShot >= creep:GetHealth()
+	local swingKill = bySwing and not towerKills and firstSwing or nil
+	return effectiveHealth - incoming - swingDamage - towerShot, ourHit, othersKill or towerKills, swingKill
+end
+
+-- [OHA-LH] yield: once per creep and reason (at most every second per bot).
+local function logYield(bot, creep, why, swing, myDelay)
+	local seen = bot._lhtYieldSeen
+	if seen ~= nil and seen.creep == creep and seen.why == why then
+		return
+	end
+	if DotaTime() < (bot._lhtYieldLogAt or -99) then
+		return
+	end
+	bot._lhtYieldSeen = { creep = creep, why = why }
+	bot._lhtYieldLogAt = DotaTime() + 1
+	local ally = swing.ally
+	pcall(
+		print,
+		string.format(
+			"[OHA-LH] t=%.0f %s yield why=%s ally=%s human=%d pos=%d creep-hp=%d allyHit=%.0f allyEta=%.2f myEta=%.2f cycle=%.2f since=%.2f",
+			DotaTime(),
+			heroName(bot),
+			why,
+			heroName(ally),
+			ally:IsBot() and 0 or 1,
+			Fu.GetPosition(ally),
+			creep:GetHealth(),
+			swing.damage,
+			swing.eta,
+			myDelay,
+			swing.cycle,
+			math.min(99, swing.since)
+		)
+	)
+end
+
+-- Our own swing on creep is winding up or its release is decided (the wind-up watch owns it then).
+local function ownSwing(bot, creep)
+	local st = bot._lhTiming
+	return st ~= nil and st.creep == creep and (st.phase == "windup" or st.phase == "decided")
+end
+
+-- An allied core (position 1-3, bot or human) winding up on creep: the swing, else nil.
+local function coreSwing(bot, creep)
+	for _, swing in ipairs(X.AllySwings(bot, creep)) do
+		if Fu.GetPosition(swing.ally) <= 3 then
+			return swing
+		end
+	end
+	return nil
+end
+
+-- Yield a creep to an ally's swing (LastHitRules.YieldReason): returns class, or nil when the bot leaves the creep to
+-- the ally (logged [OHA-LH] yield why=ally-swing / core-swing). class: Classify's result for our hit; swingKill:
+-- X.Predict's 4th value; myDelay: when our hit would land. Re-checked at every pick and frame: a human may cancel.
+function X.Yield(bot, creep, class, swingKill, myDelay)
+	local support = Fu.GetPosition(bot) >= 4
+	local own = ownSwing(bot, creep)
+	-- The ally scan only where it can decide something.
+	local core = swingKill == nil and class ~= nil and support and not own and coreSwing(bot, creep) or nil
+	local why = Rules.YieldReason({
+		class = class,
+		swingKill = swingKill ~= nil,
+		support = support,
+		coreSwing = core ~= nil,
+		ownSwing = own,
+	})
+	if why == nil then
+		return class
+	end
+	logYield(bot, creep, why, swingKill or core, myDelay)
+	return nil
+end
+
+-- A backup hit (the support behind its core): the core-swing yield before BackupDecision may say go. True when the
+-- bot leaves the creep now (logged).
+function X.YieldBackup(bot, creep, myDelay)
+	return X.Yield(bot, creep, "backup", nil, myDelay) == nil
 end
 
 -- Seconds until an enemy lane creep dies to our lane creeps and towers hitting it, our own hit not counted
@@ -133,12 +256,14 @@ end
 -- BackupCoreNext, with coreEta / myDelay / deathEta for the log. myDelay: our hit's landing (default: an attack
 -- started now; the wind-up passes the rest of the swing). The core's pending hit counts as landing first when it
 -- lands before ours; its projectile in flight is already in Fu.GetTotalAttackWillRealDamage. coreEta
--- (Fu.GetAttackProDelayTime) counts the core's walk, turn and attack cooldown.
+-- (Fu.GetAttackProDelayTime) counts the core's walk, turn and attack cooldown. The core is left out of X.Predict's
+-- allied swings (exclude) in both predictions: its pending hit is the term below, and its own hit is not "others".
 function X.BackupFacts(bot, core, creep, damage, myDelay)
 	myDelay = myDelay or Fu.GetAttackProDelayTime(bot, creep)
 	local coreEta = Fu.GetAttackProDelayTime(core, creep)
 	local pending = coreHitState(core, creep)
-	local predictedHp, ourHit, incomingKills = X.Predict(creep, damage, myDelay, X.TowerShotBefore(bot, creep, myDelay))
+	local predictedHp, ourHit, incomingKills =
+		X.Predict(creep, damage, myDelay, X.TowerShotBefore(bot, creep, myDelay), core)
 	if pending and coreEta < myDelay then
 		predictedHp = predictedHp - creep:GetActualIncomingDamage(core:GetAttackDamage(), DAMAGE_TYPE_PHYSICAL)
 		incomingKills = incomingKills or predictedHp <= 0
@@ -163,7 +288,7 @@ function X.BackupFacts(bot, core, creep, damage, myDelay)
 		coreState = "free"
 	end
 	local corePredicted, coreHit, coreOthersKill =
-		X.Predict(creep, core:GetAttackDamage(), coreEta, X.TowerShotBefore(bot, creep, coreEta))
+		X.Predict(creep, core:GetAttackDamage(), coreEta, X.TowerShotBefore(bot, creep, coreEta), core)
 	-- The death estimate (two unit scans) only where it decides something: a core that can take the creep.
 	local deathEta = Rules.CORE_MAY_TAKE[coreState] and X.DeathEta(bot, creep) or math.huge
 	return {
@@ -192,9 +317,11 @@ end
 -- Classify the hit if the bot attacked now (fresh attack: turn, walk, wind-up, flight).
 local function classifyNow(bot, st)
 	local delay = Fu.GetAttackProDelayTime(bot, st.creep)
-	local predictedHp, ourHit, incomingKills =
+	local predictedHp, ourHit, incomingKills, swingKill =
 		X.Predict(st.creep, st.damage, delay, X.TowerShotBefore(bot, st.creep, delay))
-	return Rules.Classify(predictedHp, ourHit, incomingKills, st.allowEarly), predictedHp, ourHit
+	local class =
+		X.Yield(bot, st.creep, Rules.Classify(predictedHp, ourHit, incomingKills, st.allowEarly), swingKill, delay)
+	return class, predictedHp, ourHit
 end
 
 -- Per-minute counts for the [OHA-LH] minute summary.
@@ -608,6 +735,10 @@ local function watchHold(bot, st, now)
 	if core ~= nil then
 		local facts = X.BackupFacts(bot, core, st.creep, st.damage)
 		local decision, why = Rules.BackupDecision(facts)
+		-- An allied core winding up on it (core-swing): wait until its hit is out (#71, maintainer 2026-11-23).
+		if decision == "go" and X.YieldBackup(bot, st.creep, facts.myDelay) then
+			decision = "wait"
+		end
 		restart = decision == "go" and "sure" or "hold"
 		if decision == "go" then
 			logBackupGo(bot, facts, why, "hold")
@@ -634,7 +765,7 @@ local function watchWalk(bot, st)
 		-- A backup hit: only once the core's hit is due to land first (or the core cannot take it).
 		local facts = X.BackupFacts(bot, core, st.creep, st.damage)
 		local decision, why = Rules.BackupDecision(facts)
-		if decision == "go" then
+		if decision == "go" and not X.YieldBackup(bot, st.creep, facts.myDelay) then
 			logBackupGo(bot, facts, why, "walk")
 			bot:Action_AttackUnit(st.creep, true)
 			st.phase = "attack"

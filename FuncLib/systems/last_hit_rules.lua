@@ -312,4 +312,78 @@ function LastHitRules.DenyBeatsTimedHit(denyKind, hitKind)
 	return (LastHitRules.KIND_VALUE[denyKind] or 1) > (LastHitRules.KIND_VALUE[hitKind] or 1)
 end
 
+-- Allied heroes' swings (#71, maintainer 2026-11-23: "do bots account for ally projectile when last hitting? ally
+-- attack may not be regular, they also aim for last hit"). An ally's attack projectile already in flight is in
+-- Fu.GetTotalAttackWillRealDamage; an ally (bot or human) still winding up on the creep was not counted, so two
+-- heroes swung at one creep and a bot took the last hit a human core was about to take. An allied hero within
+-- ALLY_SWING_RANGE of the creep, attacking it with the attack activity (1503) and before its attack point, counts as
+-- a hit landing after the rest of its wind-up plus its projectile's flight (ranged).
+LastHitRules.ALLY_SWING_RANGE = 1000
+
+-- Seconds left to the attack point of a swing now playing, or nil when it is past it (the hit is out: a melee hit has
+-- landed, a ranged projectile is in flight and counted there). attackPoint: GetAttackPoint() (seconds at 1.0 attack
+-- speed: the [OHA-LH] probe's Earth Spirit 0.35 / Puck 0.5 are the game files' AttackAnimationPoint); cycle:
+-- GetAnimCycle(), read in the same unit, as Fu.GetAttackProDelayTime reads the bot's own swing ((attackPoint - cycle) /
+-- attack speed). The cycle's unit is not documented (unverified): in games 060-073, 144 [OHA-LH] release / cancel
+-- lines gave cycle / seconds into the swing = 0.99 on average (0.83 after dividing by attack speed), so the cycle may
+-- still be below the attack point just after the release. sinceAttack (GameTime() - GetLastAttackTime()) closes that
+-- gap: while the previous attack's backswing / cooldown runs (sinceAttack < secondsPerAttack - wind-up - 0.05, the
+-- test LastHitTiming.Tick makes for the bot's own swing) the activity is the backswing, not a new wind-up. A nil
+-- sinceAttack skips that test.
+function LastHitRules.SwingRemaining(attackPoint, attackSpeed, cycle, sinceAttack, secondsPerAttack)
+	attackSpeed = math.max(0.1, attackSpeed or 1)
+	local pointTime = attackPoint / attackSpeed
+	if sinceAttack ~= nil and secondsPerAttack ~= nil and sinceAttack < secondsPerAttack - pointTime - 0.05 then
+		return nil
+	end
+	if cycle == nil or cycle >= attackPoint then
+		return nil
+	end
+	return (attackPoint - cycle) / attackSpeed
+end
+
+-- Damage of the swings (list of { eta, damage }: seconds until the hit lands, damage after armour) that land before a
+-- hit window seconds from now, and the first such swing (lowest eta). Strictly before: of two heroes swinging at one
+-- creep, only the one landing later counts the other, so they never both yield.
+function LastHitRules.SwingDamage(swings, window)
+	local total, first = 0, nil
+	for _, swing in ipairs(swings or {}) do
+		if swing.eta < window then
+			total = total + swing.damage
+			if first == nil or swing.eta < first.eta then
+				first = swing
+			end
+		end
+	end
+	return total, first
+end
+
+-- The other hits kill the creep before ours lands: incoming (attacks in flight, creeps mid-swing) and swingDamage
+-- (allied heroes mid-swing) against its effective HP (HP + regen until our hit, the Fu.WillKillTarget test). Returns
+-- kills, bySwing (they kill it only with the allied swings counted: the bot yields to that ally).
+function LastHitRules.OthersKill(effectiveHealth, incoming, swingDamage)
+	local without = incoming >= effectiveHealth - 1
+	local kills = without or incoming + (swingDamage or 0) >= effectiveHealth - 1
+	return kills, kills and not without
+end
+
+-- Yield to an ally (maintainer 2026-11-23). s = {
+--   class      Classify's result for our hit (nil: not taken anyway);
+--   swingKill  an allied hero's swing kills it before our hit lands (OthersKill's bySwing);
+--   support    the bot plays position 4-5;  coreSwing  an allied core (position 1-3, bot or human) winds up on it;
+--   ownSwing   our own swing on this creep is winding up or its release is decided (the wind-up watch decides then).
+-- }
+-- Returns "ally-swing" (the ally's hit kills it first: no swing; Classify already says nil), "core-swing" (a support
+-- leaves a creep its core is swinging at, even when our hit would kill it and the core's would not alone: never steal
+-- the core's last hit; once the core's hit is out, or it cancels, the support may take it) or nil.
+function LastHitRules.YieldReason(s)
+	if s.swingKill then
+		return "ally-swing"
+	end
+	if s.class ~= nil and s.support and s.coreSwing and not s.ownSwing then
+		return "core-swing"
+	end
+	return nil
+end
+
 return LastHitRules

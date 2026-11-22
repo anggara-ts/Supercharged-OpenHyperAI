@@ -222,3 +222,55 @@ T.test("deny over a timed last hit: only a more valuable creep", function()
 	T.ok(R.DenyBeatsTimedHit("flag", "melee"), "a flagbearer deny beats a melee last hit")
 	T.ok(R.DenyBeatsTimedHit("siege", "ranged"), "a siege deny beats a ranged last hit")
 end)
+
+T.test("ally swing: time left to the attack point, none past it or in the backswing", function()
+	local R = rules()
+	-- Puck in the [OHA-LH] probe: attackPoint 0.5 at attack speed 1.18 (0.424s wind-up).
+	T.near(R.SwingRemaining(0.5, 1.18, 0, nil, nil), 0.5 / 1.18, 1e-9, "a swing just started: the whole wind-up")
+	T.near(R.SwingRemaining(0.5, 1.18, 0.2, 5, 1.441), 0.3 / 1.18, 1e-9, "the open part, as the bot's own swing")
+	T.eq(R.SwingRemaining(0.5, 1.18, 0.5, 5, 1.441), nil, "at the attack point: the hit is out")
+	T.eq(R.SwingRemaining(0.4, 1.15, 0.69, 5, 1.45), nil, "game 074 Leshrac cycle 0.69: the backswing")
+	-- Released 0.1s ago: the backswing of that attack, whatever the cycle says.
+	T.eq(R.SwingRemaining(0.5, 1.18, 0.3, 0.1, 1.441), nil, "just released: not a new wind-up")
+	T.near(R.SwingRemaining(0.5, 1.18, 0.1, 1.2, 1.441), 0.4 / 1.18, 1e-9, "after the cooldown: a new wind-up")
+	T.eq(R.SwingRemaining(0.5, 1.18, nil, 5, 1.441), nil, "no cycle: not counted")
+end)
+
+T.test("ally swing: only the swings landing before our hit count", function()
+	local R = rules()
+	local swings = { { eta = 0.3, damage = 50 }, { eta = 0.2, damage = 30 }, { eta = 0.6, damage = 40 } }
+	local total, first = R.SwingDamage(swings, 0.5)
+	T.eq(total, 80, "0.3 and 0.2 land before 0.5")
+	T.eq(first.eta, 0.2, "the first to land")
+	total, first = R.SwingDamage(swings, 0.2)
+	T.eq(total, 0, "strictly before: a tie does not count (two swings never both yield)")
+	T.eq(first, nil)
+	T.eq((R.SwingDamage({}, 1)), 0, "no swings")
+end)
+
+T.test("ally swing: others kill it, and whether only with the allied swing", function()
+	local R = rules()
+	local kills, bySwing = R.OthersKill(41, 10, 50)
+	T.ok(kills and bySwing, "40 HP: creeps 10 + the ally's 50")
+	kills, bySwing = R.OthersKill(41, 45, 0)
+	T.ok(kills and not bySwing, "the creeps alone kill it")
+	kills, bySwing = R.OthersKill(41, 45, 50)
+	T.ok(kills and not bySwing, "the creeps kill it anyway: not the ally's")
+	kills, bySwing = R.OthersKill(100, 10, 50)
+	T.ok(not kills and not bySwing, "alive after both")
+end)
+
+T.test("ally swing: yield reasons", function()
+	local R = rules()
+	T.eq(R.YieldReason({ class = nil, swingKill = true }), "ally-swing", "the ally's hit kills it first")
+	local s = { class = "sure", swingKill = false, support = true, coreSwing = true, ownSwing = false }
+	T.eq(R.YieldReason(s), "core-swing", "a support leaves the core's creep even when its own hit kills")
+	s.support = false
+	T.eq(R.YieldReason(s), nil, "a core does not yield to another core's swing that does not kill")
+	s.support, s.ownSwing = true, true
+	T.eq(R.YieldReason(s), nil, "our own swing already winding up: the wind-up watch decides")
+	s.ownSwing, s.coreSwing = false, false
+	T.eq(R.YieldReason(s), nil, "no core swinging")
+	s.coreSwing, s.class = true, nil
+	T.eq(R.YieldReason(s), nil, "not taken anyway: nothing to yield")
+end)

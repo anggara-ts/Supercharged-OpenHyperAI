@@ -492,7 +492,8 @@ function GetBestLastHitCreep(creeps)
 					)
 				)
 			end
-			local predictedHp, ourHit, incomingKills = LastHitTiming.Predict(creep, damage, attackDelay, towerShot)
+			local predictedHp, ourHit, incomingKills, swingKill =
+				LastHitTiming.Predict(creep, damage, attackDelay, towerShot)
 			local class = LastHitRules.Classify(predictedHp, ourHit, incomingKills, allowEarly)
 			local hitDamage = damage
 			if class ~= "sure" and bonus > 0 then
@@ -502,6 +503,8 @@ function GetBestLastHitCreep(creeps)
 					class, hitDamage = "sure", damage + bonus
 				end
 			end
+			-- An ally's swing kills it first, or (a support) a core is swinging at it: left to them ([OHA-LH] yield).
+			class = LastHitTiming.Yield(bot, creep, class, swingKill, attackDelay)
 			local walk = GetUnitToUnitDistance(bot, creep) > attackRange
 			if class ~= nil and walk and WalkInTooLate(creep, attackDelay, false) then
 				class = nil
