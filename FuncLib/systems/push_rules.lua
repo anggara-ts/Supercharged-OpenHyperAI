@@ -169,13 +169,15 @@ end
 
 -- The own-HP cap with its inputs (#12, game 068 2331-2376: in a dead-enemies window with no enemy hero near, bots
 -- at 0.50-0.52 flipped between `advantage-push desire=0.80` and `lock-capped desire=0.25` every few seconds).
---   s.wipe: every enemy dead (0.3); s.deadWindow: an advantage window from dead enemies (not the Aegis alone) and
---   s.enemiesNear == 0: 0.4; else 0.5. s.wasCapped: the cap held this bot last think: it lets go 0.05 higher, so
---   HP ticking around the line doesn't flip the push.
+--   s.wipe: every enemy dead (0.3); s.aegisHolder: this bot holds the Aegis (0.3: it comes back where it falls);
+--   s.window: an advantage window (dead enemies or the Aegis; game 069 1543-1640: Puck and Alchemist were held at
+--   0.46-0.53 in the Aegis window) and s.enemiesNear == 0: 0.4; else 0.5. s.deadWindow is the older name of
+--   s.window. s.wasCapped: the cap held this bot last think: it lets go 0.05 higher, so HP ticking around the line
+--   doesn't flip the push.
 -- Returns the HP under which the cap applies.
 function PushRules.OwnHpCap(s)
-	local below = PushRules.OwnHpCapBelow(s.wipe)
-	if not s.wipe and s.deadWindow and (s.enemiesNear or 0) == 0 then
+	local below = PushRules.OwnHpCapBelow(s.wipe or s.aegisHolder)
+	if not s.wipe and not s.aegisHolder and (s.window or s.deadWindow) and (s.enemiesNear or 0) == 0 then
 		below = 0.4
 	end
 	if s.wasCapped then
@@ -220,12 +222,19 @@ function PushRules.HgGather(s)
 end
 
 -- A push's hero target behind an enemy tower (#12, game 068 16:52-16:58: push's hit-hero step walked Clinkz past
--- Radiant's mid T2 toward Alchemist 1006 away; he died next to the tower). Skip a hero within the tower's range + 150
--- that is farther from us than the tower, unless the tower is nearly dead (under 25%) or our creeps tank it and the
--- fight reads as ours (more allies than enemies near).
+-- Radiant's mid T2 toward Alchemist 1006 away; he died next to the tower. Game 069 22:48: Undying stood 1064 from
+-- Dire's mid T2, outside range + 150, and Alchemist and Axe chased him past it up to the T3 and died). Covered: the
+-- hero is farther from us than the tower and either stands within the tower's range + 150 or the straight path to him
+-- passes within it (s.pathToTower). Taken anyway when:
+--   the tower is under 25%; our creeps tank it and more of ours than theirs are near (s.creepsTanking, s.fightOurs);
+--   an advantage window is open (s.advantage); the enemies who can respond (alive and not seen far away,
+--   s.responders) are no more than our heroes on the chase (s.chasers; game 069 33:30: 3 alive, all near, against 3
+--   of ours, in a dead2 window: the deep chase killed two and the T3 and barracks fell);
+--   the target dies before the tower kills us (s.killTime <= 5s and under s.surviveTime).
 -- Returns skip, why.
 function PushRules.HitHeroBehindTower(s)
-	if (s.targetToTower or math.huge) > (s.towerRange or 700) + 150 then
+	local reach = (s.towerRange or 700) + 150
+	if (s.targetToTower or math.huge) > reach and (s.pathToTower or math.huge) > reach then
 		return false, "clear"
 	end
 	if (s.botToTarget or 0) <= (s.botToTower or 0) then
@@ -237,7 +246,28 @@ function PushRules.HitHeroBehindTower(s)
 	if s.creepsTanking and s.fightOurs then
 		return false, "creeps-tank"
 	end
+	if s.advantage then
+		return false, "advantage"
+	end
+	if s.responders ~= nil and s.chasers ~= nil and s.responders <= s.chasers then
+		return false, "numbers"
+	end
+	if s.killTime ~= nil and s.killTime <= 5 and s.killTime < (s.surviveTime or 0) then
+		return false, "kill-first"
+	end
 	return true, "behind-tower"
+end
+
+-- Distance from point (px, py) to the segment (ax, ay)-(bx, by).
+function PushRules.PointToSegment(px, py, ax, ay, bx, by)
+	local dx, dy = bx - ax, by - ay
+	local lengthSq = dx * dx + dy * dy
+	local t = 0
+	if lengthSq > 0 then
+		t = math.max(0, math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSq))
+	end
+	local cx, cy = ax + t * dx, ay + t * dy
+	return math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
 end
 
 -- A lane our creeps press (#12, maintainer idea 2026-11-22): the lane's next target is their T3 or deeper (tier 3+:

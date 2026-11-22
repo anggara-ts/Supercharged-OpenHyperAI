@@ -329,3 +329,62 @@ T.test("hit-hero: a hero the enemy tower covers is skipped (game 068 16:52)", fu
 		"far from the tower"
 	)
 end)
+
+T.test(
+	"hit-hero: the path past the tower counts; numbers, a window or a quick kill keep a good chase (game 069)",
+	function()
+		local R = rules()
+		-- Game 069 t=1368: Dire's mid T2 at (2593,2170); Alchemist at (2896,2571) goes for Undying at (3437,2818), 1064
+		-- from the tower (outside range + 150), past it. 1 Dire dead: 4 can respond to 2 chasers.
+		local tower, bot, target = { 2593, 2170 }, { 2896, 2571 }, { 3437, 2818 }
+		local function dist(a, b)
+			return math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2)
+		end
+		local path = R.PointToSegment(tower[1], tower[2], bot[1], bot[2], target[1], target[2])
+		T.ok(path <= 850, "the path passes within range + 150 (" .. path .. ")")
+		local s = {
+			targetToTower = dist(target, tower),
+			pathToTower = path,
+			towerRange = 700,
+			botToTarget = dist(bot, target),
+			botToTower = dist(bot, tower),
+			towerHp = 0.83,
+			responders = 4,
+			chasers = 2,
+			killTime = 9,
+			surviveTime = 6,
+		}
+		T.ok(s.targetToTower > 850, "Undying outside range + 150")
+		local skip, why = R.HitHeroBehindTower(s)
+		T.ok(skip, "22:48: blocked")
+		T.eq(why, "behind-tower", "why")
+		-- Game 069 t=2013-2022: a dead2 window, 3 Dire alive and near against 3 of ours: the chase that paid off.
+		s.advantage = true
+		T.eq(select(2, R.HitHeroBehindTower(s)), "advantage", "33:30: an open window")
+		s.advantage, s.responders, s.chasers = nil, 3, 3
+		T.eq(select(2, R.HitHeroBehindTower(s)), "numbers", "33:30: 3 against 3")
+		s.responders, s.chasers, s.killTime, s.surviveTime = 4, 2, 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "kill-first", "the target dies first")
+		s.killTime, s.surviveTime = 3, 2
+		T.ok(R.HitHeroBehindTower(s), "the tower kills us first")
+		-- A hero sideways, the path clear of the tower: taken.
+		T.eq(
+			select(
+				2,
+				R.HitHeroBehindTower({ targetToTower = 1500, pathToTower = 1200, botToTarget = 900, botToTower = 1300 })
+			),
+			"clear",
+			"clear"
+		)
+		T.near(R.PointToSegment(0, 5, -10, 0, 10, 0), 5, 1e-9, "point above the segment")
+		T.near(R.PointToSegment(20, 0, -10, 0, 10, 0), 10, 1e-9, "past the end")
+	end
+)
+
+T.test("own-HP cap in an Aegis window: 40% with nobody near, the holder 30% (game 069 1543-1640)", function()
+	local R = rules()
+	-- Puck at 0.46-0.53 in the Aegis window, no enemy near: not capped any more.
+	T.eq(R.OwnHpCap({ window = true, enemiesNear = 0 }), 0.4, "Aegis window, nobody near")
+	T.eq(R.OwnHpCap({ window = true, enemiesNear = 2 }), 0.5, "Aegis window, enemies near")
+	T.eq(R.OwnHpCap({ window = true, aegisHolder = true, enemiesNear = 2 }), 0.3, "the holder")
+end)

@@ -20,6 +20,8 @@ local PushRules = require(GetScriptDirectory() .. "/FuncLib/systems/push_rules")
 local RoshanRules = require(GetScriptDirectory() .. "/FuncLib/systems/roshan_rules")
 -- Roshan first (Push.RoshanFirstState, #12): read once per GetDesireHelper; the numbers rule and the call use it.
 local aegisFirstNow = false
+-- Roshan's HP ratio this think: seen now, or last seen within 10s (RoshanHpSeen); nil when unknown.
+local roshRatioNow = nil
 local isRoshanAlive = false
 Fu.Utils.GameStates = Fu.Utils.GameStates or {}
 Fu.Utils.GameStates.roshHandle = Fu.Utils.GameStates.roshHandle or nil
@@ -391,6 +393,17 @@ local function IsRoshanEngageSafe(roshanLocation, finishing)
 		if alliesInPit >= 2 and enemiesInPit <= 1 then
 			return true, "ok"
 		end
+		-- Under 30% with at least their number alive and the pit not lost (#12, game 069 24:18: Dire dropped a 28%
+		-- Roshan as their numbers flickered; Radiant took the Aegis).
+		if
+			roshRatioNow ~= nil
+			and roshRatioNow < 0.3
+			and alliesAlive >= enemiesAlive
+			and alliesInPit >= 1
+			and enemiesInPit <= alliesInPit
+		then
+			return true, "ok-low"
+		end
 		if alliesAlive >= enemiesAlive + 1 and enemiesInPit == 0 then
 			return true, "ok"
 		end
@@ -473,6 +486,69 @@ local function GroupFitsTake(roshanLocation)
 	local _, _, _, members, groupDps, roshHp, roshMax = TakeTimeNeeded(roshanLocation)
 	local ok, why = RoshanRules.GroupFit({ members = members, groupDps = groupDps, roshHp = roshHp, roshMax = roshMax })
 	return ok, why, #members
+end
+-- The same fit with the allies who are at the pit (within 1800) at the commit (#12, game 069 20:17-21:14: the call fit
+-- with five, the commit went with 3/5 and they left one by one, Roshan never under 56%). Returns ok, why, count.
+local function GroupFitAt(roshanLocation)
+	local members, groupDps = {}, 0
+	local players = GetTeamPlayers(GetTeam())
+	for i = 1, #players do
+		local ally = GetTeamMember(i)
+		if AllyShouldJoin(ally) and GetUnitToLocationDistance(ally, roshanLocation) <= 1800 then
+			local secondsPerAttack = ally:GetSecondsPerAttack()
+			local hit = (secondsPerAttack ~= nil and secondsPerAttack > 0) and ally:GetAttackDamage() / secondsPerAttack
+				or 0
+			groupDps = groupDps + hit
+			members[#members + 1] = { hp = ally:GetHealth(), maxHp = ally:GetMaxHealth(), roshDps = RoshanDpsOn(ally) }
+		end
+	end
+	local roshMax = 6000 + 130 * math.max(0, DotaTime() / 60)
+	local roshHp = roshMax * (roshRatioNow or 1)
+	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
+		roshHp, roshMax = roshan:GetHealth(), roshan:GetMaxHealth()
+	end
+	local ok, why = RoshanRules.GroupFit({ members = members, groupDps = groupDps, roshHp = roshHp, roshMax = roshMax })
+	return ok, why, #members
+end
+-- Roshan's HP ratio: seen now (remembered per team), or last seen within 10s while he is alive (#12, game 069 24:18:
+-- every Dire bot stepped out at 28-36%, Roshan dropped out of sight, and the finishing check fell back to the
+-- fresh-take numbers, `drop why=even(5v5) roshHp=-1.00`).
+local function RoshanHpSeen()
+	local states = Fu.Utils.GameStates
+	states.roshSeenHp = states.roshSeenHp or {}
+	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
+		local ratio = roshan:GetHealth() / math.max(1, roshan:GetMaxHealth())
+		states.roshSeenHp[GetTeam()] = { at = DotaTime(), ratio = ratio }
+		return ratio
+	end
+	local seen = states.roshSeenHp[GetTeam()]
+	if seen ~= nil and DotaTime() - seen.at <= 10 and Fu.IsRoshanAlive() then
+		return seen.ratio
+	end
+	return nil
+end
+-- Allies deep in the enemy half in a fight (within 6000 of their Ancient, in attack mode or hit by a hero in the last
+-- 3s): a Roshan call leaves them alone there (#12, game 069 22:48: Alchemist and Axe chased up to Dire's mid T3, the
+-- other three went to Roshan on a kill-window call, both died). Returns the count and their names.
+local function AlliesDeepInEnemyHalf()
+	local enemyAncient = GetAncient(GetOpposingTeam())
+	if enemyAncient == nil then
+		return 0, "-"
+	end
+	local count, names = 0, {}
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local ally = GetTeamMember(i)
+		if
+			ally ~= nil
+			and ally:IsAlive()
+			and GetUnitToUnitDistance(ally, enemyAncient) < 6000
+			and (AllyActiveMode(ally) == BOT_MODE_ATTACK or ally:WasRecentlyDamagedByAnyHero(3.0))
+		then
+			count = count + 1
+			names[#names + 1] = (string.gsub(ally:GetUnitName(), "npc_dota_hero_", ""))
+		end
+	end
+	return count, #names > 0 and table.concat(names, ",") or "-"
 end
 -- A take that only works because of a kill must fit inside that kill's window.
 -- Returns ok, why.
@@ -597,7 +673,8 @@ function GetDesireHelper()
 		return Ret(BOT_MODE_DESIRE_NONE, "base-threat")
 	end
 	local alliesInPit = #(Fu.GetAlliesNearLoc(roshanLocation, 1600) or {})
-	local roshLow = Fu.Utils.IsValidUnit(roshan) and (roshan:GetHealth() / roshan:GetMaxHealth()) < 0.8
+	roshRatioNow = RoshanHpSeen()
+	local roshLow = roshRatioNow ~= nil and roshRatioNow < 0.8
 	-- Early game: no fresh pit. Only stay if Roshan is already low and allies are in it.
 	if Fu.IsEarlyGame() and not (roshLow and alliesInPit >= 2 and IsRoshanEngageSafe(roshanLocation, true)) then
 		return Ret(BOT_MODE_DESIRE_NONE, "early-game")
@@ -623,8 +700,7 @@ function GetDesireHelper()
 			return Ret(BOT_MODE_DESIRE_NONE, "few-hitters")
 		end
 		if safeFinish and (alliesInPit >= 2 or soloFinish) then
-			local roshanHpRatio = roshan:GetHealth() / roshan:GetMaxHealth()
-			return Ret(RemapValClamped(roshanHpRatio, 0.8, 0.0, 0.9, 1.0), "finishing")
+			return Ret(RemapValClamped(roshRatioNow, 0.8, 0.0, 0.9, 1.0), "finishing")
 		end
 		-- Contested / unsafe finish — do not suicide into the pit.
 		return Ret(BOT_MODE_DESIRE_NONE, safeFinish and "finish-no-dps" or finishWhy)
@@ -686,6 +762,15 @@ function GetDesireHelper()
 			-- call-drop-call churn walked the team toward the pit and back several times.
 			if DotaTime() < (bot._roshFitFailUntil or -999) then
 				return Ret(BOT_MODE_DESIRE_NONE, "recent-window-fail")
+			end
+			-- No new call while allies fight deep in the enemy half (AlliesDeepInEnemyHalf, game 069 22:48).
+			local deep, deepNames = AlliesDeepInEnemyHalf()
+			if deep >= 1 then
+				if isRoshanAlive and hasEnoughDps and DotaTime() >= (bot._roshDeepLogAt or -999) then
+					bot._roshDeepLogAt = DotaTime() + 20
+					RoshLog("hold why=allies-deep n=%d names=%s", deep, deepNames)
+				end
+				return Ret(BOT_MODE_DESIRE_NONE, "allies-deep")
 			end
 			local fits, fitWhy = TakeFitsWindow(roshanLocation)
 			bot._roshFitWhy = fitWhy
@@ -1047,6 +1132,25 @@ function Think()
 		windowTight = window < pending / 320 + killTime + 3
 	end
 	local capped = elapsed >= 40 and grouped >= math.min(minimumCap, math.max(required, 1))
+	-- The group at the pit has to tank Roshan to half HP (GroupFitAt, #12 game 069 20:17-21:14). While others still
+	-- walk in it waits for them; with nobody left to come (or the window or the 40s cap forcing it) the call drops.
+	if safe and not committed and not finishing and (full or arrived or windowTight or capped) then
+		local fitOk, fitWhy, atPit = GroupFitAt(roshanLocation)
+		if not fitOk then
+			if othersWalking and not (windowTight or capped) then
+				full, arrived = false, false
+				if now >= (bot._roshCommitWaitLogAt or -999) then
+					bot._roshCommitWaitLogAt = now + 5
+					RoshLog("commit-wait why=%s atPit=%d grouped=%d/%d", fitWhy, atPit, grouped, required)
+				end
+			else
+				RoshLog("drop why=commit-fit %s atPit=%d grouped=%d/%d", fitWhy, atPit, grouped, required)
+				bot._roshNoAckUntil = now + 20
+				bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
+				return
+			end
+		end
+	end
 	if safe and (full or arrived or windowTight or capped) then
 		local fresh = not committed
 		bot._roshCommitUntil = now + 25

@@ -347,6 +347,9 @@ end
 -- per lane (bot._hgGather[lane]: since, releasedUntil, coolUntil) and the gather PushThink walks to
 -- (bot._hgGatherActive: lane, at, spot). Returns "none", "go", "cap" or "gather".
 -- Lines: hg-gather (throttled), hg-gather-go, hg-gather-give-up.
+-- One gather lane per team (game 069 45:57-46:42: four bots gathered for three lanes and nobody met): the first
+-- bot that gathers sets it, every gathering bot renews it, and it lapses 3s after the last one.
+local gatherLaneByTeam = {}
 local function ReadHgGather(bot, lane, s)
 	local now = DotaTime()
 	local active = bot._hgGatherActive
@@ -354,12 +357,19 @@ local function ReadHgGather(bot, lane, s)
 		-- Gathering for another lane this think: this one stays capped.
 		return "cap"
 	end
+	local teamGather = gatherLaneByTeam[s.team]
+	if teamGather ~= nil and teamGather.lane ~= lane and now - teamGather.at <= 3 then
+		return "cap"
+	end
 	bot._hgGather = bot._hgGather or {}
 	local state = bot._hgGather[lane]
-	if state == nil then
+	-- A gap of 5s+ without a push think on this lane (the bot died, or did something else): start over (game 069:
+	-- Axe's gather from 2493 outlived his death at 2538 and read waited=212 at 2705).
+	if state == nil or now - (state.seenAt or -999) > 5 then
 		state = {}
 		bot._hgGather[lane] = state
 	end
+	state.seenAt = now
 	local spot = s.groupAllowed and HgGatherSpot(s.team, lane, s.enemyFountain) or nil
 	local atSpot = spot ~= nil and #getCachedAlliesNearLoc(spot, 1600) or nil
 	local mode = PushRules.HgGather({
@@ -400,6 +410,7 @@ local function ReadHgGather(bot, lane, s)
 	elseif mode == "gather" then
 		state.since = state.since or now
 		bot._hgGatherActive = { lane = lane, at = now, spot = spot }
+		gatherLaneByTeam[s.team] = { lane = lane, at = now }
 		if now >= (state.logAt or -999) and not Fu.IsMeepoClone(bot) then
 			state.logAt = now + 6
 			pcall(
@@ -711,13 +722,15 @@ function Push.GetPushDesireHelper(bot, lane)
 		end
 	end
 	-- With every enemy dead (wipe) the own-HP cap starts at 30% (game 067 t=1376: `lock-capped why=cap desire=0.25
-	-- alive=4/0` held the push of a bot at 30-50% HP while nobody could defend). In a dead-enemies window with no enemy
-	-- hero near: 40%, and a capped bot lets go 5% higher (PushRules.OwnHpCap, game 068 2331-2376).
+	-- alive=4/0` held the push of a bot at 30-50% HP while nobody could defend). In an advantage window (dead enemies
+	-- or the Aegis) with no enemy hero near: 40%; the Aegis holder 30%; a capped bot lets go 5% higher
+	-- (PushRules.OwnHpCap, game 068 2331-2376, game 069 1543-1640).
 	local wipeWindow = advDesire ~= nil and gameState.aliveEnemyCount == 0
 	local ownHpCapped = Fu.GetHP(bot)
 		< PushRules.OwnHpCap({
 			wipe = wipeWindow,
-			deadWindow = advDesire ~= nil and (adv.dead or 0) >= 2,
+			window = advDesire ~= nil,
+			aegisHolder = advDesire ~= nil and Fu.IsHaveAegis(bot),
 			enemiesNear = #enemiesNearBot,
 			wasCapped = bot._ownHpCapped == true,
 		})
@@ -1829,6 +1842,50 @@ local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
 	if not Fu.IsValidBuilding(tower) or not tower:IsAlive() then
 		return false
 	end
+	local botLoc, targetLoc, towerLoc = bot:GetLocation(), enemyHero:GetLocation(), tower:GetLocation()
+	local reach = tower:GetAttackRange() + 150
+	local targetToTower = GetUnitToUnitDistance(enemyHero, tower)
+	local pathToTower = PushRules.PointToSegment(towerLoc.x, towerLoc.y, botLoc.x, botLoc.y, targetLoc.x, targetLoc.y)
+	local botToTarget = GetUnitToUnitDistance(bot, enemyHero)
+	local botToTower = GetUnitToUnitDistance(bot, tower)
+	-- Cheap geometry first: the rest is read only for a hero the tower covers.
+	if targetToTower > reach and pathToTower > reach or botToTarget <= botToTower then
+		return false
+	end
+	-- Enemies who can respond: alive and not seen (in the last 5s) more than 3000 from the target.
+	local responders = 0
+	for _, pid in ipairs(GetTeamPlayers(GetOpposingTeam())) do
+		if IsHeroAlive(pid) then
+			local info = GetHeroLastSeenInfo(pid)
+			local seen = info ~= nil and info[1] or nil
+			local far = seen ~= nil
+				and (seen.time_since_seen or 99) <= 5
+				and GetUnitToLocationDistance(enemyHero, seen.location) > 3000
+			if not far then
+				responders = responders + 1
+			end
+		end
+	end
+	-- Our heroes on the chase (within 1200 of this bot) and their damage on the target over 3s.
+	local chasers, damage3s = 0, 0
+	for _, ally in ipairs(Fu.GetAlliesNearLoc(botLoc, 1200) or {}) do
+		if Fu.IsValidHero(ally) and not ally:IsIllusion() then
+			chasers = chasers + 1
+			local okDamage, estimate = pcall(function()
+				return ally:GetEstimatedDamageToTarget(true, enemyHero, 3.0, DAMAGE_TYPE_ALL)
+			end)
+			damage3s = damage3s + (okDamage and type(estimate) == "number" and estimate or 0)
+		end
+	end
+	local travel = math.max(0, botToTarget - bot:GetAttackRange()) / math.max(100, bot:GetCurrentMovementSpeed())
+	local killTime = travel + enemyHero:GetHealth() / math.max(1, damage3s / 3)
+	-- The tower's hits on this bot per second (its attack after our armor).
+	local okTower, towerDps = pcall(function()
+		return bot:GetActualIncomingDamage(tower:GetAttackDamage(), DAMAGE_TYPE_PHYSICAL)
+			/ math.max(0.5, tower:GetSecondsPerAttack())
+	end)
+	local surviveTime = bot:GetHealth() / math.max(1, okTower and type(towerDps) == "number" and towerDps or 150)
+	local adv = advantageByTeam[GetTeam()]
 	local towerTarget = tower:GetAttackTarget()
 	local creepsTanking = false
 	if towerTarget ~= nil and towerTarget ~= bot and not towerTarget:IsHero() then
@@ -1842,20 +1899,45 @@ local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
 		creepsTanking = inRange >= 3
 	end
 	local skip, why = PushRules.HitHeroBehindTower({
-		targetToTower = GetUnitToUnitDistance(enemyHero, tower),
+		targetToTower = targetToTower,
+		pathToTower = pathToTower,
 		towerRange = tower:GetAttackRange(),
-		botToTarget = GetUnitToUnitDistance(bot, enemyHero),
-		botToTower = GetUnitToUnitDistance(bot, tower),
+		botToTarget = botToTarget,
+		botToTower = botToTower,
 		towerHp = tower:GetHealth() / math.max(1, tower:GetMaxHealth()),
 		creepsTanking = creepsTanking,
 		fightOurs = alliesNear >= enemiesNear + 1,
+		advantage = adv ~= nil and adv.desire ~= nil,
+		responders = responders,
+		chasers = chasers,
+		killTime = killTime,
+		surviveTime = surviveTime,
 	})
+	-- A covered hero taken anyway: one line on why (the 33:30 kind of chase).
+	if not skip and DotaTime() >= (bot._hitHeroTakeLogAt or -999) and not Fu.IsMeepoClone(bot) then
+		bot._hitHeroTakeLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[OHA-PUSH] t=%.0f %s hit-hero-take why=%s target=%s responders=%d chasers=%d kill=%.1f survive=%.1f path=%d",
+				DotaTime(),
+				ShortHeroName(bot),
+				why,
+				ShortHeroName(enemyHero),
+				responders,
+				chasers,
+				killTime,
+				surviveTime,
+				math.floor(pathToTower)
+			)
+		)
+	end
 	if skip and DotaTime() >= (bot._hitHeroSkipLogAt or -999) and not Fu.IsMeepoClone(bot) then
 		bot._hitHeroSkipLogAt = DotaTime() + 5
 		pcall(
 			print,
 			string.format(
-				"[OHA-PUSH] t=%.0f %s hit-hero-skip why=%s target=%s tower=%s lane=%s targetToTower=%d botToTower=%d botToTarget=%d towerHp=%.2f",
+				"[OHA-PUSH] t=%.0f %s hit-hero-skip why=%s target=%s tower=%s lane=%s targetToTower=%d botToTower=%d botToTarget=%d towerHp=%.2f path=%d responders=%d chasers=%d kill=%.1f survive=%.1f",
 				DotaTime(),
 				ShortHeroName(bot),
 				why,
@@ -1865,7 +1947,12 @@ local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
 				math.floor(GetUnitToUnitDistance(enemyHero, tower)),
 				math.floor(GetUnitToUnitDistance(bot, tower)),
 				math.floor(GetUnitToUnitDistance(bot, enemyHero)),
-				tower:GetHealth() / math.max(1, tower:GetMaxHealth())
+				tower:GetHealth() / math.max(1, tower:GetMaxHealth()),
+				math.floor(pathToTower),
+				responders,
+				chasers,
+				killTime,
+				surviveTime
 			)
 		)
 	end
