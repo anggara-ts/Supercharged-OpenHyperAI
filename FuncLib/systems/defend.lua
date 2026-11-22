@@ -2178,11 +2178,13 @@ function Defend.DefendThink(bot, lane)
 		end
 		return DefendStep(bot, lane, "group-up", "hold", "attack-move", vectorAdd(point, offset), info)
 	end
-	-- Enemy heroes at our Ancient: every defender goes home.
-	local heroesAtAncient = ancient ~= nil and #Fu.GetLastSeenEnemiesNearLoc(ancientLoc, 2200) or 0
+	-- Enemy heroes at our Ancient (within 1400: the T4s and the Ancient, not the rims ~1800-2100 out, which are the
+	-- high-ground steps' call): every defender goes home.
+	local heroesAtAncient = ancient ~= nil and #Fu.GetLastSeenEnemiesNearLoc(ancientLoc, DefendLaneRules.BASE_RADIUS)
+		or 0
 	if heroesAtAncient > 0 then
 		info.heroes = heroesAtAncient
-		local target, targetDist = NearestAttackableHero(ancientLoc, 2200, bot)
+		local target, targetDist = NearestAttackableHero(ancientLoc, DefendLaneRules.BASE_RADIUS + 400, bot)
 		if target ~= nil and targetDist <= 1600 then
 			return DefendStep(bot, lane, "ancient-heroes", "fight", "attack", target, info)
 		end

@@ -161,8 +161,9 @@ T.test(
 		think(g) -- the T3 seen standing
 		g.towers[g.Dota.Tower.Mid3]._alive = false
 		local dire = Stub.teams[TEAM_DIRE]
+		-- Three heroes on the rim itself (~1900 from the Ancient): a rim fight, not "heroes at the Ancient".
 		for i = 1, 3 do
-			dire[i]._loc = Vector(MID_T3.x + 200 * i, MID_T3.y, 0)
+			dire[i]._loc = Vector(MID_T3.x - 180 + 60 * i, MID_T3.y - 180, 0)
 		end
 		-- Our other four far away (top lane): alone against three, back to the Ancient (the T3 is down).
 		local radiant = Stub.teams[TEAM_RADIANT]
