@@ -379,6 +379,9 @@ T.test("team roam's overlay owns a hit (#171 bot._lhOwn): no arm, no order, one 
 	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
 	local other = Stub.newUnit({ name = "npc_dota_creep_badguys_melee", loc = bot:GetLocation() + Vector(80, 0, 0) })
 	bot._lhOwn = { unit = other, t = GameTime() }
+	-- The skip line is muted in OHA_MUTED (game 068); count it before the mute.
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
 	for _ = 1, 5 do
 		Stub.time = Stub.time + 1 / 30
 		T.eq(Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true }), nil, "not armed")
@@ -386,6 +389,7 @@ T.test("team roam's overlay owns a hit (#171 bot._lhOwn): no arm, no order, one 
 	end
 	T.eq(#state.orders, 0, "no attack over the overlay's swing (the creep was a sure hit)")
 	T.eq(bot._lhTiming, nil, "our timing dropped")
+	print = mutedPrint
 	local lines = 0
 	for _, line in ipairs(Stub.printed) do
 		if string.find(line, "skip why=overlay-owns", 1, true) then
