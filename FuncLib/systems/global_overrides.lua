@@ -6,6 +6,8 @@ local OHA_MUTED = {
 	-- Only the 20s laning summary (standoff / last hits). lasthit-skip, harass-step, summons-step-back and
 	-- go-home print again: the whole tag was muted, so game 037 could not show them working.
 	"^%[OHA%-LANE%] t=%S+ %S+ pos=%d",
+	-- #157: the last-hit overlay owning the swing (691 of 1707 [OHA-LH] lines in game 068, proven in games 064-068).
+	"^%[OHA%-LH%] t=%S+ %S+ skip why=overlay%-owns",
 	"^%[OHA%-TUSK%] t=%S+ snowball%-launch", -- early launch (median 0.6s)
 	"^%[OHA%-TUSK%] t=%S+ punch ", -- Tag Team before Punch
 	"^%[OHA%-TUSK%] t=%S+ tag%-team ",
