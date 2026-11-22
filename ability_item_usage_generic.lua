@@ -900,15 +900,16 @@ do
 		end
 		bot.posAnsweredAt = now
 		local line = PosRules.Line(position, Localization.Get("pos_names"), Localization.Get("say_pos_prefix"))
-		pcall(function()
+		local said = pcall(function()
 			bot:ActionImmediate_Chat(line, false)
 		end)
 		print(
 			string.format(
-				'[OHA-ROLE] t=%.0f %s pos-say pos=%s line="%s"',
+				'[OHA-ROLE] t=%.0f %s pos-say pos=%s said=%s line="%s"',
 				DotaTime(),
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				tostring(position),
+				said and "yes" or "no",
 				line
 			)
 		)

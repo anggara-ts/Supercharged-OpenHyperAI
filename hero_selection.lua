@@ -758,7 +758,11 @@ local heroPickedByChat = false
 local function handleChatCommand(text, senderId, teamOnly)
 	local commandWord, commandText = splitCommand(text)
 	if commandWord == nil then
-		-- A command without an argument, e.g. `!pos` (#210): it was dropped here as invalid.
+		-- Only `!pos` works without an argument (#210); a bare `!pick` / `!ban` would match the first hero.
+		if PosRules.Parse(text) == nil then
+			log("[WARN] Invalid command: %s", text)
+			return
+		end
 		commandWord, commandText = Utils.TrimString(text), ""
 	end
 	local teamPlayers = GetTeamPlayers(GetTeam())

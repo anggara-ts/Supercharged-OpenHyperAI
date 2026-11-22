@@ -109,8 +109,9 @@ T.test("pos rules: one answer per bot, in position order, throttled", function()
 	T.eq(PosRules.AnswerState(100, 100, 100.7, 101, 1), "none")
 	-- A second request 2s later (or the other chat callback) is dropped.
 	T.eq(PosRules.AnswerState(102, 100, 100.7, 103, 1), "drop")
-	-- 15s later it is answered again.
-	T.eq(PosRules.AnswerState(116, 100, 100.7, 117, 1), "answer")
+	-- 20s later it is still dropped (the chat guard would swallow the same line), 35s later it is answered.
+	T.eq(PosRules.AnswerState(120, 100, 100.7, 121, 1), "drop")
+	T.eq(PosRules.AnswerState(135, 120, 100.7, 136, 1), "answer")
 	-- A request typed in the draft, 60s before the bot spawned.
 	T.eq(PosRules.AnswerState(40, nil, nil, 100, 3), "drop")
 end)

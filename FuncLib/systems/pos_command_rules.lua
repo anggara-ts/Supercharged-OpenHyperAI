@@ -6,8 +6,10 @@ local PosRules = {}
 PosRules.Names = { "Carry", "Mid", "Offlane", "Offlane Support", "Hard Support" }
 
 -- Seconds a bot waits before it answers `!pos` again (a second callback or a repeated `!pos` inside the window is
--- dropped), and the gap between the bots' lines (pos 1 speaks first, pos 5 last).
-PosRules.AnswerCooldown = 10
+-- dropped), and the gap between the bots' lines (pos 1 speaks first, pos 5 last). 30s is the window of
+-- FuncLib/systems/chat_guard.lua: a team says the same text at most once per 30s, so a faster repeat would be
+-- swallowed there unseen.
+PosRules.AnswerCooldown = 30
 PosRules.AnswerStep = 0.6
 -- A request older than this is dropped without an answer.
 PosRules.AnswerMaxAge = 20
