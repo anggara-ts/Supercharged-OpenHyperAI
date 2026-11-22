@@ -164,19 +164,33 @@ function EscapeRules.PhaseOrbFirst(escapeShift, orbReady, jauntReady, rooted, or
 	return escapeShift == true and orbReady == true and jauntReady == true and rooted ~= true and orbOut ~= true
 end
 
--- When to Jaunt to the Orb out of an escape shift: in the shift's last JAUNT_BEFORE_END seconds, or before the Orb
--- ends. The Orb flies max_distance / orb_speed (1950 / 750 = 2.6s, datafeed hero 13), less than a rank 4 shift
--- (3.25s), so the Jaunt goes at the earlier one. sinceOrb / orbFlight nil: Orb time unknown, shift end only.
+-- When to Jaunt to the Orb out of an escape shift. "early": once the shift has covered the damage on the way, after
+-- EARLY_JAUNT_AFTER, or from EARLY_JAUNT_MIN when no stun or projectile is due at her (threatDue false); the Jaunt
+-- ends the shift but gets her out sooner, and the spot must pass ExitJauntOk. "end": the shift's last
+-- JAUNT_BEFORE_END seconds. "orb-end": before the Orb ends; it flies max_distance / orb_speed (1950 / 750 = 2.6s,
+-- datafeed hero 13), less than a rank 3-4 shift (2.5 / 3.25s). sinceOrb / orbFlight nil: Orb time unknown.
+-- Returns now, when ("early" | "end" | "orb-end" | nil).
 EscapeRules.JAUNT_BEFORE_END = 0.2
 EscapeRules.JAUNT_ORB_MARGIN = 0.3
+EscapeRules.EARLY_JAUNT_MIN = 0.15
+EscapeRules.EARLY_JAUNT_AFTER = 0.5
 -- With no Orb out at an escape shift's end, the Orb ready again is thrown home in the shift's last 0.15s (its cast
 -- point 0.1, datafeed hero 13, ends about with the shift).
 EscapeRules.ORB_EXIT_BEFORE_END = 0.15
-function EscapeRules.ShiftJauntNow(sinceOrder, duration, sinceOrb, orbFlight)
+function EscapeRules.ShiftJauntNow(sinceOrder, duration, sinceOrb, orbFlight, threatDue)
 	if sinceOrder >= duration - EscapeRules.JAUNT_BEFORE_END then
-		return true
+		return true, "end"
 	end
-	return sinceOrb ~= nil and orbFlight ~= nil and sinceOrb >= orbFlight - EscapeRules.JAUNT_ORB_MARGIN
+	if sinceOrb ~= nil and orbFlight ~= nil and sinceOrb >= orbFlight - EscapeRules.JAUNT_ORB_MARGIN then
+		return true, "orb-end"
+	end
+	if
+		sinceOrder >= EscapeRules.EARLY_JAUNT_AFTER
+		or sinceOrder >= EscapeRules.EARLY_JAUNT_MIN and threatDue ~= true
+	then
+		return true, "early"
+	end
+	return false, nil
 end
 
 -- No offensive Waning Rift (the "group" and "target" jumps into enemies) when she is under ESCAPE_HP with an enemy
@@ -208,21 +222,51 @@ function EscapeRules.KeepOrbForEscape(hp, enemiesNear)
 	return (hp or 1) < EscapeRules.ESCAPE_HP and (enemiesNear or 0) >= 1
 end
 
--- A Jaunt out of a shift goes to an Orb at least EXIT_JAUNT_MIN away on the escape side, with fewer enemy heroes
--- within 700 of the Orb than within 700 of her (#36, game 069 t=2547: a Jaunt to an Orb 532 away, 282 closer to
--- home, Io 320 -> 628 away, dead 2s later). Returns ok, why ("wrong-side" | "near" | "crowded" | nil).
+-- How far the Orb must be for an exit Jaunt: what it can have reached. EXIT_PATH_SHARE of the path it has flown
+-- (orb_speed x time since it left; the curve makes the straight line shorter than the path), capped at
+-- EXIT_JAUNT_MIN and at least EXIT_JAUNT_FLOOR. A fixed 900 could never pass at Phase Shift rank 1: an Orb thrown
+-- with the shift has flown about 750 x 1.05 = 790 of path when the 1.0s shift ends (datafeed hero 13: orb_speed 750,
+-- Phase Shift 1 / 1.75 / 2.5 / 3.25s). pathFlown nil (Orb time unknown): EXIT_JAUNT_MIN.
 EscapeRules.EXIT_JAUNT_MIN = 900
-function EscapeRules.ExitJauntOk(dist, escapeSide, enemiesAtOrb, enemiesHere)
-	if escapeSide ~= true then
-		return false, "wrong-side"
+EscapeRules.EXIT_JAUNT_FLOOR = 400
+EscapeRules.EXIT_PATH_SHARE = 0.75
+function EscapeRules.ExitJauntNeed(pathFlown)
+	if pathFlown == nil then
+		return EscapeRules.EXIT_JAUNT_MIN
 	end
-	if (dist or 0) < EscapeRules.EXIT_JAUNT_MIN then
-		return false, "near"
+	return math.max(
+		EscapeRules.EXIT_JAUNT_FLOOR,
+		math.min(EscapeRules.EXIT_JAUNT_MIN, EscapeRules.EXIT_PATH_SHARE * pathFlown)
+	)
+end
+-- An exit Jaunt goes to an Orb on the escape side, at least `need` away (ExitJauntNeed), with fewer enemy heroes
+-- within 700 of it than within 700 of her, and a real gain against the nearest enemy hero: the Orb is at least
+-- EXIT_GAIN farther from that hero than she is, and outside its attack range + EXIT_RANGE_MARGIN (#36, game 069
+-- t=2547: a Jaunt to an Orb 532 away, 282 closer to home, Io 320 -> 628 away, dead 2s later). meToEnemy /
+-- orbToEnemy / enemyRange nil: no enemy hero near, no gain test. Returns ok, why ("wrong-side" | "near" | "crowded"
+-- | "no-gain" | "in-range" | nil), gain (orbToEnemy - meToEnemy, or nil).
+EscapeRules.EXIT_GAIN = 400
+EscapeRules.EXIT_RANGE_MARGIN = 200
+function EscapeRules.ExitJauntOk(dist, need, escapeSide, enemiesAtOrb, enemiesHere, meToEnemy, orbToEnemy, enemyRange)
+	local gain = meToEnemy ~= nil and orbToEnemy ~= nil and orbToEnemy - meToEnemy or nil
+	if escapeSide ~= true then
+		return false, "wrong-side", gain
+	end
+	if (dist or 0) < (need or EscapeRules.EXIT_JAUNT_MIN) then
+		return false, "near", gain
 	end
 	if (enemiesAtOrb or 0) >= math.max(1, enemiesHere or 0) then
-		return false, "crowded"
+		return false, "crowded", gain
 	end
-	return true, nil
+	if gain ~= nil then
+		if gain < EscapeRules.EXIT_GAIN then
+			return false, "no-gain", gain
+		end
+		if orbToEnemy < (enemyRange or 0) + EscapeRules.EXIT_RANGE_MARGIN then
+			return false, "in-range", gain
+		end
+	end
+	return true, nil, gain
 end
 
 -- A dodge Phase Shift goes out in the same think when the outpost hold is the active mode (held), or when the hit is

@@ -485,13 +485,15 @@ end
 -- 3. The shift's last 0.2s with an enemy on her: Blink away first, before a projectile that waited for the shift's
 --    end lands and renews Blink's damage block (game 064, 43:16: Death Coil landed as the shift ended, tti=0.04,
 --    and Blink read 3.0 for the rest of the fight).
--- An escape shift (bot._phaseCastEscape): Jaunt to the Orb at the shift's end, or before the Orb ends
--- (EscapeRules.ShiftJauntNow), so she is gone when the enemies waiting for the shift to end hit (game 068: 7 of 10
--- deaths 1-3s after a shift in place). Only to an Orb that passes X.ExitJauntCheck. With no Orb out and the Orb
--- ready again (off cooldown during the shift), she throws it home in the shift's last ORB_EXIT_BEFORE_END seconds;
--- that cast ends the shift (the Orb does not ignore channels, game files), and X.ExitOrbJaunt follows it.
--- [OHA-PUCK] phase-exit skip=jaunt why=wrong-side|near|crowded dist= enemies=here->orb since= hp=, once per 3s; the
--- Jaunt prints escape-action spell=jaunt why=phase-end, the late Orb escape-action spell=orb why=phase-exit.
+-- An escape shift (bot._phaseCastEscape): Jaunt to the Orb so she is gone when the enemies waiting for the shift to
+-- end hit (game 068: 7 of 10 deaths 1-3s after a shift in place). EscapeRules.ShiftJauntNow: early (from 0.15s when
+-- no stun or projectile is due at her, from 0.5s anyway) once the Orb's spot passes X.ExitJauntCheck; else in the
+-- shift's last 0.2s or before the Orb ends. With no Orb out and the Orb ready again (off cooldown during the shift),
+-- she throws it home in the shift's last ORB_EXIT_BEFORE_END seconds; that cast ends the shift (the Orb does not
+-- ignore channels, game files), and X.ExitOrbJaunt follows it.
+-- [OHA-PUCK] phase-exit jaunt when=early|end|orb-end dist= need= gain= since= hp=, on each Jaunt; phase-exit
+-- skip=jaunt why=wrong-side|near|crowded|no-gain|in-range when= dist= need= gain= enemies=here->orb since= hp=, at the
+-- end / orb-end checks only, once per 3s. The late Orb prints escape-action spell=orb why=phase-exit.
 function X.EscapeShiftJaunt(orderAt, since, duration)
 	if bot._phaseCastEscape ~= true or bot._phaseTrack == nil or bot:IsRooted() then
 		return false
@@ -516,29 +518,55 @@ function X.EscapeShiftJaunt(orderAt, since, duration)
 		return false
 	end
 	local sinceOrb = bot._orbCastAt ~= nil and DotaTime() - bot._orbCastAt or nil
-	if not EscapeRules.ShiftJauntNow(since, duration, sinceOrb, X.OrbFlightTime()) then
+	local threatDue = false
+	if since < EscapeRules.EARLY_JAUNT_AFTER then
+		local okLinear, threat =
+			pcall(Fu.FindLinearProjectileIncoming, bot, phaseShiftAbility:GetCastPoint(), "cyclone")
+		threatDue = okLinear and threat ~= nil
+			or Fu.IsStunProjectileIncoming(bot, 1000)
+			or Fu.IsUnitTargetProjectileIncoming(bot, 1000)
+	end
+	local now, when = EscapeRules.ShiftJauntNow(since, duration, sinceOrb, X.OrbFlightTime(), threatDue)
+	if not now then
 		return false
 	end
-	local ok, why, dist, enemiesHere, enemiesThere = X.ExitJauntCheck(orbAt)
-	if ok then
+	local check = X.ExitJauntCheck(orbAt)
+	if check.ok then
 		bot._phaseExitFor = orderAt
 		bot._phaseExitHow = "jaunt-orb"
+		pcall(
+			print,
+			string.format(
+				"[OHA-PUCK] t=%.0f phase-exit jaunt when=%s dist=%.0f need=%.0f gain=%.0f since=%.2f hp=%.2f",
+				DotaTime(),
+				tostring(when),
+				check.dist,
+				check.need,
+				check.gain or -1,
+				since,
+				Fu.GetHP(bot)
+			)
+		)
 		X.LogEscapeAction("jaunt", "phase-end", orbAt)
 		X.ReleasePhaseHold()
 		bot:Action_UseAbility(etherealJauntAbility)
 		return true
 	end
-	if DotaTime() >= (bot._phaseExitSkipLogAt or -999) then
+	-- An early check that fails is normal while the Orb flies out; only the late ones are logged.
+	if when ~= "early" and DotaTime() >= (bot._phaseExitSkipLogAt or -999) then
 		bot._phaseExitSkipLogAt = DotaTime() + 3
 		pcall(
 			print,
 			string.format(
-				"[OHA-PUCK] t=%.0f phase-exit skip=jaunt why=%s dist=%d enemies=%d->%d since=%.2f hp=%.2f",
+				"[OHA-PUCK] t=%.0f phase-exit skip=jaunt why=%s when=%s dist=%.0f need=%.0f gain=%.0f enemies=%d->%d since=%.2f hp=%.2f",
 				DotaTime(),
-				tostring(why),
-				dist,
-				enemiesHere,
-				enemiesThere,
+				tostring(check.why),
+				tostring(when),
+				check.dist,
+				check.need,
+				check.gain or -1,
+				check.enemiesHere,
+				check.enemiesThere,
 				since,
 				Fu.GetHP(bot)
 			)
@@ -546,8 +574,10 @@ function X.EscapeShiftJaunt(orderAt, since, duration)
 	end
 	return false
 end
--- Is the Orb at orbAt a way out (EscapeRules.ExitJauntOk): 900+ away on the escape side, fewer enemy heroes within
--- 700 of it than of her. Returns ok, why, dist, enemies near her, enemies near the Orb.
+-- Is the Orb at orbAt a way out (EscapeRules.ExitJauntOk)? need: EscapeRules.ExitJauntNeed of the path the Orb has
+-- flown (orb_speed x time since it left, cast point 0.1, datafeed hero 13); gain: against the nearest enemy hero
+-- within 1600 (its distance to the Orb minus its distance to her). Returns { ok, why, dist, need, gain, enemiesHere,
+-- enemiesThere }.
 function X.ExitJauntCheck(orbAt)
 	local here = bot:GetLocation()
 	local _, dirX, dirY = X.EscapePoint(1)
@@ -555,8 +585,34 @@ function X.ExitJauntCheck(orbAt)
 	local escapeSide = EscapeRules.IsOnEscapeSide(here.x, here.y, orbAt.x, orbAt.y, dirX, dirY)
 	local enemiesHere = #Fu.GetEnemiesNearLoc(here, 700)
 	local enemiesThere = #Fu.GetEnemiesNearLoc(orbAt, 700)
-	local ok, why = EscapeRules.ExitJauntOk(dist, escapeSide, enemiesThere, enemiesHere)
-	return ok, why, dist, enemiesHere, enemiesThere
+	local pathFlown = nil
+	local speed = illusoryOrbAbility:GetSpecialValueInt("orb_speed")
+	if bot._orbCastAt ~= nil and speed ~= nil and speed > 0 then
+		pathFlown = speed * math.max(0, DotaTime() - bot._orbCastAt - illusoryOrbAbility:GetCastPoint())
+	end
+	local need = EscapeRules.ExitJauntNeed(pathFlown)
+	local nearest, nearestDist = nil, nil
+	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemyHero) and not Fu.IsSuspiciousIllusion(enemyHero) then
+			local enemyDist = GetUnitToUnitDistance(bot, enemyHero)
+			if nearestDist == nil or enemyDist < nearestDist then
+				nearest, nearestDist = enemyHero, enemyDist
+			end
+		end
+	end
+	local orbToEnemy = nearest ~= nil and GetUnitToLocationDistance(nearest, orbAt) or nil
+	local enemyRange = nearest ~= nil and nearest:GetAttackRange() or nil
+	local ok, why, gain =
+		EscapeRules.ExitJauntOk(dist, need, escapeSide, enemiesThere, enemiesHere, nearestDist, orbToEnemy, enemyRange)
+	return {
+		ok = ok,
+		why = why,
+		dist = dist,
+		need = need,
+		gain = gain,
+		enemiesHere = enemiesHere,
+		enemiesThere = enemiesThere,
+	}
 end
 -- The Orb thrown at a shift's end (X.EscapeShiftJaunt, bot._exitOrbAt): Jaunt to it once it passes X.ExitJauntCheck,
 -- within the Orb's flight. Runs before the danger Jaunt. [OHA-PUCK] escape-action spell=jaunt why=exit-orb.
@@ -574,10 +630,26 @@ function X.ExitOrbJaunt()
 		return false
 	end
 	local orbAt = X.OrbInFlight()
-	if orbAt == nil or not X.ExitJauntCheck(orbAt) then
+	if orbAt == nil then
+		return false
+	end
+	local check = X.ExitJauntCheck(orbAt)
+	if not check.ok then
 		return false
 	end
 	bot._exitOrbAt = nil
+	pcall(
+		print,
+		string.format(
+			"[OHA-PUCK] t=%.0f phase-exit jaunt when=exit-orb dist=%.0f need=%.0f gain=%.0f since=%.2f hp=%.2f",
+			DotaTime(),
+			check.dist,
+			check.need,
+			check.gain or -1,
+			DotaTime() - thrownAt,
+			Fu.GetHP(bot)
+		)
+	)
 	X.LogEscapeAction("jaunt", "exit-orb", orbAt)
 	bot:Action_UseAbility(etherealJauntAbility)
 	return true
