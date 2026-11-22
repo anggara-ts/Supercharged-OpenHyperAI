@@ -4,11 +4,13 @@
 --
 -- Off unless the local setting Customize.Swap_Probe == true (never set in the shipped Customize/general.lua, so a
 -- Workshop copy never runs it). One Radiant bot (the highest position among the Radiant bots) runs it pre-game:
---   setup   buy an Enchanted Mango (marker) and Faerie Fires (fillers) until the main slots are full and two land in
---           the backpack, then sell main fillers until 4 main items are left (only at the fountain shop). Before a
---           case whose slots are missing it buys one filler into the full main slots (it lands in the backpack) and
---           sells one main filler. No Iron Branch (the swap wrapper never moves one into the backpack) and no
---           Clarity (#15's rule refuses a Clarity pulled into an occupied main slot).
+--   setup   buy a marker item and fillers until the main slots are full and two land in the backpack, then sell
+--           main fillers until 4 main items are left (only at the fountain shop). Before a case whose slots are
+--           missing it buys one filler into the full main slots (it lands in the backpack) and sells one main filler.
+--           Only items without a stock limit (game 074: the Enchanted Mango was out of stock at t=-88, code 82). A
+--           failed buy moves on to the next candidate. The swaps use the engine's own method (handed over by
+--           global_overrides.lua), so our wrapper's rules (no branch into the backpack, #15's pull rule) don't apply.
+--           Gold (600 at t=-88 in game 074): a Faerie Fire, 7 branches, 2 sold, then ~4 restores of 55 - 27.
 --   cases   1 swap(main item, bag item)  2 swap(bag item, main item)  3 main item -> empty bag slot, then
 --           bag item -> that main slot  4 bag item -> empty main slot, then main item -> that bag slot
 --           5 case 4 with 7s between the steps (the backpack cooldown is 6s). Slots are re-read before each case.
@@ -18,13 +20,20 @@
 -- Logs: [OHA-SWAP] probe (one line per step), probe-summary (per condition), probe-done; then one ALL chat line.
 local M = {}
 
-M.MARKER = "item_enchanted_mango" -- 65 gold, team stock 4 (7.42 items.txt)
-M.MARKER_COST = 65
-M.FILLER = "item_faerie_fire" -- 65 gold, no stock limit (7.42 items.txt)
-M.FILLER_COST = 65
+-- Candidates in order; 7.42 items.txt: ItemCost, and no ItemStockMax / ItemStockInitial (no stock limit).
+M.MARKERS = {
+	{ name = "item_faerie_fire", cost = 65 },
+	{ name = "item_quelling_blade", cost = 100 },
+	{ name = "item_gauntlets", cost = 140 },
+}
+M.FILLERS = {
+	{ name = "item_branches", cost = 55 },
+	{ name = "item_slippers", cost = 140 },
+	{ name = "item_mantle", cost = 140 },
+}
 M.MAIN_KEEP = 4 -- main items after the first setup (2 empty main slots)
 M.BAG_WANT = 2 -- backpack items after the first setup (1 empty backpack slot)
-M.MAX_BUYS = 16
+M.MAX_BUYS = 20
 M.DEADLINE = 180 -- game seconds: whatever is not done by then is cut short
 M.CONDITIONS = { "idle", "busy", "modes" }
 -- Each step names two role slots (re-read before the case): m1 a main item, m2 an empty main slot, b1 a backpack
@@ -96,9 +105,20 @@ function M.CaseReady(roles, caseDef)
 	return true
 end
 
--- The next setup action for names[0..8]: "ready", "buy", item | "sell", slot | "abort", reason.
+local function InList(list, name)
+	for _, entry in ipairs(list) do
+		if entry.name == name then
+			return true
+		end
+	end
+	return false
+end
+
+-- The next setup action for names[0..8]: "ready", "buy", item, cost | "sell", slot | "abort", reason.
 -- restore = a later setup (one backpack item and one empty main slot are enough), else the first one.
-function M.SetupStep(names, gold, buys, restore)
+-- failed = set of item names whose buy failed this game: the next candidate is tried instead.
+function M.SetupStep(names, gold, buys, restore, failed)
+	failed = failed or {}
 	local mainItems, bagItems, marker = 0, 0, false
 	for slot = 0, 8 do
 		if names[slot] ~= "-" then
@@ -107,28 +127,34 @@ function M.SetupStep(names, gold, buys, restore)
 			else
 				bagItems = bagItems + 1
 			end
-			marker = marker or names[slot] == M.MARKER
+			marker = marker or InList(M.MARKERS, names[slot])
 		end
 	end
-	local function buy(item, cost)
+	local function buy(list, what)
 		if (buys or 0) >= M.MAX_BUYS then
 			return "abort", "too-many-buys"
 		end
-		if gold < cost then
-			return "abort", "gold"
+		local short = false
+		for _, entry in ipairs(list) do
+			if not failed[entry.name] then
+				if gold >= entry.cost then
+					return "buy", entry.name, entry.cost
+				end
+				short = true
+			end
 		end
-		return "buy", item
+		return "abort", short and "gold" or ("no-" .. what .. "-buyable")
 	end
 	if not marker then
-		return buy(M.MARKER, M.MARKER_COST)
+		return buy(M.MARKERS, "marker")
 	end
 	if bagItems < (restore and 1 or M.BAG_WANT) then
-		return buy(M.FILLER, M.FILLER_COST)
+		return buy(M.FILLERS, "filler")
 	end
 	if mainItems > (restore and 5 or M.MAIN_KEEP) then
 		-- The highest main slot holding a filler: in the first setup that is the newest buy.
 		for slot = 5, 0, -1 do
-			if names[slot] == M.FILLER then
+			if InList(M.FILLERS, names[slot]) then
 				return "sell", slot
 			end
 		end
@@ -138,6 +164,13 @@ function M.SetupStep(names, gold, buys, restore)
 end
 
 -- ---------------------------------------------------------------- game side
+
+-- The engine's own swap (global_overrides.lua hands it over before wrapping the method): the probe tests the bot
+-- API, not our wrapper's rules (the branch rule, #15's pull rule, the pair gap). Set once.
+local rawSwap
+function M.SetRawSwap(fn)
+	rawSwap = rawSwap or fn
+end
 
 -- Per team (GetTeam() is the team whose scripts run; kept apart in case both teams share one Lua state).
 local states = {}
@@ -213,9 +246,15 @@ local function Decide()
 	if best ~= nil then
 		state.pid = best:GetPlayerID()
 		state.phase = "setup"
-		state.cond, state.case, state.buys = 1, 1, 0
+		state.cond, state.case, state.buys, state.failed = 1, 1, 0, {}
 		state.counts = {}
-		Log("[OHA-SWAP] t=%.0f %s probe-start pos=%s", DotaTime(), HeroName(best), tostring(bestPos))
+		Log(
+			"[OHA-SWAP] t=%.0f %s probe-start pos=%s swap=%s",
+			DotaTime(),
+			HeroName(best),
+			tostring(bestPos),
+			rawSwap ~= nil and "raw" or "wrapper"
+		)
 	end
 	return true
 end
@@ -268,18 +307,28 @@ local function Finish(bot, why)
 	Log("[OHA-SWAP] t=%.0f %s probe-done why=%s moved=%d tries=%d", DotaTime(), HeroName(bot), why, moved, tries)
 	state.phase = "done"
 	state.doneAt = DotaTime()
+	Release(bot)
+	if tries == 0 then
+		-- Game 074: "finished (0/0 moved)" was said after a setup that never bought anything.
+		state.chat = nil
+		pcall(bot.ActionImmediate_Chat, bot, string.format("Item swap test could not run (%s).", tostring(why)), true)
+		return
+	end
 	state.chat = string.format(
 		"Item swap test finished (%d/%d moved). Type !about if you haven't; then you can stop the game.",
 		moved,
 		tries
 	)
-	Release(bot)
 	pcall(bot.ActionImmediate_Chat, bot, state.chat, true)
 end
 
--- The swap itself, through the wrapper (global_overrides.lua) with its enemy and pair-gap gates off. Returns
--- false when the wrapper refused it (it only records _swapCheck for a swap it passed on).
+-- Returns false when the wrapper refused the swap (only without the raw swap; the wrapper records _swapCheck for
+-- a swap it passed on).
 local function Swap(bot, a, b)
+	if rawSwap ~= nil then
+		rawSwap(bot, a, b)
+		return true
+	end
 	bot._swapCheck = nil
 	bot._swapTryReverse = nil
 	bot._swapDespiteEnemies = true
@@ -401,6 +450,26 @@ local function CheckStep(bot, now)
 	end
 end
 
+-- A purchase result code by its PURCHASE_ITEM_* name (the [OHA-API] dump lists the constants), else the number.
+local PURCHASE_RESULTS = {
+	"PURCHASE_ITEM_SUCCESS",
+	"PURCHASE_ITEM_OUT_OF_STOCK",
+	"PURCHASE_ITEM_DISALLOWED_ITEM",
+	"PURCHASE_ITEM_INSUFFICIENT_GOLD",
+	"PURCHASE_ITEM_NOT_AT_HOME_SHOP",
+	"PURCHASE_ITEM_NOT_AT_SIDE_SHOP",
+	"PURCHASE_ITEM_NOT_AT_SECRET_SHOP",
+	"PURCHASE_ITEM_INVALID_ITEM_NAME",
+}
+local function PurchaseResultName(result)
+	for _, name in ipairs(PURCHASE_RESULTS) do
+		if result ~= nil and _G[name] == result then
+			return (string.gsub(name, "^PURCHASE_ITEM_", "")) .. "(" .. tostring(result) .. ")"
+		end
+	end
+	return tostring(result)
+end
+
 -- Setup / restore before a case: one buy or sell per 0.3s, at the fountain shop only.
 local function Setup(bot, now, names)
 	local cond = M.CONDITIONS[state.cond]
@@ -410,17 +479,23 @@ local function Setup(bot, now, names)
 	local need = not state.setupDone or (caseDef ~= nil and not M.CaseReady(M.PickRoles(names), caseDef))
 	local action, arg = "ready", nil
 	if atShop and need then
-		action, arg = M.SetupStep(names, bot:GetGold(), state.buys, state.setupDone)
+		action, arg = M.SetupStep(names, bot:GetGold(), state.buys, state.setupDone, state.failed)
 	end
 	if action == "buy" then
-		state.buys = state.buys + 1
 		local result = bot:ActionImmediate_PurchaseItem(arg)
+		local ok = result == nil or result == (PURCHASE_ITEM_SUCCESS or -1)
+		if ok then
+			state.buys = state.buys + 1
+		else
+			-- Game 074: the same out-of-stock order repeated until the buy cap. Try the next candidate instead.
+			state.failed[arg] = true
+		end
 		Log(
 			"[OHA-SWAP] t=%.0f %s probe setup buy=%s result=%s gold=%d",
 			DotaTime(),
 			HeroName(bot),
 			Short(arg),
-			tostring(result),
+			PurchaseResultName(result),
 			bot:GetGold()
 		)
 		state.nextAt = now + 0.3

@@ -33,7 +33,7 @@ end)
 
 T.test("swap probe: role slots", function()
 	local P = load()
-	local F, M = "item_faerie_fire", "item_enchanted_mango"
+	local F, M = "item_branches", "item_faerie_fire"
 	-- The layout after setup: 4 main items, 2 in the backpack.
 	local roles = P.PickRoles(slots({ M, F, F, F, "-", "-", F, F, "-" }))
 	T.eq(roles.b1, 6, "backpack item")
@@ -60,17 +60,18 @@ end)
 
 -- A small engine: a buy takes the first empty main slot, else the first empty backpack slot; a sell refunds half.
 local function newInventory(P, gold)
-	local inv = { list = { "-", "-", "-", "-", "-", "-", "-", "-", "-" }, gold = gold, buys = 0 }
+	local inv = { list = { "-", "-", "-", "-", "-", "-", "-", "-", "-" }, gold = gold, buys = 0, cost = {} }
 	function inv.names()
 		return slots(inv.list)
 	end
 	-- Runs setup steps until ready or abort; returns the final action.
 	function inv.setup(restore)
 		for _ = 1, 20 do
-			local action, arg = P.SetupStep(inv.names(), inv.gold, inv.buys, restore)
+			local action, arg, cost = P.SetupStep(inv.names(), inv.gold, inv.buys, restore)
 			if action == "buy" then
 				inv.buys = inv.buys + 1
-				inv.gold = inv.gold - 65
+				inv.gold = inv.gold - cost
+				inv.cost[arg] = cost
 				for i = 1, 9 do
 					if inv.list[i] == "-" then
 						inv.list[i] = arg
@@ -78,8 +79,8 @@ local function newInventory(P, gold)
 					end
 				end
 			elseif action == "sell" then
+				inv.gold = inv.gold + math.floor(inv.cost[inv.list[arg + 1]] / 2)
 				inv.list[arg + 1] = "-"
-				inv.gold = inv.gold + 32
 			else
 				return action, arg
 			end
@@ -90,24 +91,50 @@ end
 
 T.test("swap probe: first setup from an empty inventory", function()
 	local P = load()
-	local F, M = "item_faerie_fire", "item_enchanted_mango"
+	local F, M = "item_branches", "item_faerie_fire"
 	local inv = newInventory(P, 600)
 	T.eq(inv.setup(false), "ready", "setup ends ready")
-	T.eq(inv.buys, 8, "a mango and 7 Faerie Fires")
+	T.eq(inv.buys, 8, "a Faerie Fire and 7 branches")
 	T.eq(table.concat(inv.list, ","), table.concat({ M, F, F, F, "-", "-", F, F, "-" }, ","), "layout")
 	-- Out of gold, or too many buys: stop.
 	T.eq((P.SetupStep(slots({ "-", "-", "-", "-", "-", "-", "-", "-", "-" }), 10, 0, false)), "abort", "no gold")
 	T.eq((P.SetupStep(slots({ M, "-", "-", "-", "-", "-", "-", "-", "-" }), 600, P.MAX_BUYS, false)), "abort", "cap")
 end)
 
+T.test("swap probe: a failed buy moves on to the next candidate", function()
+	local P = load()
+	local empty = slots({ "-", "-", "-", "-", "-", "-", "-", "-", "-" })
+	-- Game 074: the Enchanted Mango was out of stock (code 82) and the same order repeated until the buy cap.
+	local action, item = P.SetupStep(empty, 600, 0, false, {})
+	T.eq(action, "buy", "buy")
+	T.eq(item, P.MARKERS[1].name, "first marker")
+	action, item = P.SetupStep(empty, 600, 0, false, { [P.MARKERS[1].name] = true })
+	T.eq(item, P.MARKERS[2].name, "next marker after a failed buy")
+	local allFailed = {}
+	for _, entry in ipairs(P.MARKERS) do
+		allFailed[entry.name] = true
+	end
+	local reason
+	action, reason = P.SetupStep(empty, 600, 0, false, allFailed)
+	T.eq(action, "abort", "every marker failed")
+	T.eq(reason, "no-marker-buyable", "reason")
+	-- Not enough gold for any untried candidate.
+	action, reason = P.SetupStep(empty, 10, 0, false, {})
+	T.eq(reason, "gold", "gold")
+	-- No candidate has a stock limit, and none is refused by #15's pull rule (7.42 items.txt).
+	for _, entry in ipairs(P.MARKERS) do
+		T.ok(entry.name ~= "item_enchanted_mango" and entry.name ~= "item_clarity", entry.name)
+	end
+end)
+
 T.test("swap probe: restore after a backpack item moved in", function()
 	local P = load()
-	local F, M = "item_faerie_fire", "item_enchanted_mango"
-	-- Case 5 moved the last Fire into the main slots: main full, backpack empty. One buy (lands in the backpack)
+	local F, M = "item_branches", "item_faerie_fire"
+	-- Case 5 moved the last branch into the main slots: main full, backpack empty. One buy (lands in the backpack)
 	-- and one sell are enough.
 	local action, slot = P.SetupStep(slots({ M, F, F, F, F, F, "-", "-", "-" }), 300, 8, true)
 	T.eq(action, "buy", "buy a filler")
-	T.eq(slot, F, "a Fire")
+	T.eq(slot, F, "a branch")
 	action, slot = P.SetupStep(slots({ M, F, F, F, F, F, F, "-", "-" }), 235, 9, true)
 	T.eq(action, "sell", "sell a main filler")
 	T.eq(slot, 5, "the highest main filler")

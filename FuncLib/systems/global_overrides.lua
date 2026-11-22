@@ -811,6 +811,8 @@ function CDOTA_Bot_Script:GetAttackRange()
 	return originalGetAttackRange(self)
 end
 local originalSwapItems = CDOTA_Bot_Script.ActionImmediate_SwapItems
+-- The engine's own swap for the item swap probe (#218): it tests the bot API, not the rules below.
+require(GetScriptDirectory() .. "/FuncLib/systems/swap_probe").SetRawSwap(originalSwapItems)
 -- Gap between two swaps of the same pair of items: the game puts an item moved out of the
 -- backpack on a 6s cooldown, plus 5s, so two routines that want opposite slots for the same
 -- items cannot ping-pong them and keep both on cooldown.
