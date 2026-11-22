@@ -114,7 +114,7 @@ T.test("tower hold: a push pauses it, it resumes after (game 064, Alchemist at D
 	-- t=751: attack mode again, he walked back toward the tower: the hold is back (he was chase-stopped instead).
 	T.eq(R.TowerHoldState(751, untilTime, true, false, true), "resume", "t=751 push over: resume")
 	T.eq(R.TowerHoldState(751.5, untilTime, true, false, nil), "keep", "after the resume")
-	-- The clock kept running through the pause; a dead tower ends it too.
+	-- Given an end time, 9s over is over (the caller freezes the end during a pause: TowerHoldPausedUntil).
 	T.eq(R.TowerHoldState(754, untilTime, true, false, true), "expire", "9s over")
 	T.eq(R.TowerHoldState(749, untilTime, false, true, nil), "expire", "tower gone")
 	-- The retreat file pauses instead of clearing on a push.
@@ -184,4 +184,49 @@ T.test("tower hold: the retreat file checks a live hold ahead of the early NONE 
 	local pushAt = string.find(src, "return RetreatTag(254, BOT_MODE_DESIRE_NONE)", 1, true)
 	T.ok(earlyAt ~= nil and noneAt ~= nil and pushAt ~= nil, "tags found")
 	T.ok(earlyAt < pushAt and earlyAt < noneAt, "hold check before tags 254 and 272")
+end)
+
+T.test("tower hold: the clock stops during a pause (game 068, Clinkz at Radiant's mid T1, t=924-932)", function()
+	local R = rules()
+	-- Stop at t=919.5 (9s hold, ends 928.5); a push pauses it at t=924 with left=4.0 (the pause stores 4.0).
+	local startTime, remaining = 919.5, 4.0
+	local untilTime, floored = R.TowerHoldPausedUntil(926, remaining, nil, startTime)
+	T.near(untilTime, 930, 0.01, "t=926 still paused: the end moves with the clock")
+	T.eq(floored, nil, "4s left: no floor")
+	-- t=928 resume: the hold has its 4s back, so it does not run out at t=929 inside the zone.
+	untilTime = R.TowerHoldPausedUntil(928, remaining, floored, startTime)
+	T.near(untilTime, 932, 0.01, "t=928 resume: hold until 932")
+	T.eq(R.TowerHoldState(929, untilTime, true, false, true), "resume", "t=929 not expired")
+	T.eq(R.TowerHoldState(932.5, untilTime, true, false, nil), "expire", "t=932.5 over")
+end)
+
+T.test("tower hold: the 2s floor once per hold, and a 30s cap from the stop", function()
+	local R = rules()
+	-- Undying: paused with 0.3s left; the resume gets 2s, once.
+	local untilTime, floored = R.TowerHoldPausedUntil(930, 0.3, nil, 920)
+	T.near(untilTime, 932, 0.01, "floor 2s")
+	T.eq(floored, true, "floor used")
+	untilTime, floored = R.TowerHoldPausedUntil(933, 0.5, floored, 920)
+	T.near(untilTime, 933.5, 0.01, "second pause: no second floor")
+	T.eq(floored, true, "still floored")
+	-- A long push: the frozen clock never goes past stop + HOLD_MAX_AGE.
+	untilTime = R.TowerHoldPausedUntil(960, 5, true, 920)
+	T.near(untilTime, 920 + R.HOLD_MAX_AGE, 0.01, "capped")
+	T.eq(R.TowerHoldState(960, untilTime, true, true, true), "expire", "past the cap: expire even while pushing")
+end)
+
+T.test("tower hold end: death, fell, expire, unseen (game 068)", function()
+	local R = rules()
+	-- Puck: stopped t=809, dead t=812, the first check after the respawn at t=848 (left=-30.3, tower out of sight).
+	T.eq(R.TowerHoldEnd({ died = true, invalidFor = 4, fell = false, expired = true }), "death", "Puck 848")
+	-- Puck / Zeus t=1080-1081: Dire's mid T1 fell at t=1078 with them at it.
+	T.eq(R.TowerHoldEnd({ invalidFor = 2.5, fell = true, expired = true, insideZone = true }), "invalid", "fell")
+	T.eq(R.TowerHoldEnd({ invalidFor = 1, fell = true, expired = false, insideZone = true }), nil, "fell <2s: grace")
+	-- Zeus t=813: Dire's mid T1 stood (fell at t=1078), out of vision with Zeus 2239 away, 4.3s left.
+	T.eq(R.TowerHoldEnd({ invalidFor = 2.5, fell = false, expired = false, insideZone = false }), "unseen", "Zeus 813")
+	-- Out of sight with the bot inside the zone (night): the hold goes on at the stored spot.
+	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = false, insideZone = true }), nil, "unseen inside")
+	-- Out of sight and the time is over: plain expire.
+	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = true, insideZone = true }), "expire", "expire")
+	T.eq(R.TowerHoldEnd({ expired = false, insideZone = true }), nil, "valid tower, time left")
 end)

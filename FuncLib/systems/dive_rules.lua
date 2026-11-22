@@ -103,7 +103,8 @@ end
 -- What the hold does at this check. A push pauses it instead of ending it: PushThink steps out of tower aggro itself,
 -- and retreat must not pull a bot out of a team siege. Game 064, 12:24-12:31: Alchemist was stopped at Dire's mid T1
 -- (tower-entry-stop), one push-mode think during the hold cleared it, and attack mode walked him back under the
--- tower 7s later (chase-stop). The 9s clock keeps running while paused; when the push ends the hold resumes.
+-- tower 7s later (chase-stop). The 9s clock stops while paused (TowerHoldPausedUntil); the hold resumes when the
+-- push ends.
 --   now, untilTime   game time and the hold's end; towerValid: the tower still stands
 --   pushing          the bot is in a push mode now; paused: the last check paused the hold
 -- A team siege of the hold tower ends the hold ("siege"): the bot pushes the hold tower's lane, 2+ allied heroes
@@ -131,6 +132,57 @@ function DiveRules.TowerHoldState(now, untilTime, towerValid, pushing, paused, p
 		return "resume"
 	end
 	return "keep"
+end
+
+-- The hold's clock stops during a pause. Game 068, t=924-932: Clinkz's hold was paused by a push at left=4.0 and
+-- resumed at t=928 with left=0.1 (the clock had run on), 753 from Radiant's mid T1 (zone 900); it ran out at t=929
+-- with him inside the zone and attack mode walked him back in (tower-entry-stop t=932, attack/retreat/push flips
+-- t=922-936). Undying the same at t=928-933 (resume left=1.3). The caller stores the time left at the pause
+-- (remaining) and calls this on every paused check; the new end is now + remaining, at least HOLD_RESUME_MIN once per
+-- hold (floored: the floor was used; a push/attack flip every second would otherwise keep adding it), and never later
+-- than HOLD_MAX_AGE after the stop (startTime): a frozen clock alone would keep a stale hold through a long push.
+-- Returns the new end and the floored flag.
+DiveRules.HOLD_RESUME_MIN = 2
+DiveRules.HOLD_MAX_AGE = 30
+function DiveRules.TowerHoldPausedUntil(now, remaining, floored, startTime)
+	local left = math.max(remaining or 0, 0)
+	if left < DiveRules.HOLD_RESUME_MIN and not floored then
+		left = DiveRules.HOLD_RESUME_MIN
+		floored = true
+	end
+	local untilTime = now + left
+	if startTime ~= nil then
+		untilTime = math.min(untilTime, startTime + DiveRules.HOLD_MAX_AGE)
+	end
+	return untilTime, floored
+end
+
+-- Why a hold ends at this check, or nil (it goes on). In order:
+--   s.died        the bot died since the stop. Game 068: Puck's hold (stopped t=809, dead t=812) was cleared only at
+--                 t=848, 4s after her respawn, with left=-30.3 and why=invalid.
+--   s.invalidFor  seconds the tower handle has not read valid (not null, seen and alive), or nil
+--   s.fell        the handle is null or reads dead: the tower fell. After HOLD_INVALID_GRACE: "invalid".
+--   s.expired     the 9s (paused time not counted) are over: "expire"
+--   s.insideZone  the bot is inside the hold zone (+ release)
+-- An unseen tower that still stands (out of vision: game 068, 5 of 7 why=invalid clears named a tower that stood for
+-- minutes, the bot 1860-3480 away) ends the hold only once the bot is outside the zone ("unseen"); inside it the hold
+-- goes on at the stored spot (a tower can be out of sight at night with the bot near it).
+DiveRules.HOLD_INVALID_GRACE = 2
+function DiveRules.TowerHoldEnd(s)
+	if s.died then
+		return "death"
+	end
+	local invalidLong = s.invalidFor ~= nil and s.invalidFor > DiveRules.HOLD_INVALID_GRACE
+	if invalidLong and s.fell then
+		return "invalid"
+	end
+	if s.expired then
+		return "expire"
+	end
+	if invalidLong and not s.insideZone then
+		return "unseen"
+	end
+	return nil
 end
 
 return DiveRules
