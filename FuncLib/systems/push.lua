@@ -2028,7 +2028,33 @@ function Push.PushThink(bot, lane)
 	do
 		local laneFront = GetLaneFrontLocation(GetTeam(), lane, 0)
 		local distanceToFront = GetUnitToLocationDistance(bot, laneFront)
-		if distanceToFront > 2000 and not bot:WasRecentlyDamagedByAnyHero(3) then
+		-- A lane with none of its own buildings left (T3 and both barracks down) picks another lane's building or the
+		-- T4s; walking back to this lane's own front then undoes the approach every 2s (#12, game 071 47:20-47:41: five
+		-- Radiant bots alternated between Dire's mid melee barracks and the top lane front and nobody hit it).
+		local tier = distanceToFront > 2000 and Push.GetLaneBuildingTier(lane) or 0
+		local target = tier >= 4 and pickPushTarget(bot, lane, nil) or nil
+		local walk = PushRules.FrontWalk({
+			distanceToFront = distanceToFront,
+			recentlyHit = bot:WasRecentlyDamagedByAnyHero(3),
+			laneTier = tier,
+			hasTarget = target ~= nil,
+		})
+		if walk == "lane-done" and DotaTime() >= (bot._laneDoneLogAt or -999) and not Fu.IsMeepoClone(bot) then
+			bot._laneDoneLogAt = DotaTime() + 10
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s lane-done lane=%s target=%s dist=%d front=%d",
+					DotaTime(),
+					ShortHeroName(bot),
+					tostring(lane),
+					target ~= nil and tostring(target:GetUnitName()) or "-",
+					target ~= nil and math.floor(GetUnitToUnitDistance(bot, target)) or -1,
+					math.floor(distanceToFront)
+				)
+			)
+		end
+		if walk == "walk" then
 			bot:Action_MoveToLocation(add(laneFront, RandomVector(100)))
 			return
 		end

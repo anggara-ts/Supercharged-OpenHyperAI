@@ -388,3 +388,17 @@ T.test("own-HP cap in an Aegis window: 40% with nobody near, the holder 30% (gam
 	T.eq(R.OwnHpCap({ window = true, enemiesNear = 2 }), 0.5, "Aegis window, enemies near")
 	T.eq(R.OwnHpCap({ window = true, aegisHolder = true, enemiesNear = 2 }), 0.3, "the holder")
 end)
+
+T.test("front walk: a lane with no building left stays on its target (game 071 47:20)", function()
+	local R = rules()
+	-- Game 071 t=2855-2859: Dire's top lane gone, target Dire's mid melee barracks, the top front 2000+ away.
+	T.eq(R.FrontWalk({ distanceToFront = 2300, laneTier = 4, hasTarget = true }), "lane-done", "stay on the barracks")
+	T.eq(R.FrontWalk({ distanceToFront = 2300, laneTier = 4, hasTarget = false }), "walk", "nothing in reach: walk")
+	T.eq(
+		R.FrontWalk({ distanceToFront = 2300, laneTier = 3, hasTarget = true }),
+		"walk",
+		"the lane still has buildings"
+	)
+	T.eq(R.FrontWalk({ distanceToFront = 1500, laneTier = 4, hasTarget = true }), "stay", "near the front")
+	T.eq(R.FrontWalk({ distanceToFront = 2300, recentlyHit = true }), "stay", "hit by a hero")
+end)

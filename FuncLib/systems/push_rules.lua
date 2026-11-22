@@ -258,6 +258,21 @@ function PushRules.HitHeroBehindTower(s)
 	return true, "behind-tower"
 end
 
+-- PushThink's walk to the lane front (#12, game 071 47:20-47:41): a bot 2000+ from its lane's front walks there,
+-- unless a hero hit it in the last 3s, or the lane has none of its own buildings left (s.laneTier 4: T3 and both
+-- barracks down) and a target building was found (another lane's barracks or the T4s): then the bot stays on that
+-- target ("lane-done") instead of walking back to a front with nothing to take.
+-- Returns "walk", "lane-done" or "stay".
+function PushRules.FrontWalk(s)
+	if (s.distanceToFront or 0) <= 2000 or s.recentlyHit then
+		return "stay"
+	end
+	if (s.laneTier or 0) >= 4 and s.hasTarget then
+		return "lane-done"
+	end
+	return "walk"
+end
+
 -- Distance from point (px, py) to the segment (ax, ay)-(bx, by).
 function PushRules.PointToSegment(px, py, ax, ay, bx, by)
 	local dx, dy = bx - ax, by - ay
