@@ -50,12 +50,32 @@ local KillWindow = require(GetScriptDirectory() .. "/FuncLib/systems/kill_window
 -- defend desire tops out at 0.6 and the kill floor is 0.91 or 0.99.
 local BASE_CREEP_RADIUS = 1600
 local baseThreat = { exposed = false, why = "" }
+-- Our Ancient's HP per team, and when it last went down (#12 / #196, game 068 52:00-52:30: a regenerating Ancient at
+-- 60% with nothing at our base counted as a threat and kept pushers home). The Ancient counts while it lost HP in the
+-- last 3s, not for being under 95%.
+local ancientHpByTeam = {}
+local function AncientLosingHp(ancient)
+	local team = GetTeam()
+	local now = DotaTime()
+	local hp = ancient:GetHealth()
+	local track = ancientHpByTeam[team]
+	if track == nil then
+		track = { hp = hp, lostAt = -999 }
+		ancientHpByTeam[team] = track
+	end
+	if hp < track.hp then
+		track.lostAt = now
+	end
+	track.hp = hp
+	return now - track.lostAt <= 3
+end
 local function ReadBaseThreat(ancient, heroesAtAncient, heroesOnHG)
 	local threat = { exposed = false, why = "", creeps = 0, ancHP = 1 }
 	if ancient == nil or not ancient:IsAlive() then
 		return threat
 	end
 	threat.ancHP = ancient:GetHealth() / math.max(1, ancient:GetMaxHealth())
+	threat.ancLosing = AncientLosingHp(ancient)
 	local loc = ancient:GetLocation()
 	for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
 		if unit ~= nil and unit:IsAlive() and GetUnitToLocationDistance(unit, loc) <= BASE_CREEP_RADIUS then
@@ -69,8 +89,8 @@ local function ReadBaseThreat(ancient, heroesAtAncient, heroesOnHG)
 	if (heroesOnHG or 0) >= 1 then
 		why[#why + 1] = "hg=" .. heroesOnHG
 	end
-	if threat.ancHP < 0.95 then
-		why[#why + 1] = string.format("anc=%.2f", threat.ancHP)
+	if threat.ancLosing then
+		why[#why + 1] = string.format("anc=%.2f-losing", threat.ancHP)
 	end
 	if threat.creeps >= 2 then
 		why[#why + 1] = "creeps=" .. threat.creeps
@@ -81,7 +101,7 @@ local function ReadBaseThreat(ancient, heroesAtAncient, heroesOnHG)
 	return threat
 end
 -- Creeps only (no enemy hero at the Ancient or on high ground): only the allies closest to the
--- Ancient stay for it, 1 (2 with 8+ creeps or the Ancient below 95%); the rest may take the kill
+-- Ancient stay for it, 1 (2 with 8+ creeps or the Ancient losing HP); the rest may take the kill
 -- push. Game 018: after Radiant lost barracks, super creeps kept 2+ creeps near the Ancient most
 -- of the time, so all five held 75 kill windows (54:55: Gyrocopter, Techies and Warlock dead,
 -- held for 4 creeps) and Dire lost no building after 47:28 while Radiant had 22 kills to 8.
@@ -96,7 +116,7 @@ local function MustStayForBase(bot)
 	if ancient == nil then
 		return true
 	end
-	local keep = ((baseThreat.creeps or 0) >= 8 or (baseThreat.ancHP or 1) < 0.95) and 2 or 1
+	local keep = ((baseThreat.creeps or 0) >= 8 or baseThreat.ancLosing) and 2 or 1
 	local myDist = GetUnitToUnitDistance(bot, ancient)
 	local closer = 0
 	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES) or {}) do
