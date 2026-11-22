@@ -90,11 +90,16 @@ T.test("interact probe: the capture try needs the ability and an outpost of the 
 		{ team = 2, invulnerable = false },
 		{ team = 3, invulnerable = true },
 	}
-	T.eq(P.CanCapture(true, outposts, 2), 2, "theirs while still invulnerable (unverified rule): tried as a fallback")
-	T.eq(P.CanCapture(true, { { team = 2, invulnerable = false } }, 2), nil, "only ours")
-	T.eq(P.CanCapture(false, { { team = 3, invulnerable = false } }, 2), nil, "no ability")
+	T.eq(P.CanCapture(true, outposts, 2, false), nil, "theirs still invulnerable (or unseen): no try")
+	local index, fallback = P.CanCapture(true, outposts, 2, true)
+	T.eq(index, 2, "the invulnerable one as the allowed fallback")
+	T.eq(fallback, true, "marked as the fallback")
+	T.eq(P.CanCapture(true, { { team = 2, invulnerable = false } }, 2, true), nil, "only ours")
+	T.eq(P.CanCapture(false, { { team = 3, invulnerable = false } }, 2, true), nil, "no ability")
 	outposts[3] = { team = 3, invulnerable = false }
-	T.eq(P.CanCapture(true, outposts, 2), 3, "one without the invulnerability first")
+	index, fallback = P.CanCapture(true, outposts, 2, true)
+	T.eq(index, 3, "one without the invulnerability first")
+	T.eq(fallback, false, "a normal try")
 end)
 
 T.test("interact probe: approach steps and points", function()

@@ -233,24 +233,28 @@ function M.PickProbe(members, excludeSlot)
 	return nil
 end
 
--- The outpost try's start: the capture ability is there and an outpost of the other team, one without
--- modifier_watch_tower_invulnerable first. Game 074 cannot say whether that modifier goes before the capture or
--- because of it (the human trace saw it gone at t=1471, while the human already walked in to cast), so an
--- invulnerable one is tried too.
-function M.CanCapture(hasCapture, outposts, ourTeam)
+-- The outpost try's start: the capture ability is there and an outpost of the other team without
+-- modifier_watch_tower_invulnerable (seen: the modifier reads false on a fogged unit, so an unseen one counts as
+-- invulnerable). Game 074 leans to "the modifier goes before a capture" (the trace printed it gone as the human came
+-- within 608, before his cast, and it never came back after his broken channels), but cannot prove it, so with
+-- allowFallback an invulnerable / unseen one is tried as well. Returns the index and whether it is that fallback.
+function M.CanCapture(hasCapture, outposts, ourTeam, allowFallback)
 	if not hasCapture then
-		return nil
+		return nil, false
 	end
 	local fallback = nil
 	for i, outpost in ipairs(outposts) do
 		if outpost.team ~= ourTeam then
 			if not outpost.invulnerable then
-				return i
+				return i, false
 			end
 			fallback = fallback or i
 		end
 	end
-	return fallback
+	if allowFallback and fallback ~= nil then
+		return fallback, true
+	end
+	return nil, false
 end
 
 -- ---------------------------------------------------------------- game side
@@ -341,6 +345,7 @@ local function Decide(s)
 	end
 	s.nextTryAt = -999
 	s.scan = { at = -999, key = nil, loggedAt = -999 }
+	s.fallbacks, s.fallbackAt = 0, -999
 	s.passive = { at = -999, sig = nil }
 	Log(
 		"[SHy-PROBE] t=%.0f %s interact probe-start team=%d slot=%d pos=%s swapSlot=%s",
@@ -453,10 +458,12 @@ local function OutpostInfo(s)
 	local list = {}
 	for _, unit in ipairs(Outposts(s)) do
 		if not unit:IsNull() then
+			local seen = unit:CanBeSeen()
 			list[#list + 1] = {
 				unit = unit,
 				team = unit:GetTeam(),
-				invulnerable = unit:HasModifier("modifier_watch_tower_invulnerable"),
+				seen = seen,
+				invulnerable = not seen or unit:HasModifier("modifier_watch_tower_invulnerable"),
 			}
 		end
 	end
@@ -488,10 +495,11 @@ local function Scan(s, bot, now)
 	local outpostStates = {}
 	for _, outpost in ipairs(info) do
 		outpostStates[#outpostStates + 1] = string.format(
-			"%s:team=%d:inv=%s",
+			"%s:team=%d:seen=%s:inv=%s",
 			Pt(outpost.unit:GetLocation()),
 			outpost.team,
-			tostring(outpost.invulnerable)
+			tostring(outpost.seen),
+			outpost.seen and tostring(outpost.invulnerable) or "?"
 		)
 	end
 	local t2 = EnemyTier2Down()
@@ -578,7 +586,7 @@ local function Abort(s, bot, why)
 	s.cur = nil
 	s.nextTryAt = DotaTime() + M.RETRY_AFTER
 	local entry = s.kinds[try.kind]
-	if entry.tries >= M.MAX_TRIES and entry.result == nil then
+	if not try.fallback and entry.tries >= M.MAX_TRIES and entry.result == nil then
 		-- The ability came on an earlier step of a try that never got a cast through.
 		entry.result = entry.seenDist ~= nil and "ability" or nil
 		Summary(s, bot, try.kind, "tries-used")
@@ -601,17 +609,27 @@ local function Start(s, bot, kind, now)
 			s.nextTryAt = now + M.RETRY_AFTER
 			return
 		end
+		-- The gate on our side (nearest our Ancient): from the east watcher the Dire bot is nearer the Radiant gate.
 		local near, far = gates[1], gates[2]
-		if GetUnitToUnitDistance(bot, far) < GetUnitToUnitDistance(bot, near) then
+		local ancient = GetAncient(GetTeam())
+		local ancientLoc = ancient ~= nil and ancient:GetLocation() or bot:GetLocation()
+		if GetUnitToLocationDistance(far, ancientLoc) < GetUnitToLocationDistance(near, ancientLoc) then
 			near, far = far, near
 		end
 		try.unit, try.far = near, far
 		try.loc = near:GetLocation()
 		try.name = "gate@" .. Pt(try.loc)
 	else
-		local index = M.CanCapture(s.scan.capture ~= nil, s.scan.info or {}, GetTeam())
+		-- An invulnerable / unseen outpost only with an enemy tier-2 down, twice a game at most, minutes apart; such a
+		-- try uses none of the 3 tries and cannot set the outpost result unless a channel starts.
+		local allowFallback = s.fallbacks < 2 and now >= s.fallbackAt and EnemyTier2Down()
+		local index, fallback = M.CanCapture(s.scan.capture ~= nil, s.scan.info or {}, GetTeam(), allowFallback)
 		if index == nil then
 			return
+		end
+		if fallback then
+			try.fallback = true
+			s.fallbacks, s.fallbackAt = s.fallbacks + 1, now + 180
 		end
 		local outpost = s.scan.info[index]
 		try.unit = outpost.unit
@@ -622,11 +640,23 @@ local function Start(s, bot, kind, now)
 		try.steps = { M.CAPTURE_DIST }
 	end
 	try.steps = try.steps or M.STEPS
-	entry.tries = entry.tries + 1
+	if not try.fallback then
+		entry.tries = entry.tries + 1
+	end
 	local dist = GetUnitToLocationDistance(bot, try.loc)
 	try.stepIdx = kind == "outpost" and 1 or M.FirstStep(dist)
 	s.cur = try
-	Line(bot, kind, "start", "target=%s at=%s dist=%d try=%d", try.name, Pt(here), math.floor(dist), entry.tries)
+	Line(
+		bot,
+		kind,
+		"start",
+		"target=%s at=%s dist=%d try=%d fallback=%s",
+		try.name,
+		Pt(here),
+		math.floor(dist),
+		entry.tries,
+		tostring(try.fallback == true)
+	)
 	-- The baseline list (far from the object), always printed once per try.
 	Sample(bot, try, kind, dist, now, true)
 end
@@ -713,7 +743,7 @@ local function NextCast(s, bot, try, now)
 		local method = plan[try.castIdx]
 		if method == nil then
 			-- Against an outpost that still had its invulnerability: not an answer, retried later.
-			if try.kind == "outpost" and try.invAtCast and not try.anyChannel then
+			if try.kind == "outpost" and (try.fallback or try.invAtCast) and not try.anyChannel then
 				Abort(s, bot, "invulnerable")
 				return
 			end
