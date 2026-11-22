@@ -1,7 +1,7 @@
 // Lists heroes weighted above 50 at pos 4/5 whose pos 4/5 item build has no support items.
 // Usage: node tools/role-weights/gen.js (writes rows.json), then node tools/role-weights/supcheck.js
 const fs=require("fs");const path=require("path");const REPO=path.resolve(__dirname,"../..");
-const rows=JSON.parse(fs.readFileSync(__dirname+"/rows.json","utf8"));
+const rows=JSON.parse(fs.readFileSync(REPO+"/local/role-weights/rows.json","utf8"));
 const key2npc={};for(const m of fs.readFileSync(REPO+"/bots/lib/dota/heroes.lua","utf8").matchAll(/\w+\.HeroName\.(\w+)\s*=\s*"([^"]+)"/g))key2npc[m[1]]=m[2];
 const sup=/priest_outfit|mage_outfit|item_ward_|blood_grenade|item_glimmer|item_force_staff|item_mekansm|item_guardian_greaves|item_pipe|item_solar_crest|item_spirit_vessel|item_urn|item_tranquil|item_arcane_boots|item_holy_locket|item_boots_of_bearing|item_lotus/;
 const out=[];

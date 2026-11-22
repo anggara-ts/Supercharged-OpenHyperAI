@@ -8,6 +8,9 @@ no unit-test harness: the checks below plus a real bot game are the test.
 
 ## Repo map
 
+`bots/` is exactly what goes into Dota's `vscripts/bots` (`GetScriptDirectory()` is that folder in game); everything
+else is tooling, tests and docs.
+
 | Path | What it is |
 |---|---|
 | `bots/heroes/hero_<name>.lua` | One file per hero: skill build, item build, ability use (`X.SkillsComplement`, `X.Consider*`). |
@@ -17,22 +20,30 @@ no unit-test harness: the checks below plus a real bot game are the test.
 | `bots/lib/data/` | Static tables (hero names, matchups, position weights, spell lists). |
 | `bots/lib/dota/` | Dota API names and constants (`index`, `enums`, `interfaces`, `heroes`). |
 | `bots/lib/vendor/` | Generic libraries: `json` (dkjson), `native_operators`. |
-| `mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, rune, ward, ...). |
-| `ability_item_usage_generic.lua`, `item_purchase_generic.lua`, `hero_selection.lua`, `bot_generic.lua` | Item/ability use, buying, drafting, per-bot think. |
+| `bots/mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, rune, ward, ...). |
+| `bots/ability_item_usage_generic.lua`, `bots/item_purchase_generic.lua`, `bots/hero_selection.lua`, `bots/bot_generic.lua` | Item/ability use, buying, drafting, per-bot think. |
 | `bots/customize/general.lua` | User settings and **local test lineups**. |
 | `bots/customize/version.lua` | Build number shown in game. |
+| `tests/` | LuaJIT tests against a stub bot API (`tests/run.lua`, `tests/stub_api.lua`). |
 | `tools/` | Node.js developer tools (log splitter, build checks); see `tools/README.md`. |
 | `docs/` | Notes such as `BOT_API_RUNTIME.md` (what the bot API really exposes). |
+| `install/` | Link helpers for players who install from the Workshop folder. |
+| `workshop/` | Workshop page assets: the cover images (`cover.png`, `cover-512.png`). |
+| `local/` | Git-ignored local data: match logs, the verify tracker, generated reports and caches. |
 
-Folders use PascalCase (`bots/heroes`, `bots/lib`, `bots/customize`, `tools`, `docs`); files inside use snake_case.
+Folder names are lowercase (`bots/heroes`, `bots/lib`, `tools`, `docs`; maintainer, 2026-11-23); files use snake_case.
+The layout came from one codemod, `tools/restructure.js` (#221): a branch from before it migrates with
+`node tools/restructure.js --migrate-branch` (a branch without the file runs main's copy:
+`git show origin/main:tools/restructure.js > ../restructure.js && node ../restructure.js --migrate-branch`), and
+`--check` lists old paths or log tags left in a branch.
 The optional Fretbots / Buff plugin lives on the orphan branch `plugin-fretbots`, not here.
 
 ### Files the engine loads from the root
 
-Dota loads these only from the root of the `bots` folder, by exact name; a copy in a subfolder is never run
-(the bot silently falls back to Valve's default): `mode_<mode>_generic.lua`, `bot_generic.lua`,
-`hero_selection.lua`, `ability_item_usage_generic.lua`, `item_purchase_generic.lua`. Keep them in the root and
-put shared logic in `bots/lib/`. A mode file whose name doesn't match a real mode (e.g. `mode_roam_generic_wip`)
+Dota loads these only from the root of the `bots` folder (`bots/` in the repo), by exact name; a copy in a
+subfolder is never run (the bot silently falls back to Valve's default): `mode_<mode>_generic.lua`,
+`bot_generic.lua`, `hero_selection.lua`, `ability_item_usage_generic.lua`, `item_purchase_generic.lua`. Keep them
+directly in `bots/` and put shared logic in `bots/lib/`. A mode file whose name doesn't match a real mode (e.g. `mode_roam_generic_wip`)
 is never loaded either; don't keep such copies.
 
 ### Valve default modes we keep on purpose
@@ -58,6 +69,9 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
   **squash-merged**, so a stacked branch conflicts with `main` afterwards. If `main` moved under your branch,
   merge `origin/main` into it (merge commits are allowed on feature branches) or replay your commits onto
   `origin/main` in a new branch. Do not force-push.
+  A branch from before the layout change (#221: it has no `bots/` folder yet) migrates
+  with `node tools/restructure.js --migrate-branch` instead (main's copy: see Repo map): a plain merge conflicts on
+  every line it changed next to a rewritten path or log tag.
 - Branch names: `fix/<topic>`, `feat/<topic>`, `chore/<topic>`, `docs/<topic>`, releases `release-vX.Y`.
 - Every commit must be **signed** (the branch rules reject unverified commits).
 - PR title: a conventional-commit style summary, e.g. `fix: bugs found in game 037`.
@@ -149,6 +163,7 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
 ## Logging
 
 - Diagnostic lines use `print(string.format("[SHy-<TAG>] t=%.0f <hero> <what> key=value ...", DotaTime(), ...))`.
+  (The prefix was OHA until #221; the tools read both, so old logs, tracker items and PR texts still match.)
   Always include `t=` (game seconds) and the hero name.
 - Throttle: at most once per few seconds per bot, or only when the decision changes. A line printed every think
   is a bug (it floods the console and costs FPS).
@@ -204,7 +219,8 @@ Tools: `gh` (GitHub CLI, logged in), `tools/issue-prs.js`, `tools/verify.js`, `t
    template and **`Refs #N`** (never `Closes #N`: merging a PR must not close the issue). Run without numbers it
    only copies each issue's priority label to its PRs and lists untriaged issues. It runs locally, not as a GitHub
    Action, because commits must be signed with the maintainer's key.
-3. **Work on the PR branch.** Before the first real commit, merge `origin/main` into it if `main` moved. Commit
+3. **Work on the PR branch.** Before the first real commit, merge `origin/main` into it if `main` moved (a branch
+   from before #221: `--migrate-branch`, see Branches and pull requests). Commit
    (signed, pre-commit hooks), push, keep CI green, and fill the PR description in the change-log format
    (see Branches and pull requests). Mark the PR ready for review when the code is done.
 4. **Track what is not tested in a game yet.** `node tools/verify.js add <pr>` imports the PR's

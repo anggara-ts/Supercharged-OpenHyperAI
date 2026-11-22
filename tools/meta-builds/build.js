@@ -28,7 +28,8 @@ for (const l of fs.readFileSync(REPO + "/tools/role-weights/heroes.tsv", "utf8")
 }
 const alias = { "centaur-warrunner": "centaur", "treant-protector": "treant", "underlord": "abyssal_underlord", "natures-prophet": "furion", "outworld-destroyer": "obsidian_destroyer", "windranger": "windrunner", "clockwerk": "rattletrap", "io": "wisp", "zeus": "zuus", "wraith-king": "skeleton_king", "shadow-fiend": "nevermore", "queen-of-pain": "queenofpain", "vengeful-spirit": "vengefulspirit", "doom": "doom_bringer", "lifestealer": "life_stealer", "necrophos": "necrolyte", "magnus": "magnataur", "timbersaw": "shredder", "anti-mage": "antimage" };
 const levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18];
-fs.mkdirSync(D + "/heroes", { recursive: true });
+const OUT = REPO + "/local/meta-builds/heroes";
+fs.mkdirSync(OUT, { recursive: true });
 const done = [], unknown = new Set();
 for (const line of lines.slice(1)) {
   const [slug, topK, itemStr, abilStr, seq] = line.split("|");
@@ -51,8 +52,8 @@ for (const line of lines.slice(1)) {
   const steps = seq.match(/\d~?/g) || [];
   out.push(`Most picked ability per level (~ = picked under 40% at that level, usually a talent level; ignore):`);
   out.push("  " + steps.map((s, k) => `${levels[k]}:${abil[+s[0]]}${s.endsWith("~") ? "~" : ""}`).join(" | "));
-  fs.writeFileSync(D + "/heroes/" + hero + ".txt", out.join("\n") + "\n");
+  fs.writeFileSync(OUT + "/" + hero + ".txt", out.join("\n") + "\n");
   done.push(hero);
 }
-fs.writeFileSync(D + "/heroes/_index.txt", done.sort().join("\n") + "\n");
+fs.writeFileSync(OUT + "/_index.txt", done.sort().join("\n") + "\n");
 console.log("written", done.length, "| unknown names:", [...unknown].join(", "));
