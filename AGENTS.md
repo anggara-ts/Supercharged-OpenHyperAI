@@ -69,6 +69,9 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
   **squash-merged**, so a stacked branch conflicts with `main` afterwards. If `main` moved under your branch,
   merge `origin/main` into it (merge commits are allowed on feature branches) or replay your commits onto
   `origin/main` in a new branch. Do not force-push.
+  A branch from before the layout change (#221: it has no `bots/` folder yet) migrates
+  with `node tools/restructure.js --migrate-branch` instead (main's copy: see Repo map): a plain merge conflicts on
+  every line it changed next to a rewritten path or log tag.
 - Branch names: `fix/<topic>`, `feat/<topic>`, `chore/<topic>`, `docs/<topic>`, releases `release-vX.Y`.
 - Every commit must be **signed** (the branch rules reject unverified commits).
 - PR title: a conventional-commit style summary, e.g. `fix: bugs found in game 037`.
@@ -212,7 +215,8 @@ Tools: `gh` (GitHub CLI, logged in), `tools/issue-prs.js`, `tools/verify.js`, `t
    template and **`Refs #N`** (never `Closes #N`: merging a PR must not close the issue). Run without numbers it
    only copies each issue's priority label to its PRs and lists untriaged issues. It runs locally, not as a GitHub
    Action, because commits must be signed with the maintainer's key.
-3. **Work on the PR branch.** Before the first real commit, merge `origin/main` into it if `main` moved. Commit
+3. **Work on the PR branch.** Before the first real commit, merge `origin/main` into it if `main` moved (a branch
+   from before #221: `--migrate-branch`, see Branches and pull requests). Commit
    (signed, pre-commit hooks), push, keep CI green, and fill the PR description in the change-log format
    (see Branches and pull requests). Mark the PR ready for review when the code is done.
 4. **Track what is not tested in a game yet.** `node tools/verify.js add <pr>` imports the PR's

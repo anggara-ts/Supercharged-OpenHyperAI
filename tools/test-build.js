@@ -10,7 +10,8 @@
 //    while it builds. A PR that conflicts is aborted (`git merge --abort`) and skipped.
 //    A PR branch still on the layout before #221 (its bot scripts outside bots/) is skipped as "needs
 //    migration": it would merge, but its new files would sit outside bots/ and never load. Migrate it with
-//    node tools/restructure.js --migrate-branch (on that branch).
+//    node tools/restructure.js --migrate-branch (on that branch). A PR that merges but brings old paths or log tags
+//    (tools/restructure.js --check fails after its merge) is skipped the same way (not in --dry-run).
 // 3. Writes local/verify/test-build.json: { base, head, builtAt, included, upToDate, conflicts, missing, needsMigration }.
 // 4. Switches the working tree to test/next (the game runs the checked-out tree) unless --no-switch.
 //    Only bots/customize/general.lua (the local test lineup) may be modified: it is carried across the switch
@@ -91,6 +92,16 @@ function oldLayout(ref) {
 	return git(["cat-file", "-e", `${ref}:FuncLib`], { allowFail: true }).status === 0; // restructure:keep
 }
 
+// null when tools/restructure.js --check passes in that tree (or the tree has no such tool), else its first finding.
+function layoutFindings(cwd) {
+	const tool = path.join(cwd, "tools", "restructure.js");
+	if (!fs.existsSync(tool)) return null;
+	const r = cp.spawnSync(process.execPath, [tool, "--check"], { cwd, encoding: "utf8" });
+	if (r.status === 0) return null;
+	const lines = (r.stdout || "").split(/\r?\n/).filter(Boolean);
+	return `${lines[lines.length - 1] || "check failed"}; first: ${lines[0] || "?"}`;
+}
+
 function remoteExists(branch) {
 	return git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { allowFail: true }).status === 0;
 }
@@ -148,6 +159,9 @@ function build(prs, result) {
 		// origin/main) would otherwise fail the add
 		git(["worktree", "add", "--detach", "--no-checkout", "--quiet", wt, "origin/main"]);
 		git(["reset", "--hard", "--quiet"], { cwd: wt });
+		// Old paths or log tags a PR brought in (an old-layout branch merged with main by hand still has its own
+		// requires of the old paths): tools/restructure.js --check after each merge, if main itself passes it.
+		const checkLayout = layoutFindings(wt) === null;
 		for (const p of prs) {
 			const ref = `origin/${p.branch}`;
 			if (!remoteExists(p.branch)) {
@@ -170,6 +184,13 @@ function build(prs, result) {
 				allowFail: true,
 			});
 			if (r.status === 0) {
+				const findings = checkLayout ? layoutFindings(wt) : null;
+				if (findings) {
+					git(["reset", "--hard", "--quiet", "HEAD^1"], { cwd: wt });
+					result.needsMigration.push(p.n);
+					console.log(`#${p.n} ${p.branch}: NEEDS MIGRATION (merges, but brings old paths or tags; skipped): ${findings}`);
+					continue;
+				}
 				result.included.push(p.n);
 				console.log(`#${p.n} ${p.branch}: merged`);
 				continue;
