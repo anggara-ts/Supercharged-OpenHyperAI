@@ -146,7 +146,7 @@ local goodVibrationsAbility =
 	SafeAbility(bot:GetAbilityByName("largo_song_good_vibrations"), "largo_song_good_vibrations", "largo")
 local catchyLickDesire, catchyLickTarget, catchyLickReason
 local frogstompDesire, frogstompLocation, frogstompReason, frogstompCount, frogstompTarget
-local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason
+local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason, croakOfGeniusDamageType
 local isAttacking = false
 local botTarget
 local nearbyAllies, nearbyEnemies
@@ -225,15 +225,20 @@ function X.SkillsComplement()
 	if not canUseAbility then
 		return
 	end
-	croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason = X.ConsiderCroakOfGenius()
+	croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason, croakOfGeniusDamageType =
+		X.ConsiderCroakOfGenius()
 	if croakOfGeniusDesire > 0 then
+		-- shrink=: an ally's buff loses 0.5s per mana spend (duration_reduction), Largo's own does not (datafeed 155).
 		LogLargo(
 			"croak",
 			3,
-			"croak-cast target=%s why=%s dmg=%d hp=%.2f",
+			"croak-cast target=%s why=%s dmgType=%s dmg=%d level=%d shrink=%s hp=%.2f",
 			ShortName(croakOfGeniusTarget),
 			croakOfGeniusReason or "?",
+			croakOfGeniusDamageType or "self",
 			croakOfGeniusDamage or 0,
+			croakOfGeniusAbility:GetLevel(),
+			croakOfGeniusTarget == bot and "no" or "0.5/spend",
 			Fu.GetHP(croakOfGeniusTarget)
 		)
 		Fu.SetQueuePtToINT(bot, false)
@@ -797,13 +802,34 @@ function X.LaneStompSpot(castRange, radius, landDelay)
 	return nil, 0, nil
 end
 
+-- Basic abilities of the hero that deal magical or pure damage (trained, not passive): its kit's spell damage.
+function X.SpellKitCount(hero)
+	local count = 0
+	for slot = 0, 5 do
+		local ability = hero:GetAbilityInSlot(slot)
+		if
+			ability ~= nil
+			and not ability:IsNull()
+			and ability:IsTrained()
+			and not ability:IsPassive()
+			and not ability:IsHidden()
+			and (ability:GetDamageType() == DAMAGE_TYPE_MAGICAL or ability:GetDamageType() == DAMAGE_TYPE_PURE)
+		then
+			count = count + 1
+		end
+	end
+	return count
+end
+
 function X.ConsiderCroakOfGenius()
 	if not Fu.CanCastAbility(croakOfGeniusAbility) then
-		return BOT_ACTION_DESIRE_NONE, nil, 0, nil
+		return BOT_ACTION_DESIRE_NONE, nil, 0, nil, nil
 	end
 	local castRange = croakOfGeniusAbility:GetCastRange()
-	local bestAlly = nil
-	local bestDamage = 0
+	-- The reverb only takes damage that spell amplification affects (datafeed 155), so not attacks: an ally cast goes
+	-- to a spell-damage ally; any ally only with the Shard (Largo gets the buff too).
+	local bestAlly, bestDamage, bestType = nil, 0, nil
+	local bestSpellAlly, bestSpellDamage = nil, 0
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -824,10 +850,15 @@ function X.ConsiderCroakOfGenius()
 				and Fu.CanBeAttacked(allyTarget)
 				and not Fu.IsSuspiciousIllusion(allyTarget)
 			then
-				local estimatedDamage = allyHero:GetEstimatedDamageToTarget(true, allyTarget, 5.0, DAMAGE_TYPE_MAGICAL)
-				if estimatedDamage > bestDamage then
-					bestAlly = allyHero
-					bestDamage = estimatedDamage
+				local magicDamage = allyHero:GetEstimatedDamageToTarget(true, allyTarget, 5.0, DAMAGE_TYPE_MAGICAL)
+				local physicalDamage = allyHero:GetEstimatedDamageToTarget(true, allyTarget, 5.0, DAMAGE_TYPE_PHYSICAL)
+				local isSpell = LargoRules.IsSpellDamageAlly(magicDamage, physicalDamage, X.SpellKitCount(allyHero))
+				if isSpell and magicDamage > bestSpellDamage then
+					bestSpellAlly, bestSpellDamage = allyHero, magicDamage
+				end
+				if magicDamage + physicalDamage > bestDamage then
+					bestAlly, bestDamage = allyHero, magicDamage + physicalDamage
+					bestType = isSpell and "magic" or "physical"
 				end
 			end
 		end
@@ -844,20 +875,26 @@ function X.ConsiderCroakOfGenius()
 			break
 		end
 	end
+	local hasShard = Fu.HasAghanimsShard(bot)
 	local target, why = LargoRules.CroakTarget({
-		hasShard = Fu.HasAghanimsShard(bot),
-		allyWants = bestAlly ~= nil,
-		allyIsCore = bestAlly ~= nil and Fu.IsCore(bestAlly),
+		level = croakOfGeniusAbility:GetLevel(),
+		hasShard = hasShard,
+		allyFighting = bestAlly ~= nil,
+		spellAlly = bestSpellAlly ~= nil,
+		selfHasBuff = bot:HasModifier("modifier_largo_croak_of_genius_buff"),
 		selfWants = X.CroakSelfWanted(),
 		alone = alone,
 	})
 	if target == "ally" then
-		return BOT_ACTION_DESIRE_HIGH, bestAlly, bestDamage, why
+		if bestSpellAlly ~= nil then
+			return BOT_ACTION_DESIRE_HIGH, bestSpellAlly, bestSpellDamage, why, "magic"
+		end
+		return BOT_ACTION_DESIRE_HIGH, bestAlly, bestDamage, why, bestType
 	end
 	if target == "self" then
-		return BOT_ACTION_DESIRE_HIGH, bot, 0, why
+		return BOT_ACTION_DESIRE_HIGH, bot, 0, why, "self"
 	end
-	return BOT_ACTION_DESIRE_NONE, nil, 0, nil
+	return BOT_ACTION_DESIRE_NONE, nil, 0, nil, nil
 end
 
 function X.IsGoodToHeal(hero)
@@ -869,9 +906,6 @@ function X.IsGoodToHeal(hero)
 		and hero:GetUnitName() ~= "npc_dota_hero_huskar"
 end
 
--- Strumming needs no free action slot or finished cast (the songs are instant, DOTA_ABILITY_BEHAVIOR_IMMEDIATE in
--- the game file), only a Largo who can cast at all. Not while channeling: the songs have no IGNORE_CHANNEL, a strum
--- would break a TP.
 -- What stops every strum now, for strum-skip why=.
 function X.StrumBlockState()
 	if not bot:IsAlive() then
@@ -911,6 +945,9 @@ function X.LogStrumSkip(why, extra)
 	)
 end
 
+-- Strumming needs no free action slot or finished cast (the songs are instant, DOTA_ABILITY_BEHAVIOR_IMMEDIATE in
+-- the game file), only a Largo who can cast at all. Not while channeling: the songs have no IGNORE_CHANNEL, a strum
+-- would break a TP.
 function X.CanStrum()
 	return bot:IsAlive()
 		and not bot:IsChanneling()

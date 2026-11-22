@@ -217,26 +217,33 @@ function LargoRules.CanStartSong(mana, songCost, songsPerBeat, beats)
 	return mana >= songCost * (songsPerBeat or 1) * (beats or LargoRules.TOGGLE_ON_BEATS)
 end
 
--- Croak of Genius: on whom (#198, maintainer 2026-11-22). The buff cuts the hero's mana costs by 15%
--- (mana_cost_reduction 15, Croak costs 40, datafeed hero_id=155), and Largo's own buff is not shortened when he spends
--- mana. Aghanim's Shard (on the innate Encore: "HasShardUpgrade" "1" under largo_encore in the 7.42
--- npc_dota_hero_largo.txt; datafeed shard text): "Whenever Largo applies a Unit Target buff to a friendly hero, he also
--- gets the buff. If Largo targets himself, the buff is also applied to the nearest allied hero within the cast range."
--- o: hasShard; allyWants (an ally is going on a hero, the cast that existed before); allyIsCore; selfWants (Largo is
--- singing or about to, or starts a costly combo, and has no buff); alone (no other ally hero within 1200).
--- Returns "ally" | "self" | nil and why ("shard-share" | "ally" | "self-mana"):
---   Shard: the ally who needs it, Largo gets it too; else himself (the nearest ally gets it too).
---   No Shard: himself when alone or no ally needs it. With both: a core ally's fight wins (the damage reverb of a
---   core is worth more than 15% off the songs), a support ally's loses to Largo's songs.
+-- Croak of Genius: on whom (#198, maintainer 2026-11-22). Datafeed hero_id=155: mana_cost_reduction 15%, Croak costs
+-- 40, duration 15/20/25/30 against a 25s cooldown (from level 3 the buff lasts the whole cooldown), damage_portion_pct
+-- 25-40% reverberated over 5s, "Only applies to damage sources affected by spell amplification" (not attacks); an
+-- ally's buff loses duration_reduction 0.5s per mana spend, Largo's own does not. Aghanim's Shard (on the innate
+-- Encore: "HasShardUpgrade" "1" under largo_encore in the 7.42 npc_dota_hero_largo.txt; datafeed shard text):
+-- "Whenever Largo applies a Unit Target buff to a friendly hero, he also gets the buff. If Largo targets himself, the
+-- buff is also applied to the nearest allied hero within the cast range."
+-- o: level; hasShard; allyFighting (an ally going on a hero); spellAlly (one of them deals spell damage,
+-- IsSpellDamageAlly); selfHasBuff; selfWants (singing, about to sing, or a Lick + Frogstomp combo); alone.
+-- Returns "ally" | "self" | nil and why:
+--   shard-share  Shard and an ally fighting: the ally (spell damage first), Largo gets it too;
+--   ally-nuker   a spell-damage ally going into a fight (never a physical core: the reverb skips attacks);
+--   self-upkeep  from level 3, on Largo whenever it is ready (his songs, Lick and Frogstomp are magical);
+--   self-mana    levels 1-2: on Largo when he sings, is about to, or starts a combo.
+LargoRules.CROAK_UPKEEP_LEVEL = 3
 function LargoRules.CroakTarget(o)
-	if o.hasShard and o.allyWants then
+	if o.hasShard and o.allyFighting then
 		return "ally", "shard-share"
 	end
-	if o.selfWants and (o.alone or not o.allyWants) then
-		return "self", "self-mana"
+	if o.spellAlly and o.allyFighting then
+		return "ally", "ally-nuker"
 	end
-	if o.allyWants and (o.allyIsCore or not o.selfWants) then
-		return "ally", "ally"
+	if o.selfHasBuff then
+		return nil, nil
+	end
+	if (o.level or 0) >= LargoRules.CROAK_UPKEEP_LEVEL then
+		return "self", "self-upkeep"
 	end
 	if o.selfWants then
 		return "self", "self-mana"
@@ -244,56 +251,16 @@ function LargoRules.CroakTarget(o)
 	return nil, nil
 end
 
--- Frogstomp as lane harass (#198, game 071). o: mpRatio, manaAfterOk (after the cast still the mana for Lick and
--- Croak, Fu.GetManaThreshold), inEnemyTowerRange (Largo), enemiesNear / alliesNear (heroes within 1200, Largo
--- counted), retreating. Returns ok and, when not ok, the first gate that stops it.
-LargoRules.HARASS_MP = 0.8
-function LargoRules.LaneStompOk(o)
-	if o.retreating then
-		return false, "retreating"
-	end
-	if o.mpRatio < LargoRules.HARASS_MP then
-		return false, "mana"
-	end
-	if not o.manaAfterOk then
-		return false, "reserve"
-	end
-	if o.inEnemyTowerRange then
-		return false, "tower"
-	end
-	if o.enemiesNear > o.alliesNear then
-		return false, "outnumbered"
-	end
-	return true, nil
-end
-
--- Whether a Catchy Lick or Frogstomp is worth ending the song for (game 071, maintainer: "he could turn off ulti and
--- use lick when needed"). reason: the spell rule's why; stacks: Groovin' now (they linger stack_duration 5s after the
--- song, and the toggle has a 1.5s cooldown); count: heroes a stomp catches; alliesNear: other ally heroes within 900.
---   Always: a kill, an ally save, an ally dispel, a channel stopped, a stomp on 3+ heroes.
---   Below BREAK_STACKS stacks only (little to lose): a stomp on 2 heroes, a pull of the enemy into our fight (Largo's
---   chase lick with an ally near, or an engage lick).
-LargoRules.BREAK_STACKS = 3
--- songHasReason false: no song is worth playing now (no one hurt, no enemy in the radius, no escape), so any play
--- beats the idle song (game 071 23:10).
-function LargoRules.BreakSongFor(reason, stacks, count, alliesNear, songHasReason)
-	if reason == nil then
+-- Whether an ally's damage is mostly spells (the part Croak's reverb takes): its 5s magic estimate against its
+-- physical one (GetEstimatedDamageToTarget), or a kit of 2+ magical / pure spells with at least half as much magic.
+function LargoRules.IsSpellDamageAlly(magicDamage, physicalDamage, spellKitCount)
+	if magicDamage <= 0 then
 		return false
 	end
-	if songHasReason == false then
+	if magicDamage >= physicalDamage then
 		return true
 	end
-	if reason == "kill" or reason == "ally-save" or reason == "channel" or string.find(reason, "^ally%-dispel") then
-		return true
-	end
-	local cheap = stacks < LargoRules.BREAK_STACKS
-	if reason == "fight-aoe" then
-		return (count or 0) >= 3 or (count or 0) >= 2 and cheap
-	end
-	if reason == "ally-engage" or reason == "chase" and (alliesNear or 0) >= 1 then
-		return cheap
-	end
-	return false
+	return (spellKitCount or 0) >= 2 and magicDamage >= physicalDamage * 0.5
 end
 
 -- Catchy Lick pulls an ally pullDistance (375) toward Largo. A dispel lick on an ally that is fighting in range of its

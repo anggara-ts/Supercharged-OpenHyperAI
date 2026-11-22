@@ -139,18 +139,28 @@ T.test("largo: Croak of Genius on himself or an ally", function()
 		local target, why = R.CroakTarget(o)
 		return tostring(target) .. "/" .. tostring(why)
 	end
-	T.eq(pick({}), "nil/nil", "nobody needs it")
-	T.eq(pick({ selfWants = true, alone = true }), "self/self-mana", "alone before a song")
-	T.eq(pick({ selfWants = true }), "self/self-mana", "no ally fighting: himself")
-	T.eq(pick({ allyWants = true }), "ally/ally", "an ally fighting, Largo has no use for it")
-	T.eq(pick({ allyWants = true, allyIsCore = true, selfWants = true }), "ally/ally", "no Shard: a core's fight wins")
-	T.eq(
-		pick({ allyWants = true, selfWants = true }),
-		"self/self-mana",
-		"no Shard: a support's fight loses to the songs"
-	)
-	T.eq(pick({ hasShard = true, allyWants = true, selfWants = true }), "ally/shard-share", "Shard: Largo gets it too")
-	T.eq(pick({ hasShard = true, selfWants = true, alone = true }), "self/self-mana", "Shard, alone: himself")
+	-- Duration 15/20/25/30 against cooldown 25 (datafeed 155): from level 3 it covers the whole cooldown.
+	T.eq(pick({ level = 1 }), "nil/nil", "level 1, nothing to sing: keep it")
+	T.eq(pick({ level = 1, selfWants = true }), "self/self-mana", "level 1 before a song")
+	T.eq(pick({ level = 2, selfWants = true, alone = true }), "self/self-mana", "level 2 alone before a song")
+	T.eq(pick({ level = 2 }), "nil/nil", "level 2 (20s of 25): only for a song or a combo")
+	T.eq(pick({ level = 3 }), "self/self-upkeep", "level 3 (25s of 25): keep it up on himself")
+	T.eq(pick({ level = 4 }), "self/self-upkeep", "level 4 (30s of 25)")
+	T.eq(pick({ level = 4, selfHasBuff = true }), "nil/nil", "already on him")
+	T.eq(pick({ level = 3, allyFighting = true, spellAlly = true }), "ally/ally-nuker", "a nuker going in")
+	T.eq(pick({ level = 3, allyFighting = true }), "self/self-upkeep", "a physical core going in: himself")
+	T.eq(pick({ level = 1, allyFighting = true, selfWants = true }), "self/self-mana", "physical core, level 1")
+	T.eq(pick({ level = 2, hasShard = true, allyFighting = true }), "ally/shard-share", "Shard: Largo gets it too")
+	T.eq(pick({ level = 3, hasShard = true, alone = true }), "self/self-upkeep", "Shard, alone: himself")
+end)
+
+T.test("largo: a spell-damage ally, not a physical core", function()
+	local R = load()
+	T.ok(R.IsSpellDamageAlly(900, 300, 3), "a nuker (Lina): magic above physical")
+	T.ok(R.IsSpellDamageAlly(600, 1000, 2), "a spell kit with 60% of the physical damage")
+	T.ok(not R.IsSpellDamageAlly(0, 1200, 0), "Phantom Assassin: no magic")
+	T.ok(not R.IsSpellDamageAlly(300, 1500, 1), "Sven: one Storm Hammer against his attacks")
+	T.ok(not R.IsSpellDamageAlly(400, 1000, 1), "one spell, attacks first")
 end)
 
 T.test("largo: Frogstomp lane harass only with spare mana, away from the tower, not outnumbered", function()
