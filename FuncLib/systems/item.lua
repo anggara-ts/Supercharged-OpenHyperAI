@@ -1953,10 +1953,11 @@ local AEGIS_GUARD_RADIUS = 1000
 local AEGIS_GUARD_STEP = 1250
 local AEGIS_GUARD_SECONDS = 40
 local function RoshanGuardSpot(bot)
-	if bot == nil or not bot:IsAlive() or EnemyHeroesNear(bot, 1600) then
+	if bot == nil or not bot:IsAlive() then
 		return nil
 	end
 	local now = DotaTime()
+	local spot, what, owner = nil, nil, nil
 	for _, drop in pairs(GetDroppedItemList() or {}) do
 		if
 			drop ~= nil
@@ -1968,24 +1969,64 @@ local function RoshanGuardSpot(bot)
 			local claimer = Item.AegisClaim(drop.location)
 			local state = aegisClaims[GetTeam()]
 			if claimer ~= nil and claimer ~= bot and state ~= nil and now - state.seen <= AEGIS_GUARD_SECONDS then
-				return drop.location, "aegis", claimer
+				spot, what, owner = drop.location, "aegis", claimer
+				break
 			end
 		end
 	end
-	for i = 1, #GetTeamPlayers(GetTeam()) do
-		local ally = GetTeamMember(i)
-		if ally ~= nil and ally ~= bot and ally._roshReturn ~= nil then
-			for _, entry in ipairs(ally._roshReturn) do
-				if
-					now - entry.at <= ROSHAN_RETURN_SECONDS
-					and GetUnitToLocationDistance(bot, entry.location) <= AEGIS_GUARD_RADIUS
-				then
-					return entry.location, ItemShort(entry.name), ally
+	if spot == nil then
+		for i = 1, #GetTeamPlayers(GetTeam()) do
+			local ally = GetTeamMember(i)
+			if ally ~= nil and ally ~= bot and ally._roshReturn ~= nil then
+				for _, entry in ipairs(ally._roshReturn) do
+					if
+						not entry.restore
+						and now - entry.at <= ROSHAN_RETURN_SECONDS
+						and GetUnitToLocationDistance(bot, entry.location) <= AEGIS_GUARD_RADIUS
+					then
+						spot, what, owner = entry.location, ItemShort(entry.name), ally
+					end
 				end
 			end
 		end
 	end
-	return nil
+	if spot == nil or EnemyHeroesNear(bot, 1600) then
+		return nil
+	end
+	return spot, what, owner
+end
+-- The effect line, once per Aegis per team: who took it, and was it the claimer. A taker outside the team (an
+-- enemy snatch) or an Aegis that is just gone prints lost=yes and no match= field.
+local function AegisTakenCheck()
+	local state = aegisClaims[GetTeam()]
+	local now = DotaTime()
+	if state == nil or state.reported or now - state.lastSeen < 0.5 then
+		return
+	end
+	local taker = nil
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local ally = GetTeamMember(i)
+		if ally ~= nil and ally:IsHero() and Item.HasItem(ally, "item_aegis") then
+			taker = ally
+		end
+	end
+	if taker == nil and now - state.lastSeen < 3 then
+		return
+	end
+	state.reported = true
+	local claimer = state.unit
+	pcall(
+		print,
+		string.format(
+			"[OHA-ROSH] t=%.0f %s aegis-taken hero=%s claimer=%s %s why=%s",
+			DotaTime(),
+			taker ~= nil and HeroShort(taker) or "team",
+			taker ~= nil and HeroShort(taker) or "none",
+			claimer ~= nil and HeroShort(claimer) or "none",
+			taker == nil and "lost=yes" or (taker == claimer and "match=yes" or "match=no"),
+			state.why or "-"
+		)
+	)
 end
 -- Team roam's Think: step out of AEGIS_GUARD_RADIUS of what RoshanGuardSpot names. [OHA-ROSH] aegis-guard.
 function Item.TryGuardRoshanDrop(bot)
@@ -2042,6 +2083,9 @@ local function RoshanRestoreDue(bot)
 	then
 		-- Gone, already back in a main slot, too old, or the Aegis never came: nothing to restore.
 		bot._roshAside = nil
+		if bot._roshKeep ~= nil then
+			bot._roshKeep[aside.name] = nil
+		end
 		return nil
 	end
 	if
@@ -2054,9 +2098,22 @@ local function RoshanRestoreDue(bot)
 	then
 		return nil
 	end
+	-- No guard covers this drop: wait until no other ally (and its item mode) is close.
+	for _, ally in ipairs(bot:GetNearbyHeroes(1000, false, BOT_MODE_NONE) or {}) do
+		if ally ~= bot then
+			return nil
+		end
+	end
 	return slot
 end
+-- How far a Roshan item is worth walking to: the Aegis claimer comes from up to KEEP (why=far: nobody near could
+-- take it), the other items from 4500.
+local function RoshanDropRange(itemName)
+	return itemName == "item_aegis" and RoshanDropRules.KEEP or 4500
+end
 function Item.RoshanDropDesire(bot)
+	AegisTakenCheck()
+	local desire = 0
 	if DotaTime() >= (bot._roshNoRoomUntil or -1) then
 		for _, drop in pairs(GetDroppedItemList() or {}) do
 			if drop ~= nil and drop.item ~= nil and not drop.item:IsNull() then
@@ -2064,23 +2121,26 @@ function Item.RoshanDropDesire(bot)
 				if
 					Item.RoshanClaimKind(name) ~= nil
 					and Item.ShouldClaimRoshanDrop(bot, drop.location, name)
-					-- The Aegis claimer comes from anywhere: nobody near could take it (why=far).
-					and (name == "item_aegis" or GetUnitToLocationDistance(bot, drop.location) <= 4500)
+					and GetUnitToLocationDistance(bot, drop.location) <= RoshanDropRange(name)
 				then
 					if name == "item_aegis" and not EnemyHeroesNear(bot, 1200) then
 						return ROSH_OVER_ITEM_MODE
 					end
-					return 0.97
+					desire = 0.97
 				end
 			end
 		end
 	end
 	-- Stay for what was dropped to make room.
 	if bot._roshReturn ~= nil and #bot._roshReturn > 0 then
-		return 0.97
+		desire = 0.97
 	end
+	-- Next to the Aegis someone else claims (a Banner or Cheese claimer too: its Think takes its own item first).
 	if RoshanGuardSpot(bot) ~= nil then
 		return ROSH_OVER_ITEM_MODE
+	end
+	if desire > 0 then
+		return desire
 	end
 	if RoshanRestoreDue(bot) ~= nil then
 		return 0.97
@@ -2130,22 +2190,23 @@ function Item.TryPickupRoshanDrop(bot)
 	if bot == nil or not bot:IsAlive() then
 		return false
 	end
-	local best, bestDist = nil, math.huge
+	local best, bestDist, bestRank = nil, math.huge, math.huge
 	if DotaTime() >= (bot._roshNoRoomUntil or -1) then
 		for _, drop in pairs(GetDroppedItemList() or {}) do
 			if drop ~= nil and drop.item ~= nil and not drop.item:IsNull() then
 				local name = drop.item:GetName()
 				if Item.RoshanClaimKind(name) ~= nil and Item.ShouldClaimRoshanDrop(bot, drop.location, name) then
 					local dist = GetUnitToLocationDistance(bot, drop.location)
-					if dist < bestDist then
-						best = drop
-						bestDist = dist
+					-- The Aegis first: a Cheese next to it would otherwise take the free slot.
+					local rank = name == "item_aegis" and dist - 1e6 or dist
+					if rank < bestRank then
+						best, bestDist, bestRank = drop, dist, rank
 					end
 				end
 			end
 		end
 	end
-	if best == nil or bestDist > 4500 and best.item:GetName() ~= "item_aegis" then
+	if best == nil or bestDist > RoshanDropRange(best.item:GetName()) then
 		-- Nothing left to claim: fetch what was dropped to make room.
 		local back = RoshanReturnTarget(bot)
 		if back == nil then

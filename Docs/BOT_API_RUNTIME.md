@@ -23,6 +23,9 @@ confirmed or disproved.
   - `Action_PickUpRune` on a river rune spot: a water rune (type 7) was taken (`river-pickup-try worked=yes type=7`, 1 sample); the river bounty (type 5) was not, 0 of 4 (games 063-064). Valve's own item mode takes both (#149).
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[OHA-API] slots`, #172, game 064).
+  - Bot item swaps between the main inventory and the backpack don't take effect: every one of 60 checked swaps from a main slot into an empty backpack slot, and 156 of 157 from the backpack into a main slot, printed `[OHA-ITEM] swap-noop` (games 032-070, #15). To move an item, drop it and pick it up: a picked-up item goes into the first free main slot, else the backpack.
+  - Valve's item mode bids 1.00 at Roshan drops: `[OHA-FLIP] ... item:1.00@<t>` at the drop second in games 036, 040, 051 and 070, against 0.90 for runes. It takes the Aegis for whichever bot is closest, unless one of our modes bids above 1.00 (desires above 1 are accepted: retreat's 1.10 shows as the active mode's desire). That such a mode wins against the item mode is unverified until a game shows it (#15, `[OHA-ROSH] aegis-taken match=`).
+  - 7.42 `item_aegis`: `AllowedInBackpack 0`, so it needs a free main slot; with six full main slots the pick-up fails with the server line `Can't pick up item, no room in inventory` (order 68).
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
 
 ## 7.42 check (2026-11-19)

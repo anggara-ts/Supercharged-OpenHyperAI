@@ -213,6 +213,12 @@ T.test("roshan drop: the item put aside for the Aegis comes back, is not sold, a
 		end
 	end
 	Stub.time = Stub.time + 60
+	T.eq(Item.RoshanDropDesire(unit), 0, "not with allies next to him (their item mode)")
+	for _, ally in ipairs(Stub.teams[unit:GetTeam()]) do
+		if ally ~= unit then
+			ally._loc = Vector(ally._loc.x + 3000, ally._loc.y, 0)
+		end
+	end
 	T.ok(Item.RoshanDropDesire(unit) > 0, "team roam brings it back")
 	T.ok(not Item.TryPickupRoshanDrop(unit), "only from team roam's Think")
 	unit.GetActiveMode = function()
@@ -303,6 +309,25 @@ T.test("aegis claim: the best KDA near takes it, one claimer for the team, one l
 	end
 	T.eq(printed("aegis%-claim hero=" .. short(3) .. " kda=9.00 why=best%-kda"), 1, "one claim line")
 	T.eq(printed("aegis%-claim"), 1, "and no other")
+	-- The claimer takes it: the Aegis leaves the ground and turns up in his bag.
+	_G.GetDroppedItemList = function()
+		return {}
+	end
+	local aegisSlot = {
+		GetName = function()
+			return "item_aegis"
+		end,
+	}
+	team[3].FindItemSlot = function(_, name)
+		return name == "item_aegis" and 2 or -1
+	end
+	team[3]._items[2] = aegisSlot
+	Stub.time = 1873
+	Item.RoshanDropDesire(team[1])
+	T.eq(printed("aegis%-taken hero=" .. short(3) .. " claimer=" .. short(3) .. " match=yes"), 1, "the result line")
+	Stub.time = 1880
+	Item.RoshanDropDesire(team[1])
+	T.eq(printed("aegis%-taken"), 1, "once")
 end)
 
 T.test("aegis claim: a claimer that makes no progress is released to the next best KDA", function()

@@ -58,6 +58,7 @@ T.test("aegis rules: nobody near that can take it, the next best by KDA does", f
 	local pick, why = R.AegisClaimer({ full, farAway, farther })
 	T.eq(pick.id, 11, "best KDA of the rest")
 	T.eq(why, "far", "why")
+	T.eq(R.AegisClaimer({ full, cand(13, 9, 1, 6500) }), nil, "nobody within 6000 either")
 	local none, noneWhy = R.AegisClaimer({ full })
 	T.eq(none, nil, "nobody at all")
 	T.eq(noneWhy, "nobody", "why")

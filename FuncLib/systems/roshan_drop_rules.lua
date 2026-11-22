@@ -61,7 +61,7 @@ end
 --   kept       the claimer so far, still alive, able and within KEEP
 --   human      a human ally is near and still gets the first go (bots leave it to the player)
 --   best-kda   the best KDA of the allies near that can take it
---   far        nobody near can take it: the best KDA of the rest
+--   far        nobody near can take it: the best KDA of the rest within KEEP
 function RoshanDropRules.AegisClaimer(cands, o)
 	o = o or {}
 	local excluded = o.excluded or {}
@@ -95,7 +95,7 @@ function RoshanDropRules.AegisClaimer(cands, o)
 		return near, "best-kda"
 	end
 	local far = Best(cands, function(c)
-		return not c.human and able(c)
+		return not c.human and able(c) and (c.dist or math.huge) <= RoshanDropRules.KEEP
 	end)
 	if far ~= nil then
 		return far, "far"
