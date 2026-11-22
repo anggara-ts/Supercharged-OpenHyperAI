@@ -1078,8 +1078,8 @@ function Push.GetPushDesire(bot, lane)
 	then
 		return BotModeDesire.None
 	end
-	-- A human's push order (#222, bots/lib/systems/human_orders.lua; an X-ping is no push any more): before the
-	-- level and lane checks below, which would refuse it.
+	-- A human's push order (#222, bots/lib/systems/human_orders.lua: `!push <lane>`, a ping on an enemy building or
+	-- its wave, of any ping type): before the level and lane checks below, which would refuse it.
 	local orderDesire = HumanOrders.PushDesire(bot, lane)
 	if orderDesire ~= nil then
 		bot.pushDesire = orderDesire

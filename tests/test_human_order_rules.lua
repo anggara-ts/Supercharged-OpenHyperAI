@@ -100,8 +100,14 @@ end)
 T.test("human orders: what a ping is on", function()
 	local R = rules()
 	T.eq(R.Classify({ normal = false, visible = true }), "danger", "X-ping in the open: back off")
-	T.eq(R.Classify({ normal = false, visible = true, enemyBuildingDist = 300 }), "danger", "X-ping: never a push")
+	T.eq(R.Classify({ normal = false, visible = false }), "danger", "X-ping in the fog: back off")
+	T.eq(R.Classify({ normal = false, visible = false, recentEnemySeen = true }), "danger", "X-ping, hero seen: danger")
+	T.eq(R.Classify({ normal = false, visible = true, enemyBuildingDist = 300 }), "push", "a ping on their tower")
 	T.eq(R.Classify({ normal = false, visible = true, ourBuildingDist = 300 }), "defend", "X-ping on our tower")
+	T.eq(R.Classify({ normal = false, visible = true, enemyHero = true }), "gank", "a ping on an enemy hero")
+	T.eq(R.Classify({ normal = false, roshan = true }), "rosh", "a ping on Roshan")
+	T.eq(R.Classify({ normal = false, visible = true, campDist = 150 }), "farm", "a ping on a camp")
+	T.eq(R.Classify({ normal = false, visible = true, waveSide = "theirs" }), "push", "a ping on their wave")
 	T.eq(R.Classify({ normal = true, enemyHero = true, enemyHeroInFight = true }), "focus", "hero in a fight")
 	T.eq(R.Classify({ normal = true, enemyHero = true }), "gank", "hero alone")
 	T.eq(R.Classify({ normal = true, roshan = true, visible = false }), "rosh", "Roshan pit")
@@ -114,6 +120,129 @@ T.test("human orders: what a ping is on", function()
 	T.eq(R.Classify({ normal = true, visible = false, recentEnemySeen = true }), "chase", "fog, hero seen there")
 	T.eq(R.Classify({ normal = true, visible = false }), "fog", "fog, nothing seen")
 	T.eq(R.Classify({ normal = true, visible = true }), "move", "an empty visible spot")
+end)
+
+-- Game 075: pings clicked on a target come through as non-normal pings, and every one was read as danger and
+-- refused (`order kind=danger ... verdict=refuse why=nobody-free`).
+T.test("human orders: game 075 pings on a tower and on a hero are read by their target", function()
+	local R = rules()
+	-- t=111.5 `6279 -2150 0 normal=false`: the Dire bottom T1 is at 6269,-2240 (the !push bot order's at=).
+	local dx, dy = 6279 - 6269, -2150 - -2240
+	local towerDist = math.sqrt(dx * dx + dy * dy)
+	T.near(towerDist, 90.6, 1, "91 from the tower")
+	T.ok(towerDist <= R.ENEMY_BUILDING_RADIUS, "within the building radius")
+	T.eq(R.Classify({ normal = false, visible = true, enemyBuildingDist = towerDist }), "push", "t=111 tower ping")
+	-- t=12.0 `763 904` and t=43.7 `883 950`: the Dire mid T1 is at 832,848 (order id=8 at=).
+	T.eq(R.Classify({ normal = false, visible = true, enemyBuildingDist = 89 }), "push", "t=12 mid tower ping")
+	T.eq(R.Classify({ normal = false, visible = true, enemyBuildingDist = 114 }), "push", "t=44 mid tower ping")
+	-- t=80.4 `6283 -4364 normal=false` on Winter Wyvern, nobody fighting her: a gank, not danger.
+	T.eq(R.Classify({ normal = false, visible = true, enemyHero = true }), "gank", "t=80 Winter Wyvern")
+	T.eq(R.Classify({ normal = false, enemyHero = true, enemyHeroInFight = true }), "focus", "hero in a fight")
+	-- A push ping before 5:00 is still a request the bots refuse with a reason (insist to make them go).
+	local verdict, why = R.Check("push", "ping", { now = 111, aliveAllies = 5, available = 3, tier = 1 })
+	T.eq(verdict, "refuse", "t=111 push request")
+	T.eq(why, "too-early", "too early, ping again to insist")
+	T.eq(R.Check("push", "insist", { now = 111, aliveAllies = 5, available = 3, tier = 1 }), "go", "insist")
+end)
+
+T.test("human orders: a danger ping needs no responders", function()
+	local R = rules()
+	T.eq(R.Check("danger", "ping", { available = 0 }), "go", "nobody near: still a warning")
+	T.eq(R.Verdict("go", 0, 0, "danger"), "go", "never refuse why=nobody-free")
+	T.eq(R.Verdict("go", 0, 0, "gank"), "refuse", "other kinds still need someone")
+	local obey, _, _, decisions = R.PickResponders("danger", {
+		{ id = 1, dist = 900, state = "ok" },
+		{ id = 2, dist = 1300, state = "ok" },
+		{ id = 3, dist = 600, state = "fight" },
+	}, R.Need("danger", {}))
+	T.eq(#obey, 1, "only the bot within 1200 backs off")
+	T.eq(obey[1], 1, "the bot 900 away")
+	T.eq(decisions[3].answer, "far", "1300 away: not affected")
+	T.eq(R.DANGER_RADIUS, 1200, "maintainer: ~1200")
+	T.ok(R.DANGER_SAFE > R.DANGER_RADIUS, "backs off past the radius")
+	T.eq(#R.ReplyPlan("danger", "go", "agree", { 1 }, {}, nil), 0, "no chat reply")
+end)
+
+-- Game 075, t=60: `!push bot` picked Puck (mid, 6689) and Largo (top, 14016) while Alchemist was in the bottom
+-- lane, harassed by Undying (`[SHy-RETREAT] t=58 undying anti-dive why=tower target=alchemist`): his "fight" state
+-- made him queue behind free bots anywhere on the map, and the T1 needs only 2.
+T.test("human orders: game 075 !push bot asks the bottom laners first", function()
+	local R = rules()
+	local cands = {
+		{ id = 9, dist = 900, state = "fight", core = true, lane = "bot" }, -- alchemist
+		{ id = 7, dist = 6689, state = "ok", core = true, lane = "mid" }, -- puck
+		{ id = 8, dist = 14016, state = "ok", core = false, lane = "top" }, -- largo
+		{ id = 6, dist = 13000, state = "fight", core = true, lane = "top" }, -- spirit_breaker
+	}
+	local need = R.Need("push", { tier = 1, enemiesNear = 0 })
+	T.eq(need, 2, "T1: two")
+	local obey, queue, _, decisions = R.PickResponders("push", cands, need, { lane = "bot", now = 60 })
+	T.eq(obey[1], 9, "Alchemist, in the bottom lane, first")
+	T.eq(obey[2], 7, "then the nearest free bot")
+	T.eq(#obey, 2, "two")
+	T.eq(#queue, 0, "nobody queued")
+	T.eq(decisions[1].answer, "obey", "Alchemist obeys while trading in his lane")
+	local largo = nil
+	for _, d in ipairs(decisions) do
+		if d.id == 8 then
+			largo = d
+		end
+	end
+	T.eq(largo.answer, "far", "before 10:00 no support from across the map")
+	local names = { [9] = "alchemist", [7] = "puck", [8] = "largo", [6] = "spirit_breaker" }
+	T.eq(
+		R.CandsText(decisions, function(id)
+			return names[id]
+		end),
+		"alchemist:obey/fight:900,puck:obey:6689,spirit_breaker:wait/fight:13000,largo:far:14016",
+		"every candidate on the order line"
+	)
+	T.eq(R.Available(decisions), 3, "far bots do not count as available")
+	-- After 10:00 the far support may go; the laner rule gives way to distance (Alchemist is still nearest).
+	obey = R.PickResponders("push", cands, 3, { lane = "bot", now = 900 })
+	T.eq(obey[3], 8, "15:00: Largo may come")
+	-- A bot's own lane only counts in the laning stage: at 15:00 a bottom laner far away is not first.
+	obey = R.PickResponders("push", {
+		{ id = 1, dist = 9000, state = "ok", core = true, lane = "bot" },
+		{ id = 2, dist = 3000, state = "ok", core = true, lane = "mid" },
+	}, 1, { lane = "bot", now = 900 })
+	T.eq(obey[1], 2, "15:00: the nearest")
+	obey = R.PickResponders("push", {
+		{ id = 1, dist = 9000, state = "ok", core = true, lane = "bot" },
+		{ id = 2, dist = 3000, state = "ok", core = true, lane = "mid" },
+	}, 1, { lane = "bot", now = 60 })
+	T.eq(obey[1], 1, "1:00: the bottom laner")
+	-- A dead bot prints "-" for its distance.
+	T.eq(
+		R.CandsText({ { id = 1, state = "dead", dist = math.huge, answer = "ignore" } }, function()
+			return "zeus"
+		end),
+		"zeus:ignore/dead:-",
+		"dead"
+	)
+end)
+
+-- Maintainer, game 075: "all responder should response".
+T.test("human orders: every responder replies", function()
+	local R = rules()
+	local plan = R.ReplyPlan("push", "go", "chat", { 9, 7 }, { 6 }, { id = 3, key = "retreat" })
+	T.eq(#plan, 4, "two on my way, one queue, one refuser")
+	T.eq(plan[1].id, 9, "first responder")
+	T.eq(plan[1].key, "on-my-way", "on my way")
+	T.eq(plan[1].index, 1, "first line")
+	T.eq(plan[2].id, 7, "second responder")
+	T.eq(plan[2].index, 2, "a different line")
+	T.eq(plan[3].key, "queue", "the queued bot")
+	T.eq(plan[4].key, "retreat", "the nearest refusing bot says why")
+	plan = R.ReplyPlan("push", "refuse", "too-early", {}, {}, nil)
+	T.eq(#plan, 1, "a refused request: one reason")
+	T.eq(plan[1].key, "too-early", "the reason")
+	T.eq(plan[1].id, nil, "said by the bot that read it")
+	plan = R.ReplyPlan("gank", "refuse", "nobody-free", {}, {}, { id = 4, key = "dead", seconds = 20 })
+	T.eq(plan[1].key, "dead", "nobody free: the nearest says why")
+	T.eq(plan[1].seconds, 20, "with the respawn time")
+	T.eq(R.ReplyPlan("gank", "refuse", "nobody-free", {}, {}, nil)[1].key, "busy", "nobody at all")
+	T.eq(R.REPLY_GAP_SECONDS, 0.5, "replies ~0.5s apart")
 end)
 
 T.test("human orders: a ping is a request, insist and chat are orders", function()

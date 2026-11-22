@@ -4,8 +4,8 @@
 --
 -- The maintainer's design (2026-11-23, issue #222): a ping is a REQUEST (the bots check it and may refuse with a
 -- reason); the same ping again within 2s is INSIST (they go even if they disagree); a chat command (`!push top`)
--- is an ORDER. An X-ping (the "danger" ping) means "back off" around the spot; on our own building it still asks
--- for a defence.
+-- is an ORDER. A ping is read by what is under it, whatever its type (game 075: a ping clicked on a tower or a hero
+-- arrives as a non-normal ping); only a non-normal ping on empty ground or fog is the X-ping "danger, back off".
 local Rules = {}
 
 -- The same spot (or the same target) pinged again within this many seconds, this close, is an insist.
@@ -14,6 +14,17 @@ Rules.INSIST_RADIUS = 300
 -- How long an order lasts when nothing ends it earlier (design: "~20-30s or until done").
 Rules.ORDER_SECONDS = 25
 Rules.DANGER_SECONDS = 6
+-- A danger ping moves the bots within DANGER_RADIUS away until they are DANGER_SAFE from it (maintainer, game 075:
+-- "bots within ~1200 back off"); it needs no responders.
+Rules.DANGER_RADIUS = 1200
+Rules.DANGER_SAFE = 1500
+-- Lane orders (push / defend) during the laning stage (maintainer, game 075: "before ~10:00 don't pull a support
+-- across the map for a lane push"): the ordered lane's own bots and bots within LANE_NEAR of the target come first;
+-- a support off that lane farther than FAR_SUPPORT is not asked for a push. Estimates from the map, not game data
+-- (a lane's T1 to the next lane's T1 is ~7000-9000; game 075 Largo was 14016 away, Puck in mid 6689).
+Rules.LANING_SECONDS = 600
+Rules.LANE_NEAR = 2000
+Rules.FAR_SUPPORT = 5000
 -- A push request before this game time is refused ("still laning", design: <5:00).
 Rules.EARLY_SECONDS = 300
 -- What a ping is "on": the nearest thing within these radii of the ping spot. Estimates from the map, not game data:
@@ -135,8 +146,8 @@ function Rules.NearestCamp(camps, x, y)
 	return bestIndex, bestDist
 end
 
--- What a ping means. `f` (facts about the ping spot):
---   normal          a normal ping (false: the X / danger ping)
+-- What a ping means: what is under it first, whatever the ping type. `f` (facts about the ping spot):
+--   normal          a normal ping (false: a ping on a unit, or the X / danger ping on empty ground)
 --   enemyHero       a visible enemy hero within HERO_RADIUS; enemyHeroInFight: an ally hero is fighting near it
 --   roshan          the spot is at the Roshan pit
 --   enemyBuildingDist / ourBuildingDist  distance to the nearest enemy / our lane building in range (nil: none)
@@ -146,12 +157,6 @@ end
 --   recentEnemySeen an enemy hero was seen within CHASE_SEEN_SECONDS within CHASE_RADIUS of a fogged spot
 -- Returns one of: focus, gank, rosh, push, defend, farm, chase, fog, move, danger.
 function Rules.Classify(f)
-	if not f.normal then
-		if f.ourBuildingDist ~= nil then
-			return "defend"
-		end
-		return "danger"
-	end
 	if f.enemyHero then
 		return f.enemyHeroInFight and "focus" or "gank"
 	end
@@ -172,6 +177,9 @@ function Rules.Classify(f)
 		return "push"
 	elseif f.waveSide == "ours" then
 		return "defend"
+	end
+	if not f.normal then
+		return "danger"
 	end
 	if not f.visible then
 		return f.recentEnemySeen and "chase" or "fog"
@@ -241,7 +249,7 @@ function Rules.Need(kind, f)
 end
 
 -- How far a bot may be from the target to answer (beyond: not asked). Focus and danger are about the fight there.
-local MAX_DISTANCE = { focus = 2000, chase = 1500, danger = 1500, gank = 6000, move = 4000 }
+local MAX_DISTANCE = { focus = 2000, chase = 1500, danger = Rules.DANGER_RADIUS, gank = 6000, move = 4000 }
 function Rules.MaxDistance(kind)
 	return MAX_DISTANCE[kind] or math.huge
 end
@@ -270,8 +278,11 @@ end
 
 -- What a bot in `state` does with an order of `kind`: "obey", "queue" (after its fight) or "ignore".
 -- A fighting bot finishes its fight first (a focus or chase call is about that fight, so it obeys); a bot losing
--- its fight may leave it for an order. Retreating, low, dead and base-holding bots don't go.
-function Rules.Answer(kind, state)
+-- its fight may leave it for an order. A bot already at the ordered lane (`atLane`: its own lane in the laning
+-- stage, or within LANE_NEAR of the target) obeys a push or defend there even while it trades: it is already
+-- there (game 075: Alchemist, harassed by Undying in the bottom lane, was left out of `!push bot`). Retreating,
+-- low, dead and base-holding bots don't go.
+function Rules.Answer(kind, state, atLane)
 	if state == "ok" then
 		return "obey"
 	end
@@ -279,17 +290,32 @@ function Rules.Answer(kind, state)
 		if kind == "focus" or kind == "chase" or kind == "danger" then
 			return kind == "danger" and "ignore" or "obey"
 		end
+		if atLane and (kind == "push" or kind == "defend") then
+			return "obey"
+		end
 		return state == "losing" and "obey" or "queue"
 	end
 	return "ignore"
 end
 
--- Picks the responders. `cands`: list of { id =, dist =, state =, core = }. Nearest first (a core first for a
--- camp: a core within CORE_FIRST_SLACK farther than the nearest support still gets it), up to `need`; bots
--- beyond MaxDistance are not asked. Returns obey (list of ids), queue (ids), ignore (list of { id =, why = }).
+-- Picks the responders. `cands`: list of { id =, dist =, state =, core =, lane = } (lane: the bot's own lane,
+-- "top" / "mid" / "bot"). `ctx` (optional): { lane = the ordered lane, now = DotaTime() }.
+-- Order of preference: for a lane order (push / defend with a lane), bots at that lane first (its own laners in the
+-- laning stage, or within LANE_NEAR of the target); then nearest first (a core first for a camp: a core within
+-- CORE_FIRST_SLACK farther than the nearest support still gets it), up to `need`. Bots beyond MaxDistance, and in
+-- the laning stage a support off the lane farther than FAR_SUPPORT from a push, are not asked ("far").
+-- Returns obey (list of ids), queue (ids), ignore (list of { id =, why = }) and every candidate's answer in the
+-- order of preference: { id =, state =, dist =, answer = obey | queue | ignore | far | spare (free, not needed) |
+-- wait (fighting, not needed) }.
 Rules.CORE_FIRST_SLACK = 2500
-function Rules.PickResponders(kind, cands, need)
+function Rules.PickResponders(kind, cands, need, ctx)
+	ctx = ctx or {}
 	local maxDist = Rules.MaxDistance(kind)
+	local laneOrder = (kind == "push" or kind == "defend") and ctx.lane ~= nil
+	local laning = ctx.now ~= nil and ctx.now < Rules.LANING_SECONDS
+	local function atLane(c)
+		return laneOrder and ((laning and c.lane == ctx.lane) or c.dist <= Rules.LANE_NEAR)
+	end
 	local sorted = {}
 	for _, c in ipairs(cands or {}) do
 		sorted[#sorted + 1] = c
@@ -301,6 +327,10 @@ function Rules.PickResponders(kind, cands, need)
 		return c.dist
 	end
 	table.sort(sorted, function(a, b)
+		local la, lb = atLane(a), atLane(b)
+		if la ~= lb then
+			return la
+		end
 		local ka, kb = key(a), key(b)
 		if ka == kb then
 			return a.id < b.id
@@ -308,33 +338,74 @@ function Rules.PickResponders(kind, cands, need)
 		return ka < kb
 	end)
 	-- Free bots first; bots still fighting fill the places left (they go after the fight).
-	local obey, queue, ignore, waiting = {}, {}, {}, {}
+	local obey, queue, ignore, waiting, decisions = {}, {}, {}, {}, {}
 	for _, c in ipairs(sorted) do
-		local answer = Rules.Answer(kind, c.state)
+		local here = atLane(c)
+		local answer = Rules.Answer(kind, c.state, here)
 		if c.dist > maxDist then
 			answer = "far"
+		elseif kind == "push" and laneOrder and laning and not here and not c.core and c.dist > Rules.FAR_SUPPORT then
+			answer = "far"
 		end
-		if answer == "obey" and #obey < need then
-			obey[#obey + 1] = c.id
+		local decision = { id = c.id, state = c.state, dist = c.dist, answer = answer }
+		decisions[#decisions + 1] = decision
+		if answer == "obey" then
+			if #obey < need then
+				obey[#obey + 1] = c.id
+			else
+				decision.answer = "spare"
+			end
 		elseif answer == "queue" then
-			waiting[#waiting + 1] = c.id
+			waiting[#waiting + 1] = decision
 		elseif answer == "ignore" then
 			ignore[#ignore + 1] = { id = c.id, why = c.state }
 		end
 	end
-	for _, id in ipairs(waiting) do
+	for _, decision in ipairs(waiting) do
 		if #obey + #queue < need then
-			queue[#queue + 1] = id
+			queue[#queue + 1] = decision.id
+		else
+			decision.answer = "wait"
 		end
 	end
-	return obey, queue, ignore
+	return obey, queue, ignore, decisions
+end
+
+-- How many bots could answer: every candidate whose answer is not ignore or far.
+function Rules.Available(decisions)
+	local count = 0
+	for _, d in ipairs(decisions or {}) do
+		if d.answer ~= "ignore" and d.answer ~= "far" then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+-- The candidates for the order line: "alchemist:obey/fight:900,largo:far/ok:14016" (a dead bot's distance is "-").
+-- `nameOf(id)` gives the hero's short name.
+function Rules.CandsText(decisions, nameOf)
+	local parts = {}
+	for _, d in ipairs(decisions or {}) do
+		local answer = d.answer
+		if d.state ~= "ok" then
+			answer = answer .. "/" .. tostring(d.state)
+		end
+		local dist = (d.dist == nil or d.dist == math.huge) and "-" or string.format("%.0f", d.dist)
+		parts[#parts + 1] = string.format("%s:%s:%s", tostring(nameOf(d.id)), answer, dist)
+	end
+	return #parts > 0 and table.concat(parts, ",") or "-"
 end
 
 -- The order's verdict from the check and the pick: refuse (the check said no), queue (everyone who would go is
--- still fighting), or go.
-function Rules.Verdict(checkVerdict, obeyCount, queueCount)
+-- still fighting), or go. A danger ping is a warning: it goes even with nobody near it (game 075 printed
+-- `refuse why=nobody-free` for X-pings).
+function Rules.Verdict(checkVerdict, obeyCount, queueCount, kind)
 	if checkVerdict ~= "go" then
 		return "refuse"
+	end
+	if kind == "danger" then
+		return "go"
 	end
 	if obeyCount == 0 and queueCount > 0 then
 		return "queue"
@@ -343,6 +414,35 @@ function Rules.Verdict(checkVerdict, obeyCount, queueCount)
 		return "refuse"
 	end
 	return "go"
+end
+
+-- Who says what in team chat for an order (maintainer, game 075: "all responder should response"): every bot that
+-- goes says "On my way!" (`index`: its place, so the lines vary), every queued bot its queue line, and the nearest
+-- bot that can't go (`refuser`: { id =, key =, seconds = } or nil) says why, once. A refused request: one line
+-- with the reason (id nil: the bot that read the order says it). A danger ping: no reply. Returns a list of
+-- { id =, key =, index =, seconds = } in speaking order (said REPLY_GAP_SECONDS apart).
+Rules.REPLY_GAP_SECONDS = 0.5
+function Rules.ReplyPlan(kind, verdict, why, obey, queue, refuser)
+	local plan = {}
+	if kind == "danger" then
+		return plan
+	end
+	if verdict == "refuse" and why ~= "nobody-free" then
+		plan[1] = { key = why }
+		return plan
+	end
+	for i, id in ipairs(obey or {}) do
+		plan[#plan + 1] = { id = id, key = "on-my-way", index = i }
+	end
+	for _, id in ipairs(queue or {}) do
+		plan[#plan + 1] = { id = id, key = "queue" }
+	end
+	if refuser ~= nil then
+		plan[#plan + 1] = { id = refuser.id, key = refuser.key, seconds = refuser.seconds }
+	elseif verdict == "refuse" then
+		plan[#plan + 1] = { key = "busy" }
+	end
+	return plan
 end
 
 return Rules

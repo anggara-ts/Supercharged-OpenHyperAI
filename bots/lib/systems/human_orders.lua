@@ -1,17 +1,21 @@
 -- Shared bot system: human orders (#222). The human's pings and chat commands become team orders for the bots.
 --   * A ping is a REQUEST: the bots check it (bots/lib/systems/human_order_rules.lua) and one bot says why when they
 --     don't go. The same ping again within 2s is an INSIST: they go anyway. A chat command (`!push top`) is an
---     ORDER. One bot answers ("On my way!", or the reason).
---   * What a ping means comes from what it is on: an enemy hero (focus in a fight, gank elsewhere), an enemy
---     building or wave near their tower (push), our building or a wave coming to ours (defend), a neutral camp
---     (one bot, a core first, clears it), Roshan, or fog (chase a hero seen there a moment ago, or scout).
+--     ORDER. Every bot that goes says "On my way!", a bot that goes after its fight says so, and the nearest bot
+--     that can't go says why (maintainer, game 075: "all responder should response").
+--   * What a ping means comes from what it is on, whatever the ping type: an enemy hero (focus in a fight, gank
+--     elsewhere), an enemy building or wave near their tower (push), our building or a wave coming to ours
+--     (defend), a neutral camp (one bot, a core first, clears it), Roshan, or fog (chase a hero seen there a moment
+--     ago, or scout). Only a non-normal ping on empty ground or fog is "danger": the bots near it back off for a
+--     few seconds, on top of the running order (it does not replace it).
 --   * The modes read the order through the hooks below: Push.GetPushDesire (push), Defend.GetDefendDesire
 --     (defend), mode_farm_generic.lua (camp), mode_roshan_generic.lua (rosh), the attack override (focus target)
 --     and mode_assemble_generic.lua (gank, chase, fog, group, danger, move; it also runs Tick).
 -- The module is shared by the team's bots (as bots/lib/systems/role.lua is), so one order serves all of them.
 --
 -- Logs: [SHy-PING] t= <hero> order kind= from= via=ping|insist|chat lane= target= verdict=go|refuse|queue why=
--- responders= reply= once per order; per bot obey / queue / ignore why= / done why=.
+-- responders= reply= replies= cands=<hero>:<answer>[/<state>]:<dist>,... (danger: affected=) once per order; per bot
+-- obey / queue / ignore why= / done why=, and <hero> said id= reply= for every chat reply.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/human_order_rules")
 local Lines = require(GetScriptDirectory() .. "/lib/data/human_order_lines")
@@ -32,6 +36,8 @@ local TICK_SECONDS = 0.2
 local PING_FRESH_SECONDS = 2
 -- A reply the chosen bot hasn't said by then is said by whichever bot runs the next tick.
 local REPLY_FALLBACK_SECONDS = 1.5
+-- Seconds between two replies (maintainer, game 075: "~0.5s apart").
+local REPLY_GAP_SECONDS = Rules.REPLY_GAP_SECONDS
 
 local state = {
 	order = nil,
@@ -40,18 +46,25 @@ local state = {
 	prevPing = nil,
 	chat = nil,
 	tickAt = -999,
-	reply = nil,
+	-- Chat replies waiting to be said, in order: { speakerId =, text =, key =, orderId =, kind =, at = }.
+	replies = {},
+	replyNextAt = -999,
+	replySaidAt = -999,
+	-- A danger ping's back-off runs beside the order (it does not replace it).
+	danger = nil,
 }
 Orders.state = state
 
 local LANE_OF = { top = LANE_TOP, mid = LANE_MID, bot = LANE_BOT }
+local LANE_NAME = { [LANE_TOP] = "top", [LANE_MID] = "mid", [LANE_BOT] = "bot" }
 local TOWERS = {
 	top = { TOWER_TOP_1, TOWER_TOP_2, TOWER_TOP_3 },
 	mid = { TOWER_MID_1, TOWER_MID_2, TOWER_MID_3 },
 	bot = { TOWER_BOT_1, TOWER_BOT_2, TOWER_BOT_3 },
 }
--- Kinds the assemble mode carries out (push, defend, farm and rosh go through their own modes).
-local ASSEMBLE_KINDS = { focus = true, gank = true, chase = true, fog = true, move = true, group = true, danger = true }
+-- Kinds the assemble mode carries out (push, defend, farm and rosh go through their own modes; danger runs beside
+-- the order, see Orders.AssembleDesire).
+local ASSEMBLE_KINDS = { focus = true, gank = true, chase = true, fog = true, move = true, group = true }
 local TARGET_KINDS = { focus = true, gank = true, chase = true, fog = true }
 local PUSH_MODE = {
 	[LANE_TOP] = BOT_MODE_PUSH_TOWER_TOP,
@@ -182,6 +195,7 @@ local function Candidates(loc)
 			dist = alive and GetUnitToLocationDistance(member, loc) or math.huge,
 			state = BotState(member),
 			core = Fu.IsCore(member),
+			lane = LANE_NAME[member:GetAssignedLane()],
 		}
 	end
 	return list
@@ -343,33 +357,62 @@ local function MissingEnemies()
 	return missing
 end
 
--- Chat: one line per order, said by the chosen bot (any bot after REPLY_FALLBACK_SECONDS). The team's repeat
--- filter (bots/lib/systems/chat_guard.lua) is skipped: "On my way!" answers a new ping each time.
+-- Chat: every bot that answers an order says its own line, REPLY_GAP_SECONDS apart (maintainer, game 075); a line
+-- its bot hasn't said REPLY_FALLBACK_SECONDS after it is due (a dead bot does not think) is said by whichever bot
+-- runs the next tick. The team's repeat filter (bots/lib/systems/chat_guard.lua) is skipped: "On my way!" answers a
+-- new ping each time; the "On my way!" lines still vary per bot.
 local function Say(bot, text)
 	local chat = ChatGuard.originalChat or bot.ActionImmediate_Chat
 	pcall(chat, bot, text, false)
 end
 
-local function QueueReply(speakerId, key, human, seconds)
-	local text = nil
+local function ReplyText(key, human, seconds, index)
 	if key == "on-my-way" then
-		-- The assemble mode's line (localization.lua say_assemble, first entry: "On my way!").
+		-- The assemble mode's lines (localization.lua say_assemble: "On my way!", "Coming!", ...), one per bot.
 		local lines = Localization.Get("say_assemble")
-		text = type(lines) == "table" and lines[1] or "On my way!"
-	else
-		text = Lines.Get(Localization.GetLocale(), key, DisplayName(human), seconds)
+		if type(lines) == "table" and #lines > 0 then
+			return lines[((index or 1) - 1) % #lines + 1]
+		end
+		return "On my way!"
 	end
-	state.reply = { speakerId = speakerId, text = text, at = GameTime() }
+	return Lines.Get(Localization.GetLocale(), key, DisplayName(human), seconds)
+end
+
+local function QueueReply(orderId, kind, speakerId, key, human, seconds, index)
+	local now = GameTime()
+	local at = math.max(now, state.replyNextAt)
+	state.replyNextAt = at + REPLY_GAP_SECONDS
+	state.replies[#state.replies + 1] = {
+		speakerId = speakerId,
+		key = key,
+		orderId = orderId or 0,
+		kind = kind or "-",
+		text = ReplyText(key, human, seconds, index),
+		at = at,
+	}
 end
 
 local function SayPendingReply(bot)
-	local reply = state.reply
-	if reply == nil then
+	local now = GameTime()
+	if #state.replies == 0 or (now < state.replySaidAt + REPLY_GAP_SECONDS and now >= state.replySaidAt) then
 		return
 	end
-	if bot:GetPlayerID() == reply.speakerId or GameTime() - reply.at > REPLY_FALLBACK_SECONDS then
-		state.reply = nil
-		Say(bot, reply.text)
+	local botId = bot:GetPlayerID()
+	for i, reply in ipairs(state.replies) do
+		if now >= reply.at and (botId == reply.speakerId or now - reply.at > REPLY_FALLBACK_SECONDS) then
+			table.remove(state.replies, i)
+			state.replySaidAt = now
+			Say(bot, reply.text)
+			Log(
+				"%s said id=%d kind=%s reply=%s%s",
+				Short(bot),
+				reply.orderId,
+				reply.kind,
+				reply.key,
+				botId ~= reply.speakerId and (" for=" .. Short(MemberById(reply.speakerId))) or ""
+			)
+			return
+		end
 	end
 end
 
@@ -385,18 +428,22 @@ local function LogDone(order, entry, why)
 	Log("%s done id=%d kind=%s why=%s", Short(entry.unit), order.id, order.kind, why)
 end
 
-local function EndOrder(why)
-	local order = state.order
+local function Finish(slot, why)
+	local order = state[slot]
 	if order == nil then
 		return
 	end
-	state.order = nil
+	state[slot] = nil
 	for _, entry in pairs(order.bots) do
 		if entry.state == "obey" or entry.state == "queue" then
 			entry.state = "done"
 			LogDone(order, entry, why)
 		end
 	end
+end
+
+local function EndOrder(why)
+	Finish("order", why)
 end
 Orders.EndOrder = EndOrder
 
@@ -410,7 +457,43 @@ local function LeaveOrder(order, entry, why)
 	end
 	if state.order == order then
 		state.order = nil
+	elseif state.danger == order then
+		state.danger = nil
 	end
+end
+
+-- The nearest bot that can't go and why (dead bots: the first one back), from Rules.PickResponders' decisions.
+-- `anyAnswer`: any candidate, not only the ignored ones (nobody can go: the nearest says it can't).
+local function NearestRefuser(decisions, unitById, anyAnswer)
+	local nearest = nil
+	for _, d in ipairs(decisions) do
+		local unit = unitById[d.id]
+		if unit ~= nil and (anyAnswer or d.answer == "ignore") then
+			if nearest == nil or d.dist < nearest.dist then
+				nearest = d
+			elseif
+				d.dist == math.huge
+				and nearest.dist == math.huge
+				and unit:GetRespawnTime() < unitById[nearest.id]:GetRespawnTime()
+			then
+				nearest = d
+			end
+		end
+	end
+	if nearest == nil then
+		return nil
+	end
+	local key = "busy"
+	if
+		nearest.state == "dead"
+		or nearest.state == "low-hp"
+		or nearest.state == "retreat"
+		or nearest.state == "base"
+	then
+		key = nearest.state
+	end
+	local seconds = nearest.state == "dead" and unitById[nearest.id]:GetRespawnTime() or nil
+	return { id = nearest.id, key = key, seconds = seconds }
 end
 
 -- Starts an order. `found`: what Orders.ReadSpot found (target, buildings, camp), or the chat command's target.
@@ -426,12 +509,6 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 		building, tier = building or found.ourBuilding, tier or found.ourTier
 	end
 	local cands = Candidates(loc)
-	local available = 0
-	for _, cand in ipairs(cands) do
-		if Rules.Answer(kind, cand.state) ~= "ignore" and cand.dist <= Rules.MaxDistance(kind) then
-			available = available + 1
-		end
-	end
 	local aliveAllies = 0
 	for slot = 1, #GetTeamPlayers(GetTeam()) do
 		local member = GetTeamMember(slot)
@@ -447,7 +524,6 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	local facts = {
 		now = DotaTime(),
 		aliveAllies = aliveAllies,
-		available = available,
 		enemiesNear = #(Fu.GetLastSeenEnemiesNearLoc(loc, 1600) or {}),
 		humanNear = human ~= nil and human:IsAlive() and GetUnitToLocationDistance(human, loc) <= 2500,
 		baseUnderAttack = kind ~= "defend" and BaseSiegeAwayFrom(loc),
@@ -457,12 +533,14 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	if kind == "rosh" then
 		facts.roshanAlive = Fu.IsRoshanAlive()
 	end
+	local need = Rules.Need(kind, facts)
+	local obey, queue, ignore, decisions = Rules.PickResponders(kind, cands, need, { lane = lane, now = DotaTime() })
+	facts.available = Rules.Available(decisions)
 	local checkVerdict, why = Rules.Check(kind, via, facts)
-	local obey, queue, ignore = {}, {}, {}
-	if checkVerdict == "go" then
-		obey, queue, ignore = Rules.PickResponders(kind, cands, Rules.Need(kind, facts))
+	if checkVerdict ~= "go" then
+		obey, queue = {}, {}
 	end
-	local verdict = Rules.Verdict(checkVerdict, #obey, #queue)
+	local verdict = Rules.Verdict(checkVerdict, #obey, #queue, kind)
 	if verdict == "refuse" and checkVerdict == "go" then
 		why = "nobody-free"
 	end
@@ -495,46 +573,20 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	for _, id in ipairs(queue) do
 		order.bots[id] = { state = "queue", unit = unitById[id] }
 	end
-	-- One reply per order, from the bot it is about.
-	local replyKey, speakerId, seconds = "none", nil, nil
-	if kind ~= "danger" then
-		if verdict == "go" then
-			replyKey, speakerId = "on-my-way", obey[1]
-		elseif verdict == "queue" then
-			replyKey, speakerId = "queue", queue[1]
-		elseif why ~= "nobody-free" then
-			replyKey = why
-		else
-			-- Nobody can go: the nearest bot says why it can't (all dead: the first one back says when).
-			local nearest = nil
-			for _, cand in ipairs(cands) do
-				if nearest == nil or cand.dist < nearest.dist then
-					nearest = cand
-				elseif
-					cand.dist == math.huge
-					and nearest.dist == math.huge
-					and cand.unit:GetRespawnTime() < nearest.unit:GetRespawnTime()
-				then
-					nearest = cand
-				end
-			end
-			replyKey = "busy"
-			if nearest ~= nil then
-				speakerId = nearest.id
-				if nearest.state == "dead" or nearest.state == "low-hp" or nearest.state == "retreat" then
-					replyKey = nearest.state
-				elseif nearest.state == "base" then
-					replyKey = "base"
-				end
-				if nearest.state == "dead" then
-					seconds = nearest.unit:GetRespawnTime()
-				end
-			end
+	-- Replies (Rules.ReplyPlan): every bot that goes, every queued bot, and the nearest bot that can't go.
+	local refuser = nil
+	if kind ~= "danger" and (verdict ~= "refuse" or why == "nobody-free") then
+		refuser = NearestRefuser(decisions, unitById, verdict == "refuse")
+	end
+	local replyKey, replies = "none", {}
+	local tickId = tickBot ~= nil and tickBot:GetPlayerID() or nil
+	for _, line in ipairs(Rules.ReplyPlan(kind, verdict, why, obey, queue, refuser)) do
+		local speakerId = line.id or tickId
+		QueueReply(order.id, kind, speakerId, line.key, human, line.seconds, line.index)
+		if replyKey == "none" then
+			replyKey = line.key
 		end
-		if speakerId == nil and tickBot ~= nil then
-			speakerId = tickBot:GetPlayerID()
-		end
-		QueueReply(speakerId, replyKey, human, seconds)
+		replies[#replies + 1] = Short(unitById[speakerId] or MemberById(speakerId)) .. ":" .. line.key
 	end
 	local targetName = "-"
 	if order.target ~= nil then
@@ -544,8 +596,16 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	elseif order.camp ~= nil then
 		targetName = "camp-" .. tostring(order.camp.type or "?")
 	end
+	local extra = ""
+	if kind == "fog" then
+		extra = string.format(" missing=%d", MissingEnemies())
+	elseif kind == "chase" then
+		extra = string.format(" seen=%.1f", found.seenAgo or -1)
+	elseif kind == "danger" then
+		extra = " affected=" .. NamesOf(obey)
+	end
 	Log(
-		"%s order kind=%s from=%s via=%s lane=%s target=%s verdict=%s why=%s responders=%s queued=%s reply=%s need=%d at=%.0f,%.0f id=%d%s",
+		"%s order kind=%s from=%s via=%s lane=%s target=%s verdict=%s why=%s responders=%s queued=%s reply=%s need=%d at=%.0f,%.0f id=%d%s replies=%s cands=%s",
 		Short(tickBot),
 		kind,
 		Short(human),
@@ -557,12 +617,15 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 		NamesOf(obey),
 		NamesOf(queue),
 		replyKey,
-		Rules.Need(kind, facts),
+		need,
 		loc.x,
 		loc.y,
 		order.id,
-		kind == "fog" and string.format(" missing=%d", MissingEnemies())
-			or (kind == "chase" and string.format(" seen=%.1f", found.seenAgo or -1) or "")
+		extra,
+		#replies > 0 and table.concat(replies, ",") or "-",
+		Rules.CandsText(decisions, function(id)
+			return Short(unitById[id])
+		end)
 	)
 	for _, entry in ipairs(ignore) do
 		local unit = unitById[entry.id]
@@ -573,8 +636,14 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	for _, id in ipairs(queue) do
 		Log("%s queue id=%d kind=%s why=in-fight", Short(unitById[id]), order.id, kind)
 	end
-	-- A refused request leaves the current order running; an accepted one replaces it.
-	if verdict ~= "refuse" then
+	-- A danger ping runs beside the current order (only for the bots near it); a refused request leaves the current
+	-- order running; an accepted one replaces it.
+	if kind == "danger" then
+		if #obey > 0 then
+			Finish("danger", "replaced")
+			state.danger = order
+		end
+	elseif verdict ~= "refuse" then
 		EndOrder("replaced")
 		state.order = order
 	end
@@ -613,17 +682,18 @@ end
 local function StartChatOrder(chat, tickBot)
 	local human = MemberById(chat.senderId)
 	if chat.kind == "no" then
-		local hadOrder = state.order ~= nil
+		local hadOrder = state.order ~= nil or state.danger ~= nil
 		EndOrder("cancelled")
+		Finish("danger", "cancelled")
 		Log("%s order kind=no from=%s via=chat verdict=%s", Short(tickBot), Short(human), hadOrder and "go" or "none")
 		if hadOrder then
-			QueueReply(tickBot:GetPlayerID(), "cancelled", human)
+			QueueReply(nil, "no", tickBot:GetPlayerID(), "cancelled", human)
 		end
 		return
 	end
 	if (chat.kind == "push" or chat.kind == "defend") and chat.lane == nil then
 		Log("%s order kind=%s from=%s via=chat verdict=refuse why=no-lane", Short(tickBot), chat.kind, Short(human))
-		QueueReply(tickBot:GetPlayerID(), "which_lane", human)
+		QueueReply(nil, chat.kind, tickBot:GetPlayerID(), "which_lane", human)
 		return
 	end
 	local found = {}
@@ -676,11 +746,14 @@ end
 
 -- Keeps the current order up to date: ends it when it is done, lets queued bots go after their fight.
 local function KeepOrder()
+	local now = DotaTime()
+	if state.danger ~= nil and now > state.danger.untilAt then
+		Finish("danger", "timeout")
+	end
 	local order = state.order
 	if order == nil then
 		return
 	end
-	local now = DotaTime()
 	if now > order.untilAt then
 		return EndOrder("timeout")
 	end
@@ -782,13 +855,21 @@ end
 
 -- This bot's part in the current order: the order and its entry while the bot obeys it, else nil. A bot leaves the
 -- order when it dies, retreats or drops under LEAVE_HP. The first call under an order prints its obey line.
-function Orders.ForBot(bot)
-	local order = state.order
+local function EntryOf(order, bot)
 	if order == nil or bot == nil then
 		return nil
 	end
 	local entry = order.bots[bot:GetPlayerID()]
 	if entry == nil or entry.state ~= "obey" or entry.unit ~= bot then
+		return nil
+	end
+	return entry
+end
+
+function Orders.ForBot(bot)
+	local order = state.order
+	local entry = EntryOf(order, bot)
+	if entry == nil then
 		return nil
 	end
 	if not bot:IsAlive() then
@@ -801,6 +882,29 @@ function Orders.ForBot(bot)
 	end
 	if Fu.IsRetreating(bot) then
 		LeaveOrder(order, entry, "retreat")
+		return nil
+	end
+	return order, entry
+end
+
+-- This bot's part in a danger ping's back-off (Rules.DANGER_RADIUS around it when pinged), else nil. It ends when
+-- the bot is DANGER_SAFE away, dies or retreats (the retreat mode moves it away anyway).
+local function DangerFor(bot)
+	local order = state.danger
+	local entry = EntryOf(order, bot)
+	if entry == nil then
+		return nil
+	end
+	if not bot:IsAlive() then
+		LeaveOrder(order, entry, "dead")
+		return nil
+	end
+	if Fu.IsRetreating(bot) then
+		LeaveOrder(order, entry, "retreat")
+		return nil
+	end
+	if GetUnitToLocationDistance(bot, order.loc) >= Rules.DANGER_SAFE then
+		LeaveOrder(order, entry, "safe")
 		return nil
 	end
 	return order, entry
@@ -950,19 +1054,16 @@ local function ChaseStopWhy(bot, order, target)
 end
 
 -- mode_assemble_generic.lua GetDesire: the desire for the kinds the assemble mode carries out, else nil.
+-- A danger ping's back-off comes first: just above an order's desire, so it also beats an ordered push or defend.
 function Orders.AssembleDesire(bot)
+	if DangerFor(bot) ~= nil then
+		return math.min(0.85, Desire(bot) + 0.05)
+	end
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or not ASSEMBLE_KINDS[order.kind] then
 		return nil
 	end
 	local kind = order.kind
-	if kind == "danger" then
-		if GetUnitToLocationDistance(bot, order.loc) >= Rules.MaxDistance("danger") then
-			LeaveOrder(order, entry, "safe")
-			return nil
-		end
-		return math.min(0.85, Desire(bot) + 0.05)
-	end
 	if kind == "group" then
 		if order.from == nil or not order.from:IsAlive() then
 			LeaveOrder(order, entry, "human-dead")
@@ -1000,16 +1101,18 @@ end
 
 -- mode_assemble_generic.lua Think: carries out the order. Returns true when it gave the bot an action.
 function Orders.AssembleThink(bot)
+	local danger, dangerEntry = DangerFor(bot)
+	if danger ~= nil then
+		NoteObey(bot, danger, dangerEntry)
+		bot:Action_MoveToLocation(Fu.VectorAway(bot:GetLocation(), danger.loc, 800))
+		return true
+	end
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or not ASSEMBLE_KINDS[order.kind] then
 		return false
 	end
 	NoteObey(bot, order, entry)
 	local kind = order.kind
-	if kind == "danger" then
-		bot:Action_MoveToLocation(Fu.VectorAway(bot:GetLocation(), order.loc, 800))
-		return true
-	end
 	if kind == "group" then
 		if order.from ~= nil and order.from:IsAlive() then
 			bot:Action_MoveToLocation(order.from:GetLocation() + RandomVector(150))
