@@ -75,8 +75,8 @@ end
 -- LastHitRules.SwingRemaining): a list of { ally, eta (seconds until the hit lands: rest of the wind-up + flight),
 -- damage (GetAttackDamage, the average, after armour: crits and Quelling Blade not counted), cycle, since }. Team
 -- slots 1-5 cover humans; illusions are not team members. Game 074's [OHA-HUMAN] state lines read GetAttackTarget,
--- GetAnimActivity and GetAnimCycle on a human hero; GetLastAttackTime on one is unverified (a wrong value only drops
--- the backswing test).
+-- GetAnimActivity and GetAnimCycle on a human hero; GetLastAttackTime on one is unverified (a non-number or wrong
+-- value only drops the backswing test).
 function X.AllySwings(bot, creep, exclude)
 	local list = {}
 	local now = GameTime()
@@ -91,7 +91,8 @@ function X.AllySwings(bot, creep, exclude)
 			and ally:GetAnimActivity() == ATTACK_ACTIVITY
 			and GetUnitToUnitDistance(ally, creep) <= Rules.ALLY_SWING_RANGE
 		then
-			local since = now - ally:GetLastAttackTime()
+			local lastAttack = ally:GetLastAttackTime()
+			local since = type(lastAttack) == "number" and now - lastAttack or nil
 			local cycle = ally:GetAnimCycle()
 			local remaining = Rules.SwingRemaining(
 				ally:GetAttackPoint(),
@@ -157,7 +158,7 @@ local function logYield(bot, creep, why, swing, myDelay)
 			swing.eta,
 			myDelay,
 			swing.cycle,
-			math.min(99, swing.since)
+			swing.since ~= nil and math.min(99, swing.since) or -1
 		)
 	)
 end

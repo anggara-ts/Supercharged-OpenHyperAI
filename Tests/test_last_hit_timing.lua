@@ -518,3 +518,43 @@ T.test("ally swing: a support leaves the creep its core is swinging at (core-swi
 	T.eq(state.orders[1], "attack", "a core takes it")
 	Fu.GetPosition = getPosition
 end)
+
+T.test("ally swing: a backup behind a core in a team slot counts its pending hit once", function()
+	local Fu, Timing, bot, creep, state = setup(80)
+	Stub.time = 1500
+	-- The core in slot 2 (seen by AllySwings) winding up: hit 50, 0.25s left (cycle 0.05 of 0.3).
+	local props = { attacking = true, cycle = 0.05, damage = 50 }
+	local core = addSwinger(creep, props)
+	core.IsBot = function()
+		return true
+	end
+	core.GetActiveMode = function()
+		return BOT_MODE_LANING
+	end
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and 5 or hero == core and 1 or getPosition(hero)
+	end
+	local facts = Timing.BackupFacts(bot, core, creep, 45)
+	-- 80 HP + 0.8: the core's 50 once leaves 30.8 (twice would be -19.2).
+	T.near(facts.predictedHp, 80.8 - 50, 1e-9, "the core's pending hit taken off once")
+	T.eq(facts.coreState, "attacking")
+	T.ok(not facts.coreKillsFirst, "its hit alone does not kill 80")
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true, backupCore = core })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "no backup swing while the core winds up")
+	T.eq(yieldLines("core-swing"), 1, "one core-swing line")
+	-- The core's hit is out (past its attack point): the backup may go.
+	props.cycle = 0.35
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true, backupCore = core })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "the backup swing after the core's hit")
+	Fu.GetPosition = getPosition
+end)
