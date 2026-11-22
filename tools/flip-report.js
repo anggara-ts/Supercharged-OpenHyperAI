@@ -344,7 +344,7 @@ function summary(lines) {
 }
 
 function readLines(file) {
-	return fs.readFileSync(file, "latin1").split(/\r?\n/);
+	return require("./shared.js").normTags(fs.readFileSync(file, "latin1")).split(/\r?\n/);
 }
 
 function selfTest() {
