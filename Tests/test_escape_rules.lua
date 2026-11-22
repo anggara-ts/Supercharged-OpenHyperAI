@@ -99,7 +99,7 @@ T.test("escape rules: escape shifts throw the Orb first and Jaunt out (game 068)
 	T.eq(R.PhaseOrbFirst(true, true, true, false, true), false, "an Orb is out already")
 	T.eq(R.PhaseOrbFirst(false, true, true, false, false), false, "not an escape")
 	-- Orb 1950 / 750 = 2.6s (datafeed hero 13); shift 2.5s at rank 3, 3.25s at rank 4.
-	T.eq(R.ShiftJauntNow(1.0, 2.5, 1.2, 2.6, true), false, "mid-shift, a stun due, Orb flying")
+	T.eq(R.ShiftJauntNow(0.3, 2.5, 0.5, 2.6, true), false, "0.3s in, a stun due, Orb flying: wait")
 	T.eq(R.ShiftJauntNow(0.6, 2.5, 0.8, 2.6, true), true, "after 0.5s: early even with something due")
 	T.eq(select(2, R.ShiftJauntNow(0.2, 1.0, 0.35, 2.6, false)), "early", "nothing due: early from 0.15s")
 	T.eq(R.ShiftJauntNow(0.1, 1.0, 0.25, 2.6, false), false, "too soon after the order")
