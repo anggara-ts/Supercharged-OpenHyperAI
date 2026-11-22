@@ -34,8 +34,21 @@ T.test("human trace: unit kinds and skipped units", function()
 	T.ok(not H.Skip("npc_dota_xp_fountain"), "wisdom shrine kept")
 	T.ok(not H.Skip("npc_dota_unit_twin_gate"), "twin gate kept")
 	T.ok(not H.Skip(""), "unnamed unit kept")
-	T.ok(H.Hint("modifier_watch_tower_capturing"), "capture modifier hinted")
-	T.ok(not H.Hint("modifier_tango_heal"), "tango not hinted")
+	T.ok(H.Skip("npc_dota_neutral_kobold"), "neutral creep skipped (camps sit next to outposts)")
+	T.ok(H.Skip("npc_dota_roshan"), "roshan skipped")
+end)
+
+T.test("human trace: near choice puts an outpost first", function()
+	local H = load()
+	local outpost = { kind = "outpost", dist = 650 }
+	local gate = { kind = "other", dist = 100 }
+	local spot = { kind = "watcher-spot", dist = 300 }
+	T.ok(H.Better(outpost, gate), "a far outpost beats a close other object")
+	T.ok(not H.Better(gate, outpost), "and not the other way round")
+	T.ok(H.Better(spot, gate), "a watcher spot beats other")
+	T.ok(H.Better({ kind = "other", dist = 50 }, gate), "same kind: closer wins")
+	T.ok(H.Better(gate, nil), "anything beats nothing")
+	T.ok(not H.Better(nil, gate), "nothing beats nothing")
 end)
 
 T.test("human trace: first bot slot", function()

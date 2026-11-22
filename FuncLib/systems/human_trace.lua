@@ -11,7 +11,7 @@
 --   on tracer= humans=                       who traces whom
 --   abilities part= list=slot:name:h=hidden:c=castable:l=level   at the start and when the list changes
 --   items list=slot:name                     at the start and when it changes
---   cast-cb install pid= ok=                 InstallCastCallback for the human's player id
+--   cb-install pid= ok=                      InstallCastCallback for the human's player id
 --   cast <every field of the event table>    each cast the callback reports
 --   state channel= active= atk= act= queued= anim= cycle= vel= speed= at= near=
 --   mods add= del=                           modifiers gained / lost by the human
@@ -23,12 +23,13 @@
 --   units add= del=                          non-hero, non-creep unit names that appear in / leave the unit lists
 --   watcher-vision spot= vis= allyDist=      vision at a candidate watcher spot (an active watcher gives vision)
 -- A trace window (10s) opens while the human channels, casts, has an active ability, is within 700 of an outpost,
--- a watcher spot or another map object, or gains a modifier whose name hints at a capture.
+-- a watcher spot or another map object (an outpost first, then the closest), or gains any modifier.
 local H = {}
 
 H.NEAR = 700
 H.WINDOW = 10
 H.LINE_EVERY = 1
+H.NEAR_LINE_EVERY = 5
 H.SAMPLE_EVERY = 0.25 -- outside a window; inside one every think
 H.SCAN_EVERY = 1
 H.OUTPOST_SCAN_EVERY = 10
@@ -44,8 +45,6 @@ H.ITEM_SLOTS = 25
 -- game 049 ([OHA-STUCK] mode=watcher moved=0), not positions read from the map. The human's at= on a channel line
 -- gives the real ones.
 H.WATCHER_SPOTS = { { 1091, -4300 }, { -1564, 3953 } }
-
-local HINTS = { "capture", "channel", "lantern", "lamp", "watch", "outpost", "interact" }
 
 -- Pure helpers (Tests/test_human_trace.lua).
 
@@ -94,6 +93,8 @@ local SKIP = {
 	"guys_",
 	"halloffame",
 	"illusion",
+	"neutral",
+	"roshan",
 }
 function H.Skip(name)
 	if H.Kind(name) ~= nil then
@@ -111,15 +112,21 @@ function H.Skip(name)
 	return false
 end
 
--- A modifier name that hints at a capture / channel interaction.
-function H.Hint(name)
-	local lower = string.lower(name or "")
-	for _, part in ipairs(HINTS) do
-		if string.find(lower, part, 1, true) then
-			return true
-		end
+-- Near-object choice: an outpost beats a watcher, a watcher spot and any other object (a closer neutral creep or
+-- summon must not hide the outpost), then the closer one wins. a and b are { kind =, dist = } or nil.
+local KIND_RANK = { outpost = 1, watcher = 2, ["watcher-spot"] = 3, other = 4 }
+function H.Better(a, b)
+	if a == nil then
+		return false
 	end
-	return false
+	if b == nil then
+		return true
+	end
+	local rankA, rankB = KIND_RANK[a.kind] or 5, KIND_RANK[b.kind] or 5
+	if rankA ~= rankB then
+		return rankA < rankB
+	end
+	return a.dist < b.dist
 end
 
 -- First slot (1..5) whose flag is true, or nil.
@@ -206,24 +213,28 @@ end
 
 -- Runtime.
 
-local state = {
-	enabled = nil,
-	refreshAt = -999,
-	tracer = nil,
-	humans = {},
-	traced = {},
-	startKey = nil,
-	outposts = {},
-	outpostTeams = {},
-	outpostScanAt = -999,
-	outpostsLogged = false,
-	unitNames = nil,
-	unitScanAt = -999,
-	spotVision = {},
-	spotVisionAt = {},
-	spotScanAt = -999,
-	errorLogged = false,
-}
+-- One state per team (the bots of both teams may share this module), set at the start of each Tick.
+local enabled, errorLogged = nil, false
+local states = {}
+local state = nil
+local function NewState()
+	return {
+		refreshAt = -999,
+		tracer = nil,
+		humans = {},
+		traced = {},
+		startKey = nil,
+		outposts = {},
+		outpostTeams = {},
+		outpostScanAt = -999,
+		outpostsLogged = false,
+		unitNames = nil,
+		unitScanAt = -999,
+		spotVision = {},
+		spotVisionAt = {},
+		spotScanAt = -999,
+	}
+end
 
 local function Try(object, method, ...)
 	local args = { ... }
@@ -329,17 +340,19 @@ local function FindNear(human)
 			local name = unit:GetUnitName() or ""
 			if not H.Skip(name) and unit ~= human then
 				local dist = GetUnitToUnitDistance(human, unit)
-				if dist <= H.NEAR and (best == nil or dist < best.dist) then
-					best =
-						{ kind = H.Kind(name) or "other", name = name ~= "" and name or "?", unit = unit, dist = dist }
+				local candidate =
+					{ kind = H.Kind(name) or "other", name = name ~= "" and name or "?", unit = unit, dist = dist }
+				if dist <= H.NEAR and H.Better(candidate, best) then
+					best = candidate
 				end
 			end
 		end
 	end
 	for _, spot in ipairs(H.WATCHER_SPOTS) do
 		local dist = GetUnitToLocationDistance(human, Vector(spot[1], spot[2], 0))
-		if dist <= H.NEAR and (best == nil or dist < best.dist) then
-			best = { kind = "watcher-spot", name = spot[1] .. "," .. spot[2], dist = dist }
+		local candidate = { kind = "watcher-spot", name = spot[1] .. "," .. spot[2], dist = dist }
+		if dist <= H.NEAR and H.Better(candidate, best) then
+			best = candidate
 		end
 	end
 	return best
@@ -426,13 +439,10 @@ local function TraceHuman(human, now)
 		local ok, err = pcall(InstallCastCallback, pid, function(event)
 			local okCast, errCast = pcall(OnCast, trace, event)
 			if not okCast then
-				Log(trace.name, "cast-error " .. tostring(errCast))
+				Log(trace.name, "cb-error " .. tostring(errCast))
 			end
 		end)
-		Log(
-			trace.name,
-			string.format("cast-cb install pid=%s ok=%s err=%s", H.Describe(pid), tostring(ok), H.Describe(err))
-		)
+		Log(trace.name, string.format("cb-install pid=%s ok=%s err=%s", H.Describe(pid), tostring(ok), H.Describe(err)))
 	end
 	trace.unit = human
 	local inWindow = now < trace.windowUntil
@@ -476,14 +486,13 @@ local function TraceHuman(human, now)
 
 	-- Modifiers on the human.
 	local mods, modsOk = Modifiers(human)
-	local hinted = false
+	local newModifier = false
 	if modsOk then
 		if trace.mods ~= nil then
 			local added, removed = H.SetDiff(trace.mods, mods)
 			if #added > 0 or #removed > 0 then
-				for _, name in ipairs(added) do
-					hinted = hinted or H.Hint(name)
-				end
+				-- Any new modifier opens the window: the capture one may have any name.
+				newModifier = #added > 0
 				Log(
 					trace.name,
 					string.format(
@@ -519,11 +528,16 @@ local function TraceHuman(human, now)
 				)
 			end
 			trace.nearSince = near and now or nil
-			trace.lineAt = -999
 		end
 		trace.near = near
 		trace.nearKey = nearKey
-		if near ~= nil and now - trace.lineAt >= H.LINE_EVERY then
+		-- On a change, then every H.NEAR_LINE_EVERY while near (the state line carries near= every second).
+		if
+			near ~= nil
+			and now - (trace.nearLineAt or -999) >= (nearKey ~= trace.nearKeyLogged and 0 or H.NEAR_LINE_EVERY)
+		then
+			trace.nearLineAt = now
+			trace.nearKeyLogged = nearKey
 			Log(
 				trace.name,
 				string.format(
@@ -546,7 +560,7 @@ local function TraceHuman(human, now)
 	local active = Try(human, "GetCurrentActiveAbility")
 	local activeName = (active ~= nil and active ~= "n/a") and H.Describe(Try(active, "GetName")) or H.Describe(active)
 	local chanKey = H.Describe(channel) .. "|" .. activeName
-	if channel == true or (active ~= nil and active ~= "n/a") or trace.near ~= nil or hinted then
+	if channel == true or (active ~= nil and active ~= "n/a") or trace.near ~= nil or newModifier then
 		trace.windowUntil = now + H.WINDOW
 	end
 	inWindow = now < trace.windowUntil
@@ -587,7 +601,7 @@ local function TraceHuman(human, now)
 				vel,
 				speed,
 				H.Describe(pos ~= "n/a" and pos or nil),
-				trace.near and (trace.near.kind .. ":" .. trace.near.name) or "-"
+				trace.near and string.format("%s:%s:%.0f", trace.near.kind, trace.near.name, trace.near.dist) or "-"
 			)
 		)
 	end
@@ -684,7 +698,9 @@ local function TraceSpots(now)
 	for i, spot in ipairs(H.WATCHER_SPOTS) do
 		local loc = Vector(spot[1], spot[2], 0)
 		local okVis, visible = pcall(IsLocationVisible, loc)
-		visible = okVis and visible or "n/a"
+		if not okVis then
+			visible = "n/a"
+		end
 		if visible ~= state.spotVision[i] and now - (state.spotVisionAt[i] or -999) >= H.VISION_EVERY then
 			state.spotVision[i] = visible
 			state.spotVisionAt[i] = now
@@ -713,12 +729,17 @@ local function Tick(bot)
 	local now = DotaTime()
 	if now - state.refreshAt >= H.REFRESH_EVERY then
 		state.refreshAt = now
-		local flags, members = {}, {}
+		local flags, members, raw = {}, {}, {}
 		for slot = 1, 5 do
 			local member = GetTeamMember(slot)
 			members[slot] = member
+			local isBot = nil
+			if member ~= nil and not member:IsNull() then
+				isBot = Try(member, "IsBot")
+			end
+			raw[#raw + 1] = slot .. ":" .. H.Describe(isBot)
 			-- A human only when IsBot() says false (n/a counts as a bot, so a failing call traces nobody).
-			flags[slot] = member ~= nil and not member:IsNull() and Try(member, "IsBot") ~= false
+			flags[slot] = member ~= nil and not member:IsNull() and isBot ~= false
 		end
 		local slot = H.FirstBotSlot(flags)
 		state.tracer = slot and members[slot] or nil
@@ -730,12 +751,19 @@ local function Tick(bot)
 			end
 		end
 		state.humans = humans
+		-- Once per team and whenever who traces whom changes, also with no human (the IsBot reads say why).
 		local startKey = tostring(state.tracer) .. table.concat(names, ",")
-		if startKey ~= state.startKey and bot == state.tracer and #humans > 0 then
+		if startKey ~= state.startKey then
 			state.startKey = startKey
 			Log(
-				Short(bot:GetUnitName()),
-				string.format("on tracer=slot%d humans=%s team=%s", slot or 0, table.concat(names, ","), GetTeam())
+				state.tracer and Short(Try(state.tracer, "GetUnitName")) or "-",
+				string.format(
+					"on tracer=slot%d humans=%s team=%s isBot=%s",
+					slot or 0,
+					#names > 0 and table.concat(names, ",") or "none",
+					H.Describe(Try(bot, "GetTeam")),
+					table.concat(raw, ",")
+				)
 			)
 		end
 	end
@@ -756,19 +784,24 @@ end
 
 -- Called every think from CourierUsageThink (ability_item_usage_generic.lua) by every bot.
 function H.Tick(bot)
-	if state.enabled == false then
+	if enabled == false then
 		return
 	end
-	if state.enabled == nil then
+	if enabled == nil then
 		local ok, settings = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
-		state.enabled = ok and type(settings) == "table" and settings.Human_Trace == true
-		if not state.enabled then
+		enabled = ok and type(settings) == "table" and settings.Human_Trace == true
+		if not enabled then
 			return
 		end
 	end
-	local ok, err = pcall(Tick, bot)
-	if not ok and not state.errorLogged then
-		state.errorLogged = true
+	local ok, err = pcall(function()
+		local team = bot:GetTeam()
+		states[team] = states[team] or NewState()
+		state = states[team]
+		Tick(bot)
+	end)
+	if not ok and not errorLogged then
+		errorLogged = true
 		Log("-", "error " .. tostring(err))
 	end
 end
