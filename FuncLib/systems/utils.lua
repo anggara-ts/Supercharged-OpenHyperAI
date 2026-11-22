@@ -508,8 +508,6 @@ local Team = Dota.Team
 local Tower = Dota.Tower
 local UnitType = Dota.UnitType
 local BotScriptEnums = Dota.BotScriptEnums
-local HttpReq = require(GetScriptDirectory() .. "/FuncLib/lib/http_req")
-local Request = HttpReq.Request
 local NativeOperators = require(GetScriptDirectory() .. "/FuncLib/lib/native_operators")
 local add = NativeOperators.add
 local dot = NativeOperators.dot
@@ -1449,20 +1447,6 @@ function Utils.DetermineEnemyBotRole(bot)
 		return 3
 	end
 	return estimatedRole.role
-end
-function Utils.QueryCounters(heroId)
-	log("heroId=%s", heroId)
-	Request:RawGetRequest(
-		("https://api.opendota.com/api/heroes/" .. tostring(heroId)) .. "/matchups",
-		function(response)
-			Utils.PrintTable(response)
-		end
-	)
-end
-function Utils.InitiStats()
-	Request:GetUUID(function(uuid)
-		log("uuid=%s", uuid)
-	end)
 end
 function Utils.GetLoneDruid(bot)
 	local loneDruidState = Utils.LoneDruid[bot:GetPlayerID()]
