@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const CACHE = path.join(__dirname, "..", "cache");
+const CACHE = path.join(__dirname, "..", "..", "..", "local", "item-builds", "cache");
 const RAW = path.join(CACHE, "raw");
 const ROOT = path.join(__dirname, "..", "..", "..");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
