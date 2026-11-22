@@ -31,11 +31,11 @@ local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_lo
 local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local TeamMemory = require(GetScriptDirectory() .. "/FuncLib/systems/team_memory")
+local RelocateRules = require(GetScriptDirectory() .. "/FuncLib/systems/relocate_rules")
 local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_tracker")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
-local RelocateRules = require(GetScriptDirectory() .. "/FuncLib/systems/relocate_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
