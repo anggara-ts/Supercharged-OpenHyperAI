@@ -31,21 +31,57 @@ function SpecialUnitRules.TombstoneHitsLeft(health, maxHealth)
 	return math.ceil(health / perHit - 1e-6)
 end
 
+-- With enemy heroes in the fight (#185, game 069 37:39-37:49): Axe hit a full Tombstone (8 hits) alone with 3 allies
+-- vs 4 enemies near, Puck at 17% and Vengeful Spirit at 39%; the close rule gave it 0.98 and all three died. Then the
+-- Tombstone comes first only when it dies quickly: hits left / allied heroes on it within TOMBSTONE_KILL_TIME, at an
+-- assumed TOMBSTONE_HITS_PER_SECOND per hero (about one attack a second: base attack time 1.7 with mid-game attack
+-- speed; a guess, not game data), or TOMBSTONE_FEW_HITS hits or fewer. A hero with a teamfight spell ready (its
+-- ultimate, or an initiator spell, X.TeamfightSpellReady) fights instead unless the Tombstone dies in
+-- TOMBSTONE_TEAMFIGHT_HITS (maintainer, 2026-11-22: "idea of teamfight spell to keep fighting is good").
+SpecialUnitRules.TOMBSTONE_FIGHT_RANGE = 1200
+SpecialUnitRules.TOMBSTONE_HITTER_RANGE = 700
+SpecialUnitRules.TOMBSTONE_HITS_PER_SECOND = 1
+SpecialUnitRules.TOMBSTONE_KILL_TIME = 2.5
+SpecialUnitRules.TOMBSTONE_TEAMFIGHT_HITS = 2
+-- Seconds the allied heroes on it take to kill it (TOMBSTONE_HITS_PER_SECOND each; the bot counts as at least one).
+function SpecialUnitRules.TombstoneKillTime(hitsLeft, hitters)
+	return hitsLeft / (math.max(1, hitters or 1) * SpecialUnitRules.TOMBSTONE_HITS_PER_SECOND)
+end
+
 -- Kill the Tombstone first (above attack mode, no even-fight gate): close (TOMBSTONE_CLOSE), a few hits from dying
 -- and inside its radius, or TOMBSTONE_ALLIES+ allied heroes inside its radius. Never while retreating or under
 -- TOMBSTONE_MIN_HP. dist: bot to the Tombstone; alliesInRadius: allied heroes (the bot too) within the radius.
-function SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio)
+-- fight (nil: no enemy hero near): enemies = enemy heroes within TOMBSTONE_FIGHT_RANGE of the bot, hitters = allied
+-- heroes (the bot too) within TOMBSTONE_HITTER_RANGE of the Tombstone, teamfightReady = a teamfight spell ready.
+-- Returns the priority and, when the fight rule turned it down, why ("teamfight-ready" | "slow-kill").
+function SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio, fight)
 	if retreating or hpRatio < SpecialUnitRules.TOMBSTONE_MIN_HP then
 		return false
 	end
-	return dist <= SpecialUnitRules.TOMBSTONE_CLOSE
+	local base = dist <= SpecialUnitRules.TOMBSTONE_CLOSE
 		or hitsLeft <= SpecialUnitRules.TOMBSTONE_FEW_HITS and dist <= SpecialUnitRules.TOMBSTONE_RADIUS
 		or alliesInRadius >= SpecialUnitRules.TOMBSTONE_ALLIES
+	if not base or fight == nil or (fight.enemies or 0) <= 0 then
+		return base
+	end
+	if fight.teamfightReady and hitsLeft > SpecialUnitRules.TOMBSTONE_TEAMFIGHT_HITS then
+		return false, "teamfight-ready"
+	end
+	if
+		hitsLeft <= SpecialUnitRules.TOMBSTONE_FEW_HITS
+		or SpecialUnitRules.TombstoneKillTime(hitsLeft, fight.hitters) <= SpecialUnitRules.TOMBSTONE_KILL_TIME
+	then
+		return true
+	end
+	return false, "slow-kill"
 end
 
 -- The desire for the Tombstone and whether it is the priority case. Outside it the old rule: only when the fight is
 -- even (alliesNear >= enemiesNear, heroes within 1600 of the bot) and not retreating; within attack range + 200 0.40
--- to 0.96 by the bot's HP, farther 0.56 (team roam then scales both by HP).
+-- to 0.96 by the bot's HP, farther 0.56 (team roam then scales both by HP). fight: see TombstonePriority. When the
+-- fight rule turned the priority down: 0 with a teamfight spell ready (fight), else the old rule held under
+-- TOMBSTONE_FIGHT_CAP (below attack mode's 0.95, so a fight wins). Returns desire, priority, why.
+SpecialUnitRules.TOMBSTONE_FIGHT_CAP = 0.9
 function SpecialUnitRules.TombstoneDesire(
 	dist,
 	attackRange,
@@ -54,18 +90,24 @@ function SpecialUnitRules.TombstoneDesire(
 	alliesNear,
 	enemiesNear,
 	retreating,
-	hpRatio
+	hpRatio,
+	fight
 )
-	if SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio) then
+	local priority, why = SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio, fight)
+	if priority then
 		return SpecialUnitRules.TOMBSTONE_PRIORITY_DESIRE, true
 	end
-	if alliesNear >= enemiesNear and not retreating then
-		if dist <= attackRange + 200 then
-			return remap(hpRatio, 0.25, 0.9, 0.4, 0.96), false
-		end
-		return 0.56, false
+	if why == "teamfight-ready" then
+		return 0, false, why
 	end
-	return 0, false
+	local desire = 0
+	if alliesNear >= enemiesNear and not retreating then
+		desire = dist <= attackRange + 200 and remap(hpRatio, 0.25, 0.9, 0.4, 0.96) or 0.56
+	end
+	if why ~= nil then
+		desire = math.min(desire, SpecialUnitRules.TOMBSTONE_FIGHT_CAP)
+	end
+	return desire, false, why
 end
 
 -- A zombie-slowed bot hits the Tombstone instead of running to the fountain.

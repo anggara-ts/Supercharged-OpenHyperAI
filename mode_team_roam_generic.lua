@@ -103,32 +103,6 @@ local function ClearEngageTarget()
 	engageTargetLockedUntil = -90
 	bot:SetTarget(nil)
 end
--- The end of a Tombstone cap exemption run (#185, game 068: it lasted ~1s and the bot landed at most one hit), once
--- per run: [OHA-ROAM] tombstone-exempt-end why=<capped|no-priority|gone> held= hits=<start>-><now> hold=<yes|no> hp=
--- retreat=. hits=<start>-><last seen>: lower at the end shows the hold paid off (a Tombstone that died shows its last
--- count, 1 or 2); -1 is unknown.
-local function EndTombstoneExempt(why, hp, retreatDesire)
-	local run = bot._tombExempt
-	if run == nil then
-		return
-	end
-	bot._tombExempt = nil
-	pcall(
-		print,
-		string.format(
-			"[OHA-ROAM] t=%.0f %s tombstone-exempt-end why=%s held=%.1f hits=%d->%d hold=%s hp=%.2f retreat=%.2f",
-			DotaTime(),
-			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-			why,
-			DotaTime() - run.at,
-			run.hits,
-			run.last,
-			run.held and "yes" or "no",
-			hp or -1,
-			retreatDesire or -1
-		)
-	)
-end
 local function adjustDesire(desire)
 	return RoamRules.AdjustDesire(desire, Fu.IsPushing(bot), Fu.IsInLaningPhase())
 end
@@ -584,9 +558,6 @@ function GetDesireHelper()
 		end
 	end
 	local specialUnitDesire = SpecialUnits.GetDesire(bot)
-	if specialUnitDesire <= 0 then
-		EndTombstoneExempt("gone", hpRatio, nil)
-	end
 	if specialUnitDesire > 0 then
 		hasSpecialUnitTarget = true
 		roamWhy = "special-unit"
@@ -597,52 +568,10 @@ function GetDesireHelper()
 		end
 		-- Outnumbered: never above retreat (game 063, 15:38: Zeus left a hard retreat for a special unit at 0.96).
 		local retreatDesire = RetreatDesireNow()
-		-- Exempt: the serpent ward escape, and a priority Tombstone while the bot is healthy, held 2s / to the last
-		-- hits once it started (RoamRules).
-		local exemptRun = bot._tombExempt
-		if exemptRun ~= nil and DotaTime() - exemptRun.seen > 1 then
-			-- The run was not seen for 1s (another rule of this desire returned first): it is over.
-			EndTombstoneExempt("gone", hpRatio, retreatDesire)
-			exemptRun = nil
-		end
-		local exemptWhy = RoamRules.SpecialUnitCapExempt(
-			bot._specialUnitWhy,
-			bot._tombstonePriority,
-			hpRatio,
-			retreatDesire,
-			exemptRun ~= nil and DotaTime() - exemptRun.at or nil,
-			bot._tombstoneHitsLeft
-		)
-		if exemptWhy == "tombstone" or exemptWhy == "tombstone-hold" then
-			if exemptRun == nil then
-				local hits = bot._tombstoneHitsLeft or -1
-				exemptRun = { at = DotaTime(), hits = hits, last = hits, held = false }
-				bot._tombExempt = exemptRun
-			end
-			exemptRun.seen = DotaTime()
-			exemptRun.last = bot._tombstoneHitsLeft or exemptRun.last
-			if exemptWhy == "tombstone-hold" and not exemptRun.held then
-				-- Once per run: the hold kept the exemption past retreat 0.5.
-				exemptRun.held = true
-				pcall(
-					print,
-					string.format(
-						"[OHA-ROAM] t=%.0f %s special-unit-cap-exempt why=tombstone-hold for=%.1f hits-left=%d desire=%.2f retreat=%.2f allies=%d enemies=%d hp=%.2f",
-						DotaTime(),
-						(string.gsub(botName, "npc_dota_hero_", "")),
-						DotaTime() - exemptRun.at,
-						bot._tombstoneHitsLeft or -1,
-						desire,
-						retreatDesire or -1,
-						#alliesNear,
-						#enemiesNear,
-						hpRatio
-					)
-				)
-			end
-		else
-			EndTombstoneExempt(bot._tombstonePriority and "capped" or "no-priority", hpRatio, retreatDesire)
-		end
+		-- Exempt: the serpent ward escape, and a priority Tombstone a few hits from dying while the bot is healthy
+		-- (RoamRules).
+		local exemptWhy =
+			RoamRules.SpecialUnitCapExempt(bot._specialUnitWhy, bot._tombstonePriority, hpRatio, bot._tombstoneHitsLeft)
 		local capped, cut = RoamRules.SpecialUnitCap(desire, #alliesNear, #enemiesNear, retreatDesire, exemptWhy ~= nil)
 		if
 			exemptWhy == "tombstone"
@@ -653,9 +582,10 @@ function GetDesireHelper()
 			pcall(
 				print,
 				string.format(
-					"[OHA-ROAM] t=%.0f %s special-unit-cap-exempt why=tombstone desire=%.2f retreat=%.2f allies=%d enemies=%d hp=%.2f",
+					"[OHA-ROAM] t=%.0f %s special-unit-cap-exempt why=tombstone hits-left=%d desire=%.2f retreat=%.2f allies=%d enemies=%d hp=%.2f",
 					DotaTime(),
 					(string.gsub(botName, "npc_dota_hero_", "")),
+					bot._tombstoneHitsLeft or -1,
 					desire,
 					retreatDesire or -1,
 					#alliesNear,

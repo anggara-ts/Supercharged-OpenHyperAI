@@ -181,42 +181,27 @@ function Rules.SpecialUnitCap(desire, allies, enemies, retreatDesire, exempt)
 end
 
 -- Which special units the outnumbered cap above leaves alone, or nil to cap. specialWhy: bot._specialUnitWhy;
--- tombstonePriority: bot._tombstonePriority (#185 / PR #188: Undying's Tombstone close, nearly dead or with our heroes
--- in it; nil without that PR); hp: the bot's HP ratio; retreatDesire: retreat's last desire (nil when unknown).
+-- tombstonePriority: bot._tombstonePriority (#185 / PR #188); hp: the bot's HP ratio; hitsLeft: the Tombstone's hits
+-- left (bot._tombstoneHitsLeft, nil when unknown).
 --   "serpent-escape"  the serpent ward escape (itself an escape)
---   "tombstone"       a priority Tombstone while the bot is above TOMBSTONE_EXEMPT_HP and retreat wants it under
---                     TOMBSTONE_EXEMPT_RETREAT. Game 067: 11 of 12 cap lines cut a Tombstone's 0.98 to 0.12-0.65,
---                     e.g. t=2185 Zeus (hp 0.98, retreat 0.39, 3 allies vs 4 enemies), and those Tombstones were
---                     never hit; where it was not cut (t=3342-3347) it went from 8 hits left to 1 in 5s.
---   "tombstone-hold"  the same Tombstone after retreat passed TOMBSTONE_EXEMPT_RETREAT, while the bot is above
---                     TOMBSTONE_HOLD_HP: for TOMBSTONE_HOLD_TIME from the start of the exemption (exemptFor), and
---                     longer while it has TOMBSTONE_HOLD_HITS hits or fewer left (hitsLeft). Game 068 8:26, 16:55,
---                     21:29: the exemption lasted ~1s before retreat passed 0.5 and re-capped it; then retreat
---                     took over and the bot landed at most one hit (t=506 Alchemist hp 0.97, retreat 0.32 -> 0.60
---                     at 507, 1 ally vs 3, the Tombstone 5 -> 4 hits and left).
---   exemptFor: seconds since this bot's Tombstone exemption started (nil when none is running); hitsLeft: the
---   Tombstone's hits left (nil when unknown).
-Rules.TOMBSTONE_EXEMPT_HP = 0.25
-Rules.TOMBSTONE_EXEMPT_RETREAT = 0.5
-Rules.TOMBSTONE_HOLD_HP = 0.4
-Rules.TOMBSTONE_HOLD_TIME = 2
-Rules.TOMBSTONE_HOLD_HITS = 2
-function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, retreatDesire, exemptFor, hitsLeft)
+--   "tombstone"       a priority Tombstone TOMBSTONE_EXEMPT_HITS hits or fewer from dying, while the bot is above
+--                     TOMBSTONE_EXEMPT_HP. Game 067: the cap cut a Tombstone's 0.98 to 0.12-0.65 and those were never
+--                     hit. Game 068: an exemption by retreat's desire (under 0.5) flickered off after ~1s; a 2s hold
+--                     followed, and game 069 37:39-37:49 showed it too wide: Axe stayed 4s on a full Tombstone (8 -> 5
+--                     hits) with 3 allies vs 4 enemies and three of them died. Now only a nearly dead one.
+Rules.TOMBSTONE_EXEMPT_HP = 0.4
+Rules.TOMBSTONE_EXEMPT_HITS = 3
+function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, hitsLeft)
 	if specialWhy == "serpent-escape" then
 		return "serpent-escape"
 	end
-	if tombstonePriority ~= true then
-		return nil
-	end
-	if (hp or 0) > Rules.TOMBSTONE_EXEMPT_HP and (retreatDesire or 0) < Rules.TOMBSTONE_EXEMPT_RETREAT then
-		return "tombstone"
-	end
 	if
-		exemptFor ~= nil
-		and (hp or 0) > Rules.TOMBSTONE_HOLD_HP
-		and (exemptFor < Rules.TOMBSTONE_HOLD_TIME or hitsLeft ~= nil and hitsLeft <= Rules.TOMBSTONE_HOLD_HITS)
+		tombstonePriority == true
+		and (hp or 0) > Rules.TOMBSTONE_EXEMPT_HP
+		and hitsLeft ~= nil
+		and hitsLeft <= Rules.TOMBSTONE_EXEMPT_HITS
 	then
-		return "tombstone-hold"
+		return "tombstone"
 	end
 	return nil
 end

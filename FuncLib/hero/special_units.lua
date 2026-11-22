@@ -48,13 +48,17 @@ function X.GetDesire(thinkingBot)
 	end
 	-- Undying's Tombstone first when it is close, nearly dead or our heroes stand in it (#185): before the loop, so a
 	-- zombie or another unit earlier in the list can't return first. Team roam keeps this desire uncapped.
+	-- tombstoneWhy / tombstoneFallback: the fight rule turned the priority down (#185); the loop below then uses this
+	-- desire for the Tombstone instead of its old even-fight one.
+	local tombstoneWhy, tombstoneFallback
 	do
-		local tombstoneDesire, tombstone, tombstoneHits =
+		local tombstoneDesire, tombstone, tombstoneHits, fallback, why =
 			X.GetTombstonePriorityDesire(bot, isRetreating, hpRatio, attackRange)
+		tombstoneWhy, tombstoneFallback = why, fallback or 0
 		if tombstoneDesire > 0 and Fu.IsValid(tombstone) then
 			bot.special_unit_target = tombstone
 			bot._tombstonePriority = true
-			-- Team roam holds its cap exemption while few hits are left (RoamRules.SpecialUnitCapExempt).
+			-- Team roam exempts a nearly dead one from its outnumbered cap (RoamRules.SpecialUnitCapExempt).
 			bot._tombstoneHitsLeft = tombstoneHits
 			return tombstoneDesire
 		end
@@ -336,7 +340,12 @@ function X.GetDesire(thinkingBot)
 						return RemapValClamped(hpRatio, 0.2, 0.9, 0, 0.9)
 					end
 				end
-				if string.find(unitName, "tombstone") then
+				if string.find(unitName, "tombstone") and tombstoneWhy ~= nil then
+					-- With enemies in the fight and a slow kill or a teamfight spell ready (SpecialUnitRules).
+					if tombstoneFallback > 0 then
+						return tombstoneFallback
+					end
+				elseif string.find(unitName, "tombstone") then
 					if #nearbyAllies >= #nearbyEnemies and not isRetreating then
 						if Fu.IsInRange(bot, unit, attackRange + 200) then
 							return RemapValClamped(hpRatio, 0.25, 0.9, 0.4, 0.96)
@@ -395,11 +404,33 @@ function X.NearestTombstone(unit, range)
 	end
 	return best, bestDist, SpecialUnitRules.TombstoneHitsLeft(best:GetHealth(), best:GetMaxHealth())
 end
+-- Initiator spells that keep a hero in the fight instead of on the Tombstone (#185), besides any ready ultimate. From
+-- the repo's initiator list (FuncLib/systems/utils.lua initiatorRequirements: Axe, Enigma, Earthshaker, Invoker, Sand
+-- King, Troll Warlord): their initiation is the ultimate (Black Hole, Echo Slam, Epicenter, Battle Trance), except
+-- Axe's Berserker's Call, a basic spell. Ultimates that are no teamfight spell and nearly always castable don't count.
+local INITIATOR_SPELLS = { axe_berserkers_call = true }
+local NOT_TEAMFIGHT_ULTIMATES = { invoker_invoke = true, rubick_spell_steal = true }
+-- A teamfight spell ready: a trained, non-passive ultimate or an INITIATOR_SPELLS spell, off cooldown with the mana.
+function X.TeamfightSpellReady(unit)
+	for slot = 0, 5 do
+		local ability = unit:GetAbilityInSlot(slot)
+		if ability ~= nil and not ability:IsNull() and ability:IsTrained() and not ability:IsPassive() then
+			local name = ability:GetName()
+			local counts = INITIATOR_SPELLS[name] or ability:IsUltimate() and not NOT_TEAMFIGHT_ULTIMATES[name]
+			if counts and ability:IsFullyCastable() then
+				return true, name
+			end
+		end
+	end
+	return false, nil
+end
 -- [OHA-ROAM] t= <hero> special-unit unit=tombstone hits-left= hp= maxHp= dist= allies= enemies= prio= desire=
--- allies: allied heroes within the Tombstone's radius (the bot too); enemies: enemy heroes within 1600 of the bot.
--- Once per 3s per bot, or when the priority or the hits left change.
-function X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemiesNear, priority, desire)
-	local key = tostring(priority) .. ":" .. hitsLeft
+-- why= hitters= fight=
+-- allies: allied heroes within the Tombstone's radius (the bot too); enemies: enemy heroes within 1600 of the bot;
+-- why: why the fight rule turned the priority down (slow-kill | teamfight-ready, else -); hitters: allied heroes within
+-- 700 of it; fight: enemy heroes within 1200 of the bot. Once per 3s per bot, or when the priority or the hits change.
+function X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemiesNear, priority, desire, why, fight)
+	local key = tostring(priority) .. ":" .. hitsLeft .. ":" .. tostring(why)
 	if unit._tombstoneLogKey == key and DotaTime() < (unit._tombstoneLogAt or -999) then
 		return
 	end
@@ -408,7 +439,7 @@ function X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemies
 	pcall(
 		print,
 		string.format(
-			"[OHA-ROAM] t=%.0f %s special-unit unit=tombstone hits-left=%d hp=%d maxHp=%d dist=%d allies=%d enemies=%d prio=%s desire=%.2f",
+			"[OHA-ROAM] t=%.0f %s special-unit unit=tombstone hits-left=%d hp=%d maxHp=%d dist=%d allies=%d enemies=%d prio=%s desire=%.2f why=%s hitters=%d fight=%d spell=%s",
 			DotaTime(),
 			(string.gsub(unit:GetUnitName(), "npc_dota_hero_", "")),
 			hitsLeft,
@@ -418,12 +449,26 @@ function X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemies
 			alliesInRadius,
 			enemiesNear,
 			priority and "yes" or "no",
-			desire
+			desire,
+			why or "-",
+			fight and fight.hitters or -1,
+			fight and fight.enemies or -1,
+			fight and fight.spell or "-"
 		)
 	)
 end
+-- The fight around a Tombstone for SpecialUnitRules.TombstonePriority (enemies, hitters, teamfightReady, spell).
+function X.TombstoneFight(unit, tombstone)
+	local ready, spell = X.TeamfightSpellReady(unit)
+	return {
+		enemies = #(unit:GetNearbyHeroes(SpecialUnitRules.TOMBSTONE_FIGHT_RANGE, true, BOT_MODE_NONE) or {}),
+		hitters = #(Fu.GetAlliesNearLoc(tombstone:GetLocation(), SpecialUnitRules.TOMBSTONE_HITTER_RANGE) or {}),
+		teamfightReady = ready,
+		spell = spell,
+	}
+end
 -- Tombstone priority (SpecialUnitRules.TombstoneDesire): returns the desire, the Tombstone and its hits left in the
--- priority case, else 0 (the old even-fight rule in the loop below handles the rest). Logs every Tombstone within 1600.
+-- priority case, else 0 (and, when the fight rule turned it down, nil, nil, the desire to use instead and why) (the old even-fight rule in the loop below handles the rest). Logs every Tombstone within 1600.
 function X.GetTombstonePriorityDesire(unit, isRetreating, hpRatio, attackRange)
 	local tombstone, dist, hitsLeft = X.NearestTombstone(unit, 1600)
 	if tombstone == nil then
@@ -432,7 +477,8 @@ function X.GetTombstonePriorityDesire(unit, isRetreating, hpRatio, attackRange)
 	local alliesInRadius = #(Fu.GetAlliesNearLoc(tombstone:GetLocation(), SpecialUnitRules.TOMBSTONE_RADIUS) or {})
 	local alliesNear = #(unit:GetNearbyHeroes(1600, false, BOT_MODE_NONE) or {})
 	local enemiesNear = #(unit:GetNearbyHeroes(1600, true, BOT_MODE_NONE) or {})
-	local desire, priority = SpecialUnitRules.TombstoneDesire(
+	local fight = X.TombstoneFight(unit, tombstone)
+	local desire, priority, why = SpecialUnitRules.TombstoneDesire(
 		dist,
 		attackRange,
 		hitsLeft,
@@ -440,11 +486,15 @@ function X.GetTombstonePriorityDesire(unit, isRetreating, hpRatio, attackRange)
 		alliesNear,
 		enemiesNear,
 		isRetreating,
-		hpRatio
+		hpRatio,
+		fight
 	)
-	X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemiesNear, priority, desire)
+	X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemiesNear, priority, desire, why, fight)
 	if priority then
 		return desire, tombstone, hitsLeft
+	end
+	if why ~= nil then
+		return 0, nil, nil, desire, why
 	end
 	return 0
 end
@@ -456,7 +506,8 @@ function X.PriorityTombstone(unit, isRetreating, hpRatio)
 		return nil
 	end
 	local alliesInRadius = #(Fu.GetAlliesNearLoc(tombstone:GetLocation(), SpecialUnitRules.TOMBSTONE_RADIUS) or {})
-	if SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, isRetreating, hpRatio) then
+	local fight = X.TombstoneFight(unit, tombstone)
+	if SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, isRetreating, hpRatio, fight) then
 		return tombstone, dist, hitsLeft
 	end
 	return nil

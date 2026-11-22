@@ -31,6 +31,62 @@ T.test("tombstone: priority above attack mode when close, nearly dead or allies 
 	T.eq(select(2, R.TombstoneDesire(300, 150, 1, 3, 3, 1, false, 0.2)), false, "never under 25% HP")
 end)
 
+T.test("tombstone: with enemy heroes in the fight only a quick kill comes first", function()
+	local R = rules()
+	-- dist, attackRange, hitsLeft, alliesInRadius, alliesNear, enemiesNear, retreating, hpRatio, fight
+	-- Game 069 37:39: Axe at a full Tombstone (8 hits), 1 hero on it, 4 enemies, Berserker's Call ready: fight.
+	local desire, priority, why =
+		R.TombstoneDesire(300, 150, 8, 3, 3, 4, false, 0.8, { enemies = 4, hitters = 1, teamfightReady = true })
+	T.eq(priority, false, "no priority")
+	T.eq(why, "teamfight-ready", "why=teamfight-ready")
+	T.eq(desire, 0, "he fights")
+	-- Same without the spell: 8s to kill alone -> slow-kill; outnumbered, so the old rule gives 0.
+	desire, priority, why =
+		R.TombstoneDesire(300, 150, 8, 3, 3, 4, false, 0.8, { enemies = 4, hitters = 1, teamfightReady = false })
+	T.eq(priority, false, "no priority")
+	T.eq(why, "slow-kill", "why=slow-kill")
+	T.eq(desire, 0, "behind in the fight: 0")
+	-- Game 068 t=506: Alchemist 1 vs 3, 5 hits, 249 away: 5s alone -> slow-kill.
+	T.eq(
+		select(3, R.TombstoneDesire(249, 150, 5, 1, 1, 3, false, 0.97, { enemies = 3, hitters = 1 })),
+		"slow-kill",
+		"068 t=506 Alchemist"
+	)
+	-- Game 068 t=158: Zeus 2 vs 2, 5 hits, two heroes on it: 2.5s -> priority.
+	T.eq(select(2, R.TombstoneDesire(400, 600, 5, 2, 2, 2, false, 0.9, { enemies = 2, hitters = 2 })), true, "068 Zeus")
+	-- Even fight, slow kill: the old rule, held under attack mode.
+	desire = R.TombstoneDesire(300, 150, 8, 1, 2, 2, false, 0.9, { enemies = 2, hitters = 1 })
+	T.near(desire, R.TOMBSTONE_FIGHT_CAP, 1e-9, "capped at 0.9, under attack mode")
+	-- 3 hits or fewer: priority even with enemies; with a teamfight spell ready only at 2 hits or fewer.
+	T.eq(select(2, R.TombstoneDesire(300, 150, 3, 1, 1, 4, false, 0.8, { enemies = 4, hitters = 1 })), true, "3 hits")
+	T.eq(
+		select(
+			2,
+			R.TombstoneDesire(300, 150, 3, 1, 1, 4, false, 0.8, { enemies = 4, hitters = 1, teamfightReady = true })
+		),
+		false,
+		"3 hits, spell ready: fight"
+	)
+	T.eq(
+		select(
+			2,
+			R.TombstoneDesire(300, 150, 2, 1, 1, 4, false, 0.8, { enemies = 4, hitters = 1, teamfightReady = true })
+		),
+		true,
+		"2 hits, spell ready: kill it"
+	)
+	-- No enemy hero within reach: clear it first as before, spell or not.
+	T.eq(
+		select(
+			2,
+			R.TombstoneDesire(300, 150, 8, 1, 1, 0, false, 0.8, { enemies = 0, hitters = 1, teamfightReady = true })
+		),
+		true,
+		"no enemies: priority"
+	)
+	T.eq(R.TombstoneKillTime(8, 1), 8, "8 hits, 1 hero: 8s at 1 hit per second")
+end)
+
 T.test("tombstone: outside the priority the old even-fight rule", function()
 	local R = rules()
 	local desire, priority = R.TombstoneDesire(800, 600, 6, 1, 2, 2, false, 0.9)
