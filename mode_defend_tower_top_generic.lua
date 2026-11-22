@@ -7,6 +7,10 @@ function GetDesire()
 	end
 	return Defend.GetDefendDesire(bot, LANE_TOP)
 end
+-- #53: our defend movement (high-ground rim, waves, lane defence). Without a Think here Valve's own defend Think ran.
+function Think()
+	Defend.DefendThink(bot, LANE_TOP)
+end
 if SafeCall then
 	local originalGetDesire = GetDesire
 	local originalThink = Think
