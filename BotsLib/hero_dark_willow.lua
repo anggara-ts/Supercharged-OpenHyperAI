@@ -327,6 +327,8 @@ function X.StartShadowRealm(why, target)
 		maxTime = maxTime,
 		duration = duration,
 		tp = "-",
+		-- Deaths at the cast: a higher count later means she died in or right after the realm (#48).
+		deaths = GetHeroDeaths(bot:GetPlayerID()) or 0,
 	}
 	pcall(
 		print,
@@ -344,7 +346,10 @@ end
 -- [OHA-DW] t= dark_willow shadow-realm why=attack|dodge|retreat held= ended= release= tp= dist= mod= invuln=, one
 -- line per realm when it ends. held: seconds from the cast to the release order (attack) or to the end; ended: when
 -- the realm was seen to end (the hit landed; about 5.2 when it ran out, or when the modifier was never seen).
-function X.EndShadowRealm(realm, since)
+-- release=died: she died in the realm or the tick stopped (her think doesn't run while dead); t=, held= and ended=
+-- are then from the last tick she was alive (game 068: the lines printed at respawn, 18-51s late, held=51.10).
+-- endedAt: that time (default now).
+function X.EndShadowRealm(realm, since, endedAt)
 	bot._dwRealm = nil
 	local target = realm.target
 	local dist = -1
@@ -355,7 +360,7 @@ function X.EndShadowRealm(realm, since)
 		print,
 		string.format(
 			"[OHA-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s",
-			DotaTime(),
+			endedAt or DotaTime(),
 			realm.why,
 			realm.releasedAt or since,
 			since,
@@ -462,6 +467,18 @@ function X.ShadowRealmTick()
 		return false
 	end
 	local since = DotaTime() - realm.at
+	-- Dead, a death since the cast, or the realm older than its duration + 1s (the tick missed its end: her think
+	-- does not run while dead): end it at the last tick she was alive, release=died (release=stale when no death
+	-- was counted, e.g. the think stopped for another reason).
+	local deaths = GetHeroDeaths(bot:GetPlayerID()) or 0
+	local died = not bot:IsAlive() or deaths > (realm.deaths or deaths)
+	if died or since > realm.duration + 1 then
+		local last = realm.lastTick or 0
+		realm.released, realm.releasedAt = died and "died" or "stale", realm.releasedAt or last
+		X.EndShadowRealm(realm, last, realm.at + last)
+		return false
+	end
+	realm.lastTick = since
 	local inRealm = bot:HasModifier("modifier_dark_willow_shadow_realm_buff")
 	if inRealm and realm.modSeen == nil then
 		realm.modSeen = since
