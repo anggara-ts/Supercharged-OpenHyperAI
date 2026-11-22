@@ -51,6 +51,10 @@ M.CAST_WALK_MAX = 8
 M.GATE_SETTLE = 2 -- seconds after the warp channel ends before the position is read
 M.GATE_ARRIVED = 1500 -- within this of the other gate counts as arrived
 M.CAPTURE_DIST = 350 -- game 074: the human cast ability_capture from ~395-400
+-- How close the bot walks before the first cast once the ability is there (the abilities stay once given, so a retry
+-- can start with one thousands away). Lamp: cast range 200 (game files, mode_watcher_generic.lua). Warp: unverified
+-- (the human got it ~613 from the gate). Capture: the human cast it from ~395-400 (game 074).
+M.CAST_FROM = { watcher = 150, gate = 300, outpost = M.CAPTURE_DIST }
 M.CAPTURE_SETTLE = 1.5
 M.SCAN_EVERY = 10
 M.SCAN_HEARTBEAT = 120
@@ -229,17 +233,24 @@ function M.PickProbe(members, excludeSlot)
 	return nil
 end
 
--- The outpost try's start: the capture ability is there and an outpost of the other team is capturable.
+-- The outpost try's start: the capture ability is there and an outpost of the other team, one without
+-- modifier_watch_tower_invulnerable first. Game 074 cannot say whether that modifier goes before the capture or
+-- because of it (the human trace saw it gone at t=1471, while the human already walked in to cast), so an
+-- invulnerable one is tried too.
 function M.CanCapture(hasCapture, outposts, ourTeam)
 	if not hasCapture then
 		return nil
 	end
+	local fallback = nil
 	for i, outpost in ipairs(outposts) do
-		if outpost.team ~= ourTeam and not outpost.invulnerable then
-			return i
+		if outpost.team ~= ourTeam then
+			if not outpost.invulnerable then
+				return i
+			end
+			fallback = fallback or i
 		end
 	end
-	return nil
+	return fallback
 end
 
 -- ---------------------------------------------------------------- game side
@@ -521,11 +532,12 @@ local function Summary(s, bot, kind, why)
 		bot,
 		kind,
 		"summary",
-		"result=%s why=%s seenDist=%s cast=%s tries=%d",
+		"result=%s why=%s seenDist=%s cast=%s channel=%s tries=%d",
 		M.Verdict(entry),
 		why or "-",
 		entry.seenDist ~= nil and tostring(math.floor(entry.seenDist)) or "-",
 		entry.castMethod or "-",
+		tostring(entry.channelSeen == true),
 		entry.tries
 	)
 end
@@ -700,6 +712,11 @@ local function NextCast(s, bot, try, now)
 		try.castIdx = (try.castIdx or 0) + 1
 		local method = plan[try.castIdx]
 		if method == nil then
+			-- Against an outpost that still had its invulnerability: not an answer, retried later.
+			if try.kind == "outpost" and try.invAtCast and not try.anyChannel then
+				Abort(s, bot, "invulnerable")
+				return
+			end
 			Close(s, bot, "ability", "no-cast-worked")
 			return
 		end
@@ -721,8 +738,14 @@ local function NextCast(s, bot, try, now)
 				entry:GetCooldownTimeRemaining(),
 				entry:GetChannelTime()
 			)
-			Cast(bot, try, entry, method)
-			return
+			if try.kind == "outpost" and try.unit ~= nil and not try.unit:IsNull() then
+				try.invAtCast = try.invAtCast or try.unit:HasModifier("modifier_watch_tower_invulnerable")
+			end
+			local okCast, castErr = pcall(Cast, bot, try, entry, method)
+			if okCast then
+				return
+			end
+			Line(bot, try.kind, "cast", "method=%s error=%s", method, tostring(castErr))
 		else
 			Close(s, bot, "ability", "handle-lost")
 			return
@@ -749,6 +772,8 @@ end
 
 local function Judge(s, bot, try, now)
 	local entry = s.kinds[try.kind]
+	entry.channelSeen = entry.channelSeen or try.sawChannel
+	try.anyChannel = try.anyChannel or try.sawChannel
 	local ability = try.foundAbility
 	local cd = ability ~= nil and not ability:IsNull() and ability:GetCooldownTimeRemaining() or -1
 	if try.kind == "gate" then
@@ -774,12 +799,13 @@ local function Judge(s, bot, try, now)
 		end
 	elseif try.kind == "outpost" then
 		local team = try.unit ~= nil and not try.unit:IsNull() and try.unit:GetTeam() or -1
-		local captured = team == GetTeam()
+		-- Only the probe bot's own channel counts: once a bot has the ability, ConsiderOutpostCapture lets any bot cast it.
+		local captured = team == GetTeam() and try.sawChannel
 		Line(
 			bot,
 			"outpost",
 			"result",
-			"method=%s channel=%s active=%s capturing=%s team=%d->%d captured=%s cd=%.1f",
+			"method=%s channel=%s active=%s capturing=%s team=%d->%d captured=%s inv=%s cd=%.1f",
 			try.method,
 			tostring(try.sawChannel),
 			tostring(try.sawActive),
@@ -787,8 +813,13 @@ local function Judge(s, bot, try, now)
 			try.team,
 			team,
 			tostring(captured),
+			tostring(try.invAtCast == true),
 			cd
 		)
+		if team == GetTeam() and not captured then
+			Close(s, bot, "ability", "taken-by-another")
+			return
+		end
 		if captured then
 			entry.castMethod = try.method
 			Close(s, bot, "yes", "captured")
@@ -860,12 +891,21 @@ local function Step(s, bot, now)
 			Found(s, bot, try, want.ability, want.how, dist)
 		end
 		try.foundAbility = want.ability
-		-- The outpost cast waits for the capture spot (~350); the others cast as soon as the ability shows.
-		if try.kind ~= "outpost" or try.phase == "dwell" then
-			try.cast = true
-			NextCast(s, bot, try, now)
+		-- Walk in to the cast distance first (straight, no more stops); a blocked walk casts from where it is.
+		local castFrom = M.CAST_FROM[try.kind]
+		if not try.closeIn then
+			try.closeIn = true
+			try.lastPos, try.lastMoveAt = bot:GetLocation(), now
+		end
+		if dist > castFrom + M.STEP_SLACK and not Stuck(bot, try, now) then
+			local here = bot:GetLocation()
+			local x, y = M.ApproachPoint(try.loc.x, try.loc.y, here.x, here.y, castFrom)
+			MoveTo(bot, try, x, y, now)
 			return
 		end
+		try.cast = true
+		NextCast(s, bot, try, now)
+		return
 	end
 	if try.phase == "walk" then
 		local step = try.steps[try.stepIdx]

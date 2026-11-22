@@ -84,16 +84,17 @@ T.test("interact probe: which kind runs next, and when the test is done", functi
 	T.eq(line, "Interaction test done: watcher=yes gate=no outpost=ability", "final chat")
 end)
 
-T.test("interact probe: the capture try needs the ability and an outpost without its invulnerability", function()
+T.test("interact probe: the capture try needs the ability and an outpost of the other team", function()
 	local P = load()
 	local outposts = {
 		{ team = 2, invulnerable = false },
 		{ team = 3, invulnerable = true },
 	}
-	T.eq(P.CanCapture(true, outposts, 2), nil, "ours, and theirs still invulnerable")
+	T.eq(P.CanCapture(true, outposts, 2), 2, "theirs while still invulnerable (unverified rule): tried as a fallback")
+	T.eq(P.CanCapture(true, { { team = 2, invulnerable = false } }, 2), nil, "only ours")
 	T.eq(P.CanCapture(false, { { team = 3, invulnerable = false } }, 2), nil, "no ability")
-	outposts[2].invulnerable = false
-	T.eq(P.CanCapture(true, outposts, 2), 2, "theirs, capturable")
+	outposts[3] = { team = 3, invulnerable = false }
+	T.eq(P.CanCapture(true, outposts, 2), 3, "one without the invulnerability first")
 end)
 
 T.test("interact probe: approach steps and points", function()
