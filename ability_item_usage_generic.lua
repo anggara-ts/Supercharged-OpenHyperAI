@@ -1284,7 +1284,9 @@ function Usage.IsEnemyHeroAroundSecretShop()
 	end
 	return false
 end
-local stashItemSeenTime = {}
+-- When each item name was last seen in a backpack slot (6-8): an item moved from the backpack to the main inventory
+-- is on the swap cooldown for 6s. Usage.UpdateBackpackSeenTime stamps it, Usage.WasInBackpackRecently reads it.
+local backpackSeenTime = {}
 local castRangeBonus = 0
 local unusedCounter = 0
 local enemyHasMonkeyKing = false
@@ -1351,7 +1353,7 @@ end
 -- item think (#52: one table less per bot per think); same slots in the same order.
 Usage.itemThinkSlots = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 16 }
 local function ConsiderItems()
-	Usage.SetStashItemTimeUpdate()
+	Usage.UpdateBackpackSeenTime()
 	-- WD: cash Gris-Gris before other item logic (bypasses CanCastAbility).
 	if Usage.TryConsumeGrisGris and Usage.TryConsumeGrisGris() then
 		return BOT_ACTION_DESIRE_HIGH
@@ -1472,15 +1474,21 @@ local function ConsiderItems()
 				nil,
 				string.format("cd=%.1f", item:GetCooldownTimeRemaining() or -1)
 			)
-		elseif itemName == "item_roshans_banner" and Usage.IsItemInStash(itemName) then
-			Usage.BannerSkip("stash", nil)
+		end
+		-- The backpack swap-cooldown gate is for items moved from the backpack into a main slot. Smoke and the Banner
+		-- are cast from the backpack itself (7.42 game files: "ItemCanBeUsedWithoutInventory" "1" for both), and a
+		-- backpack item is stamped on every think, so the gate always held them back: game 069, Vengeful Spirit kept
+		-- the Banner in slot 7 from 41:21 to the end, 23 x [OHA-BANNER] plant-skip why=stash, no plant (#15).
+		local swapCooldown = not smokeFromBag and itemName ~= nil and Usage.WasInBackpackRecently(itemName)
+		if ready and itemName == "item_roshans_banner" and swapCooldown then
+			Usage.BannerSkip("swap-cooldown", nil)
 		end
 		-- Another player's item can't be used from this inventory (#141).
 		if ready and itemName ~= nil and ForeignItems.Check(bot, item) then
 			ready = false
 		end
 		if ready and itemName ~= nil then
-			if Usage.ConsiderItemDesire[itemName] ~= nil and not Usage.IsItemInStash(itemName) then
+			if Usage.ConsiderItemDesire[itemName] ~= nil and not swapCooldown then
 				local desire, target, castType, castReason = Usage.ConsiderItemDesire[itemName](item)
 				if desire > 0 then
 					local nearbyAllies = Fu.GetAllyList(bot, 1200) or {}
@@ -1588,25 +1596,27 @@ function Usage.IsWithoutSpellShield(unit)
 		and not unit:HasModifier("modifier_item_lotus_orb_active")
 end
 local lastStashCleanTime = -90
-function Usage.SetStashItemTimeUpdate()
+function Usage.UpdateBackpackSeenTime()
 	local now = DotaTime()
 	for slot = 6, 8 do
 		local item = bot:GetItemInSlot(slot)
 		if item ~= nil then
-			stashItemSeenTime[item:GetName()] = now
+			backpackSeenTime[item:GetName()] = now
 		end
 	end
 	if now > lastStashCleanTime + 7.0 then
 		lastStashCleanTime = now
-		for itemName, seenTime in pairs(stashItemSeenTime) do
+		for itemName, seenTime in pairs(backpackSeenTime) do
 			if seenTime ~= nil and seenTime < now - 7.0 then
-				stashItemSeenTime[itemName] = nil
+				backpackSeenTime[itemName] = nil
 			end
 		end
 	end
 end
-function Usage.IsItemInStash(itemName)
-	if stashItemSeenTime[itemName] ~= nil and DotaTime() < stashItemSeenTime[itemName] + 6.05 then
+-- True while an item of that name was in a backpack slot within the last 6.05s (still in the backpack, or moved out
+-- of it and on the swap cooldown).
+function Usage.WasInBackpackRecently(itemName)
+	if backpackSeenTime[itemName] ~= nil and DotaTime() < backpackSeenTime[itemName] + 6.05 then
 		return true
 	end
 	return false
@@ -8010,7 +8020,8 @@ end
 -- per 10s per bot. Game 067: Death Prophet held one in the backpack (slot 7) from t=3548, pushed the barracks and
 -- the base, and no Banner line was printed: every gate returned silently. Gates: hurt, creeps (under
 -- BannerRules.DEFEND_CREEPS of ours within 1600), no-rule (BannerRules.Why: detail names the counts), own-banner,
--- far, not-passable, and in the item loop cooldown / stash / doomed.
+-- far, not-passable, and in the item loop not-ready / doomed / swap-cooldown (a Banner moved from the backpack into a
+-- main slot in the last 6s; game 069's why=stash on every backpack Banner was a bug, #15).
 function Usage.BannerSkip(why, creeps, detail)
 	if DotaTime() < (bot._bannerSkipLogAt or -999) then
 		return
@@ -8253,7 +8264,7 @@ Usage.ConsiderItemDesire["item_roshans_banner"] = function(item)
 		pcall(
 			print,
 			string.format(
-				"[OHA-BANNER] t=%.0f %s plant why=%s building=%s creeps=%d radius=%d at=%.0f,%.0f dist=%.0f mode=%d slot=%d from=%s",
+				"[OHA-BANNER] t=%.0f %s planting why=%s building=%s creeps=%d radius=%d at=%.0f,%.0f dist=%.0f mode=%d slot=%d from=%s",
 				DotaTime(),
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				why,
