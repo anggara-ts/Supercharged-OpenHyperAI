@@ -35,8 +35,8 @@ host's Steam ID and server IPs) and the local test lineup.
 5. **Optional smoke test:** a Local Host lobby with Local Dev Script; `[SHy-BUILD]` shows `commit=release` and the
    release number, the default lineup drafts.
 6. **Upload (the maintainer does it; publishing is outward-facing, never do it yourself):** Dota 2 Workshop Tools →
-   Bot Scripting → create a new bot script or pick the existing one → title, description, preview image →
-   submit. (From Valve's 22 July 2017 patch notes; the menu may have moved since.) The Steam account must not be a
+   Bot Scripting → create a new bot script or pick the existing one → title, description, preview image
+   (`workshop/cover.png`, or the smaller `workshop/cover-512.png`, in the repo) → submit. (From Valve's 22 July 2017 patch notes; the menu may have moved since.) The Steam account must not be a
    limited account.
 7. **After:** leave the copy, or `node tools/export-bots.js --remove`, then `/prepare-game` before the next test
    game.
@@ -45,6 +45,8 @@ Not in the copy on purpose (maintainer's decision, #177): `install/` and docs. T
 the bot scripts only. Our Workshop item is 3843444501 (https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501): update it,
 not a new item.
 
-New Lua files: a committed file under the root, `bots/heroes/`, `bots/lib/` or `bots/customize/` is in the copy
-automatically. A `.lua` file in any other new folder stops the export until the folder is added to
-`RUNTIME_DIRS` or `NOT_RUNTIME_DIRS` in `tools/export-bots.js`.
+New Lua files: a committed `.lua` file under `bots/` is in the copy automatically, at the same path below
+`vscripts/bots`. A `.lua` file outside `bots/` in a new folder stops the export until it moves under `bots/` or
+the folder is added to `NOT_RUNTIME_DIRS` in `tools/export-bots.js`. A release tag from before the layout change
+(#221, e.g. v0.4) has no `bots/` folder: the tool says so; export it with that tag's own `Util/export-bots.js` <!-- restructure:keep -->
+from a worktree of the tag.

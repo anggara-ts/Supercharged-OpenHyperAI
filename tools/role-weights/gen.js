@@ -62,7 +62,9 @@ out = out.replace(/^(--[^\n]*\n)+/, `-- Lookup table: hero pos weights, { pos1 s
 -- always keeps a weight above 50 as a candidate and keeps lower ones with a chance (RandomInt(5, 50)).
 `);
 fs.writeFileSync(target, out);
-fs.writeFileSync(D + "/rows.json", JSON.stringify(rows));
+const LOCAL = path.join(REPO, "local", "role-weights");
+fs.mkdirSync(LOCAL, { recursive: true });
+fs.writeFileSync(path.join(LOCAL, "rows.json"), JSON.stringify(rows));
 for (let p = 0; p < 5; p++) {
   const top = rows.filter(r => r.neu[p] > 50).sort((a, b) => b.neu[p] - a.neu[p]);
   console.log(`pos${p + 1}: ${top.length} always-candidates; top: ${top.slice(0, 12).map(r => r.name + " " + r.neu[p]).join(", ")}`);
