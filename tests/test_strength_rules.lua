@@ -186,7 +186,11 @@ T.test("strength: a window ends on the building, the timeout, deaths, outnumbere
 	local function endWhy(now, over, state)
 		local i = inputs(ahead)
 		for k, v in pairs(over or {}) do
-			i[k] = v
+			if v == NONE then
+				i[k] = nil
+			else
+				i[k] = v
+			end
 		end
 		return R.EndWhy(state or arrived, now, i)
 	end
