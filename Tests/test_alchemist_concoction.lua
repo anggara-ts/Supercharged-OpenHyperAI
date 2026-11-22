@@ -1111,15 +1111,26 @@ T.test("alchemist: no engage brew on a hero allies kill with spells before the t
 	Stub.time = 2001.75
 	X.SkillsComplement()
 	T.eq(state.brewing, false, "no engage brew")
-	T.ok(printedLine("concoction no%-brew why=finish%-hit by=hp%-rate rule=engage .* alliesOn=1 lossRate=333"), "line")
-	-- It stops losing HP: once the rate no longer kills it in time the engage brew starts; its line names the values.
-	for i = 1, 8 do
-		Stub.time = 2001.75 + i * 0.25
-		X.SkillsComplement()
-	end
+	T.ok(
+		printedLine(
+			"concoction no%-brew why=finish%-hit by=hp%-rate rule=engage .* alliesOn=1 byAttack=0 byHit=1 lossRate=333"
+		),
+		"line"
+	)
+	-- The rate rule is for engage starts only: at 30% (max damage kills it) the help brew still starts, with the
+	-- check's values on the start line (no horizon on the kill path).
+	enemy._hp = 300
+	Stub.time = 2002
+	X.SkillsComplement()
 	context.Build = build
-	T.eq(state.brewing, true, "engage brew once it holds")
-	T.ok(printedLine("concoction start why=engage .* alliesOn=1 allyPending=0 lossRate=%d+ horizon=2%.6"), "start line")
+	T.eq(state.brewing, true, "kill path: the help brew starts")
+	T.ok(printedLine("concoction help%-start rule=kill .* allies=1 kind=held"), "help line")
+	T.ok(
+		printedLine(
+			"concoction start why=help .* alliesOn=1 byAttack=0 byHit=1 allyPending=0 lossRate=%d+ horizon=0%.0"
+		),
+		"start line"
+	)
 end)
 
 T.test("alchemist: a stun ready near him throws the brew at 2s (disable-risk)", function()

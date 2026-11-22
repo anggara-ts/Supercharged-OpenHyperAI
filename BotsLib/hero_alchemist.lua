@@ -1014,7 +1014,7 @@ function X.SkillsComplement()
 					or nil
 				print(string.format(
 					"[OHA-ALCHEMIST] t=%.0f concoction start why=%s target=%s dist=%.0f targetHp=%.2f mode=%s range=%.0f"
-						.. " escape=%s alliesOn=%d allyPending=%d lossRate=%.0f horizon=%.1f",
+						.. " escape=%s alliesOn=%d byAttack=%d byHit=%d allyPending=%d lossRate=%.0f horizon=%.1f",
 					DotaTime(),
 					brewWhy,
 					UnitNameOrNone(brewTarget),
@@ -1025,6 +1025,8 @@ function X.SkillsComplement()
 					EscapeNote(brewTarget),
 					-- The finish-hit check of this target (kill and engage starts; -1: not run for it).
 					finish and finish.alliesOn or -1,
+					finish and finish.byAttack or -1,
+					finish and finish.byHit or -1,
 					finish and finish.allyPending or -1,
 					finish and finish.lossRate or -1,
 					finish and finish.horizon or -1
@@ -1236,8 +1238,10 @@ end
 -- spells, no ally's attack target was Clinkz, so the count read 0 and an engage brew started; he died 0.2s into it.
 local ALLY_HIT_RECENT = 1.0
 local ALLY_ON_RANGE = 1200
+-- Returns the count, how many by attack target and how many by recent damage (WasRecentlyDamagedByHero on an
+-- enemy handle is not proven to read: a failed read prints [OHA-ALCHEMIST] ally-hit-read error=, every 30s).
 local function AlliesOnTarget(enemyHero)
-	local count = 0
+	local count, byAttack, byHit = 0, 0, 0
 	for _, allyHero in pairs(Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_NONE) or {}) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -1248,12 +1252,27 @@ local function AlliesOnTarget(enemyHero)
 			local okHit, hitRecently = pcall(function()
 				return enemyHero:WasRecentlyDamagedByHero(allyHero, ALLY_HIT_RECENT)
 			end)
-			if allyHero:GetAttackTarget() == enemyHero or (okHit and hitRecently == true) then
+			if not okHit and DotaTime() >= (bot._alchAllyHitErrAt or -999) then
+				bot._alchAllyHitErrAt = DotaTime() + 30
+				pcall(
+					print,
+					string.format("[OHA-ALCHEMIST] t=%.0f ally-hit-read error=%s", DotaTime(), tostring(hitRecently))
+				)
+			end
+			local attacking = allyHero:GetAttackTarget() == enemyHero
+			local hit = okHit and hitRecently == true
+			if attacking then
+				byAttack = byAttack + 1
+			end
+			if hit then
+				byHit = byHit + 1
+			end
+			if attacking or hit then
 				count = count + 1
 			end
 		end
 	end
-	return count
+	return count, byAttack, byHit
 end
 -- A brew start on a low hero his allies are finishing (ConcoctionRules.AlliesFinishing), for the kill and engage
 -- starts. His allies are counted by AlliesOnTarget. Returns nil when it is not that case (the normal rules decide), "save" (no brew) or "help" (start a
@@ -1438,16 +1457,16 @@ local function AllyPendingDamage(enemyHero)
 end
 -- #34, game 064 (ConcoctionRules.FinishedWithoutBrew): no kill or engage brew on a hero his next hit or our
 -- team's damage on its way kills, whether or not it is running. Game 068 (t=2899): nor on one that, with allies on it
--- (AlliesOnTarget), loses HP fast enough to die before the brew's throw lands (`horizon` seconds: the kill throw
--- for the kill rule, the earliest disable-risk throw for engage), unless it is teleporting or blinking out (that
--- stops the damage). The values are kept for the start line (alliesOn= allyPending= lossRate=).
+-- (AlliesOnTarget), loses HP fast enough to die before the brew's throw lands (`horizon` seconds, engage starts
+-- only: the earliest disable-risk throw), unless it is teleporting or blinking out (that stops the damage). Not on
+-- the kill path: its throw can be 5s away, so one ally's hits would block nearly every kill and help brew. The values are kept for the start line (alliesOn= allyPending= lossRate=).
 -- [OHA-ALCHEMIST] no-brew why=finish-hit by=own-hit|ally-damage|hp-rate, every 5s.
 local function FinishHitStopsBrew(enemyHero, rule, horizon)
 	local health = enemyHero:GetHealth()
 	local ownHit = enemyHero:GetActualIncomingDamage(bot:GetAttackDamage(), DAMAGE_TYPE_PHYSICAL)
 	local ownInReach = GetUnitToUnitDistance(bot, enemyHero) <= bot:GetAttackRange() + 150
 	local allyPending, allyProjectiles, allyHits = AllyPendingDamage(enemyHero)
-	local alliesOn = AlliesOnTarget(enemyHero)
+	local alliesOn, byAttack, byHit = AlliesOnTarget(enemyHero)
 	local escape = EscapeKind(enemyHero)
 	local lossRate = 0
 	if alliesOn > 0 and escape ~= "tp" and escape ~= "blink" then
@@ -1456,6 +1475,8 @@ local function FinishHitStopsBrew(enemyHero, rule, horizon)
 	lastFinishCheck = {
 		target = enemyHero,
 		alliesOn = alliesOn,
+		byAttack = byAttack,
+		byHit = byHit,
 		allyPending = allyPending,
 		lossRate = lossRate,
 		horizon = horizon or 0,
@@ -1470,7 +1491,7 @@ local function FinishHitStopsBrew(enemyHero, rule, horizon)
 			print,
 			string.format(
 				"[OHA-ALCHEMIST] t=%.0f concoction no-brew why=finish-hit by=%s rule=%s target=%s hp=%d hit=%d"
-					.. " inReach=%s allyPending=%d proj=%d hits=%d dist=%.0f escape=%s alliesOn=%d lossRate=%.0f horizon=%.1f",
+					.. " inReach=%s allyPending=%d proj=%d hits=%d dist=%.0f escape=%s alliesOn=%d byAttack=%d byHit=%d lossRate=%.0f horizon=%.1f",
 				DotaTime(),
 				by,
 				rule,
@@ -1484,6 +1505,8 @@ local function FinishHitStopsBrew(enemyHero, rule, horizon)
 				GetUnitToUnitDistance(bot, enemyHero),
 				tostring(escape),
 				alliesOn,
+				byAttack,
+				byHit,
 				lossRate,
 				horizon or 0
 			)
@@ -1527,15 +1550,8 @@ local function AttackKillsFirst(enemyHero, brewTime, maxDamage, rule)
 	end
 	return attackInstead, lethalAfter
 end
--- Seconds from a brew start until its throw lands on this hero (FinishHitStopsBrew): a kill brew is thrown once it
--- brews enough to kill (the formula of AttackKillsFirst, at most the full brew), an engage brew from the earliest
--- disable-risk throw (ConcoctionRules.DISABLE_RISK_AFTER) on; then the cast point and the flight.
-local function KillThrowHorizon(enemyHero, brewTime, maxDamage)
-	local lethalAfter = brewTime
-		* enemyHero:GetHealth()
-		/ math.max(1, enemyHero:GetActualIncomingDamage(maxDamage, DAMAGE_TYPE_PHYSICAL))
-	return math.min(brewTime, lethalAfter) + ConcoctionRules.LandTime(GetUnitToUnitDistance(bot, enemyHero))
-end
+-- Seconds from an engage brew start until its throw lands on this hero (FinishHitStopsBrew): from the earliest
+-- disable-risk throw (ConcoctionRules.DISABLE_RISK_AFTER) on, then the cast point and the flight.
 local function EngageThrowHorizon(enemyHero)
 	return ConcoctionRules.DISABLE_RISK_AFTER + ConcoctionRules.LandTime(GetUnitToUnitDistance(bot, enemyHero))
 end
@@ -1575,7 +1591,7 @@ function X.ConsiderUnstableConcoction()
 				and not enemyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
 				and not enemyHero:HasModifier("modifier_oracle_false_promise_timer")
 				and not enemyHero:HasModifier("modifier_item_solar_crest_armor_addition")
-				and not FinishHitStopsBrew(enemyHero, "kill", KillThrowHorizon(enemyHero, brewTime, maxDamage))
+				and not FinishHitStopsBrew(enemyHero, "kill")
 				and not EscapeStopsBrew(enemyHero, "kill")
 			then
 				-- #34: the damage grows with the brew time, so the kill needs this many seconds of brewing.
