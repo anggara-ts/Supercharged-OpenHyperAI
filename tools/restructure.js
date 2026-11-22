@@ -501,7 +501,7 @@ function migrateBranch(args) {
 	if (!branch) throw new Error("not on a branch");
 	const main = args.main || "origin/main";
 	if (!args.main) git(["fetch", "--quiet", "origin"]);
-	const added = git(["log", "--format=%H", "--diff-filter=A", main, "--", SELF_DEST]).split(/\r?\n/).filter(Boolean);
+	const added = git(["log", "--no-renames", "--format=%H", "--diff-filter=A", main, "--", SELF_DEST]).split(/\r?\n/).filter(Boolean);
 	if (added.length === 0) throw new Error(`${main} has no ${SELF_DEST} yet: nothing to migrate to`);
 	const n0 = added[added.length - 1];
 	const lastOld = git(["rev-parse", `${n0}^1`]);
