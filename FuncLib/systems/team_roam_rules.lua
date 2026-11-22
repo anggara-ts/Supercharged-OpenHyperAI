@@ -188,18 +188,35 @@ end
 --                     TOMBSTONE_EXEMPT_RETREAT. Game 067: 11 of 12 cap lines cut a Tombstone's 0.98 to 0.12-0.65,
 --                     e.g. t=2185 Zeus (hp 0.98, retreat 0.39, 3 allies vs 4 enemies), and those Tombstones were
 --                     never hit; where it was not cut (t=3342-3347) it went from 8 hits left to 1 in 5s.
+--   "tombstone-hold"  the same Tombstone after retreat passed TOMBSTONE_EXEMPT_RETREAT, while the bot is above
+--                     TOMBSTONE_HOLD_HP: for TOMBSTONE_HOLD_TIME from the start of the exemption (exemptFor), and
+--                     longer while it has TOMBSTONE_HOLD_HITS hits or fewer left (hitsLeft). Game 068 8:26, 16:55,
+--                     21:29: the exemption lasted ~1s before retreat passed 0.5 and re-capped it; then retreat
+--                     took over and the bot landed at most one hit (t=506 Alchemist hp 0.97, retreat 0.32 -> 0.60
+--                     at 507, 1 ally vs 3, the Tombstone 5 -> 4 hits and left).
+--   exemptFor: seconds since this bot's Tombstone exemption started (nil when none is running); hitsLeft: the
+--   Tombstone's hits left (nil when unknown).
 Rules.TOMBSTONE_EXEMPT_HP = 0.25
 Rules.TOMBSTONE_EXEMPT_RETREAT = 0.5
-function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, retreatDesire)
+Rules.TOMBSTONE_HOLD_HP = 0.4
+Rules.TOMBSTONE_HOLD_TIME = 2
+Rules.TOMBSTONE_HOLD_HITS = 2
+function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, retreatDesire, exemptFor, hitsLeft)
 	if specialWhy == "serpent-escape" then
 		return "serpent-escape"
 	end
-	if
-		tombstonePriority == true
-		and (hp or 0) > Rules.TOMBSTONE_EXEMPT_HP
-		and (retreatDesire or 0) < Rules.TOMBSTONE_EXEMPT_RETREAT
-	then
+	if tombstonePriority ~= true then
+		return nil
+	end
+	if (hp or 0) > Rules.TOMBSTONE_EXEMPT_HP and (retreatDesire or 0) < Rules.TOMBSTONE_EXEMPT_RETREAT then
 		return "tombstone"
+	end
+	if
+		exemptFor ~= nil
+		and (hp or 0) > Rules.TOMBSTONE_HOLD_HP
+		and (exemptFor < Rules.TOMBSTONE_HOLD_TIME or hitsLeft ~= nil and hitsLeft <= Rules.TOMBSTONE_HOLD_HITS)
+	then
+		return "tombstone-hold"
 	end
 	return nil
 end

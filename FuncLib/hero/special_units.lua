@@ -17,6 +17,7 @@ function X.GetDesire(thinkingBot)
 	end
 	bot.special_unit_target = nil
 	bot._tombstonePriority = false
+	bot._tombstoneHitsLeft = nil
 	local health = bot:GetHealth()
 	local botHpRatio = hpRatio
 	local botLocation = bot:GetLocation()
@@ -48,10 +49,13 @@ function X.GetDesire(thinkingBot)
 	-- Undying's Tombstone first when it is close, nearly dead or our heroes stand in it (#185): before the loop, so a
 	-- zombie or another unit earlier in the list can't return first. Team roam keeps this desire uncapped.
 	do
-		local tombstoneDesire, tombstone = X.GetTombstonePriorityDesire(bot, isRetreating, hpRatio, attackRange)
+		local tombstoneDesire, tombstone, tombstoneHits =
+			X.GetTombstonePriorityDesire(bot, isRetreating, hpRatio, attackRange)
 		if tombstoneDesire > 0 and Fu.IsValid(tombstone) then
 			bot.special_unit_target = tombstone
 			bot._tombstonePriority = true
+			-- Team roam holds its cap exemption while few hits are left (RoamRules.SpecialUnitCapExempt).
+			bot._tombstoneHitsLeft = tombstoneHits
 			return tombstoneDesire
 		end
 	end
@@ -418,8 +422,8 @@ function X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemies
 		)
 	)
 end
--- Tombstone priority (SpecialUnitRules.TombstoneDesire): returns the desire and the Tombstone in the priority case,
--- else 0 (the old even-fight rule in the loop below handles the rest). Logs every Tombstone within 1600.
+-- Tombstone priority (SpecialUnitRules.TombstoneDesire): returns the desire, the Tombstone and its hits left in the
+-- priority case, else 0 (the old even-fight rule in the loop below handles the rest). Logs every Tombstone within 1600.
 function X.GetTombstonePriorityDesire(unit, isRetreating, hpRatio, attackRange)
 	local tombstone, dist, hitsLeft = X.NearestTombstone(unit, 1600)
 	if tombstone == nil then
@@ -440,7 +444,7 @@ function X.GetTombstonePriorityDesire(unit, isRetreating, hpRatio, attackRange)
 	)
 	X.LogTombstone(unit, hitsLeft, tombstone, dist, alliesInRadius, enemiesNear, priority, desire)
 	if priority then
-		return desire, tombstone
+		return desire, tombstone, hitsLeft
 	end
 	return 0
 end

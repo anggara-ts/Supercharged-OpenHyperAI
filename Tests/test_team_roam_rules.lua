@@ -118,6 +118,20 @@ T.test("team roam rules: a priority Tombstone is not capped while the bot is hea
 	T.eq(R.SpecialUnitCapExempt("serpent-escape", nil, 0.1, 0.9), "serpent-escape", "serpent escape kept")
 end)
 
+T.test("team roam rules: a started Tombstone exemption holds 2s, and to the last hits", function()
+	local R = rules()
+	-- Game 068 t=506-507: Alchemist hp 0.96, retreat 0.32 -> 0.60, 1 ally vs 3, Tombstone 5 -> 4 hits: re-capped at 1s.
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.96, 0.60, nil, 4), nil, "no run started: capped as before")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.96, 0.60, 1.0, 4), "tombstone-hold", "1s into the run: held")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.96, 0.60, 2.5, 4), nil, "after 2s with 4 hits left: capped")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.96, 0.60, 2.5, 2), "tombstone-hold", "2 hits left: finish it")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.38, 0.60, 1.0, 1), nil, "under 40% HP: no hold")
+	T.eq(R.SpecialUnitCapExempt(nil, false, 0.96, 0.60, 1.0, 1), nil, "no priority: no hold")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.96, 0.30, 5.0, 4), "tombstone", "retreat under 0.5: the plain exemption")
+	local d = R.SpecialUnitCap(0.98, 1, 3, 0.60, R.SpecialUnitCapExempt(nil, true, 0.96, 0.60, 1.0, 4) ~= nil)
+	T.eq(d, 0.98, "held: the desire stays 0.98")
+end)
+
 T.test("team roam rules: which modes the overlay can hold, and the snipe's path", function()
 	local R = rules()
 	for _, mode in ipairs({ "laning", "farm", "push_tower_mid", "assemble", "rune", "ward", "roshan", "team_roam" }) do
