@@ -2,10 +2,11 @@
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 -- Kiting lives there now, shared with the per-think hook for heroes on Valve's attack mode.
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
-local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
 local AttackHelpers = {}
-local isolatedLoggedId, isolatedLogAt = nil, -999
 local bot = GetBot()
+-- #227: the team danger map (isolated-target bonus).
+local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
+local isolatedLoggedId, isolatedLogAt = nil, -999
 local attackTarget = { unit = nil, id = -1, location = nil, locationFuture = nil, hidden1 = false, hidden2 = false }
 local attackRange, hpRatio, botHealth, attackDamage, unused, botLocation, botName
 local skipNextDesire = false

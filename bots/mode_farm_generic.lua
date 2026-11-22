@@ -13,10 +13,11 @@ local CustomizeGeneral = require(GetScriptDirectory() .. "/customize/general")
 local FarmDefend = require(GetScriptDirectory() .. "/lib/systems/farm_defend")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local FarmRules = require(GetScriptDirectory() .. "/lib/systems/farm_rules")
-local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
 local bot = GetBot()
 local FarmMode = {}
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+-- #227: the team danger map (no solo farm where 3+ enemies could arrive).
+local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
 local radiantBaseLocation = Vector(-7174.000000, -6671.00000, 0.000000)
 local direBaseLocation = Vector(7023.000000, 6450.000000, 0.000000)
 local botName = bot:GetUnitName()
