@@ -98,6 +98,14 @@ function LargoRules.CountsAsNoCast(castWentOut, blockedWhy, escaping)
 	return blockedWhy ~= "cooldown"
 end
 
+-- Heal thresholds (#198, maintainer game 071): under HEAL_URGENT the heal beats every song; outside a fight it tops
+-- the group up while the lowest ally is under TOP_UP_HP or the group misses TOP_UP_STRUMS strums of healing, with
+-- TOP_UP_MP mana or more.
+LargoRules.HEAL_URGENT = 0.35
+LargoRules.TOP_UP_HP = 0.8
+LargoRules.TOP_UP_STRUMS = 3
+LargoRules.TOP_UP_MP = 0.4
+
 -- Which songs to play. s (all optional):
 --   enemies     enemy heroes inside the song radius (800)
 --   fighting    Largo or an ally inside the radius is fighting (going on someone, or a team fight)
@@ -122,12 +130,32 @@ function LargoRules.ChooseSongs(s)
 			reasons[song] = why
 		end
 	end
-	if hurtHp < 0.3 then
+	-- Good Vibrations by the group's need (game 071 ~26:00: allies at 60-75% got no heal). strumsNeeded: strums to top
+	-- the group up (missing HP / (heal per strum x heroes healed)).
+	local perStrum = (s.healPerStrum or 0) * math.max(1, s.healCount or 0)
+	local strumsNeeded = perStrum > 0 and (s.missing or 0) / perStrum or 0
+	local inFight = enemies >= 1 and s.fighting or s.objective
+	if hurtHp < LargoRules.HEAL_URGENT then
+		-- Someone is about to die: beats the run song too.
 		offer("vibes", 3, "hurt")
-	elseif hurtHp < 0.5 then
-		offer("vibes", 2.2, "hurt")
-	elseif hurtHp < 0.75 and (s.fighting or s.escaping or s.objective) then
-		offer("vibes", 1.8, "hurt")
+	elseif inFight then
+		if hurtHp < 0.5 then
+			offer("vibes", 2.2, "hurt")
+		elseif (s.under65 or 0) >= 2 then
+			offer("vibes", 2.1, "group-hurt")
+		elseif hurtHp < 0.75 then
+			offer("vibes", 1.8, "hurt")
+		end
+	elseif s.escaping then
+		if hurtHp < 0.75 then
+			offer("vibes", 1.8, "hurt")
+		end
+	elseif
+		(s.mpRatio or 0) >= LargoRules.TOP_UP_MP
+		and (hurtHp < LargoRules.TOP_UP_HP or strumsNeeded >= LargoRules.TOP_UP_STRUMS)
+	then
+		-- After a fight: top the group up while the mana lasts, stop when it is full.
+		offer("vibes", 1.5, "top-up")
 	end
 	if s.escaping then
 		offer("time", 2.5, "escape")
@@ -165,12 +193,18 @@ end
 
 -- Whether to end the song now: "mana" (not enough mana for one song), "no-cast" (noCastBeats beats in a row with no
 -- song going out), "idle" (no reason to sing for holdSeconds), or nil to keep singing.
-function LargoRules.ToggleOffReason(now, lastReasonAt, canAffordSong, holdSeconds, noCastBeats)
+-- silentFor: seconds he could strum and gave no song order (game 071 23:10: a song on for 6s with nothing played);
+-- "silent" after SILENT_AFTER.
+LargoRules.SILENT_AFTER = 1.6
+function LargoRules.ToggleOffReason(now, lastReasonAt, canAffordSong, holdSeconds, noCastBeats, silentFor)
 	if not canAffordSong then
 		return "mana"
 	end
 	if (noCastBeats or 0) >= LargoRules.NO_CAST_BEATS then
 		return "no-cast"
+	end
+	if (silentFor or 0) >= LargoRules.SILENT_AFTER then
+		return "silent"
 	end
 	if now - lastReasonAt >= (holdSeconds or LargoRules.TOGGLE_OFF_AFTER) then
 		return "idle"
@@ -240,9 +274,14 @@ end
 --   Below BREAK_STACKS stacks only (little to lose): a stomp on 2 heroes, a pull of the enemy into our fight (Largo's
 --   chase lick with an ally near, or an engage lick).
 LargoRules.BREAK_STACKS = 3
-function LargoRules.BreakSongFor(reason, stacks, count, alliesNear)
+-- songHasReason false: no song is worth playing now (no one hurt, no enemy in the radius, no escape), so any play
+-- beats the idle song (game 071 23:10).
+function LargoRules.BreakSongFor(reason, stacks, count, alliesNear, songHasReason)
 	if reason == nil then
 		return false
+	end
+	if songHasReason == false then
+		return true
 	end
 	if reason == "kill" or reason == "ally-save" or reason == "channel" or string.find(reason, "^ally%-dispel") then
 		return true

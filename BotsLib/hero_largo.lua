@@ -204,6 +204,11 @@ function X.SkillsComplement()
 	local isSinging = X.TrackRhapsody(now)
 	local canUseAbility = not Fu.CanNotUseAbility(bot)
 	local canStrum = isSinging and X.CanStrum()
+	if isSinging and not canStrum then
+		-- He can't strum at all (a stun, Winter's Curse, a hex...): the silent-song clock waits for him.
+		rhapsody.ableSince = nil
+		X.LogStrumSkip(X.StrumBlockState(), "")
+	end
 	if not canUseAbility and not canStrum then
 		return
 	end
@@ -328,6 +333,11 @@ local ENEMY_DISPELS = {
 	"modifier_abaddon_aphotic_shield",
 }
 function X.AllyDispelModifier(allyHero, allyIsGoingOnSomeone, allyIsRetreating)
+	-- A rooted ally that runs, or can't reach its target (game 071 23:10). Most roots are basic-dispellable; which
+	-- ones are not is not checked here (unverified per root).
+	if allyHero:IsRooted() and (allyIsRetreating or not allyIsGoingOnSomeone) then
+		return "rooted"
+	end
 	for _, entry in ipairs(ALLY_DISPELS) do
 		local name, when = entry[1], entry[2]
 		if Fu.GetModifierTime(allyHero, name) > 2 then
@@ -575,6 +585,23 @@ function X.ConsiderFrogstomp(onceShown)
 			and enemyHero:IsChanneling()
 		then
 			return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation(), "channel", 1
+		end
+	end
+	-- Rooted (game 071 23:10): stomp the enemy hero in range that hits him.
+	if bot:IsRooted() then
+		for _, enemyHero in pairs(nearbyEnemies) do
+			if
+				Fu.IsValidHero(enemyHero)
+				and Fu.CanBeAttacked(enemyHero)
+				and Fu.IsInRange(bot, enemyHero, castRange)
+				and Fu.CanCastOnNonMagicImmune(enemyHero)
+				and not Fu.IsSuspiciousIllusion(enemyHero)
+			then
+				local targetLocation = Fu.GetCorrectLoc(enemyHero, landDelay)
+				if GetUnitToLocationDistance(bot, targetLocation) <= castRange then
+					return BOT_ACTION_DESIRE_HIGH, targetLocation, "rooted", 1, enemyHero
+				end
+			end
 		end
 	end
 	-- Fights (#198): the spot that catches two or more heroes, else Largo's target where it will be when the froglings
@@ -845,6 +872,45 @@ end
 -- Strumming needs no free action slot or finished cast (the songs are instant, DOTA_ABILITY_BEHAVIOR_IMMEDIATE in
 -- the game file), only a Largo who can cast at all. Not while channeling: the songs have no IGNORE_CHANNEL, a strum
 -- would break a TP.
+-- What stops every strum now, for strum-skip why=.
+function X.StrumBlockState()
+	if not bot:IsAlive() then
+		return "dead"
+	end
+	if bot:IsChanneling() then
+		return "channeling"
+	end
+	if bot:HasModifier("modifier_winter_wyvern_winters_curse") then
+		return "winters-curse"
+	end
+	if bot:IsStunned() then
+		return "stunned"
+	end
+	if bot:IsHexed() then
+		return "hexed"
+	end
+	if bot:IsNightmared() then
+		return "nightmared"
+	end
+	if bot:IsSilenced() then
+		return "silenced"
+	end
+	return "other"
+end
+-- strum-skip: at most one line per reason a second (a beat).
+function X.LogStrumSkip(why, extra)
+	LogLargo(
+		"skip:" .. why,
+		1,
+		"strum-skip why=%s %s rooted=%s song=%s since-on=%.1f",
+		why,
+		extra or "",
+		Bool(bot:IsRooted()),
+		rhapsody.first,
+		DotaTime() - rhapsody.onAt
+	)
+end
+
 function X.CanStrum()
 	return bot:IsAlive()
 		and not bot:IsChanneling()
@@ -878,6 +944,13 @@ function X.RhapsodySituation(radius)
 		chasing = false,
 		objective = false,
 		double = amphibianRhapsodyAbility:GetSpecialValueInt("double_song") > 0,
+		-- The group's heal need (game 071 ~26:00): missing HP of the healable heroes in the radius, how many of them
+		-- miss HP, how many are under 65%, what one strum heals each (heal_burst 30/55/80, datafeed hero_id=155).
+		missing = 0,
+		healCount = 0,
+		under65 = 0,
+		healPerStrum = goodVibrationsAbility:GetSpecialValueInt("heal_burst"),
+		mpRatio = Fu.GetMP(bot),
 	}
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -905,12 +978,15 @@ function X.RhapsodySituation(radius)
 			and not allyHero:HasModifier("modifier_teleporting")
 		then
 			local allyHp = Fu.GetHP(allyHero)
-			if
-				allyHp < situation.hurtHp
-				and X.IsGoodToHeal(allyHero)
-				and (allyHero:WasRecentlyDamagedByAnyHero(4.0) or situation.enemies > 0)
-			then
-				situation.hurtHp = allyHp
+			if X.IsGoodToHeal(allyHero) then
+				situation.hurtHp = math.min(situation.hurtHp, allyHp)
+				if allyHp < 0.95 then
+					situation.missing = situation.missing + allyHero:GetMaxHealth() - allyHero:GetHealth()
+					situation.healCount = situation.healCount + 1
+				end
+				if allyHp < 0.65 then
+					situation.under65 = situation.under65 + 1
+				end
 			end
 			local allyTarget = Fu.GetProperTarget(allyHero)
 			if allyHero ~= bot and Fu.IsGoingOnSomeone(allyHero) then
@@ -983,6 +1059,11 @@ end
 function X.TrackRhapsody(now)
 	local isOn = bot:HasModifier(RHAPSODY_MODIFIER)
 	local stacks = Fu.GetModifierCount(bot, GROOVIN_MODIFIER)
+	-- No think of ours reached Largo for a while (another order owned the item think).
+	if isOn and rhapsody.on and rhapsody.lastThinkAt ~= nil and now - rhapsody.lastThinkAt > 0.5 then
+		X.LogStrumSkip("no-think", string.format("gap=%.1f", now - rhapsody.lastThinkAt))
+	end
+	rhapsody.lastThinkAt = now
 	if isOn and not rhapsody.on then
 		rhapsody.on = true
 		rhapsody.onAt = now
@@ -992,6 +1073,7 @@ function X.TrackRhapsody(now)
 		rhapsody.pending = nil
 		rhapsody.strums, rhapsody.hits, rhapsody.reanchors, rhapsody.noCast = 0, 0, 0, 0
 		rhapsody.missStreak = 0
+		rhapsody.ableSince = nil
 		-- Settles what the game files can't: are the basic abilities hidden during the song, are the songs
 		-- unhidden, trained and castable.
 		local song = songByKey[rhapsody.first] or fightSongAbility
@@ -1135,9 +1217,7 @@ function X.CheckStrum(now, stacks)
 	if pending.cast then
 		rhapsody.noCast = 0
 	elseif LargoRules.CountsAsNoCast(false, nil, X.IsEscaping()) then
-		if LargoRules.CountsAsNoCast(false, blocked, X.IsEscaping()) then
-			rhapsody.noCast = rhapsody.noCast + 1
-		end
+		rhapsody.noCast = rhapsody.noCast + 1
 	end
 	local reanchor = "no"
 	if LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits, rhapsody.missStreak) then
@@ -1185,7 +1265,7 @@ function X.CheckStrum(now, stacks)
 end
 
 -- The Lick or Frogstomp to end the song for, or nil: "lick" | "stomp", its target, the spell's reason.
-function X.SongBreakPlay()
+function X.SongBreakPlay(songHasReason)
 	local stacks = Fu.GetModifierCount(bot, GROOVIN_MODIFIER)
 	local alliesNear = 0
 	for _, allyHero in pairs(nearbyAllies) do
@@ -1199,11 +1279,11 @@ function X.SongBreakPlay()
 		end
 	end
 	local lickDesire, lickTarget, lickWhy = X.ConsiderCatchLick(true)
-	if lickDesire > 0 and LargoRules.BreakSongFor(lickWhy, stacks, 1, alliesNear) then
+	if lickDesire > 0 and LargoRules.BreakSongFor(lickWhy, stacks, 1, alliesNear, songHasReason) then
 		return "lick", lickTarget, lickWhy
 	end
 	local stompDesire, _, stompWhy, stompCount, stompTarget = X.ConsiderFrogstomp(true)
-	if stompDesire > 0 and LargoRules.BreakSongFor(stompWhy, stacks, stompCount, alliesNear) then
+	if stompDesire > 0 and LargoRules.BreakSongFor(stompWhy, stacks, stompCount, alliesNear, songHasReason) then
 		return "stomp", stompTarget, stompWhy
 	end
 	return nil, nil, nil
@@ -1212,19 +1292,36 @@ end
 -- While the song is on: pick the songs, end the song when there is nothing to sing for, strum on the beat.
 -- Returns whether it gave an order.
 function X.RhapsodyThink(now)
-	local first, second, why =
-		LargoRules.ChooseSongs(X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius")))
+	local situation = X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius"))
+	local first, second, why = LargoRules.ChooseSongs(situation)
 	if first ~= nil then
 		rhapsody.lastReasonAt = now
 		if first ~= rhapsody.first or second ~= rhapsody.second then
-			LogLargo("song", 2, "song-change song=%s second=%s why=%s", first, tostring(second), why)
+			LogLargo(
+				"song",
+				2,
+				"song-change song=%s second=%s why=%s missing=%d lowest=%.2f healers=%d under65=%d enemies=%d mp=%.2f",
+				first,
+				tostring(second),
+				why,
+				situation.missing,
+				situation.hurtHp,
+				situation.healCount,
+				situation.under65,
+				situation.enemies,
+				situation.mpRatio
+			)
 		end
 		rhapsody.first, rhapsody.second, rhapsody.why = first, second, why
 	end
+	if rhapsody.ableSince == nil then
+		rhapsody.ableSince = now
+	end
 	-- A Catchy Lick or Frogstomp worth more than the song (game 071, maintainer): end the song for it. The spells show
 	-- again once the song is off and the normal rules cast them; the toggle-on rule starts the song again after.
+	-- With no song worth playing now, any Lick or Frogstomp play beats a disarmed, idle song (game 071 23:10).
 	if Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
-		local play, playTarget, playWhy = X.SongBreakPlay()
+		local play, playTarget, playWhy = X.SongBreakPlay(first ~= nil)
 		if play ~= nil then
 			rhapsody.toggleOrderAt = now
 			LogLargo(
@@ -1250,7 +1347,8 @@ function X.RhapsodyThink(now)
 		rhapsody.lastReasonAt,
 		bot:GetMana() >= firstSong:GetManaCost(),
 		LargoRules.TOGGLE_OFF_AFTER,
-		rhapsody.noCast
+		rhapsody.noCast,
+		X.IsEscaping() and 0 or now - rhapsody.ableSince
 	)
 	if offWhy ~= nil and Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
 		rhapsody.toggleOrderAt = now
@@ -1280,10 +1378,17 @@ function X.RhapsodyThink(now)
 	if beatTime == nil then
 		return false
 	end
+	-- Beats that went by with no think reaching here (game 071 23:10: 6s of song with no strum line at all).
+	local missedBeats = math.floor((beatTime - rhapsody.lastBeat) / LargoRules.BEAT + 0.5) - 1
+	if missedBeats >= 1 then
+		X.LogStrumSkip("beat-gap", string.format("missed=%d", missedBeats))
+	end
 	rhapsody.lastBeat = beatTime
 	local blocked = X.SongBlockReason(firstSong)
 	if blocked ~= nil then
-		rhapsody.noCast = rhapsody.noCast + 1
+		if LargoRules.CountsAsNoCast(false, blocked, X.IsEscaping()) then
+			rhapsody.noCast = rhapsody.noCast + 1
+		end
 		LogLargo(
 			"strum-blocked",
 			3,
@@ -1329,6 +1434,7 @@ function X.RhapsodyThink(now)
 	end
 	bot:ActionPush_UseAbility(firstSong)
 	rhapsody.pending.via = X.HoldForStrum(now)
+	rhapsody.ableSince = now
 	return true
 end
 return X

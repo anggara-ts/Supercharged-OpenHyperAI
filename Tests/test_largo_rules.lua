@@ -75,7 +75,36 @@ T.test("largo: which song", function()
 	T.eq(pick({ chasing = true }), "time/nil/chase", "a chase")
 	T.eq(pick({ enemies = 1, fighting = true, chasing = true }), "fight/nil/fight", "a fight beats a chase")
 	T.eq(pick({ objective = true }), "fight/nil/objective", "Roshan / Tormentor")
-	T.eq(pick({ hurtHp = 0.7 }), "nil/nil/nil", "70% and nothing going on: no song")
+	T.eq(pick({ hurtHp = 0.7 }), "nil/nil/nil", "70% with no mana known: no song")
+	T.eq(pick({ escaping = true, hurtHp = 0.34 }), "vibes/nil/hurt", "under 35% beats the run song")
+end)
+
+T.test("largo: the heal follows the group's need (game 071 ~26:00)", function()
+	local R = load()
+	local function pick(s)
+		local first, second, why = R.ChooseSongs(s)
+		return tostring(first) .. "/" .. tostring(second) .. "/" .. tostring(why)
+	end
+	-- 25:40-25:50: allies at 60-75%, Largo with 758-861 mana (about 80%), Island Elixir heals 55 a strum (level 2).
+	local group = { hurtHp = 0.6, missing = 1600, healCount = 4, under65 = 2, healPerStrum = 55, mpRatio = 0.8 }
+	local function with(over)
+		local o = {}
+		for k, v in pairs(group) do
+			o[k] = v
+		end
+		for k, v in pairs(over) do
+			o[k] = v
+		end
+		return o
+	end
+	T.eq(pick(with({ enemies = 2, fighting = true })), "vibes/nil/group-hurt", "a fight, two allies under 65%")
+	T.eq(pick(with({ enemies = 2, fighting = true, under65 = 1, hurtHp = 0.7 })), "fight/nil/fight", "one ally at 70%")
+	T.eq(pick(with({ escaping = true })), "time/nil/escape", "an escape at 60%: run")
+	T.eq(pick(with({ escaping = true, double = true })), "time/vibes/escape+hurt", "Scepter: run and heal")
+	T.eq(pick(with({})), "vibes/nil/top-up", "after the fight: top the group up")
+	T.eq(pick(with({ hurtHp = 0.85, missing = 400 })), "nil/nil/nil", "everyone above 80%, under 3 strums missing")
+	T.eq(pick(with({ hurtHp = 0.82, missing = 900 })), "vibes/nil/top-up", "above 80% but 4 strums missing")
+	T.eq(pick(with({ mpRatio = 0.3 })), "nil/nil/nil", "30% mana: keep it for the fight")
 end)
 
 T.test("largo: the song ends only after a few seconds with no reason, or with no mana", function()
@@ -86,6 +115,8 @@ T.test("largo: the song ends only after a few seconds with no reason, or with no
 	T.eq(R.ToggleOffReason(10, 10, false, 3), "mana", "no mana for one song")
 	T.eq(R.ToggleOffReason(10, 10, true, 3, 2), nil, "two beats with no song out: keep trying")
 	T.eq(R.ToggleOffReason(10, 10, true, 3, 3), "no-cast", "three beats with no song out: stop, he is disarmed")
+	T.eq(R.ToggleOffReason(10, 10, true, 3, 0, 1.2), nil, "1.2s free with no order: the next beat comes")
+	T.eq(R.ToggleOffReason(10, 10, true, 3, 0, 1.6), "silent", "1.6s free with no order: no silent song")
 	T.ok(R.CanStartSong(105, 35, 1, 3), "3 beats of a 35 song")
 	T.ok(not R.CanStartSong(104, 35, 1, 3), "not quite 3 beats")
 	T.ok(not R.CanStartSong(150, 35, 2, 3), "Scepter: 3 beats of two songs")
@@ -160,6 +191,10 @@ T.test("largo: end the song only for a clearly better Lick or Frogstomp", functi
 	T.ok(not R.BreakSongFor("harass", 0, 1, 0), "lane harass: no")
 	T.ok(not R.BreakSongFor("enemy-dispel:ursa_overpower", 0, 1, 2), "an enemy dispel: no")
 	T.ok(not R.BreakSongFor(nil, 0, 0, 0), "nothing")
+	T.ok(R.BreakSongFor("rooted", 5, 1, 0, false), "no song worth playing: any play (game 071 23:10)")
+	T.ok(R.BreakSongFor("fight-target", 5, 1, 0, false), "no song worth playing: a one-hero stomp too")
+	T.ok(not R.BreakSongFor("fight-target", 5, 1, 0, true), "a song worth playing: not for a one-hero stomp")
+	T.ok(not R.BreakSongFor(nil, 0, 0, 0, false), "no play at all")
 end)
 
 -- The level-up list from the hero file with the real ability slots (Tests/data/hero_abilities.lua).
