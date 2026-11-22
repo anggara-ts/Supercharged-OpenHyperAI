@@ -35,6 +35,7 @@ local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_t
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local AboutRules = require(GetScriptDirectory() .. "/FuncLib/systems/about_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -874,6 +875,18 @@ function Usage.SetReplyHumanTime(chatEvent)
 		end
 		return
 	end
+	-- `!about` (#215): the team's first bot answers it from its own think (Usage.AnswerAboutRequest); no chat reply.
+	if AboutRules.IsCommand(chatText) then
+		AboutRules.Note(
+			Fu.Role,
+			chatText,
+			IsPlayerBot(senderPlayerId),
+			chatEvent.team_only,
+			Fu.Role.IsAllyMemberID(senderPlayerId),
+			GameTime()
+		)
+		return
+	end
 	if chatText ~= "-都来守家" or Fu.Role.IsAllyMemberID(senderPlayerId) then
 		Fu.Role.SetLastChatString(chatText)
 	end
@@ -912,11 +925,51 @@ local function BuybackSkipLog(why, ancientHp, remaining)
 	bot._buybackSkipLogAt = DotaTime()
 	BuybackLog("skip", why, ancientHp, remaining)
 end
+-- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version ([OHA-BUILD]'s,
+-- from Customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
+-- think, which also runs while the hero is dead; FuncLib/systems/about_rules.lua has the rules.
+function Usage.AnswerAboutRequest()
+	if
+		Fu.Role.AboutRequest == nil
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or bot:GetPlayerID() ~= AboutRules.FirstBotId(GetTeamPlayers(GetTeam()), IsPlayerBot)
+	then
+		return
+	end
+	local result, request = AboutRules.Decide(Fu.Role, GameTime())
+	if result == "none" then
+		return
+	end
+	local versionOk, versionModule = pcall(require, GetScriptDirectory() .. "/Customize/version")
+	local version = AboutRules.VersionOf(versionOk and versionModule or nil)
+	local said = "-"
+	if result == "answer" then
+		local line = AboutRules.Line(Localization.Get("say_about"), version)
+		said = pcall(function()
+			bot:ActionImmediate_Chat(line, request.allChat == true)
+		end) and "yes" or "error"
+	end
+	print(
+		string.format(
+			"[OHA-CHAT] t=%.0f %s about team=%s result=%s chat=%s said=%s version=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			result,
+			request.allChat and "all" or "team",
+			said,
+			version
+		)
+	)
+end
 local function ConsiderBuyback()
 	if Fu.IsMeepoClone(bot) then
 		return
 	end
 	Usage.SetTalkMessage()
+	Usage.AnswerAboutRequest()
 	if bot:GetLevel() <= 15 or bot:HasModifier("modifier_arc_warden_tempest_double") or not Fu.Role.ShouldBuyBack() then
 		return
 	end

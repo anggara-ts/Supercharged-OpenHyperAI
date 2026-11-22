@@ -14,7 +14,8 @@
 //
 // What is a bot script: tracked .lua files at the repo root and under BotsLib/, FuncLib/ and Customize/, read
 // from git (never the working tree, so .git, .env, match logs, tests, tools, docs and uncommitted edits never get
-// in). Before writing, every literal require / dofile target must be in the copy.
+// in). Before writing, every literal require / dofile target must be in the copy. The copy also gets LICENSE (the
+// MIT notice must ship with every copy, #215; a ref from before it had none still exports).
 // Workshop copies (no --test-game): the committed Customize/general.lua must hold release defaults (no TEST #N
 // comments, no forced picks, Weak_Hero_Cap 1, no Debug_* = true) or the export stops; after writing, the folder must
 // hold exactly the copied files (no build_info.lua, nothing edited or added), then it prints READY TO UPLOAD.
@@ -60,6 +61,14 @@ function isBotScript(file) {
 	return RUNTIME_DIRS.some((dir) => file.startsWith(dir));
 }
 
+// Files that go into every copy besides the bot scripts: the licence notice (MIT asks for it in all copies, #215).
+const NOTICE_FILES = ["LICENSE"];
+
+// What the copy holds: the bot scripts plus the notice files.
+function isExported(file) {
+	return isBotScript(file) || NOTICE_FILES.includes(file);
+}
+
 // .lua files in a folder that is in neither list (a new folder): the copy would silently miss them.
 function unplacedLua(files) {
 	return files.filter((file) => file.endsWith(".lua") && !isBotScript(file) &&
@@ -87,7 +96,7 @@ function collect(ref) {
 	const selected = [];
 	const leftOut = {};
 	for (const entry of entries) {
-		if (isBotScript(entry.file)) {
+		if (isExported(entry.file)) {
 			if (entry.type !== "blob" || entry.mode === "120000") {
 				throw new Error(`${entry.file} is a ${entry.mode === "120000" ? "symlink" : entry.type}, not a file`);
 			}
@@ -397,7 +406,7 @@ function uncommittedChanges() {
 		.map((line) => ({ isNew: line.startsWith("??"), file: line.slice(3).replace(/^.* -> /, "").replace(/^"|"$/g, "") }));
 	const unplaced = new Set(unplacedLua(changed.map((c) => c.file)));
 	return changed
-		.filter((c) => c.file !== LINEUP_FILE && (isBotScript(c.file) || unplaced.has(c.file)))
+		.filter((c) => c.file !== LINEUP_FILE && (isExported(c.file) || unplaced.has(c.file)))
 		.map((c) => (c.isNew ? `${c.file} (new)` : c.file));
 }
 
@@ -448,7 +457,7 @@ function folderProblems(dest, files) {
 	const onDisk = listFiles(dest);
 	const extra = onDisk.filter((file) => !files.has(file));
 	if (extra.length > 0) problems.push(`files not in the export: ${extra.slice(0, 10).join(", ")}`);
-	const notScripts = onDisk.filter((file) => !isBotScript(file));
+	const notScripts = onDisk.filter((file) => !isExported(file));
 	if (notScripts.length > 0) problems.push(`not bot scripts: ${notScripts.slice(0, 10).join(", ")}`);
 	if (onDisk.includes(BUILD_INFO_FILE)) problems.push(`${BUILD_INFO_FILE} (a test-game file)`);
 	const changed = onDisk.filter((file) => files.has(file) && !fs.readFileSync(path.join(dest, file)).equals(files.get(file)));
@@ -571,7 +580,8 @@ function selfTest() {
 	const notInCopy = ["FuncLib/README.md", "Tests/run.lua", "Util/x.lua", "Docs/a.lua", ".luacheckrc", "README.md",
 		"Install-to-vscript/quick-install-oha.bat", ".env.example", ".github/workflows/lua-check.yml"];
 	check("selection: runtime .lua files are in", inCopy.every(isBotScript));
-	check("selection: tests, tools, docs, configs are out", notInCopy.every((file) => !isBotScript(file)));
+	check("selection: tests, tools, docs, configs are out", notInCopy.every((file) => !isExported(file)));
+	check("selection: LICENSE ships with the copy, it is not a bot script", isExported("LICENSE") && !isBotScript("LICENSE"));
 	check("selection: .lua in a new folder is reported, known folders are not",
 		unplacedLua(["Lib/new.lua", "Tests/run.lua", "BotsLib/hero_new.lua", "Util/a.md"]).join() === "Lib/new.lua");
 
@@ -685,4 +695,4 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { isBotScript, missingRequires, assertDestSafe, plan, apply, removeExport, workshopProblems, folderProblems };
+module.exports = { isBotScript, isExported, missingRequires, assertDestSafe, plan, apply, removeExport, workshopProblems, folderProblems };

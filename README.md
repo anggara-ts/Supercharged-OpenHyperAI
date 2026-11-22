@@ -47,6 +47,7 @@ and edit the copy there; it wins over the one in the script. Per-hero overrides 
 | `!pick HERO` | Force a bot pick |
 | `!ban HERO` | Ban a hero from bot picks; during the draft |
 | `!sp XX` | Bot language: `en`, `zh`, `ru`, `ja` |
+| `!about` | One bot per team says the script name, version and where to send feedback (the Workshop page) |
 
 ---
 
@@ -104,3 +105,10 @@ default bots and earlier community scripts: jmz / New Beginner AI, ryndrb, adamq
 The Linux install script is based on ashoktamang's
 [dota2bot-OpenHyperAI-linux-patcher](https://github.com/ashoktamang/dota2bot-OpenHyperAI-linux-patcher).
 Thanks to all of them.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE). It keeps the MIT notice of the upstream project
+([forest0xia/dota2bot-OpenHyperAI](https://github.com/forest0xia/dota2bot-OpenHyperAI), Copyright (c) 2024 Mingyou
+Xia) next to this project's own copyright line. `FuncLib/lib/json.lua` (dkjson by David Heiko Kolf) keeps its own MIT
+notice inside the file. Every copy of the scripts, the Workshop upload included, ships with `LICENSE`.
