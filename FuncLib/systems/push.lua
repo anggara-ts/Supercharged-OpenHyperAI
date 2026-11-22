@@ -1821,16 +1821,6 @@ local function pickPushTarget(bot, lane, targetLocation)
 	return nil
 end
 laneTargetCache = {}
-local function getAllyLaneTower(team, lane)
-	local towerIds = lane == Lane.Top and { 0, 3, 6 } or (lane == Lane.Mid and { 1, 4, 7 } or { 2, 5, 8 })
-	for _, towerId in ipairs(towerIds) do
-		local tower = GetTower(team, towerId)
-		if tower and tower:IsAlive() then
-			return tower
-		end
-	end
-	return nil
-end
 -- A hero the enemy tower covers is not the push's hero target (#12, game 068 16:52-16:58: `step=hit-hero` walked
 -- Clinkz past Radiant's mid T2 toward Alchemist behind it; push is exempt from the tower stop rules, so only attack
 -- mode stopped him at 29% HP next to the tower and he died). PushRules.HitHeroBehindTower; [OHA-PUSH] hit-hero-skip.
@@ -1880,6 +1870,16 @@ local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
 		)
 	end
 	return skip
+end
+local function getAllyLaneTower(team, lane)
+	local towerIds = lane == Lane.Top and { 0, 3, 6 } or (lane == Lane.Mid and { 1, 4, 7 } or { 2, 5, 8 })
+	for _, towerId in ipairs(towerIds) do
+		local tower = GetTower(team, towerId)
+		if tower and tower:IsAlive() then
+			return tower
+		end
+	end
+	return nil
 end
 function Push.PushThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
