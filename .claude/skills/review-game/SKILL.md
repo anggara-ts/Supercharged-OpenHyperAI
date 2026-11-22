@@ -12,7 +12,8 @@ Rules: `AGENTS.md` ("Reviewing a game", workflow steps 7-8). Checklist:
    maintainer's PR comments since the last review, and writes `Util/match-logs/game-NNN_review.md`.
 2. **Read the skeleton**, then go deeper only where needed (spawn parallel read-only reviewers for big games:
    one for heroes/features, one for team behaviour; give them the review file, the build commit and what is
-   already fixed).
+   already fixed). Reviewers edit nothing: they return `verify.js set` lines and findings, and you apply them
+   (AGENTS.md "Working notes for AI agents").
 3. **Tracker:** for every item `verify.js check` left pending or flagged, read the sample lines and set
    `node Util/verify.js set <pr> <item> pass|fail|skip [note]`. Items whose situation didn't happen stay pending.
    `set` and `check` also update the PR: its "How to verify in game" checkboxes and, once every item is done,
