@@ -21,12 +21,14 @@ end
 local team = GetTeam()
 local alwaysTrue = 10 == 10
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
+local LastHitOverlay = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_overlay")
 -- Logs switched off once their feature works (the TP diag lines, game 029).
 local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local BotBuild = dofile(GetScriptDirectory() .. "/BotsLib/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
+local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local TeamMemory = require(GetScriptDirectory() .. "/FuncLib/systems/team_memory")
 local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_tracker")
@@ -1354,6 +1356,10 @@ local function ConsiderItems()
 	if Usage.TryConsumeGrisGris and Usage.TryConsumeGrisGris() then
 		return BOT_ACTION_DESIRE_HIGH
 	end
+	-- Winter Wyvern: consume Eldwurm's Edda when it is off cooldown (#47); also runs the edda-result probe.
+	if Usage.TryConsumeEdda and Usage.TryConsumeEdda() then
+		return BOT_ACTION_DESIRE_HIGH
+	end
 	-- Shadow Amulet during a teleport channel (item use below is off while channelling).
 	if bot:IsAlive() and bot:HasModifier("modifier_teleporting") and Usage.AmuletDuringTeleport() then
 		return BOT_ACTION_DESIRE_NONE
@@ -1487,6 +1493,10 @@ local function ConsiderItems()
 					)
 					if string.find(itemName, "tpscroll", 1, true) or string.find(itemName, "travel_boots", 1, true) then
 						Usage.LogTeleport(itemName, target, castReason, botMode)
+						-- #53: the last defend TP (lane, time) for DefendLaneRules.DefendTpBlock, stamped at the cast.
+						if string.find(tostring(castReason), "前往守塔", 1, true) ~= nil then
+							bot._defendTpLane, bot._defendTpAt = bot._defendTpCandidateLane, DotaTime()
+						end
 					end
 					Usage.SetUseItem(item, target, castType)
 				end
@@ -1846,15 +1856,22 @@ Usage.ConsiderItemDesire["item_armlet"] = function(item)
 end
 -- [OHA-DODGE] (#134): a defensive item used against an incoming spell (Blink, Eul's / Wind Waker, BKB, Lotus Orb,
 -- Linken's), and 1.5s later whether the target was hit by a hero anyway, so a game shows if the dodge was in time.
--- projectile: from Fu.Find*ProjectileIncoming; caster / ability: from Fu.FindWillBeCast*Spell.
-function Usage.LogDodge(item, target, why, projectile, caster, ability)
+-- projectile: from Fu.Find*ProjectileIncoming or Fu.FindLinearProjectileIncoming; caster / ability: from
+-- Fu.FindWillBeCast*Spell. timing (#134): { kind = "tracking" | "linear", tti = seconds to impact, src = where the
+-- speed came from }; without it (a spell being cast) kind=cast tti=-1.
+function Usage.LogDodge(item, target, why, projectile, caster, ability, timing)
 	local itemName = item:GetName()
 	local now = DotaTime()
+	-- (#134) One dodge per target per think: the items after this one in the same think see it and keep their
+	-- charge (each item's order would replace the previous one anyway).
+	bot._dodgeChosen = { t = now, target = target }
 	bot._dodgeLogAt = bot._dodgeLogAt or {}
 	if now < (bot._dodgeLogAt[itemName] or -99) then
 		return
 	end
 	bot._dodgeLogAt[itemName] = now + 2
+	timing = timing or {}
+	local kind = timing.kind or (projectile ~= nil and "tracking" or "cast")
 	local spell, dist = "will-cast", -1
 	if projectile ~= nil then
 		spell = projectile.ability ~= nil and projectile.ability:GetName() or "?"
@@ -1869,21 +1886,130 @@ function Usage.LogDodge(item, target, why, projectile, caster, ability)
 	local targetName = target == bot and "self" or (string.gsub(target:GetUnitName(), "npc_dota_hero_", ""))
 	print(
 		string.format(
-			"[OHA-DODGE] t=%.0f %s item=%s target=%s spell=%s dist=%.0f why=%s",
+			"[OHA-DODGE] t=%.0f %s item=%s target=%s spell=%s dist=%.0f why=%s kind=%s tti=%.2f src=%s",
 			now,
 			(string.gsub(botName, "npc_dota_hero_", "")),
 			(string.gsub(itemName, "^item_", "")),
 			targetName,
 			spell,
 			dist,
-			why
+			why,
+			kind,
+			timing.tti or -1,
+			timing.src or "none"
 		)
 	)
 	bot._dodgePending = bot._dodgePending or {}
 	table.insert(
 		bot._dodgePending,
-		{ at = now, item = itemName, handle = item, target = target, targetName = targetName }
+		{ at = now, item = itemName, handle = item, target = target, targetName = targetName, kind = kind }
 	)
+end
+-- (#134) Did an earlier item in this think already dodge for this target?
+local function DodgeChosenThisThink(target)
+	local chosen = bot._dodgeChosen
+	return chosen ~= nil and chosen.t == DotaTime() and chosen.target == target
+end
+-- [OHA-ERROR] dodge: an error in the projectile readers (fields of GetLinearProjectiles are not verified), first 3
+-- distinct per bot, so a game without [OHA-DODGE] lines can tell "no skillshot" from "the reader throws".
+local function LogDodgeError(where, err)
+	bot._dodgeErrs = bot._dodgeErrs or {}
+	local key = where .. ": " .. tostring(err)
+	if bot._dodgeErrs[key] or (bot._dodgeErrCount or 0) >= 3 then
+		return
+	end
+	bot._dodgeErrs[key] = true
+	bot._dodgeErrCount = (bot._dodgeErrCount or 0) + 1
+	print(string.format("[OHA-ERROR] t=%.1f %s dodge %s", DotaTime(), botName, key))
+end
+Usage.LogDodgeError = LogDodgeError
+-- (#134) The reaction time of a dodge item starts with its cast point: 0 for Blink, Eul's, Wind Waker (7.42
+-- items.txt AbilityCastPoint "0.0"), BKB, Lotus Orb and Linken's (no AbilityCastPoint: the default 0). Read from
+-- the handle so a change in a patch is followed.
+local function DodgeCastPoint(item)
+	local ok, castPoint = pcall(item.GetCastPoint, item)
+	return ok and type(castPoint) == "number" and castPoint or 0
+end
+-- [OHA-DODGE] too-late: a projectile that will land before the item can work, so the item is kept. Only for a
+-- projectile seen for the first time in this think (one that was in the window before and passed up for another
+-- reason is not "too late"); at most once per 3s per item. (No "kind" word here, so the `[OHA-DODGE] linear` / `tracking` checks only see real dodges.)
+local function LogDodgeTooLate(item, target, spell, tti, src)
+	local itemName = item:GetName()
+	local now = DotaTime()
+	bot._dodgeLateAt = bot._dodgeLateAt or {}
+	if now < (bot._dodgeLateAt[itemName] or -99) then
+		return
+	end
+	bot._dodgeLateAt[itemName] = now + 3
+	print(
+		string.format(
+			"[OHA-DODGE] t=%.0f %s too-late item=%s target=%s spell=%s tti=%.2f src=%s",
+			now,
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			(string.gsub(itemName, "^item_", "")),
+			target == bot and "self" or (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
+			spell,
+			tti or -1,
+			src or "none"
+		)
+	)
+end
+-- (#134) A tracking projectile from `finder` (a Fu.Find*ProjectileIncoming) that this item should answer now: it
+-- lands within the item's reaction time plus DodgeRules.SLACK (time to impact = distance / closing speed). The
+-- old fixed ranges (350-1200) are only the search radius now. Returns projectile, timing (for LogDodge) or nil.
+function Usage.TimedTrackingProjectile(item, target, finder, searchRange)
+	if DodgeChosenThisThink(target) then
+		return nil
+	end
+	local castPoint = DodgeCastPoint(item)
+	local timing, late = nil, nil
+	local ok, found = pcall(finder, target, searchRange, function(projectile)
+		Fu.LogTrackingProjectileFields(projectile)
+		local window, tti, src, first = Fu.TrackingProjectileWindow(target, projectile, castPoint)
+		if window == "now" then
+			timing = { kind = "tracking", tti = tti, src = src }
+			return true
+		end
+		if window == "late" and first and late == nil then
+			late = { projectile = projectile, tti = tti, src = src }
+		end
+		return false
+	end)
+	if not ok then
+		LogDodgeError("tracking", found)
+		return nil
+	end
+	if found ~= nil then
+		return found, timing
+	end
+	if late ~= nil then
+		local spell = late.projectile.ability ~= nil and late.projectile.ability:GetName() or "?"
+		pcall(LogDodgeTooLate, item, target, spell, late.tti, late.src)
+	end
+	return nil
+end
+-- (#134) A dangerous linear skillshot (FuncLib/systems/dodge_rules.lua LINEAR) that will hit `target` and that
+-- this item ("blink" | "cyclone" | "bkb") answers, when it is time to react. Returns the threat
+-- (Fu.FindLinearProjectileIncoming) and the timing for LogDodge, or nil.
+function Usage.LinearThreat(item, target, tool)
+	if DodgeChosenThisThink(target) then
+		return nil
+	end
+	local ok, threat = pcall(Fu.FindLinearProjectileIncoming, target, DodgeCastPoint(item), tool)
+	if not ok then
+		LogDodgeError("linear", threat)
+		return nil
+	end
+	if threat == nil then
+		return nil
+	end
+	if threat.window == "late" and threat.first then
+		pcall(LogDodgeTooLate, item, target, threat.name, threat.tti, threat.src)
+	end
+	if threat.window ~= "now" then
+		return nil
+	end
+	return threat, { kind = "linear", tti = threat.tti, src = threat.src }
 end
 function Usage.WatchDodgeResults()
 	local pending = bot._dodgePending
@@ -1904,7 +2030,7 @@ function Usage.WatchDodgeResults()
 			local cast = handle ~= nil and not handle:IsNull() and handle:GetCooldownTimeRemaining() > 0
 			print(
 				string.format(
-					"[OHA-DODGE] t=%.0f %s result item=%s target=%s hit=%s cast=%s alive=%s after=%.1f",
+					"[OHA-DODGE] t=%.0f %s result item=%s target=%s hit=%s cast=%s alive=%s after=%.1f kind=%s",
 					now,
 					(string.gsub(botName, "npc_dota_hero_", "")),
 					(string.gsub(entry.item, "^item_", "")),
@@ -1912,7 +2038,8 @@ function Usage.WatchDodgeResults()
 					valid and tostring(hit) or "unknown",
 					tostring(cast),
 					tostring(alive),
-					now - entry.at
+					now - entry.at,
+					entry.kind or "?"
 				)
 			)
 		end
@@ -1930,6 +2057,20 @@ Usage.ConsiderItemDesire["item_black_king_bar"] = function(item)
 	local hEffectTarget = nil
 	local castReason = nil
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
+	-- (#134) A skillshot BKB blocks (DodgeRules.LINEAR bkb=true: Sacred Arrow, Earth Spike, Impale, Spear, ...)
+	-- about to hit: the caster may stand farther than the 1300 above (Sacred Arrow flies 3000).
+	if
+		not bot:IsMagicImmune()
+		and not bot:IsInvulnerable()
+		and (#enemyHeroes > 0 or Fu.IsGoingOnSomeone(bot) or Fu.IsRetreating(bot))
+	then
+		local threat, timing = Usage.LinearThreat(item, bot, "bkb")
+		if threat ~= nil then
+			pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
+			castReason = "防御弹道"
+			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+		end
+	end
 	if
 		#enemyHeroes > 0
 		and not bot:IsMagicImmune()
@@ -1953,10 +2094,15 @@ Usage.ConsiderItemDesire["item_black_king_bar"] = function(item)
 			castReason = "解沉默"
 			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
 		end
-		if Fu.IsNotAttackProjectileIncoming(bot, 350) and closeEnemyCount >= 1 then
-			pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindNotAttackProjectileIncoming(bot, 350))
-			castReason = "防御弹道"
-			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+		-- (#134) by time to impact (was: any spell projectile within 350).
+		if closeEnemyCount >= 1 then
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, bot, Fu.FindNotAttackProjectileIncoming, 2000)
+			if projectile ~= nil then
+				pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+				castReason = "防御弹道"
+				return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+			end
 		end
 		if Fu.IsWillBeCastUnitTargetSpell(bot, radius) and closeEnemyCount >= 1 then
 			pcall(Usage.LogDodge, item, bot, "will-cast", nil, Fu.FindWillBeCastUnitTargetSpell(bot, radius))
@@ -2115,13 +2261,35 @@ Usage.ConsiderItemDesire["item_blink"] = function(item)
 			end
 		end
 	end
-	if
-		Fu.IsProjectileIncoming(bot, 1200)
-		and (botTarget == nil or not botTarget:IsHero() or not Fu.IsInRange(bot, botTarget, bot:GetAttackRange() + 100))
-	then
-		pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindProjectileIncoming(bot, 1200))
-		local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, GetAncient(GetTeam()):GetLocation(), 1199)
-		return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
+	-- (#134) A dangerous skillshot about to hit: Blink to the side of its line (a Blink toward base can stay on the
+	-- line, the shot usually flies that way), on the side of our base, plus the part of the way home along it.
+	do
+		local threat, timing = Usage.LinearThreat(item, bot, "blink")
+		if threat ~= nil then
+			local DodgeRules = Fu.DodgeRules
+			local home = GetAncient(GetTeam()):GetLocation()
+			local here = bot:GetLocation()
+			local sideDist = math.min(castRange - 1, 500)
+			local x, y = DodgeRules.SideStep(threat.vx, threat.vy, here.x, here.y, sideDist, home.x, home.y, 600)
+			local blinkLocation = Vector(x, y, here.z)
+			if not IsLocationPassable(blinkLocation) then
+				x, y = DodgeRules.SideStep(threat.vx, threat.vy, here.x, here.y, -sideDist, home.x, home.y, 600)
+				blinkLocation = Vector(x, y, here.z)
+			end
+			if IsLocationPassable(blinkLocation) then
+				pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
+				return BOT_ACTION_DESIRE_HIGH, blinkLocation, "ground", nil
+			end
+		end
+	end
+	-- (#134) by time to impact (was: any dodgeable spell projectile within 1200).
+	if botTarget == nil or not botTarget:IsHero() or not Fu.IsInRange(bot, botTarget, bot:GetAttackRange() + 100) then
+		local projectile, timing = Usage.TimedTrackingProjectile(item, bot, Fu.FindProjectileIncoming, 2000)
+		if projectile ~= nil then
+			pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+			local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, GetAncient(GetTeam()):GetLocation(), 1199)
+			return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
+		end
 	end
 	if Fu.IsGoingOnSomeone(bot) then
 		if
@@ -2606,8 +2774,21 @@ Usage.ConsiderItemDesire["item_cyclone"] = function(item)
 			castReason = "解缠绕:" .. Fu.Chat.GetNormName(hEffectTarget)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 		end
-		if Fu.IsUnitTargetProjectileIncoming(bot, 800) then
-			pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindUnitTargetProjectileIncoming(bot, 800))
+		-- (#134) by time to impact (was: any unit-target spell projectile within 800).
+		local projectile, timing = Usage.TimedTrackingProjectile(item, bot, Fu.FindUnitTargetProjectileIncoming, 2000)
+		if projectile ~= nil then
+			pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+			hEffectTarget = bot
+			castReason = "防御弹道:" .. Fu.Chat.GetNormName(hEffectTarget)
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+		end
+	end
+	-- (#134) A dangerous skillshot about to hit: the self-cyclone is invulnerable, the projectile passes. The
+	-- caster may stand outside the 1600 the block above needs (Sacred Arrow flies 3000).
+	if Fu.CanCastOnNonMagicImmune(bot) then
+		local threat, timing = Usage.LinearThreat(item, bot, "cyclone")
+		if threat ~= nil then
+			pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
 			hEffectTarget = bot
 			castReason = "防御弹道:" .. Fu.Chat.GetNormName(hEffectTarget)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
@@ -3398,6 +3579,195 @@ function Usage.TryConsumeGrisGris()
 		string.format("packed buy=%s bagFull=%s", tostring(buyName), tostring(bagFull))
 	)
 end
+
+-- Winter Wyvern innate (#47): consume Eldwurm's Edda once it is off cooldown. The rules and the game data are in
+-- FuncLib/systems/edda_rules.lua. The order is Action_UseAbility on the item from whatever slot it is in (it is
+-- UNSWAPPABLE: every swap of it was reverted in game 070). Whether that order consumes a passive item, and what
+-- the engine does with the basic-ability choice, is what [OHA-ITEM] edda-result shows.
+local EddaRules = require(GetScriptDirectory() .. "/FuncLib/systems/edda_rules")
+local function EddaSlot()
+	for slot = 0, 16 do
+		local item = bot:GetItemInSlot(slot)
+		if item ~= nil and not item:IsNull() and item:GetName() == EddaRules.ITEM then
+			return slot, item
+		end
+	end
+	return -1, nil
+end
+local function EddaSnapshot()
+	local levels = {}
+	for _, name in ipairs(EddaRules.BASIC_ABILITIES) do
+		local ability = bot:GetAbilityByName(name)
+		local level, max, up = -1, -1, "-"
+		if ability ~= nil and not ability:IsNull() then
+			level, max = ability:GetLevel() or -1, ability:GetMaxLevel() or -1
+			-- Raw value: the repo reads it as a boolean, the engine may return an enum.
+			up = tostring(ability:CanAbilityBeUpgraded())
+		end
+		levels[#levels + 1] = { name = name, level = level, max = max, up = up }
+	end
+	local slot = EddaSlot()
+	return {
+		at = DotaTime(),
+		levels = levels,
+		points = bot:GetAbilityPoints() or 0,
+		int = bot:GetAttributeValue(ATTRIBUTE_INTELLECT) or 0,
+		heroLevel = bot:GetLevel() or 0,
+		itemPresent = slot >= 0,
+		slot = slot,
+	}
+end
+local function EddaUpgradeText(levels)
+	local parts = {}
+	for _, entry in ipairs(levels) do
+		parts[#parts + 1] = entry.up
+	end
+	return table.concat(parts, "/")
+end
+local function EddaHeroName()
+	return (string.gsub(botName, "npc_dota_hero_", ""))
+end
+local function LogEddaState(when, slot, item)
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-state when=%s slot=%d passive=%s castable=%s ready=%s cd=%.0f cdLeft=%.0f",
+			DotaTime(),
+			EddaHeroName(),
+			when,
+			slot,
+			tostring(item:IsPassive()),
+			tostring(item:IsFullyCastable()),
+			tostring(item:IsCooldownReady()),
+			item:GetCooldown() or -1,
+			item:GetCooldownTimeRemaining() or -1
+		)
+	)
+end
+-- The probe after a consume order: levels, max levels, ability points, int and the item at +1s and +5s.
+local function EddaFollowUp(state)
+	local probe = state.probe
+	if probe == nil then
+		return
+	end
+	local step = EddaRules.RESULT_AFTER[probe.step]
+	if step == nil then
+		state.probe = nil
+		return
+	end
+	if DotaTime() - probe.before.at < step then
+		return
+	end
+	probe.step = probe.step + 1
+	local after = EddaSnapshot()
+	local outcome, changed = EddaRules.Outcome(probe.before, after)
+	if outcome ~= "not-consumed" then
+		state.consumed = true
+	end
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-result after=%.1f try=%d outcome=%s changed=%s consumed=%d levels=%s was=%s up=%s points=%d->%d int=%.0f->%.0f slot=%d",
+			DotaTime(),
+			EddaHeroName(),
+			DotaTime() - probe.before.at,
+			state.tries,
+			outcome,
+			changed ~= nil and (string.gsub(changed, "^winter_wyvern_", "")) or "-",
+			outcome ~= "not-consumed" and 1 or 0,
+			EddaRules.LevelsText(after.levels),
+			EddaRules.LevelsText(probe.before.levels),
+			EddaUpgradeText(after.levels),
+			probe.before.points,
+			after.points,
+			probe.before.int,
+			after.int,
+			after.slot
+		)
+	)
+	-- The only API call that could answer the ability choice: tried once per game, logged, nothing further.
+	if not state.choiceTried and EddaRules.ShouldTryChoice(after, outcome) then
+		state.choiceTried = true
+		bot:ActionImmediate_LevelAbility(EddaRules.KEY_ABILITY)
+		pcall(
+			print,
+			string.format(
+				"[OHA-ITEM] t=%.0f %s edda-choice try=LevelAbility ability=%s outcome=%s points=%d",
+				DotaTime(),
+				EddaHeroName(),
+				(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+				outcome,
+				after.points
+			)
+		)
+	end
+end
+function Usage.TryConsumeEdda()
+	if botName ~= "npc_dota_hero_winter_wyvern" or DotaTime() <= 0 then
+		return false
+	end
+	local state = bot._edda
+	if state == nil then
+		state = { tries = 0 }
+		bot._edda = state
+	end
+	EddaFollowUp(state)
+	if state.consumed then
+		return false
+	end
+	local slot, item = EddaSlot()
+	if item == nil then
+		return false
+	end
+	if state.loggedSlot ~= slot then
+		state.loggedSlot = slot
+		LogEddaState(state.loggedFirst and "slot" or "first", slot, item)
+		state.loggedFirst = true
+	end
+	local cooldown = item:GetCooldownTimeRemaining() or 0
+	if cooldown <= 0 and not state.loggedReady then
+		state.loggedReady = true
+		LogEddaState("ready", slot, item)
+	end
+	local why = EddaRules.ConsumeWhy({
+		cooldown = cooldown,
+		tries = state.tries,
+		sinceTry = state.lastTryAt ~= nil and DotaTime() - state.lastTryAt or nil,
+		canAct = bot:IsAlive()
+			and not bot:IsMuted()
+			and not bot:IsStunned()
+			and not bot:IsHexed()
+			and not bot:IsChanneling(),
+		inDanger = bot:WasRecentlyDamagedByAnyHero(2.0),
+	})
+	if why == nil then
+		return false
+	end
+	local before = EddaSnapshot()
+	state.tries = state.tries + 1
+	state.lastTryAt = DotaTime()
+	state.probe = { before = before, step = 1 }
+	local key = bot:GetAbilityByName(EddaRules.KEY_ABILITY)
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-consume why=%s try=%d ability=%s level=%s heroLevel=%d int=%.0f slot=%d levels=%s points=%d",
+			DotaTime(),
+			EddaHeroName(),
+			why,
+			state.tries,
+			(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+			key ~= nil and string.format("%d/%d", key:GetLevel() or -1, key:GetMaxLevel() or -1) or "-",
+			before.heroLevel,
+			before.int,
+			slot,
+			EddaRules.LevelsText(before.levels),
+			before.points
+		)
+	)
+	bot:Action_UseAbility(item)
+	return true
+end
 Usage.ConsiderItemDesire["item_glimmer_cape"] = function(item)
 	local castRange = 800 + castRangeBonus
 	local castType = "unit"
@@ -3820,8 +4190,12 @@ Usage.ConsiderItemDesire["item_lotus_orb"] = function(item)
 			and not ally:HasModifier("modifier_item_lotus_orb_active")
 			and not ally:HasModifier("modifier_antimage_spell_shield")
 		then
-			if Fu.IsUnitTargetProjectileIncoming(ally, 800) then
-				pcall(Usage.LogDodge, item, ally, "projectile", Fu.FindUnitTargetProjectileIncoming(ally, 800))
+			-- (#134) by time to impact (was: any unit-target spell projectile within 800). Skillshots: Lotus
+			-- re-casts targeted spells only (Valve item text), so linear projectiles are not answered here.
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, ally, Fu.FindUnitTargetProjectileIncoming, 2000)
+			if projectile ~= nil then
+				pcall(Usage.LogDodge, item, ally, "projectile", projectile, nil, nil, timing)
 				hEffectTarget = ally
 				castReason = "反弹弹道"
 				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
@@ -4783,6 +5157,8 @@ Usage.ConsiderItemDesire["item_sphere"] = function(item)
 	local castReason = nil
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE)
+	-- (#134) Incoming projectiles by time to impact (was: any unit-target spell projectile within 800). Skillshots:
+	-- Linken's blocks targeted spells only (Valve item text), so linear projectiles are not answered here.
 	for _, ally in pairs(allyHeroes) do
 		if
 			Fu.IsValidHero(ally)
@@ -4792,21 +5168,22 @@ Usage.ConsiderItemDesire["item_sphere"] = function(item)
 			and not ally:IsIllusion()
 			and not ally:HasModifier("modifier_item_sphere_target")
 			and not ally:HasModifier("modifier_antimage_spell_shield")
-			and (
-				Fu.IsUnitTargetProjectileIncoming(ally, 800)
-				or Fu.IsWillBeCastUnitTargetSpell(ally, 1200)
-				or bot:GetHealth() < 150
-			)
 		then
-			local projectile = Fu.FindUnitTargetProjectileIncoming(ally, 800)
-			local caster, ability = Fu.FindWillBeCastUnitTargetSpell(ally, 1200)
-			if projectile ~= nil or caster ~= nil then
-				local why = projectile ~= nil and "projectile" or "will-cast"
-				pcall(Usage.LogDodge, item, ally, why, projectile, caster, ability)
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, ally, Fu.FindUnitTargetProjectileIncoming, 2000)
+			local caster, ability = nil, nil
+			if projectile == nil then
+				caster, ability = Fu.FindWillBeCastUnitTargetSpell(ally, 1200)
 			end
-			hEffectTarget = ally
-			castReason = "帮助队友"
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+			if projectile ~= nil or caster ~= nil or bot:GetHealth() < 150 then
+				if projectile ~= nil or caster ~= nil then
+					local why = projectile ~= nil and "projectile" or "will-cast"
+					pcall(Usage.LogDodge, item, ally, why, projectile, caster, ability, timing)
+				end
+				hEffectTarget = ally
+				castReason = "帮助队友"
+				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+			end
 		end
 	end
 	if Fu.IsValidHero(botTarget) and Fu.IsInRange(bot, botTarget, 2400) and not Fu.IsInRange(bot, botTarget, 800) then
@@ -5751,7 +6128,66 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		if laneAmount.distance > tpDistance or laneAmount.amount < laneFrontAmount / 5 then
 			tpLocation = Usage.GetDefendTPLocation(defendLane)
 		end
+		-- #53, game 066 81:55 / 82:35: Elder Titan TP'd to mid's far end, walked 10,000 back to his high ground and TP'd
+		-- out the same way again. No repeat to the same lane within 20s, and no TP away from our base while enemy creeps
+		-- or heroes are at it (DefendLaneRules.DefendTpBlock). The TP target itself is #87's.
+		local blockWhy = nil
 		if tpLocation ~= nil and GetUnitToLocationDistance(bot, tpLocation) > tpDistance - 500 then
+			local DefendLaneRules = require(GetScriptDirectory() .. "/FuncLib/systems/defend_lane_rules")
+			local ancient = GetAncient(team)
+			local botToAncient = ancient ~= nil and GetUnitToUnitDistance(bot, ancient) or 0
+			local targetToAncient = ancient ~= nil
+					and Fu.GetLocationToLocationDistance(tpLocation, ancient:GetLocation())
+				or 0
+			local baseThreat = false
+			if ancient ~= nil and targetToAncient > botToAncient + 1500 then
+				local creepsAtBase = 0
+				for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
+					if unit ~= nil and unit:IsAlive() and GetUnitToUnitDistance(unit, ancient) <= 4000 then
+						creepsAtBase = creepsAtBase + 1
+					end
+				end
+				baseThreat = creepsAtBase >= 2 or #Fu.GetLastSeenEnemiesNearLoc(ancient:GetLocation(), 4000) >= 1
+			end
+			blockWhy = DefendLaneRules.DefendTpBlock(
+				DotaTime(),
+				bot._defendTpLane,
+				bot._defendTpAt,
+				defendLane,
+				baseThreat,
+				botToAncient,
+				targetToAncient
+			)
+			local enemyFront = GetLaneFrontLocation(GetOpposingTeam(), defendLane, 0)
+			local ourFront = GetLaneFrontLocation(team, defendLane, 0)
+			local logKey = blockWhy ~= nil and "_defendTpSkipLogAt" or "_defendTpLogAt"
+			if DotaTime() >= (bot[logKey] or -999) then
+				bot[logKey] = DotaTime() + 5
+				pcall(
+					print,
+					string.format(
+						"[OHA-TP] t=%.0f %s %s lane=%s to=%.0f,%.0f ourFront=%.0f,%.0f enemyFront=%.0f,%.0f botAnc=%d toAnc=%d base=%s last=%s ago=%s",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						blockWhy ~= nil and ("defend-tp-skip why=" .. blockWhy) or "defend-tp-try",
+						towerLabel,
+						tpLocation.x,
+						tpLocation.y,
+						ourFront.x,
+						ourFront.y,
+						enemyFront.x,
+						enemyFront.y,
+						math.floor(botToAncient),
+						math.floor(targetToAncient),
+						tostring(baseThreat),
+						tostring(bot._defendTpLane),
+						bot._defendTpAt ~= nil and string.format("%.0f", DotaTime() - bot._defendTpAt) or "-"
+					)
+				)
+			end
+			bot._defendTpCandidateLane = defendLane
+		end
+		if blockWhy == nil and tpLocation ~= nil and GetUnitToLocationDistance(bot, tpLocation) > tpDistance - 500 then
 			hEffectTarget = tpLocation
 			castReason = "前往守塔:" .. towerLabel
 			if botName == "npc_dota_hero_furion" then
@@ -10382,12 +10818,25 @@ function ItemUsageThink()
 			return
 		end
 	end
+	-- Laning last hits every frame (#71): the attack on the right frame, the wind-up release / cancel. While it owns
+	-- the hit, no kiting step, item or spell order replaces it. It lets go while an enemy tower hits the bot, so the
+	-- tower-aggro step below still runs.
+	local okLastHit, timingLastHit = pcall(LastHitTiming.Tick, bot)
+	if not okLastHit and not bot._lhTimingErr then
+		-- Once per bot: a broken hook would silently drop every timed last hit.
+		bot._lhTimingErr = true
+		pcall(print, string.format("[OHA-LH] t=%.0f %s timing error=%s", DotaTime(), botName, tostring(timingLastHit)))
+	elseif okLastHit and timingLastHit then
+		_perfDone()
+		return
+	end
 	-- Tower aggro: one attack order on an allied lane creep under the tower, never a walk.
 	local okDeaggro, deaggroed = pcall(Usage.DeflectTowerAggro)
 	if okDeaggro and deaggroed then
 		return
 	end
-	-- Kiting for heroes on Valve's attack mode (the override attack mode kites from its own Think).
+	-- Kiting for ranged heroes in every mode: a step away from a melee hero, lane creep or neutral hitting them, between
+	-- attacks (#72; the override attack mode kites from its own Think).
 	local okKite, kited = pcall(SpecialUnits.TryKiteInAttack, bot)
 	if okKite and kited then
 		return
@@ -10430,6 +10879,14 @@ function ItemUsageThink()
 	if bot:HasModifier("modifier_watch_tower_capturing") then
 		_perfDone()
 		return
+	end
+	-- Team roam's last hit (snipe, or a hunt on a creep) without a mode change (#165). No return: items below may
+	-- still replace the order, as they could while team roam ran as a mode.
+	local okLH, errLH = pcall(LastHitOverlay.Think, bot)
+	if not okLH and not bot._lhOverlayErr then
+		-- Once per bot: a broken hook would silently remove every last hit.
+		bot._lhOverlayErr = true
+		pcall(print, string.format("[OHA-ROAM] t=%.0f %s overlay error=%s", DotaTime(), botName, tostring(errLH)))
 	end
 	-- Keep attack orders; only throttle expensive item/ability rescans when target is locked.
 	if ShouldThrottleHeavyThink() then
@@ -10810,6 +11267,7 @@ do
 	Perf.WrapDetailIn(MatchTrace, "Tick", "MatchTrace.Tick")
 	Perf.WrapDetailIn(ChargeTracker, "Tick", "ChargeTracker.Tick")
 	Perf.WrapDetailIn(SpecialUnits, "TryKiteInAttack", "TryKiteInAttack")
+	Perf.WrapDetailIn(LastHitOverlay, "Think", "LastHitOverlay")
 	Perf.WrapDetailIn(AbilityContext, "IsCornered", "IsCornered")
 	Perf.WrapDetailIn(Dispel, "ShouldMantaDodge", "Dispel.Manta")
 	Perf.WrapDetailIn(Dispel, "ShouldUseSelfDispelItem", "Dispel.Self")
