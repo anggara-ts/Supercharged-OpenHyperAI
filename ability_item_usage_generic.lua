@@ -1702,8 +1702,9 @@ Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 end
 -- Drum of Endurance / Boots of Bearing active (#9). The old rule cast only when going on a hero within 680 and
 -- returned at 0 charges, but the 7.42 Drum has no charges (ItemRequiresCharges is commented out in the game file),
--- so it was probably never cast: no log since game 006 shows the active buff. Now: escape > fight > chase > push
--- (FuncLib/systems/drum_rules.lua). [OHA-ITEM] drum why= item= allies= target=, at most once per 3s per bot.
+-- so it was probably never cast. Now: escape > fight > chase > push (FuncLib/systems/drum_rules.lua). Ally counts
+-- come from Fu.GetAllyList, which holds the bot itself (Arcane Boots below reads allyHeroes[2] as the first other
+-- ally). [OHA-ITEM] drum why= item= allies= target=, at most once per 3s per bot.
 local DrumRules = require(GetScriptDirectory() .. "/FuncLib/systems/drum_rules")
 -- An enemy tower, barracks or Ancient (the API has IsTower and IsFort, barracks go by name).
 local function IsEnemyBuilding(unit)
