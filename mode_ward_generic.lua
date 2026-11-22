@@ -46,6 +46,27 @@ end
 local function DispenserHasObservers(item)
 	return item ~= nil and (item:GetCurrentCharges() or 0) > 0
 end
+-- Observers and sentries the bot holds (dispenser: current = observers, secondary = sentries).
+local function WardCharges()
+	local obs, sen = 0, 0
+	for slot = 0, 8 do
+		local item = bot:GetItemInSlot(slot)
+		if item ~= nil then
+			local itemName = item:GetName()
+			if itemName == "item_ward_observer" then
+				obs = obs + (item:GetCurrentCharges() or 0)
+			elseif itemName == "item_ward_sentry" then
+				sen = sen + (item:GetCurrentCharges() or 0)
+			elseif itemName == "item_ward_dispenser" then
+				obs = obs + (item:GetCurrentCharges() or 0)
+				sen = sen + DispenserSentryCharges(item)
+			end
+		end
+	end
+	return obs, sen
+end
+-- Defined below AnnounceWard: the result of a dispenser cast the ward think no longer watches (#15).
+local CheckDispenserTry
 -- Plant from a Ward Dispenser. Which toggle state means observer is not documented, and the old
 -- code toggled whenever the state read false and returned, so the next think could toggle it
 -- back: game 014 Lina and game 016 Techies stood on the bottom-rune spot holding a dispenser and
@@ -87,6 +108,9 @@ local function DispenserPlant(item, loc, wantObs)
 	local sen = DispenserSentryCharges(item)
 	local pendingTry = bot._dispTry
 	if pendingTry ~= nil and (pendingTry.loc ~= loc or pendingTry.wantObs ~= wantObs or now - pendingTry.at > 4) then
+		-- A new spot or a stale try: the old cast may have planted (game 068: the next spot is picked once the ward
+		-- is down, and the planted line was lost). Log it before the new cast.
+		CheckDispenserTry(pendingTry.loc ~= loc and "new-cast" or "stale")
 		pendingTry = nil
 	end
 	if pendingTry == nil then
@@ -96,6 +120,7 @@ local function DispenserPlant(item, loc, wantObs)
 		local okT, tog = pcall(function()
 			return item:GetToggleState()
 		end)
+		local allObs, allSen = WardCharges()
 		if okT and type(tog) == "boolean" and tog ~= wantObs then
 			bot._dispTry = {
 				at = now,
@@ -106,12 +131,26 @@ local function DispenserPlant(item, loc, wantObs)
 				toggled = true,
 				recast = true,
 				castAt = now + 0.4,
+				spot = wardSpot,
+				allObs = allObs,
+				allSen = allSen,
 			}
 			DispLog("pre-toggle", item, loc, wantObs, obs, sen)
 			bot:Action_UseAbilityOnEntity(item, bot)
 			return true
 		end
-		bot._dispTry = { at = now, loc = loc, wantObs = wantObs, obs = obs, sen = sen, toggled = false, castAt = now }
+		bot._dispTry = {
+			at = now,
+			loc = loc,
+			wantObs = wantObs,
+			obs = obs,
+			sen = sen,
+			toggled = false,
+			castAt = now,
+			spot = wardSpot,
+			allObs = allObs,
+			allSen = allSen,
+		}
 		DispLog("cast", item, loc, wantObs, obs, sen)
 		bot:Action_UseAbilityOnLocation(item, loc)
 		return true
@@ -163,18 +202,19 @@ local function PickChat(key, fallback)
 	end
 	return fallback
 end
-local function RememberWard(kind)
-	if wardSpot == nil or wardSpot.location == nil then
+local function RememberWard(kind, spot)
+	spot = spot or wardSpot
+	if spot == nil or spot.location == nil then
 		return
 	end
-	local x = math.floor(wardSpot.location.x)
-	local y = math.floor(wardSpot.location.y)
+	local x = math.floor(spot.location.x)
+	local y = math.floor(spot.location.y)
 	local now = DotaTime()
 	local last = planted[#planted]
 	if last and last.kind == kind and last.x == x and last.y == y and now - last.t < 20 then
 		return
 	end
-	planted[#planted + 1] = { t = now, kind = kind, role = wardSpot.role or "spot", x = x, y = y }
+	planted[#planted + 1] = { t = now, kind = kind, role = spot.role or "spot", x = x, y = y }
 	if #planted > 40 then
 		table.remove(planted, 1)
 	end
@@ -221,10 +261,11 @@ local function DumpWards()
 		)
 	end
 end
-local function AnnounceWard(kind)
-	RememberWard(kind)
-	local role = wardSpot and wardSpot.role or nil
-	local wardLoc = wardSpot and wardSpot.location or nil
+local function AnnounceWard(kind, spot)
+	spot = spot or wardSpot
+	RememberWard(kind, spot)
+	local role = spot and spot.role or nil
+	local wardLoc = spot and spot.location or nil
 	MatchTrace.Item(
 		bot,
 		kind == "sentry" and "item_ward_sentry" or "item_ward_observer",
@@ -264,10 +305,63 @@ local function AnnounceWard(kind)
 			"[debug] ward %s role=%s at (%.0f, %.0f)",
 			kind,
 			tostring(role or "n/a"),
-			wardSpot and wardSpot.location.x or 0,
-			wardSpot and wardSpot.location.y or 0
+			wardLoc and wardLoc.x or 0,
+			wardLoc and wardLoc.y or 0
 		)
 		bot:ActionImmediate_Chat(extra, false)
+	end
+end
+-- The result of a dispenser cast (#15). DispenserPlant saw the charge drop only when the ward think ran again at the
+-- same spot. Game 068: 3 of 48 dispenser casts printed `dispenser planted`, while the courier tracker showed the
+-- charge going down after most of them (`[OHA-COURIER] dispenser obs=2->1`): once the ward is down the next think
+-- picks another spot (the planted one leaves the list), or another mode takes over, and the try was dropped
+-- unlogged; RememberWard missed those wards too. Checked here on every GetDesire while the bot is out of the ward
+-- mode or the ward mode moved on to the next spot, and by DispenserPlant before it starts a new try. Counts all
+-- wards held (WardCharges), in case the dispenser turns into a plain ward item when one kind runs out. A ward went
+-- down since the cast: planted (via= where it was seen), remembered, the spot marked. Charges that went up (a
+-- courier delivery) raise the baseline. A try with no drop for 6s is dropped.
+CheckDispenserTry = function(via)
+	local try = bot._dispTry
+	if try == nil or try.allObs == nil then
+		return
+	end
+	local now = DotaTime()
+	local obs, sen = WardCharges()
+	local obsDown, senDown = obs < try.allObs, sen < try.allSen
+	if obsDown or senDown then
+		bot._dispTry = nil
+		local kind = obsDown and "observer" or "sentry"
+		local spot = try.spot
+		if spot ~= nil then
+			if obsDown then
+				spot.plant_time_obs = now
+			else
+				spot.plant_time_sentry = now
+			end
+		end
+		pcall(
+			print,
+			string.format(
+				"[OHA-WARD] t=%.1f %s dispenser planted want=%s got=%s obs=%d sen=%d via=%s after=%.1f at=%.0f,%.0f%s",
+				now,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				try.wantObs and "obs" or "sentry",
+				obsDown and "obs" or "sentry",
+				obs,
+				sen,
+				tostring(via),
+				now - try.at,
+				try.loc.x,
+				try.loc.y,
+				SpotLabel(spot)
+			)
+		)
+		AnnounceWard(kind, spot)
+		return
+	end
+	try.allObs, try.allSen = math.max(try.allObs, obs), math.max(try.allSen, sen)
+	if now - try.at > 6 then
+		bot._dispTry = nil
 	end
 end
 -- Plant retry (#15). The maintainer's pinged eye-cliff spots (Radiant top, Dire bottom) took no ward: the bot stood in
@@ -281,25 +375,6 @@ local RETRY_STEP = 1.5
 -- Where to cast for a spot: the retry point being tried, else the point that worked, else the spot.
 local function PlantLoc(spot)
 	return spot._retryLoc or spot.plantAt or spot.location
-end
--- Observers and sentries the bot holds (dispenser: current = observers, secondary = sentries).
-local function WardCharges()
-	local obs, sen = 0, 0
-	for slot = 0, 8 do
-		local item = bot:GetItemInSlot(slot)
-		if item ~= nil then
-			local itemName = item:GetName()
-			if itemName == "item_ward_observer" then
-				obs = obs + (item:GetCurrentCharges() or 0)
-			elseif itemName == "item_ward_sentry" then
-				sen = sen + (item:GetCurrentCharges() or 0)
-			elseif itemName == "item_ward_dispenser" then
-				obs = obs + (item:GetCurrentCharges() or 0)
-				sen = sen + DispenserSentryCharges(item)
-			end
-		end
-	end
-	return obs, sen
 end
 local function EndPlantRetry(retry, ok)
 	local spot = retry.spot
@@ -354,6 +429,11 @@ end
 function GetDesire()
 	DumpWards()
 	CheckPlantRetry()
+	-- Out of the ward mode, or once the ward mode moved on to another spot, nobody else watches a dispenser cast
+	-- (DispenserPlant does only at the spot it cast on).
+	if bot._dispTry ~= nil and (bot:GetActiveMode() ~= BOT_MODE_WARD or bot._dispTry.spot ~= wardSpot) then
+		CheckDispenserTry(bot:GetActiveMode() ~= BOT_MODE_WARD and "mode-left" or "next-spot")
+	end
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
 	end
