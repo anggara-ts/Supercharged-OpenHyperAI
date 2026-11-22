@@ -67,7 +67,7 @@ T.test("strength: game 074 Dire (2.6 levels and 11% net worth ahead) pushes, by 
 		theirLvl = RADIANT_LVL,
 	}))
 	T.eq(ok, true, "strength push")
-	T.eq(lead, "lvl", "the level lead opens it (11% net worth is under 15%)")
+	T.eq(lead, "lvl", "the level lead opens it (11% net worth is under 20%)")
 	T.near(nwPct, 0.108, 0.01, "net worth lead")
 	T.near(lvlLead, 2.6, 0.01, "level lead")
 	local okUlts, why = R.Decide(inputs({
@@ -82,7 +82,7 @@ T.test("strength: game 074 Dire (2.6 levels and 11% net worth ahead) pushes, by 
 	T.eq(why, "ults", "skip reason")
 end)
 
-T.test("strength: net worth route needs 15% and a small level lead", function()
+T.test("strength: net worth route needs 20% and a level", function()
 	local R = rules()
 	local ok, lead = R.Decide(inputs({ ourNw = 80000, theirNw = 65000, ourLvl = 19, theirLvl = 18 }))
 	T.eq(ok, true, "23% and +1 level: push")
@@ -117,24 +117,24 @@ T.test("strength: base, defend, laning and alive counts hold it back", function(
 	T.eq(why({ defendPing = true }), "defend-ping", "a defend ping")
 	T.eq(why({ defendDesire = 0.45 }), "defend", "a lane needs defending")
 	T.eq(why({ aliveUs = 4, aliveThem = 5 }), "alive", "fewer alive than them")
-	T.eq(why({ aliveUs = 2, aliveThem = 1 }), "alive", "under 3 alive")
+	T.eq(why({ aliveUs = 3, aliveThem = 2 }), "alive", "under 4 alive")
 	local ok = R.Decide(inputs(ahead))
 	T.eq(ok, true, "ahead with nothing to defend: push")
 end)
 
 T.test("strength: the scale knob and the Aegis move the thresholds", function()
 	local R = rules()
-	local i = inputs({ ourNw = 78000, theirNw = 65000, ourLvl = 19, theirLvl = 18 }) -- 20% and +1
-	T.eq((R.Decide(i)), true, "scale 1: 20% is enough")
+	local i = inputs({ ourNw = 80000, theirNw = 65000, ourLvl = 19, theirLvl = 18 }) -- 23% and +1
+	T.eq((R.Decide(i)), true, "scale 1: 23% and +1 is enough")
 	T.eq(R.SetScale(1.5), 1.5, "scale set")
-	T.eq((R.Decide(i)), false, "scale 1.5: 20% is under 22.5%")
+	T.eq((R.Decide(i)), false, "scale 1.5: 23% is under 30%")
 	T.eq(R.SetScale(9), 2, "scale clamped to 2")
 	T.eq(R.SetScale(0.1), 0.5, "scale clamped to 0.5")
 	R.SetScale(1)
-	local lvlOnly = inputs({ ourNw = NONE, theirNw = NONE, ourLvl = 19.3, theirLvl = 18 })
-	T.eq((R.Decide(lvlOnly)), false, "+1.3 levels: no push")
+	local lvlOnly = inputs({ ourNw = NONE, theirNw = NONE, ourLvl = 19.6, theirLvl = 18 })
+	T.eq((R.Decide(lvlOnly)), false, "+1.6 levels: no push")
 	lvlOnly.aegis = true
-	T.eq((R.Decide(lvlOnly)), true, "+1.3 levels with the Aegis (threshold 1.2): push")
+	T.eq((R.Decide(lvlOnly)), true, "+1.6 levels with the Aegis (threshold 1.5): push")
 end)
 
 T.test("strength: TeamTotal counts an unread or stale hero as unknown, not 0", function()
@@ -172,7 +172,7 @@ end)
 
 T.test("strength: a window ends on the building, the timeout, deaths, outnumbered or the lost lead", function()
 	local R = rules()
-	local state = { startedAt = 100, aliveAtStart = 5 }
+	local arrived = { startedAt = 100, aliveAtStart = 5, arrivedAt = 100 }
 	local ahead = {
 		ourNw = 80000,
 		theirNw = 60000,
@@ -183,16 +183,23 @@ T.test("strength: a window ends on the building, the timeout, deaths, outnumbere
 		enemiesAtFront = 1,
 		alliesAtFront = 4,
 	}
-	local function endWhy(now, over)
+	local function endWhy(now, over, state)
 		local i = inputs(ahead)
 		for k, v in pairs(over or {}) do
 			i[k] = v
 		end
-		return R.EndWhy(state, now, i)
+		return R.EndWhy(state or arrived, now, i)
 	end
 	T.eq(endWhy(120), nil, "+1.2 levels / 33% at the end threshold: keeps going")
+	T.eq(endWhy(120, { ultsReady = 0 }), nil, "ultimates cast in the fight: keeps going")
+	T.eq(endWhy(120, { theirNw = NONE }), nil, "an enemy net worth read gone stale: keeps going")
 	T.eq(endWhy(120, { targetAlive = false }), "building-down", "the building fell")
-	T.eq(endWhy(140), "timeout", "40s")
+	T.eq(endWhy(140), "timeout", "40s after the arrival")
+	T.eq(endWhy(150, { targetDropping = true }), nil, "the target still losing HP: extended")
+	T.eq(endWhy(160, { targetDropping = true }), "timeout", "the extension is 20s at most")
+	local walking = { startedAt = 100, aliveAtStart = 5 }
+	T.eq(endWhy(140, nil, walking), nil, "still walking at 40s: the hold clock has not started")
+	T.eq(endWhy(145, nil, walking), "no-gather", "nobody at the lane front 45s after the start")
 	T.eq(endWhy(120, { aliveUs = 3, aliveThem = 3 }), "deaths", "two of ours died")
 	T.eq(endWhy(120, { aliveUs = 4, aliveThem = 5 }), "deaths", "fewer alive than them")
 	T.eq(endWhy(120, { enemiesAtFront = 3, alliesAtFront = 2 }), "outnumbered", "3 enemies at the front vs 2")

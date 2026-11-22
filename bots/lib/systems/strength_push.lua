@@ -11,8 +11,9 @@
 -- the six slots + backpack (unit:GetItemInSlot, GetItemCost) for both teams, the highest seen per enemy, and to
 -- levels only when an enemy has not been seen for 2 minutes. Enemy ultimates are not readable (no enemy cooldowns).
 --
--- Logs: [SHy-PUSH] strength-push (start), strength-end why=, strength-skip why= (once per 30s per team),
--- strength-join (a bot raised by a window), strength-nw-probe; [SHy-FARM] yield-strength-push.
+-- Logs: [SHy-PUSH] strength-push (start), strength-end why=, strength-skip why= / strength-compare (the compare once
+-- per 30s per team, always), strength-join (a bot raised by a window), strength-nw-probe; [SHy-FARM]
+-- yield-strength-push.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Dota = require(GetScriptDirectory() .. "/lib/dota/index")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/strength_rules")
@@ -146,6 +147,15 @@ local function AverageLevel(team)
 		count = count + 1
 	end
 	return count > 0 and total / count or 0
+end
+local function HumanCount(team)
+	local count = 0
+	for _, pid in ipairs(GetTeamPlayers(team) or {}) do
+		if not IsPlayerBot(pid) then
+			count = count + 1
+		end
+	end
+	return count
 end
 local function AliveCount(team)
 	local count = 0
@@ -282,11 +292,13 @@ local function ReadInputs(state, team, bot, now)
 		aegis = Fu.DoesTeamHaveAegis() == true,
 		ultsReady = ultsReady,
 		ultsTotal = ultsTotal,
+		humansUs = HumanCount(team),
+		humansThem = HumanCount(GetOpposingTeam()),
 	}
 end
 local function Fields(i, nwPct, lvlLead)
 	return string.format(
-		"nw=%s/%s nwsrc=%s nwLead=%s lvl=%.1f/%.1f lvlLead=%.1f ults=%d/%d alive=%d/%d aegis=%s defend=%.2f scale=%.2f",
+		"nw=%s/%s nwsrc=%s nwLead=%s lvl=%.1f/%.1f lvlLead=%.1f ults=%d/%d alive=%d/%d humans=%d/%d aegis=%s defend=%.2f scale=%.2f",
 		i.ourNw ~= nil and string.format("%.0f", i.ourNw) or "-",
 		i.theirNw ~= nil and string.format("%.0f", i.theirNw) or "-",
 		tostring(i.nwSrc),
@@ -298,6 +310,8 @@ local function Fields(i, nwPct, lvlLead)
 		i.ultsTotal or 0,
 		i.aliveUs or 0,
 		i.aliveThem or 0,
+		i.humansUs or 0,
+		i.humansThem or 0,
 		tostring(i.aegis),
 		i.defendDesire or 0,
 		Rules.GetScale()
@@ -314,17 +328,52 @@ local function EndWindow(state, team, now, why, i)
 	state.cooldownUntil = now + Rules.Cooldown(why)
 	print(
 		string.format(
-			"[SHy-PUSH] t=%.0f %s strength-end why=%s lane=%s target=%s held=%.0f alive=%d/%d",
+			"[SHy-PUSH] t=%.0f %s strength-end why=%s lane=%s target=%s targetHp=%.2f held=%.0f gathered=%s front=%d/%d alive=%d/%d",
 			now,
 			TeamName(team),
 			why,
 			tostring(state.lane),
 			state.targetName or "-",
+			state.lastTargetHp or 0,
 			now - (state.startedAt or now),
+			state.arrivedAt ~= nil and string.format("%.0f", now - state.arrivedAt) or "-",
+			i.alliesAtFront or 0,
+			i.enemiesAtFront or 0,
 			i.aliveUs or 0,
 			i.aliveThem or 0
 		)
 	)
+end
+-- The compare, once per SKIP_LOG_SECONDS per team whatever happens (maintainer 2026-11-23: "need more data"):
+-- strength-skip why= while no window runs (laning and cooldown included), strength-compare state=active in a window.
+local function LogCompare(state, team, now, why, i)
+	if now - state.lastSkipLog < SKIP_LOG_SECONDS then
+		return
+	end
+	state.lastSkipLog = now
+	local _, _, _, nwPct, lvlLead = Rules.Lead(i)
+	if state.active then
+		print(
+			string.format(
+				"[SHy-PUSH] t=%.0f %s strength-compare state=active lane=%s target=%s %s",
+				now,
+				TeamName(team),
+				tostring(state.lane),
+				state.targetName or "-",
+				Fields(i, nwPct, lvlLead)
+			)
+		)
+	else
+		print(
+			string.format(
+				"[SHy-PUSH] t=%.0f %s strength-skip why=%s %s",
+				now,
+				TeamName(team),
+				tostring(why),
+				Fields(i, nwPct, lvlLead)
+			)
+		)
+	end
 end
 local function TickTeam(bot)
 	local team = GetTeam()
@@ -344,33 +393,35 @@ local function TickTeam(bot)
 		local front = GetLaneFrontLocation(team, state.lane, 0)
 		i.enemiesAtFront = #Fu.GetEnemiesNearLoc(front, FRONT_RADIUS)
 		i.alliesAtFront = #Fu.GetAlliesNearLoc(front, FRONT_RADIUS)
+		-- The hold clock starts when 2+ of ours reach the lane front (StrengthRules.EndWhy).
+		if state.arrivedAt == nil and i.alliesAtFront >= 2 then
+			state.arrivedAt = now
+		end
+		if i.targetAlive then
+			local hp = state.target:GetHealth() / math.max(1, state.target:GetMaxHealth())
+			i.targetDropping = state.lastTargetHp ~= nil and hp < state.lastTargetHp - 0.005
+			state.lastTargetHp = hp
+		else
+			state.lastTargetHp = 0
+		end
 		local why = Rules.EndWhy(state, now, i)
 		if why ~= nil then
 			EndWindow(state, team, now, why, i)
+		else
+			LogCompare(state, team, now, nil, i)
 		end
 		return state
 	end
-	if now < state.cooldownUntil then
-		return state
-	end
 	local ok, why, nwPct, lvlLead = Rules.Decide(i)
+	if ok and now < state.cooldownUntil then
+		ok, why = false, "cooldown"
+	end
 	local pick = ok and Rules.PickLane(LaneEntries(team)) or nil
 	if ok and pick == nil then
 		ok, why = false, "no-target"
 	end
 	if not ok then
-		if why ~= "laning" and now - state.lastSkipLog >= SKIP_LOG_SECONDS then
-			state.lastSkipLog = now
-			print(
-				string.format(
-					"[SHy-PUSH] t=%.0f %s strength-skip why=%s %s",
-					now,
-					TeamName(team),
-					tostring(why),
-					Fields(i, nwPct, lvlLead)
-				)
-			)
-		end
+		LogCompare(state, team, now, why, i)
 		return state
 	end
 	state.active = true
@@ -379,6 +430,8 @@ local function TickTeam(bot)
 	state.targetName = TargetName(pick.target)
 	state.startedAt = now
 	state.aliveAtStart = i.aliveUs
+	state.arrivedAt = nil
+	state.lastTargetHp = pick.hp
 	print(
 		string.format(
 			"[SHy-PUSH] t=%.0f %s strength-push lead=%s %s lane=%d target=%s tier=%d targetHp=%.2f allyDist=%.0f",
@@ -397,9 +450,21 @@ local function TickTeam(bot)
 end
 
 -- Whether this bot joins the window: a core, or a support within SUPPORT_RANGE of the lane front; alive, level 6+,
--- HP 45%+, not outnumbered where it stands.
+-- HP 45%+, not at Roshan or defending, not outnumbered where it stands.
 local function Joins(bot, lane)
 	if not bot:IsAlive() or bot:IsIllusion() or bot:GetLevel() < 6 or Fu.GetHP(bot) < MIN_HP then
+		return false
+	end
+	-- Push.GetPushDesire returns none for these; the floor must not override them: a bot at Roshan, or one that
+	-- defends a lane (its defend mode active). A lane that needs defending ends the window (StrengthRules.EndWhy).
+	if Fu.IsDoingRoshan(bot) then
+		return false
+	end
+	local mode = bot:GetActiveMode()
+	if
+		(mode == BOT_MODE_DEFEND_TOWER_TOP or mode == BOT_MODE_DEFEND_TOWER_MID or mode == BOT_MODE_DEFEND_TOWER_BOT)
+		and bot:GetActiveModeDesire() >= 0.2
+	then
 		return false
 	end
 	local location = bot:GetLocation()

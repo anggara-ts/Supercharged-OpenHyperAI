@@ -10,17 +10,21 @@ local StrengthRules = {}
 
 -- Thresholds. The lead thresholds (nwLeadPct, lvlLead*) are multiplied by the scale (StrengthRules.SetScale), the
 -- knob a difficulty profile can turn: under 1 pushes on a smaller lead, over 1 needs a bigger one.
+-- Conservative on purpose (maintainer, 2026-11-23: a human can order a push with !push, #225; "need more data"):
+-- only a clear lead fires, and the strength-skip / strength-compare lines give the numbers to tune these.
 StrengthRules.DEFAULTS = {
-	nwLeadPct = 0.15, -- net worth lead (our - their) / their
-	lvlLeadAlone = 2.0, -- average level lead that is enough on its own (net worth not behind)
-	lvlLeadWithNw = 0.5, -- average level lead needed next to a net worth lead (net worth reads are a lower bound)
+	nwLeadPct = 0.2, -- net worth lead (our - their) / their
+	lvlLeadAlone = 2.5, -- average level lead that is enough on its own (net worth not behind)
+	lvlLeadWithNw = 1.0, -- average level lead needed next to a net worth lead (net worth reads are a lower bound)
 	nwBehindPct = -0.05, -- net worth this far behind blocks the level route
 	lvlBehind = -1.0, -- average level this far behind: always skip
 	aegisFactor = 0.6, -- with the Aegis the lead thresholds are this much of normal
 	endFactor = 0.5, -- during a window the lead may drop to this much of the start threshold
-	minAlive = 3, -- our alive heroes at least
+	minAlive = 4, -- our alive heroes at least
 	defendDesire = 0.4, -- any GetDefendLaneDesire at or above this: defend first
-	holdSeconds = 40, -- window length (the card asks ~30-45s)
+	holdSeconds = 40, -- window length from the arrival at the lane front (the card asks ~30-45s)
+	gatherSeconds = 45, -- no 2+ allies at the lane front this long after the start: end
+	extendSeconds = 20, -- extra hold while the target is still losing HP
 	cooldown = 20, -- seconds after an end before a new window
 	cooldownAfterFall = 5, -- after the target fell (chain to the next building)
 	maxNwAge = 120, -- an enemy net worth read older than this counts as unknown
@@ -139,25 +143,46 @@ function StrengthRules.PickLane(lanes)
 	return best
 end
 
--- Whether a running window ends. state = { startedAt, aliveAtStart }, i = the Decide inputs at the end threshold
--- (factor = endFactor) plus targetAlive (bool), enemiesAtFront, alliesAtFront (visible heroes near the lane front).
--- Returns the end reason or nil.
+-- Whether a running window ends. state = { startedAt, aliveAtStart, arrivedAt (nil until 2+ allies reached the lane
+-- front) }, i = the Decide inputs at the end threshold (factor = endFactor) plus targetAlive (bool), targetDropping
+-- (the target lost HP since the last tick), enemiesAtFront, alliesAtFront (visible heroes near the lane front).
+-- The hold clock runs from the arrival, so the walk does not eat the window; gatherSeconds without an arrival ends
+-- it, and a target still losing HP at the end of the hold gets up to extendSeconds more. Our ultimates are not
+-- checked here: they are cast in the fight the push starts. Returns the end reason or nil.
 function StrengthRules.EndWhy(state, now, i)
 	if not i.targetAlive then
 		return "building-down"
 	end
-	if now - (state.startedAt or now) >= D.holdSeconds then
-		return "timeout"
+	if state.arrivedAt == nil then
+		if now - (state.startedAt or now) >= D.gatherSeconds then
+			return "no-gather"
+		end
+	else
+		local held = now - state.arrivedAt
+		if held >= D.holdSeconds and not (i.targetDropping and held < D.holdSeconds + D.extendSeconds) then
+			return "timeout"
+		end
 	end
-	if (i.aliveUs or 0) < (state.aliveAtStart or 0) - 1 then
+	local aliveUs, aliveThem = i.aliveUs or 0, i.aliveThem or 0
+	if aliveUs < (state.aliveAtStart or 0) - 1 or aliveUs < aliveThem or aliveUs < D.minAlive then
 		return "deaths"
 	end
 	if (i.enemiesAtFront or 0) >= 2 and (i.enemiesAtFront or 0) > (i.alliesAtFront or 0) then
 		return "outnumbered"
 	end
-	local ok, why = StrengthRules.Decide(i)
-	if not ok then
-		return why == "alive" and "deaths" or why
+	if i.baseThreat then
+		return "base"
+	end
+	if i.defendPing then
+		return "defend-ping"
+	end
+	if (i.defendDesire or 0) >= D.defendDesire then
+		return "defend"
+	end
+	local ok, _, why = StrengthRules.Lead(i)
+	-- An enemy not seen for a while makes net worth unknown; that alone does not end a running window.
+	if not ok and why ~= "no-lead-nw-unknown" then
+		return why
 	end
 	return nil
 end
