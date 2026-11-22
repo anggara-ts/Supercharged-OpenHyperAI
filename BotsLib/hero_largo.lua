@@ -171,6 +171,8 @@ local rhapsody = {
 	strums = 0,
 	hits = 0,
 	reanchors = 0,
+	noCast = 0,
+	holdUntil = -99,
 	stacks = 0,
 }
 
@@ -221,7 +223,7 @@ function X.SkillsComplement()
 		LogLargo(
 			"croak",
 			3,
-			"croak target=%s dmg=%d hp=%.2f",
+			"croak-cast target=%s dmg=%d hp=%.2f",
 			ShortName(croakOfGeniusTarget),
 			croakOfGeniusDamage or 0,
 			Fu.GetHP(croakOfGeniusTarget)
@@ -235,7 +237,7 @@ function X.SkillsComplement()
 		LogLargo(
 			"lick",
 			2,
-			"lick target=%s why=%s dist=%d",
+			"lick-cast target=%s why=%s dist=%d",
 			ShortName(catchyLickTarget),
 			catchyLickReason or "?",
 			GetUnitToUnitDistance(bot, catchyLickTarget)
@@ -712,9 +714,11 @@ function X.IsGoodToHeal(hero)
 end
 
 -- Strumming needs no free action slot or finished cast (the songs are instant, DOTA_ABILITY_BEHAVIOR_IMMEDIATE in
--- the game file), only a Largo who can cast at all.
+-- the game file), only a Largo who can cast at all. Not while channeling: the songs have no IGNORE_CHANNEL, a strum
+-- would break a TP.
 function X.CanStrum()
 	return bot:IsAlive()
+		and not bot:IsChanneling()
 		and not bot:IsStunned()
 		and not bot:IsSilenced()
 		and not bot:IsHexed()
@@ -823,6 +827,7 @@ function X.ConsiderAmphibianRhapsody(now)
 		not Fu.CanCastAbility(amphibianRhapsodyAbility)
 		or amphibianRhapsodyAbility:GetToggleState()
 		or now - rhapsody.toggleOrderAt < 1
+		or now < rhapsody.holdUntil
 	then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
@@ -856,7 +861,7 @@ function X.TrackRhapsody(now)
 		rhapsody.lastBeat = now
 		rhapsody.lastReasonAt = now
 		rhapsody.pending = nil
-		rhapsody.strums, rhapsody.hits, rhapsody.reanchors = 0, 0, 0
+		rhapsody.strums, rhapsody.hits, rhapsody.reanchors, rhapsody.noCast = 0, 0, 0, 0
 		-- Settles what the game files can't: are the basic abilities hidden during the song, are the songs
 		-- unhidden, trained and castable.
 		local song = songByKey[rhapsody.first] or fightSongAbility
@@ -945,11 +950,20 @@ function X.CheckStrum(now, stacks)
 	if result == "hit" then
 		rhapsody.hits = rhapsody.hits + 1
 	end
-	local newAnchor = LargoRules.Reanchor(rhapsody.anchor, result, pending.cast, LargoRules.REANCHOR_SHIFT)
-	local reanchored = newAnchor ~= rhapsody.anchor
-	if reanchored then
-		rhapsody.anchor = newAnchor
-		rhapsody.reanchors = rhapsody.reanchors + 1
+	rhapsody.noCast = pending.cast and 0 or rhapsody.noCast + 1
+	local reanchor = "no"
+	if LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits) then
+		local newAnchor = LargoRules.Reanchor(rhapsody.anchor, result, pending.cast, LargoRules.REANCHOR_SHIFT)
+		if newAnchor ~= rhapsody.anchor then
+			rhapsody.anchor = newAnchor
+			rhapsody.reanchors = rhapsody.reanchors + 1
+			reanchor = "yes"
+			if not LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits) then
+				-- A whole beat swept with no hit: the stacks don't tell, keep the toggle-on beat from now on.
+				rhapsody.anchor = rhapsody.onAt
+				reanchor = "stop"
+			end
+		end
 	end
 	print(
 		string.format(
@@ -966,7 +980,7 @@ function X.CheckStrum(now, stacks)
 			(pending.at - rhapsody.onAt) % 1,
 			pending.at % 1,
 			pending.at - pending.beat,
-			Bool(reanchored),
+			reanchor,
 			rhapsody.strums,
 			rhapsody.hits
 		)
@@ -991,10 +1005,15 @@ function X.RhapsodyThink(now)
 		now,
 		rhapsody.lastReasonAt,
 		bot:GetMana() >= firstSong:GetManaCost(),
-		LargoRules.TOGGLE_OFF_AFTER
+		LargoRules.TOGGLE_OFF_AFTER,
+		rhapsody.noCast
 	)
 	if offWhy ~= nil and Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
 		rhapsody.toggleOrderAt = now
+		if offWhy == "no-cast" then
+			-- The songs don't go out: no new song for a while rather than a disarmed, silent Largo.
+			rhapsody.holdUntil = now + LargoRules.NO_CAST_HOLD
+		end
 		LogLargo(
 			"toggle",
 			1,
@@ -1020,6 +1039,7 @@ function X.RhapsodyThink(now)
 	rhapsody.lastBeat = beatTime
 	local blocked = X.SongBlockReason(firstSong)
 	if blocked ~= nil then
+		rhapsody.noCast = rhapsody.noCast + 1
 		LogLargo(
 			"strum-blocked",
 			3,

@@ -16,6 +16,12 @@ LargoRules.LATE = 0.25
 -- After a strum that gained no Groovin' stack (below the cap), the beat is assumed this far later: three misses walk
 -- the phase through a whole beat, so a 0.4s window is found within a few beats wherever it lies.
 LargoRules.REANCHOR_SHIFT = 0.3
+-- Shifts with no hit at all before the stacks are taken to say nothing (3 x 0.3s: a whole beat swept).
+LargoRules.MAX_REANCHORS = 3
+-- The song ends after this many beats in a row with no song going out (blocked, or a cast that never happened),
+-- and is not started again for NO_CAST_HOLD seconds: Largo is disarmed while it is on.
+LargoRules.NO_CAST_BEATS = 3
+LargoRules.NO_CAST_HOLD = 20
 -- The song ends after this many seconds with no reason to sing (the stacks linger 5s anyway).
 LargoRules.TOGGLE_OFF_AFTER = 3
 -- Turn the song on only with mana for this many beats of the chosen songs.
@@ -65,6 +71,11 @@ function LargoRules.Reanchor(anchor, result, castWentOut, shift)
 		return anchor + (shift or LargoRules.REANCHOR_SHIFT)
 	end
 	return anchor
+end
+
+-- Whether a miss may still move the beat: always after a hit (the stacks work), else for MAX_REANCHORS shifts.
+function LargoRules.MayReanchor(reanchors, hits)
+	return hits > 0 or reanchors < LargoRules.MAX_REANCHORS
 end
 
 -- Which songs to play. s (all optional):
@@ -132,11 +143,14 @@ function LargoRules.ChooseSongs(s)
 	return first, second, why
 end
 
--- Whether to end the song now: "mana" (not enough mana for one song), "idle" (no reason to sing for holdSeconds),
--- or nil to keep singing.
-function LargoRules.ToggleOffReason(now, lastReasonAt, canAffordSong, holdSeconds)
+-- Whether to end the song now: "mana" (not enough mana for one song), "no-cast" (noCastBeats beats in a row with no
+-- song going out), "idle" (no reason to sing for holdSeconds), or nil to keep singing.
+function LargoRules.ToggleOffReason(now, lastReasonAt, canAffordSong, holdSeconds, noCastBeats)
 	if not canAffordSong then
 		return "mana"
+	end
+	if (noCastBeats or 0) >= LargoRules.NO_CAST_BEATS then
+		return "no-cast"
 	end
 	if now - lastReasonAt >= (holdSeconds or LargoRules.TOGGLE_OFF_AFTER) then
 		return "idle"
