@@ -35,6 +35,7 @@ local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_t
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local GlyphRules = require(GetScriptDirectory() .. "/FuncLib/systems/glyph_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -9328,10 +9329,94 @@ function Usage.IsTargetedByEnemy(unit)
 	end
 	return false
 end
+-- Glyph of Fortification (#12). Only team slot 1 decides, and only when all five players are bots: every bot runs
+-- this every 2s and the Glyph is one team-wide resource, so one bot decides for the team; and with a human teammate
+-- the human keeps the shared Glyph for their own call (a bot spending it would take the charge from them). The rules
+-- (values, 7.42 sources) are in FuncLib/systems/glyph_rules.lua. Our own charge count is only valid because of this
+-- guard (no one else on the team casts).
+local GlyphState = { charges = nil, towerHp = {}, pending = nil, lastWaitLog = -100 }
+local GLYPH_TOWERS = {
+	{ id = TOWER_TOP_1, name = "top_1", tier = 1 },
+	{ id = TOWER_MID_1, name = "mid_1", tier = 1 },
+	{ id = TOWER_BOT_1, name = "bot_1", tier = 1 },
+	{ id = TOWER_TOP_2, name = "top_2", tier = 2 },
+	{ id = TOWER_MID_2, name = "mid_2", tier = 2 },
+	{ id = TOWER_BOT_2, name = "bot_2", tier = 2 },
+	{ id = TOWER_TOP_3, name = "top_3", tier = 3 },
+	{ id = TOWER_MID_3, name = "mid_3", tier = 3 },
+	{ id = TOWER_BOT_3, name = "bot_3", tier = 3 },
+	{ id = TOWER_BASE_1, name = "base_1", tier = 4 },
+	{ id = TOWER_BASE_2, name = "base_2", tier = 4 },
+}
+-- Distinct enemy heroes (by player ID, no illusions or clones) within radius of the unit.
+local function GlyphEnemiesNear(unit, radius)
+	local found, seen = {}, {}
+	for _, enemy in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES)) do
+		if Fu.IsValidHero(enemy) and not enemy:IsIllusion() and GetUnitToUnitDistance(unit, enemy) <= radius then
+			local id = enemy:GetPlayerID()
+			if not seen[id] then
+				seen[id] = true
+				found[#found + 1] = enemy
+			end
+		end
+	end
+	return found
+end
+-- Our heroes within ALLY_RADIUS of the tower that attack one of the enemies or were hit by one in the last 2s.
+local function GlyphAlliesFighting(tower, enemies)
+	local count, seen = 0, {}
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
+		if
+			Fu.IsValidHero(ally)
+			and not ally:IsIllusion()
+			and not seen[ally:GetPlayerID()]
+			and GetUnitToUnitDistance(ally, tower) <= GlyphRules.ALLY_RADIUS
+		then
+			local target = ally:GetAttackTarget()
+			for _, enemy in pairs(enemies) do
+				if target == enemy or enemy:GetAttackTarget() == ally or ally:WasRecentlyDamagedByHero(enemy, 2) then
+					seen[ally:GetPlayerID()] = true
+					count = count + 1
+					break
+				end
+			end
+		end
+	end
+	return count
+end
+local function GlyphTowerAttacked(tower)
+	if Usage.IsTargetedByEnemy(tower) then
+		return true
+	end
+	for _, creep in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS)) do
+		if Fu.IsValid(creep) and creep:GetAttackTarget() == tower then
+			return true
+		end
+	end
+	return false
+end
+local function GlyphCast(why, building, name, enemies, allies)
+	bot:ActionImmediate_Glyph()
+	GlyphRules.Spend(GlyphState.charges, DotaTime())
+	GlyphState.pending = { building = building, name = name, why = why }
+	print(
+		string.format(
+			"[OHA-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d",
+			DotaTime(),
+			string.gsub(botName, "npc_dota_hero_", ""),
+			why,
+			name,
+			enemies,
+			allies,
+			building:GetHealth() / building:GetMaxHealth(),
+			team,
+			GlyphState.charges.charges
+		)
+	)
+end
 local function UseGlyphIfNeeded()
 	if
-		GetGlyphCooldown() > 0
-		or DotaTime() < 60
+		DotaTime() < 60
 		or bot ~= GetTeamMember(1)
 		or not GetTeamMember(2):IsBot()
 		or not GetTeamMember(3):IsBot()
@@ -9340,42 +9425,84 @@ local function UseGlyphIfNeeded()
 	then
 		return
 	end
-	local towerIds = {
-		TOWER_TOP_1,
-		TOWER_MID_1,
-		TOWER_BOT_1,
-		TOWER_TOP_2,
-		TOWER_MID_2,
-		TOWER_BOT_2,
-		TOWER_TOP_3,
-		TOWER_MID_3,
-		TOWER_BOT_3,
-		TOWER_BASE_1,
-		TOWER_BASE_2,
-	}
-	for _, towerId in pairs(towerIds) do
-		local tower = GetTower(team, towerId)
+	local now = DotaTime()
+	if GlyphState.charges == nil then
+		GlyphState.charges = GlyphRules.NewCharges()
+	end
+	GlyphRules.Tick(GlyphState.charges, now)
+	-- One tick (2s) after a cast: did the building get the Glyph, and what does GetGlyphCooldown read with 2 charges?
+	local pending = GlyphState.pending
+	if pending ~= nil then
+		GlyphState.pending = nil
+		print(
+			string.format(
+				"[OHA-GLYPH] t=%.0f %s glyph-result why=%s tower=%s fortified=%s cd=%.0f charges=%d",
+				now,
+				string.gsub(botName, "npc_dota_hero_", ""),
+				pending.why,
+				pending.name,
+				tostring(
+					pending.building ~= nil
+						and not pending.building:IsNull()
+						and pending.building:HasModifier("modifier_fountain_glyph")
+				),
+				GetGlyphCooldown(),
+				GlyphState.charges.charges
+			)
+		)
+	end
+	-- HP samples for "its HP is falling" (taken every tick, also while the Glyph is on cooldown).
+	local towerHp = {}
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
+		if tower ~= nil and tower:GetHealth() > 0 then
+			towerHp[info.id] = tower:GetHealth()
+		end
+	end
+	local prevHp = GlyphState.towerHp
+	GlyphState.towerHp = towerHp
+	if GetGlyphCooldown() > 0 then
+		return
+	end
+	-- 1. Save a dying building (unchanged thresholds), first.
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
 		if
 			tower ~= nil
 			and tower:GetHealth() > 0
-			and tower:GetHealth() / tower:GetMaxHealth() < 0.36
 			and tower:CanBeSeen()
-			and Usage.IsTargetedByEnemy(tower)
+			and GlyphRules.ShouldSave(
+				"tower",
+				tower:GetHealth() / tower:GetMaxHealth(),
+				Usage.IsTargetedByEnemy(tower),
+				tower:HasModifier("modifier_fountain_glyph")
+			)
 		then
-			bot:ActionImmediate_Glyph()
+			local enemies =
+				GlyphEnemiesNear(tower, (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN)
+			GlyphCast("save", tower, info.name, #enemies, GlyphAlliesFighting(tower, enemies))
 			return
 		end
 	end
-	local barracksIds = { BARRACKS_TOP_MELEE, BARRACKS_MID_MELEE, BARRACKS_BOT_MELEE }
-	for _, barracksId in pairs(barracksIds) do
-		local barracks = GetBarracks(team, barracksId)
+	local barracksList = {
+		{ id = BARRACKS_TOP_MELEE, name = "rax_top" },
+		{ id = BARRACKS_MID_MELEE, name = "rax_mid" },
+		{ id = BARRACKS_BOT_MELEE, name = "rax_bot" },
+	}
+	for _, info in ipairs(barracksList) do
+		local barracks = GetBarracks(team, info.id)
 		if
 			barracks ~= nil
 			and barracks:GetHealth() > 0
-			and barracks:GetHealth() / barracks:GetMaxHealth() < 0.5
-			and Usage.IsTargetedByEnemy(barracks)
+			and GlyphRules.ShouldSave(
+				"building",
+				barracks:GetHealth() / barracks:GetMaxHealth(),
+				Usage.IsTargetedByEnemy(barracks),
+				barracks:HasModifier("modifier_fountain_glyph")
+			)
 		then
-			bot:ActionImmediate_Glyph()
+			local enemies = GlyphEnemiesNear(barracks, 900)
+			GlyphCast("save", barracks, info.name, #enemies, GlyphAlliesFighting(barracks, enemies))
 			return
 		end
 	end
@@ -9383,11 +9510,63 @@ local function UseGlyphIfNeeded()
 	if
 		ancient ~= nil
 		and ancient:GetHealth() > 0
-		and ancient:GetHealth() / ancient:GetMaxHealth() < 0.5
-		and Usage.IsTargetedByEnemy(ancient)
+		and GlyphRules.ShouldSave(
+			"building",
+			ancient:GetHealth() / ancient:GetMaxHealth(),
+			Usage.IsTargetedByEnemy(ancient),
+			ancient:HasModifier("modifier_fountain_glyph")
+		)
 	then
-		bot:ActionImmediate_Glyph()
+		local enemies = GlyphEnemiesNear(ancient, 900)
+		GlyphCast("save", ancient, "ancient", #enemies, GlyphAlliesFighting(ancient, enemies))
 		return
+	end
+	-- 2. Fight under one of our towers (T2 and higher: multishot).
+	local aliveEnemies = Fu.GetNumOfAliveHeroes(true)
+	local need = GlyphRules.EnemiesNeeded(aliveEnemies)
+	if need == nil then
+		return
+	end
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
+		if info.tier >= 2 and tower ~= nil and tower:GetHealth() > 0 and tower:CanBeSeen() then
+			local enemies =
+				GlyphEnemiesNear(tower, (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN)
+			if #enemies >= need then
+				local allies = GlyphAlliesFighting(tower, enemies)
+				local ok, why = GlyphRules.ShouldFight({
+					tier = info.tier,
+					enemies = #enemies,
+					aliveEnemies = aliveEnemies,
+					allies = allies,
+					hit = GlyphRules.HpFalling(prevHp[info.id], tower:GetHealth()) or GlyphTowerAttacked(tower),
+					charges = GlyphState.charges.charges,
+					fortified = tower:HasModifier("modifier_fountain_glyph"),
+				})
+				if ok then
+					GlyphCast("fight", tower, info.name, #enemies, allies)
+					return
+				end
+				-- A fight under the tower that did not get the Glyph: say why (at most every 10s).
+				if allies >= 1 and why ~= "fortified" and now - GlyphState.lastWaitLog >= 10 then
+					GlyphState.lastWaitLog = now
+					print(
+						string.format(
+							"[OHA-GLYPH] t=%.0f %s glyph-skip why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d",
+							now,
+							string.gsub(botName, "npc_dota_hero_", ""),
+							why,
+							info.name,
+							#enemies,
+							allies,
+							tower:GetHealth() / tower:GetMaxHealth(),
+							team,
+							GlyphState.charges.charges
+						)
+					)
+				end
+			end
+		end
 	end
 end
 -- [OHA-STUCK]: a live hero away from the fountain that has moved less than 300 in 8s while not
