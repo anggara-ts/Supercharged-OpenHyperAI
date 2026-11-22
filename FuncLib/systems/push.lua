@@ -344,18 +344,21 @@ local function HgGatherSpot(team, lane, enemyFountain)
 	return spot
 end
 -- The high-ground cap or a gather below it (PushRules.HgGather) for this bot on this lane, with the state it keeps
--- (bot._hgGatherState: lane, since, lastAt, spot, releasedUntil, coolUntil; PushThink reads spot / lastAt).
--- Returns "none", "go", "cap" or "gather". Lines: hg-gather (throttled), hg-gather-go, hg-gather-give-up.
+-- per lane (bot._hgGather[lane]: since, releasedUntil, coolUntil) and the gather PushThink walks to
+-- (bot._hgGatherActive: lane, at, spot). Returns "none", "go", "cap" or "gather".
+-- Lines: hg-gather (throttled), hg-gather-go, hg-gather-give-up.
 local function ReadHgGather(bot, lane, s)
 	local now = DotaTime()
-	local state = bot._hgGatherState
-	if state == nil or state.lane ~= lane then
-		if state ~= nil and now - (state.lastAt or -999) <= 1 then
-			-- Gathering for another lane this think: leave that one alone.
-			return "cap"
-		end
-		state = { lane = lane }
-		bot._hgGatherState = state
+	local active = bot._hgGatherActive
+	if active ~= nil and active.lane ~= lane and now - (active.at or -999) <= 1 then
+		-- Gathering for another lane this think: this one stays capped.
+		return "cap"
+	end
+	bot._hgGather = bot._hgGather or {}
+	local state = bot._hgGather[lane]
+	if state == nil then
+		state = {}
+		bot._hgGather[lane] = state
 	end
 	local spot = s.groupAllowed and HgGatherSpot(s.team, lane, s.enemyFountain) or nil
 	local atSpot = spot ~= nil and #getCachedAlliesNearLoc(spot, 1600) or nil
@@ -393,11 +396,10 @@ local function ReadHgGather(bot, lane, s)
 			state.releasedUntil = now + 12
 		end
 		state.since = nil
-		state.lastAt = nil
+		bot._hgGatherActive = nil
 	elseif mode == "gather" then
 		state.since = state.since or now
-		state.lastAt = now
-		state.spot = spot
+		bot._hgGatherActive = { lane = lane, at = now, spot = spot }
 		if now >= (state.logAt or -999) and not Fu.IsMeepoClone(bot) then
 			state.logAt = now + 6
 			pcall(
@@ -435,7 +437,9 @@ local function ReadHgGather(bot, lane, s)
 			)
 		end
 		state.since = nil
-		state.lastAt = nil
+		if active ~= nil and active.lane == lane then
+			bot._hgGatherActive = nil
+		end
 	end
 	return mode
 end
@@ -1836,10 +1840,17 @@ local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
 		return false
 	end
 	local towerTarget = tower:GetAttackTarget()
-	local creepsTanking = towerTarget ~= nil
-		and towerTarget ~= bot
-		and not towerTarget:IsHero()
-		and #(tower:GetNearbyLaneCreeps(tower:GetAttackRange() + 100, true) or {}) >= 3
+	local creepsTanking = false
+	if towerTarget ~= nil and towerTarget ~= bot and not towerTarget:IsHero() then
+		-- Our lane creeps inside the tower's range, from the bot's own list (a tower handle's own lists are untested).
+		local inRange = 0
+		for _, creep in ipairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
+			if Fu.IsValid(creep) and GetUnitToUnitDistance(creep, tower) <= tower:GetAttackRange() + 100 then
+				inRange = inRange + 1
+			end
+		end
+		creepsTanking = inRange >= 3
+	end
 	local skip, why = PushRules.HitHeroBehindTower({
 		targetToTower = GetUnitToUnitDistance(enemyHero, tower),
 		towerRange = tower:GetAttackRange(),
@@ -1908,12 +1919,12 @@ function Push.PushThink(bot, lane)
 	-- spot and wait there, hitting creeps in range, until enough allies are there. Before the walk to the lane front,
 	-- which at their T4s is inside their base.
 	do
-		local gather = bot._hgGatherState
+		local gather = bot._hgGatherActive
 		if
 			gather ~= nil
 			and gather.lane == lane
 			and gather.spot ~= nil
-			and DotaTime() - (gather.lastAt or -999) <= 1
+			and DotaTime() - (gather.at or -999) <= 1
 			and not bot:WasRecentlyDamagedByAnyHero(1)
 		then
 			if GetUnitToLocationDistance(bot, gather.spot) > 350 then

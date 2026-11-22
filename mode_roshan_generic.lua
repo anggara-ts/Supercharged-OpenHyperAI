@@ -1025,6 +1025,13 @@ function Think()
 	end
 	local othersWalking = pending > 1800
 	local minimum = math.min(GatherMinimum(), math.max(required, 1))
+	-- Aegis first (every enemy alive): the take goes in with 4 there (or everyone who is coming), not the 2-3 of a kill
+	-- window or the 40s cap.
+	local minimumCap = 2
+	if aegisFirstNow then
+		minimum = math.max(minimum, math.min(4, math.max(required, 1)))
+		minimumCap = minimum
+	end
 	local full = required > 0 and grouped >= required
 	local committed = bot._roshCommitUntil ~= nil and now < bot._roshCommitUntil
 	-- A short wait lets allies switch into the call. After that, the minimum group goes
@@ -1039,7 +1046,7 @@ function Think()
 		local window = left + KillWindow.TransitGrace(roshanLocation)
 		windowTight = window < pending / 320 + killTime + 3
 	end
-	local capped = elapsed >= 40 and grouped >= math.min(2, math.max(required, 1))
+	local capped = elapsed >= 40 and grouped >= math.min(minimumCap, math.max(required, 1))
 	if safe and (full or arrived or windowTight or capped) then
 		local fresh = not committed
 		bot._roshCommitUntil = now + 25

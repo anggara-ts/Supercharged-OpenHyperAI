@@ -64,5 +64,12 @@ T.test("push: a dead-enemies window near their fountain gathers below the high g
 		end
 	end
 	T.ok(seen, "a lone bot in a dead-enemies window gathers (need=2)")
-	T.ok(bot._hgGatherState ~= nil and bot._hgGatherState.spot ~= nil, "gather spot kept for PushThink")
+	T.ok(bot._hgGatherActive ~= nil and bot._hgGatherActive.spot ~= nil, "gather spot kept for PushThink")
+	T.ok(bot._hgGather ~= nil and bot._hgGather[1] ~= nil and bot._hgGather[1].since ~= nil, "lane 1 state kept")
+	-- The Roshan-first state and the creep pressure read on the same stub.
+	local count = Push.CreepPressureLanes()
+	T.ok(type(count) == "number", "pressure lanes")
+	local on, why = Push.RoshanFirstState(bot)
+	T.eq(on, false, "3 enemies dead: no Roshan first")
+	T.ok(type(why) == "string", "why")
 end)

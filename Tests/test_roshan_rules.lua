@@ -30,15 +30,18 @@ T.test("game 068 Dire 41:24 (5/5, killed in 20s): fits", function()
 	T.ok(ok, why)
 end)
 
-T.test("game 068 Radiant 25:51 (2 of 5 grouped, left Roshan at 60%): tank-short", function()
+T.test("game 068 Radiant 25:51 (left Roshan at 60%): tank-short", function()
 	local R = rules()
-	-- At the call the five were at 0.68-0.92 (average 0.78), but only two hit Roshan at first.
+	-- At the call all five were 6000-6300 from the pit at 0.68-0.92 HP (average 0.78), so all five count.
 	local ok, why = R.GroupFit({
 		members = {
-			member(0.68, 1400), -- alchemist
-			member(0.74, 1200), -- puck
+			member(0.68, 1500), -- alchemist
+			member(0.74, 1100), -- puck
+			member(0.70, 1200), -- vengefulspirit
+			member(0.86, 1400), -- ember_spirit
+			member(0.92, 1000), -- zuus
 		},
-		groupDps = 2 * 130,
+		groupDps = 5 * 110,
 		roshHp = 6000 + 130 * 26,
 		roshMax = 6000 + 130 * 26,
 	})
@@ -83,4 +86,25 @@ T.test("a hurt group is not sent (average under 70%)", function()
 		"Roshan at half"
 	)
 	T.ok(not R.GroupFit({ members = {} }), "nobody coming")
+end)
+
+T.test("healthy groups fit: 5 at 20:00, 4 at 25:00, 3 at 40:00", function()
+	local R = rules()
+	local function group(n, maxHp, dps, minute)
+		local members = {}
+		for i = 1, n do
+			members[i] = member(1.0, maxHp)
+		end
+		local roshHp = 6000 + 130 * minute
+		return R.GroupFit({ members = members, groupDps = n * dps, roshHp = roshHp, roshMax = roshHp })
+	end
+	local ok, why = group(5, 1300, 100, 20)
+	T.ok(ok, "5 at 20:00 " .. why)
+	ok, why = group(4, 1500, 130, 25)
+	T.ok(ok, "4 at 25:00 " .. why)
+	ok, why = group(3, 2200, 170, 40)
+	T.ok(ok, "3 at 40:00 " .. why)
+	-- Two heroes late are not enough to tank him to half.
+	ok, why = group(2, 2400, 200, 45)
+	T.ok(not ok, "2 at 45:00 " .. why)
 end)

@@ -18,6 +18,10 @@ RoshanRules.STAY_BELOW = 0.5
 -- A fresh take needs the group's average HP at 70%+ (game 068: Radiant called at 26:06 and 37:27 right after
 -- fights and left Roshan at 60% and 78%).
 RoshanRules.MIN_AVG_HP = 0.7
+-- The time to half HP comes from right-click damage at a flat half through his armor; spells and items are not
+-- counted. Game 068's Dire take (5 of 5, t=2500-2520) killed him in about 20s where that model says about 27s, so the
+-- tanking pool has to last 0.75 of the modelled time (calibration from one take: unverified).
+RoshanRules.HALF_CREDIT = 0.75
 
 -- Can the group that is coming take Roshan before its HP runs out? (#12, game 068: 3 of 4 committed tries failed;
 -- the kill time ignored Roshan's damage on the group.)
@@ -53,7 +57,7 @@ function RoshanRules.GroupFit(s)
 	if avg < (s.minAvg or RoshanRules.MIN_AVG_HP) then
 		return false, string.format("group-hurt(avg=%.2f,n=%d)", avg, n), numbers
 	end
-	if tank < toHalf then
+	if tank < toHalf * RoshanRules.HALF_CREDIT then
 		return false, string.format("tank-short(tank=%.0f,half=%.0f,avg=%.2f,n=%d)", tank, toHalf, avg, n), numbers
 	end
 	return true, string.format("group(tank=%.0f,half=%.0f,avg=%.2f,n=%d)", tank, toHalf, avg, n), numbers
