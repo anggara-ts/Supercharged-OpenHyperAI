@@ -294,10 +294,14 @@ local function considerRelocate()
 	if not relocateAbility:IsFullyCastable() then
 		return nil
 	end
-	if not isTethered() and #nearbyEnemies >= 1 and Fu.GetHP(bot) < relocateHpThreshold then
+	-- Io's own escape at 20%, tethered or not (the save above covers the tethered ally; when it can't, e.g. the ally
+	-- is out of range, Io still gets out).
+	if #nearbyEnemies >= 1 and Fu.GetHP(bot) < relocateHpThreshold then
 		return {
-			kind = "self",
+			-- A tethered ally comes along: the same fountain stay and return decision as the save.
+			kind = "save",
 			why = "self-low",
+			ally = isTethered() and IsValidHero(bot.stateTetheredHero) and bot.stateTetheredHero or nil,
 			hp = Fu.GetHP(bot),
 			dps = RelocateRules.LossRate(selfSamples) * bot:GetMaxHealth(),
 			delay = relocateDelay(),
@@ -366,7 +370,8 @@ local function returnLeft(state, now)
 		end
 		return nil
 	end)
-	if ok and type(left) == "number" then
+	-- Only a plausible read (0..12.5s); a 0 or negative read would decide right after the arrival.
+	if ok and type(left) == "number" and left > 0 and left <= RelocateRules.RETURN_TIME + 0.5 then
 		return left, "modifier"
 	end
 	return state.returnAt - now, "timer"
@@ -391,9 +396,15 @@ local function relocateTick()
 			state.resultAt = state.teleportAt + 1
 			state.returnAt = state.teleportAt + RelocateRules.RETURN_TIME
 			state.origin = bot:GetLocation()
+			-- Deaths counted from here: the hero think may not run while Io is dead, so "alive now" can't tell.
+			state.ioDeaths = GetHeroDeaths(bot:GetPlayerID())
+			if unitAlive(state.ally) then
+				state.allyId = state.ally:GetPlayerID()
+				state.allyDeaths = GetHeroDeaths(state.allyId)
+			end
 			print(
 				string.format(
-					"[OHA-WISP] t=%.0f wisp relocate why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f",
+					"[OHA-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f",
 					now,
 					state.why,
 					state.allyName,
@@ -407,7 +418,7 @@ local function relocateTick()
 				bot._noTpUntil = state.returnAt
 				if unitAlive(state.ally) then
 					state.memory = {
-						allyId = state.ally:GetPlayerID(),
+						allyId = state.allyId,
 						io = bot,
 						teleportAt = state.teleportAt,
 						returnAt = state.returnAt,
@@ -439,27 +450,40 @@ local function relocateTick()
 			return false
 		end
 		state.resultDone = true
-		local arrived = bot:IsAlive() and GetUnitToLocationDistance(bot, state.target) < 1200
-		local allyAlive = unitAlive(state.ally)
-		local allyThere = allyAlive and GetUnitToLocationDistance(state.ally, state.target) < 1200
+		local ioDied = GetHeroDeaths(bot:GetPlayerID()) > state.ioDeaths
+		local allyDied = state.allyId ~= nil and GetHeroDeaths(state.allyId) > state.allyDeaths
+		-- More than 2s late (Io was dead, no thinks): the positions say nothing about the teleport.
+		local late = now - state.resultAt > 2
+		local arrived = not ioDied and not late and GetUnitToLocationDistance(bot, state.target) < 1200
+		local allyAlive = not allyDied and unitAlive(state.ally)
+		local allyThere = arrived and allyAlive and GetUnitToLocationDistance(state.ally, state.target) < 1200
 		local died = "none"
-		if not bot:IsAlive() and state.ally ~= nil and not allyAlive then
+		if ioDied and allyDied then
 			died = "both"
-		elseif not bot:IsAlive() then
+		elseif ioDied then
 			died = "io"
-		elseif state.ally ~= nil and not allyAlive then
+		elseif allyDied then
 			died = "ally"
 		end
+		local modLeft = "-"
+		pcall(function()
+			local index = bot:GetModifierByName("modifier_wisp_relocate_return")
+			if index ~= nil and index >= 0 then
+				modLeft = string.format("%.1f", bot:GetModifierRemainingDuration(index))
+			end
+		end)
 		print(
 			string.format(
-				"[OHA-WISP] t=%.0f wisp relocate-result why=%s ally=%s arrived=%s tether=%s died=%s ioReturn=%s allyReturn=%s originEnemies=%d",
+				"[OHA-WISP] t=%.0f wisp relocate-result why=%s ally=%s arrived=%s tether=%s died=%s late=%s ioReturn=%s returnLeft=%s allyReturn=%s originEnemies=%d",
 				now,
 				state.why,
 				state.allyName,
 				tostring(arrived),
 				tostring(allyThere and isTethered()),
 				died,
+				tostring(late),
 				tostring(bot:HasModifier("modifier_wisp_relocate_return")),
+				modLeft,
 				tostring(allyAlive and state.ally:HasModifier("modifier_wisp_relocate_return")),
 				heroesNear(UnitType.EnemyHeroes, state.origin, 1500)
 			)
@@ -521,7 +545,7 @@ local function relocateTick()
 	if now >= state.returnAt + 1.5 then
 		print(
 			string.format(
-				"[OHA-WISP] t=%.0f wisp relocate-return-result ally=%s ioFountain=%d allyFountain=%d",
+				"[OHA-WISP] t=%.0f wisp relocate-back ally=%s ioFountain=%d allyFountain=%d",
 				now,
 				state.allyName,
 				Fu.GetDistanceFromAllyFountain(bot),
@@ -530,6 +554,16 @@ local function relocateTick()
 		)
 		clearRelocate()
 	end
+	return false
+end
+-- An error in the tick would repeat every think with the state stuck (and Tether blocked): log it once, drop the state.
+local function guardedRelocateTick()
+	local ok, result = pcall(relocateTick)
+	if ok then
+		return result
+	end
+	pcall(print, string.format("[OHA-WISP] t=%.0f wisp relocate-error %s", DotaTime(), tostring(result)))
+	clearRelocate()
 	return false
 end
 -- Between the teleport and the return Io stays with the relocated ally so the tether holds.
@@ -545,12 +579,8 @@ local function skillsComplement()
 	-- Before the early returns: the damage rate needs samples while Io is stunned too, and the Relocate result is due
 	-- whatever Io is doing.
 	sampleHp()
-	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
-		pcall(relocateTick)
-		return
-	end
-	local okTick, ordered = pcall(relocateTick)
-	if okTick and ordered then
+	local ordered = guardedRelocateTick()
+	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() or ordered then
 		return
 	end
 	nearbyEnemies = bot:GetNearbyHeroes(1600, true, BotMode.None) or {}
