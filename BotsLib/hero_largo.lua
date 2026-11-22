@@ -145,7 +145,7 @@ local doubleTimeAbility = SafeAbility(bot:GetAbilityByName("largo_song_double_ti
 local goodVibrationsAbility =
 	SafeAbility(bot:GetAbilityByName("largo_song_good_vibrations"), "largo_song_good_vibrations", "largo")
 local catchyLickDesire, catchyLickTarget, catchyLickReason
-local frogstompDesire, frogstompLocation, frogstompReason, frogstompCount
+local frogstompDesire, frogstompLocation, frogstompReason, frogstompCount, frogstompTarget
 local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason
 local isAttacking = false
 local botTarget
@@ -247,15 +247,17 @@ function X.SkillsComplement()
 		bot:ActionQueue_UseAbilityOnEntity(catchyLickAbility, catchyLickTarget)
 		return
 	end
-	frogstompDesire, frogstompLocation, frogstompReason, frogstompCount = X.ConsiderFrogstomp()
+	frogstompDesire, frogstompLocation, frogstompReason, frogstompCount, frogstompTarget = X.ConsiderFrogstomp()
 	if frogstompDesire > 0 then
 		LogLargo(
 			"frogstomp",
 			3,
-			"frogstomp why=%s count=%d dist=%d",
+			"frogstomp why=%s target=%s count=%d dist=%d mp=%.2f",
 			frogstompReason or "?",
+			ShortName(frogstompTarget),
 			frogstompCount or 0,
-			GetUnitToLocationDistance(bot, frogstompLocation)
+			GetUnitToLocationDistance(bot, frogstompLocation),
+			Fu.GetMP(bot)
 		)
 		Fu.SetQueuePtToINT(bot, false)
 		bot:ActionQueue_UseAbilityOnLocation(frogstompAbility, frogstompLocation)
@@ -578,7 +580,7 @@ function X.ConsiderFrogstomp()
 				targetLocation = Fu.GetCorrectLoc(botTarget, landDelay)
 			end
 			if GetUnitToLocationDistance(bot, targetLocation) <= castRange then
-				return BOT_ACTION_DESIRE_HIGH, targetLocation, "fight-target", 1
+				return BOT_ACTION_DESIRE_HIGH, targetLocation, "fight-target", 1, botTarget
 			end
 		end
 	end
@@ -594,6 +596,24 @@ function X.ConsiderFrogstomp()
 				and bot:WasRecentlyDamagedByHero(enemyHero, 3.0)
 			then
 				return BOT_ACTION_DESIRE_HIGH, (bot:GetLocation() + enemyHero:GetLocation()) / 2, "retreat", 1
+			end
+		end
+	end
+	-- Lane harass (#198, game 071: no Frogstomp on the laning enemy with full mana): spare mana, an enemy hero inside
+	-- the cast range (800, datafeed hero_id=155), Largo not inside an enemy tower's range and not outnumbered.
+	if Fu.IsInLaningPhase() or Fu.IsLaning(bot) then
+		local harassLocation, harassCount, harassTarget = X.LaneStompSpot(castRange, radius, landDelay)
+		if harassLocation ~= nil then
+			local laneStompOk = LargoRules.LaneStompOk({
+				mpRatio = Fu.GetMP(bot),
+				manaAfterOk = manaAfter > manaThreshold,
+				inEnemyTowerRange = X.IsInEnemyTowerRange(150),
+				enemiesNear = #Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200),
+				alliesNear = #Fu.GetAlliesNearLoc(bot:GetLocation(), 1200),
+				retreating = Fu.IsRetreating(bot),
+			})
+			if laneStompOk then
+				return BOT_ACTION_DESIRE_HIGH, harassLocation, "harass", harassCount, harassTarget
 			end
 		end
 	end
@@ -686,6 +706,50 @@ function X.CroakSelfWanted()
 		and Fu.IsInRange(bot, botTarget, 1000)
 		and Fu.CanCastAbility(catchyLickAbility)
 		and Fu.CanCastAbility(frogstompAbility)
+end
+
+-- Largo inside an enemy tower's attack range (+ margin): the tower's range plus both bounding radii.
+function X.IsInEnemyTowerRange(margin)
+	for _, tower in pairs(bot:GetNearbyTowers(1600, true)) do
+		if Fu.IsValidBuilding(tower) then
+			local towerRange = (tower:GetAttackRange() or 700) + tower:GetBoundingRadius() + bot:GetBoundingRadius()
+			if GetUnitToUnitDistance(bot, tower) <= towerRange + margin then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Where a lane-harass Frogstomp goes: the spot that catches two heroes, else the weakest enemy hero in range where it
+-- will be when the froglings land. Returns location, count, target, or nil.
+function X.LaneStompSpot(castRange, radius, landDelay)
+	local target = nil
+	for _, enemyHero in pairs(nearbyEnemies) do
+		if
+			Fu.IsValidHero(enemyHero)
+			and Fu.CanBeAttacked(enemyHero)
+			and Fu.IsInRange(bot, enemyHero, castRange)
+			and Fu.CanCastOnNonMagicImmune(enemyHero)
+			and not Fu.IsSuspiciousIllusion(enemyHero)
+			and not enemyHero:HasModifier("modifier_necrolyte_reapers_scythe")
+			and (target == nil or Fu.GetHP(enemyHero) < Fu.GetHP(target))
+		then
+			target = enemyHero
+		end
+	end
+	if target == nil then
+		return nil, 0, nil
+	end
+	local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius * 0.8, landDelay, 0)
+	if aoeLocation.count >= 2 and GetUnitToLocationDistance(bot, aoeLocation.targetloc) <= castRange then
+		return aoeLocation.targetloc, aoeLocation.count, target
+	end
+	local targetLocation = Fu.IsDisabled(target) and target:GetLocation() or Fu.GetCorrectLoc(target, landDelay)
+	if GetUnitToLocationDistance(bot, targetLocation) <= castRange then
+		return targetLocation, 1, target
+	end
+	return nil, 0, nil
 end
 
 function X.ConsiderCroakOfGenius()

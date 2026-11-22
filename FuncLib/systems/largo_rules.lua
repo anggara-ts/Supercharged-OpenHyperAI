@@ -190,6 +190,29 @@ function LargoRules.CroakTarget(o)
 	return nil, nil
 end
 
+-- Frogstomp as lane harass (#198, game 071). o: mpRatio, manaAfterOk (after the cast still the mana for Lick and
+-- Croak, Fu.GetManaThreshold), inEnemyTowerRange (Largo), enemiesNear / alliesNear (heroes within 1200, Largo
+-- counted), retreating. Returns ok and, when not ok, the first gate that stops it.
+LargoRules.HARASS_MP = 0.8
+function LargoRules.LaneStompOk(o)
+	if o.retreating then
+		return false, "retreating"
+	end
+	if o.mpRatio < LargoRules.HARASS_MP then
+		return false, "mana"
+	end
+	if not o.manaAfterOk then
+		return false, "reserve"
+	end
+	if o.inEnemyTowerRange then
+		return false, "tower"
+	end
+	if o.enemiesNear > o.alliesNear then
+		return false, "outnumbered"
+	end
+	return true, nil
+end
+
 -- Catchy Lick pulls an ally pullDistance (375) toward Largo. A dispel lick on an ally that is fighting in range of its
 -- target would drag it out of range: only when the debuff already stops it fighting (sleep, stun) or it is not
 -- in range of its target anyway. distToTarget nil: no target.

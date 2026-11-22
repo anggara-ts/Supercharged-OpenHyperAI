@@ -113,6 +113,28 @@ T.test("largo: Croak of Genius on himself or an ally", function()
 	T.eq(pick({ hasShard = true, selfWants = true, alone = true }), "self/self-mana", "Shard, alone: himself")
 end)
 
+T.test("largo: Frogstomp lane harass only with spare mana, away from the tower, not outnumbered", function()
+	local R = load()
+	local base = { mpRatio = 0.9, manaAfterOk = true, inEnemyTowerRange = false, enemiesNear = 2, alliesNear = 2 }
+	local function check(over)
+		local o = {}
+		for k, v in pairs(base) do
+			o[k] = v
+		end
+		for k, v in pairs(over or {}) do
+			o[k] = v
+		end
+		local ok, why = R.LaneStompOk(o)
+		return tostring(ok) .. "/" .. tostring(why)
+	end
+	T.eq(check(), "true/nil", "2v2 lane, 90% mana")
+	T.eq(check({ mpRatio = 0.7 }), "false/mana", "70% mana: keep it")
+	T.eq(check({ manaAfterOk = false }), "false/reserve", "no mana left for Lick and Croak")
+	T.eq(check({ inEnemyTowerRange = true }), "false/tower", "inside the enemy tower's range (game 071 5:55)")
+	T.eq(check({ enemiesNear = 3 }), "false/outnumbered", "3 enemies against 2")
+	T.eq(check({ retreating = true }), "false/retreating", "running home")
+end)
+
 -- The level-up list from the hero file with the real ability slots (Tests/data/hero_abilities.lua).
 T.test("largo: talents at 20 and 25 are two Lick charges and twice the stomps", function()
 	local data = assert(loadstring(T.read("Tests/data/hero_abilities.lua"), "hero_abilities"))()
