@@ -5,6 +5,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -14,32 +15,111 @@ local tAllAbilityBuildList = { { 2, 3, 2, 1, 2, 6, 2, 3, 3, 3, 6, 1, 1, 1, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 49,559 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
-	"item_double_branches",
 	"item_quelling_blade",
-	"item_slippers",
+	"item_double_branches",
 	"item_circlet",
-	"item_magic_wand",
+	"item_slippers",
 	"item_wraith_band",
+	"item_magic_wand",
 	"item_power_treads",
 	"item_diffusal_blade",
 	"item_manta",
-	"item_greater_crit",
-	"item_aghanims_shard",
 	"item_basher",
-	"item_sphere",
+	"item_disperser",
+	"item_aghanims_shard",
 	"item_ultimate_scepter",
+	"item_black_king_bar",
+	"item_abyssal_blade",
+	"item_travel_boots",
+	"item_ultimate_scepter_2",
+	"item_phylactery",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 44,403 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_2"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_quelling_blade",
+	"item_circlet",
+	"item_slippers",
+	"item_wraith_band",
+	"item_magic_wand",
+	"item_orb_of_corrosion",
+	"item_power_treads",
+	"item_diffusal_blade",
+	"item_manta",
+	"item_disperser",
+	"item_aghanims_shard",
+	"item_abyssal_blade",
+	"item_ultimate_scepter_2",
+	"item_skadi",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 11,602 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_slippers",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_diffusal_blade",
+	"item_basher",
+	"item_manta",
+	"item_disperser",
+	"item_abyssal_blade",
+	"item_greater_crit",
+	"item_ultimate_scepter",
+	"item_aghanims_shard",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 4,831 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_branches",
+	"item_circlet",
+	"item_magic_stick",
+	"item_wraith_band",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_diffusal_blade",
+	"item_basher",
+	"item_aghanims_shard",
+	"item_disperser",
+	"item_abyssal_blade",
+	"item_phylactery",
+	"item_ultimate_scepter",
+	"item_butterfly",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 9,130 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_3"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_quelling_blade",
+	"item_circlet",
+	"item_slippers",
+	"item_wraith_band",
+	"item_magic_wand",
+	"item_power_treads",
+	"item_diffusal_blade",
+	"item_manta",
+	"item_basher",
 	"item_disperser",
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
+	"item_nullifier",
+	"item_phylactery",
+	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_monkey_king_bar",
 }
-sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_1"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = {
 	"item_black_king_bar",
@@ -80,7 +160,6 @@ local blinkStrikeAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[2]), "s
 local tricksOfTheTradeAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAbilityList[3]", "riki")
 local slot4Ability = SafeAbility(bot:GetAbilityByName(sAbilityList[4]), "sAbilityList[4]", "riki")
 local cloakAndDaggerAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "riki")
-local talent5 = SafeAbility(bot:GetAbilityByName(sTalentList[5]), "sTalentList[5]", "riki")
 local talent6 = SafeAbility(bot:GetAbilityByName(sTalentList[6]), "sTalentList[6]", "riki")
 local talent8 = SafeAbility(bot:GetAbilityByName(sTalentList[8]), "sTalentList[8]", "riki")
 local smokeScreenDesire, smokeScreenLocation
@@ -92,6 +171,7 @@ local lastBlinkStrikeTime = -90
 local secondsPerAttack = 0
 local botLevel, mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) or DotaTime() < lastBlinkStrikeTime + secondsPerAttack + 0.3 then
 		return
 	end
@@ -221,10 +301,9 @@ function X.ConsiderW()
 	-- Cloak and Dagger) has no damage_multiplier, so the bonus read 0.
 	local innateBackstabAbility = bot:GetAbilityByName("riki_innate_backstab")
 	if innateBackstabAbility ~= nil then
+		-- 7.42 game files: special_bonus_unique_riki_1 (+0.3) is linked into Backstab "damage_multiplier",
+		-- and the read includes it once learned (talent_watch.lua). The old talent "value" read added 0 (#46).
 		local backstabMultiplier = innateBackstabAbility:GetSpecialValueFloat("damage_multiplier")
-		if talent5:IsTrained() then
-			backstabMultiplier = backstabMultiplier + talent5:GetSpecialValueFloat("value")
-		end
 		attackDamage = attackDamage + bot:GetAttributeValue(ATTRIBUTE_AGILITY) * backstabMultiplier
 	end
 	local bonusDamage = blinkStrikeAbility:GetSpecialValueInt("bonus_damage")

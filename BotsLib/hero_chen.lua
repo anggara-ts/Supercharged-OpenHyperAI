@@ -23,26 +23,6 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
-sRoleItemsBuyList["pos_1"] = {
-	"item_tango",
-	"item_double_branches",
-	"item_faerie_fire",
-	"item_boots",
-	"item_magic_wand",
-	"item_dagon_2",
-	"item_travel_boots",
-	"item_aghanims_shard",
-	"item_cyclone",
-	"item_ultimate_scepter",
-	"item_octarine_core",
-	"item_dagon_5",
-	"item_ultimate_scepter_2",
-	"item_shivas_guard",
-	"item_travel_boots_2",
-	"item_wind_waker",
-	"item_moon_shard",
-}
-sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_1"]
 sRoleItemsBuyList["pos_3"] = {
 	"item_mage_outfit",
 	"item_ancient_janggo",
@@ -58,32 +38,53 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,558 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
 	"item_blood_grenade",
-	"item_priest_outfit",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_faerie_fire",
+	"item_magic_wand",
+	"item_ring_of_basilius",
+	"item_headdress",
+	"item_arcane_boots",
+	"item_ancient_janggo",
 	"item_mekansm",
-	"item_vladmir",
-	"item_glimmer_cape",
 	"item_aghanims_shard",
 	"item_guardian_greaves",
+	"item_ultimate_scepter",
+	"item_ultimate_scepter_2",
+	"item_glimmer_cape",
+	"item_force_staff",
 	"item_spirit_vessel",
 	"item_shivas_guard",
-	"item_sheepstick",
-	"item_ultimate_scepter_2",
 	"item_moon_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 5,001 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
-	"item_crystal_maiden_outfit",
+	"item_tango",
+	"item_blood_grenade",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_faerie_fire",
+	"item_magic_wand",
+	"item_ring_of_basilius",
+	"item_headdress",
+	"item_arcane_boots",
 	"item_ancient_janggo",
-	"item_glimmer_cape",
-	"item_pipe",
-	"item_guardian_greaves",
+	"item_mekansm",
 	"item_aghanims_shard",
-	"item_vladmir",
+	"item_guardian_greaves",
+	"item_ultimate_scepter",
+	"item_glimmer_cape",
 	"item_sheepstick",
-	"item_solar_crest",
 	"item_ultimate_scepter_2",
 }
+-- Maintainer (2026-11-21): Chen pos 1 and pos 2 follow the pos 4 support list. Stratz has 58 / 126 matches
+-- there, and they build Basilius, Headdress, Mekansm and Drum, not the old Dagon / Octarine list (#9).
+sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_4"]
+sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_4"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_shivas_guard", "item_magic_wand", "item_sheepstick", "item_magic_wand" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
@@ -100,7 +101,6 @@ end
 local penitenceAbility = SafeAbility(bot:GetAbilityByName("chen_penitence"), "chen_penitence", "chen")
 local holyPersuasionAbility = SafeAbility(bot:GetAbilityByName("chen_holy_persuasion"), "chen_holy_persuasion", "chen")
 local divineFavorAbility = SafeAbility(bot:GetAbilityByName("chen_divine_favor"), "chen_divine_favor", "chen")
-local zealotAbility = SafeAbility(bot:GetAbilityByName("chen_zealot"), "chen_zealot", "chen")
 local handOfGodAbility = SafeAbility(bot:GetAbilityByName("chen_hand_of_god"), "chen_hand_of_god", "chen")
 local penitenceDesire, penitenceTarget
 local holyPersuasionDesire, holyPersuasionTarget
@@ -127,10 +127,15 @@ function X.SkillsComplement()
 		bot:Action_UseAbilityOnEntity(penitenceAbility, penitenceTarget)
 		return
 	end
-	zealotDesire = X.ConsiderZealot()
+	zealotDesire = X.ConsiderGatherCreeps()
 	if zealotDesire > 0 then
-		-- datafeed: Zealot is unit-target (behavior 8); targeting Chen teleports all controlled units to him
-		bot:Action_UseAbilityOnEntity(zealotAbility, bot)
+		-- 7.42 (Valve patch notes + datafeed): Zealot is a no-target resurrect now. The teleport of all
+		-- controlled creeps moved to Holy Persuasion: cast it on Chen himself (teleport_delay 6/5/4/3s).
+		if DotaTime() >= (bot._chenGatherLogAt or -999) then
+			bot._chenGatherLogAt = DotaTime() + 5
+			pcall(print, string.format("[OHA-CHEN] t=%.0f gather creeps=%d", DotaTime(), #(controlledCreeps or {})))
+		end
+		bot:Action_UseAbilityOnEntity(holyPersuasionAbility, bot)
 		return
 	end
 	holyPersuasionDesire, holyPersuasionTarget = X.ConsiderHolyPersuasion()
@@ -379,8 +384,8 @@ function X.ConsiderDivineFavor()
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
 end
-function X.ConsiderZealot()
-	if not zealotAbility:IsFullyCastable() then
+function X.ConsiderGatherCreeps()
+	if not holyPersuasionAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE
 	end
 	if Fu.IsInTeamFight(bot, 1200) then
