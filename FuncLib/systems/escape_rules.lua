@@ -140,6 +140,81 @@ end
 function EscapeRules.MoveOutInsteadOfShift(why, heroHit, threatDue, canMoveOut)
 	return why == "low-hp-units" and heroHit ~= true and threatDue ~= true and canMoveOut == true
 end
+-- Out of an enemy tower's range when it is hitting her (#36, game 072, 19:56-20:05: the Dire mid T2 hit her alone
+-- for 8s, HP 0.70 -> 0.26, she started a TP inside its range, Bramble rooted her, dead at 20:05; her escape rules
+-- reacted to heroes and creeps only). towerOnHer: the tower targets her, or it hit her in the last second with no
+-- allied creep or other hero in its range to take the shots. Only when her HP is under TOWER_ESCAPE_HP or fell more
+-- than TOWER_ESCAPE_LOSS in the last second. outDist: how far she has to move to leave its range (+ a margin). The
+-- fastest way: walk when she is within TOWER_WALK_EDGE of the edge, a Rift (max_distance 350, datafeed hero 13)
+-- when it gets her out, else the Orb toward safety and a Jaunt once it is out of range, else the Rift anyway, else
+-- walk. Returns nil | "walk" | "rift" | "orb-jaunt".
+EscapeRules.TOWER_ESCAPE_HP = 0.65
+EscapeRules.TOWER_ESCAPE_LOSS = 0.10
+EscapeRules.TOWER_WALK_EDGE = 200
+function EscapeRules.TowerEscape(towerOnHer, hp, loss, outDist, orbJauntReady, riftReady, riftDistance)
+	if towerOnHer ~= true then
+		return nil
+	end
+	if (hp or 1) >= EscapeRules.TOWER_ESCAPE_HP and (loss or 0) <= EscapeRules.TOWER_ESCAPE_LOSS then
+		return nil
+	end
+	outDist = outDist or 0
+	if outDist <= EscapeRules.TOWER_WALK_EDGE then
+		return "walk"
+	end
+	if riftReady == true and outDist <= (riftDistance or 350) then
+		return "rift"
+	end
+	if orbJauntReady == true then
+		return "orb-jaunt"
+	end
+	if riftReady == true then
+		return "rift"
+	end
+	return "walk"
+end
+-- Behind an enemy tower on the way home (#36, game 072, 19:56-20:05: after the team's dive past Dire's mid T2 and
+-- the kill, her walk home crossed the T2's range and the tower hit her alone): hop over its range with the Orb and a
+-- Jaunt instead of walking through. behind: she is farther from home than the tower; the line home passes within
+-- range + TOWER_MARGIN of it; she is within TOWER_HOP_NEAR of its range (about to cross: the Orb flies max_distance
+-- 1950, datafeed hero 13, so from the edge it clears the 2 x (range + margin) = 1700 across a 700 range tower); she
+-- is heading home.
+EscapeRules.TOWER_MARGIN = 150
+EscapeRules.TOWER_HOP_NEAR = 300
+function EscapeRules.TowerHopWanted(botHome, towerHome, pathToTower, towerDist, range, headingHome)
+	if headingHome ~= true or botHome <= towerHome then
+		return false
+	end
+	local clear = (range or 700) + EscapeRules.TOWER_MARGIN
+	return pathToTower < clear and towerDist < clear + EscapeRules.TOWER_HOP_NEAR
+end
+-- The Orb's line for a hop: candidates every 15 degrees up to 60 off the home direction (closest to home first); on
+-- each, the first point within orbReach that is closer to home than the tower and outside its range +
+-- TOWER_MARGIN is where she Jaunts. Returns dx, dy, hopAt (the distance along the line) or nil when no line clears.
+function EscapeRules.HopDirection(bx, by, tx, ty, range, hx, hy, orbReach)
+	local ux, uy = hx - bx, hy - by
+	local uLen = math.sqrt(ux * ux + uy * uy)
+	if uLen < 1 then
+		return nil
+	end
+	ux, uy = ux / uLen, uy / uLen
+	local clear = (range or 700) + EscapeRules.TOWER_MARGIN
+	local towerHome = math.sqrt((hx - tx) * (hx - tx) + (hy - ty) * (hy - ty))
+	for _, bend in ipairs({ 0, 15, -15, 30, -30, 45, -45, 60, -60 }) do
+		local rad = math.rad(bend)
+		local dx = ux * math.cos(rad) - uy * math.sin(rad)
+		local dy = ux * math.sin(rad) + uy * math.cos(rad)
+		for along = 100, orbReach or 1950, 50 do
+			local px, py = bx + dx * along, by + dy * along
+			local toTower = math.sqrt((px - tx) * (px - tx) + (py - ty) * (py - ty))
+			local toHome = math.sqrt((hx - px) * (hx - px) + (hy - py) * (hy - py))
+			if toHome < towerHome and toTower > clear then
+				return dx, dy, along
+			end
+		end
+	end
+	return nil
+end
 -- Is a point (px, py) on the escape side of (bx, by) for the direction (dx, dy)? For a Jaunt to the orb: it must
 -- take her the way the escape goes (game 064, t=2600: a danger Jaunt to an orb flying away from base).
 function EscapeRules.IsOnEscapeSide(bx, by, px, py, dx, dy)

@@ -341,7 +341,8 @@ end
 -- within 1600 only inside that (EscapeRules.SafeDirection, game 071 34:06: the exit Orb went 547 farther from home).
 -- The path check looks at least 600 ahead, so a short jump does not head into a threat behind it. Returns the point,
 -- the unit direction and how (safe | bent | away | fallback, kept in bot._escapeHow for the escape-action line).
-function X.EscapePoint(distance)
+-- extraThreats: more { x, y } points to keep clear of (the tower in X.TowerEscape).
+function X.EscapePoint(distance, extraThreats)
 	local here = bot:GetLocation()
 	local enemies = {}
 	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
@@ -349,6 +350,10 @@ function X.EscapePoint(distance)
 			local at = enemyHero:GetLocation()
 			enemies[#enemies + 1] = { x = at.x, y = at.y }
 		end
+	end
+	-- Other threats to keep clear of, e.g. the enemy tower hitting her (X.TowerEscape): { x, y } points.
+	for _, threat in ipairs(extraThreats or {}) do
+		enemies[#enemies + 1] = threat
 	end
 	local safe, safeKind = X.SafePoint()
 	local dx, dy, how = EscapeRules.SafeDirection(here.x, here.y, enemies, safe.x, safe.y, math.max(distance or 0, 600))
@@ -1002,6 +1007,220 @@ function X.OffensiveRiftBlocked(branch)
 	end
 	return true
 end
+-- The enemy tower within 1600 that is hitting her: it targets her, or it hit her in the last second with no allied
+-- lane creep or other allied hero inside its range to take the shots. Returns tower, distance, range (its attack
+-- range from the handle) or nil.
+function X.TowerOnHer()
+	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
+		if Fu.IsValid(tower) then
+			local range = tower:GetAttackRange()
+			local dist = GetUnitToUnitDistance(bot, tower)
+			if dist <= range + EscapeRules.TOWER_MARGIN then
+				local onHer = tower:GetAttackTarget() == bot
+				if not onHer and bot:WasRecentlyDamagedByTower(1.0) then
+					local tanked = #Fu.GetAlliesNearLoc(tower:GetLocation(), range) > 1
+					for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
+						if Fu.IsValid(creep) and GetUnitToUnitDistance(creep, tower) <= range then
+							tanked = true
+							break
+						end
+					end
+					onHer = not tanked
+				end
+				if onHer then
+					return tower, dist, range
+				end
+			end
+		end
+	end
+	return nil
+end
+-- [OHA-PUCK] tower-escape via=walk|rift|orb-jaunt|orb-hop why=hit|behind-tower dist= out= hp= loss= tower=, when
+-- the way changes or once per 3s.
+function X.LogTowerEscape(via, why, tower, dist, out, loss)
+	local key = via .. why
+	if key == bot._towerEscapeLogKey and DotaTime() < (bot._towerEscapeLogAt or -999) then
+		return
+	end
+	bot._towerEscapeLogKey = key
+	bot._towerEscapeLogAt = DotaTime() + 3
+	pcall(
+		print,
+		string.format(
+			"[OHA-PUCK] t=%.0f tower-escape via=%s why=%s dist=%.0f out=%.0f hp=%.2f loss=%.2f tower=%s",
+			DotaTime(),
+			via,
+			why,
+			dist or -1,
+			out or -1,
+			Fu.GetHP(bot),
+			loss or 0,
+			tower ~= nil and tostring(tower:GetUnitName()) or "-"
+		)
+	)
+end
+-- Out of an enemy tower's range at once when it hits her and nothing tanks it (EscapeRules.TowerEscape, game 072
+-- 19:56-20:05). No TP while it hits her (bot._noTpUntil; the TP channel is 3s, 7.42 items). A walk is held by the
+-- outpost mode's hold (bot._phaseHoldAskUntil: its Think gives no order), so the push or retreat Think does not walk
+-- her back in. The Orb + Jaunt way ends in X.TowerOrbJaunt. True: an order went out this think.
+function X.TowerEscape(canCast)
+	local tower, dist, range = X.TowerOnHer()
+	if tower == nil then
+		return false
+	end
+	local now = DotaTime()
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 1.0)
+	local loss = X.HpLoss()
+	local out = range + EscapeRules.TOWER_MARGIN - dist
+	local orbJauntReady = canCast
+		and illusoryOrbAbility:IsFullyCastable()
+		and etherealJauntAbility:IsFullyCastable()
+		and not bot:IsRooted()
+		and X.OrbInFlight() == nil
+	local riftReady = canCast and waningRiftAbility:IsFullyCastable()
+	local riftDistance = waningRiftAbility:GetSpecialValueInt("max_distance")
+	if riftDistance == nil or riftDistance <= 0 then
+		riftDistance = 350
+	end
+	local via = EscapeRules.TowerEscape(true, Fu.GetHP(bot), loss, out, orbJauntReady, riftReady, riftDistance)
+	if via == nil then
+		return false
+	end
+	local towerAt = tower:GetLocation()
+	local threats = { { x = towerAt.x, y = towerAt.y } }
+	if via == "rift" then
+		X.LogTowerEscape(via, "hit", tower, dist, out, loss)
+		local point = X.EscapePoint(riftDistance - 10, threats)
+		X.LogEscapeAction("rift", "tower", point)
+		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
+		return true
+	end
+	if via == "orb-jaunt" then
+		X.LogTowerEscape(via, "hit", tower, dist, out, loss)
+		local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
+		local point = X.EscapePoint(castRange, threats)
+		bot._orbCastAt = now
+		bot._towerOrb = { at = now, x = towerAt.x, y = towerAt.y, range = range, why = "hit" }
+		X.LogEscapeAction("orb", "tower", point)
+		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
+		return true
+	end
+	-- walk: past the edge plus 150, held from the modes' Thinks for this think and the next few. Not while a hero is
+	-- hitting her too: her shift / Orb / Rift rules answer that, and the TP stays held.
+	if bot:WasRecentlyDamagedByAnyHero(1.0) then
+		return false
+	end
+	X.LogTowerEscape(via, "hit", tower, dist, out, loss)
+	local point = X.EscapePoint(math.max(out, 0) + 150, threats)
+	bot._phaseHoldAskUntil = now + 0.3
+	bot:Action_MoveToLocation(point)
+	return true
+end
+-- Behind an enemy tower and heading home (EscapeRules.TowerHopWanted, game 072): the Orb along a line home that
+-- clears the tower's range (EscapeRules.HopDirection), then a Jaunt once the Orb is past it (X.TowerOrbJaunt), instead
+-- of walking through its range. Only with the Orb and Jaunt both ready.
+function X.TowerHop(canCast)
+	if
+		not canCast
+		or bot:IsRooted()
+		or not illusoryOrbAbility:IsFullyCastable()
+		or not etherealJauntAbility:IsFullyCastable()
+		or X.OrbInFlight() ~= nil
+	then
+		return false
+	end
+	local headingHome = Fu.IsRetreating(bot) or bot:GetActiveMode() == BOT_MODE_RETREAT
+	if not headingHome then
+		return false
+	end
+	local here = bot:GetLocation()
+	local home = Fu.GetTeamFountain()
+	local homeDist = GetUnitToLocationDistance(bot, home)
+	local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
+	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
+		if Fu.IsValid(tower) then
+			local towerAt = tower:GetLocation()
+			local range = tower:GetAttackRange()
+			local towerDist = GetUnitToUnitDistance(bot, tower)
+			local towerHome = (home - towerAt):Length2D()
+			-- How close the straight line home passes the tower.
+			local ux, uy = home.x - here.x, home.y - here.y
+			local uLen = math.max(1, math.sqrt(ux * ux + uy * uy))
+			local along = math.max(0, ((towerAt.x - here.x) * ux + (towerAt.y - here.y) * uy) / uLen)
+			local px, py = here.x + ux / uLen * along, here.y + uy / uLen * along
+			local pathToTower = math.sqrt((towerAt.x - px) * (towerAt.x - px) + (towerAt.y - py) * (towerAt.y - py))
+			if EscapeRules.TowerHopWanted(homeDist, towerHome, pathToTower, towerDist, range, true) then
+				local orbReach = illusoryOrbAbility:GetSpecialValueInt("max_distance")
+				if orbReach == nil or orbReach <= 0 then
+					orbReach = 1950
+				end
+				local dx, dy, hopAt =
+					EscapeRules.HopDirection(here.x, here.y, towerAt.x, towerAt.y, range, home.x, home.y, orbReach)
+				if dx ~= nil then
+					local point = Vector(here.x + dx * castRange, here.y + dy * castRange, here.z)
+					bot._orbCastAt = DotaTime()
+					bot._towerOrb = {
+						at = DotaTime(),
+						x = towerAt.x,
+						y = towerAt.y,
+						range = range,
+						why = "behind-tower",
+						towerHome = towerHome,
+					}
+					X.LogTowerEscape("orb-hop", "behind-tower", tower, towerDist, hopAt, X.HpLoss())
+					X.LogEscapeAction("orb", "tower-hop", point)
+					bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+-- The Orb of a tower escape or hop (bot._towerOrb): Jaunt once it is outside the tower's range + margin and closer to
+-- home than she is, within its flight. [OHA-PUCK] escape-action spell=jaunt why=tower-hit|tower-behind-tower.
+function X.TowerOrbJaunt()
+	local hop = bot._towerOrb
+	if hop == nil then
+		return false
+	end
+	if DotaTime() - hop.at > (X.OrbFlightTime() or 2.6) + 0.2 then
+		bot._towerOrb = nil
+		return false
+	end
+	if not etherealJauntAbility:IsFullyCastable() or bot:IsRooted() then
+		return false
+	end
+	local orbAt = X.OrbInFlight()
+	if orbAt == nil then
+		return false
+	end
+	local home = Fu.GetTeamFountain()
+	local orbToTower = math.sqrt((orbAt.x - hop.x) * (orbAt.x - hop.x) + (orbAt.y - hop.y) * (orbAt.y - hop.y))
+	if
+		orbToTower <= hop.range + EscapeRules.TOWER_MARGIN
+		or (home - orbAt):Length2D() >= GetUnitToLocationDistance(bot, home)
+		-- A hop Jaunts only once the Orb is past the tower (closer to home than it), not just ahead of her.
+		or hop.towerHome ~= nil and (home - orbAt):Length2D() >= hop.towerHome
+	then
+		-- A hop waits outside the tower's range while the Orb flies (about 2.4s for 1800), held from the retreat
+		-- Think that would walk her in (the outpost hold, bot._phaseHoldAskUntil), unless an enemy hero is near.
+		-- The hold gives no order, so her last move would go on: stop it once the Orb is out.
+		if
+			hop.towerHome ~= nil
+			and #Fu.GetEnemiesNearLoc(bot:GetLocation(), 1000) == 0
+			and illusoryOrbAbility:GetCooldownTimeRemaining() > 0
+		then
+			bot._phaseHoldAskUntil = DotaTime() + 0.3
+			bot:Action_ClearActions(true)
+		end
+		return false
+	end
+	bot._towerOrb = nil
+	X.LogEscapeAction("jaunt", "tower-" .. tostring(hop.why), orbAt)
+	bot:Action_UseAbility(etherealJauntAbility)
+	return true
+end
 -- Ask for the outpost hold before a dodge Phase Shift (EscapeRules.AskDodgeHold): an enemy hero within the spell's
 -- range + 200 casting a linear stun from DodgeRules.LINEAR while facing her (its cast point: Impale 0.3s, datafeed
 -- hero 88), or a linear stun flying at her with tti under 1s. The hold (mode_outpost_generic.lua reads
@@ -1104,10 +1323,23 @@ function X.SkillsComplement()
 	if dodgeWant ~= nil and (not canCast or DotaTime() - dodgeWant.at > 0.6) then
 		pcall(X.LogPhaseDodge, dodgeWant, "late", canCast and "expired" or "cant-cast")
 	end
+	-- An enemy tower hitting her: out of its range first, even silenced (a walk needs no spell).
+	local okT, towerActed = pcall(X.TowerEscape, canCast)
+	if okT and towerActed then
+		return
+	end
 	if not canCast then
 		return
 	end
 	pcall(X.AskDodgeHold)
+	local okTj, towerJaunted = pcall(X.TowerOrbJaunt)
+	if okTj and towerJaunted then
+		return
+	end
+	local okHop, hopped = pcall(X.TowerHop, canCast)
+	if okHop and hopped then
+		return
+	end
 	local okE, exitJaunted = pcall(X.ExitOrbJaunt)
 	if okE and exitJaunted then
 		return

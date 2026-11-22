@@ -220,6 +220,29 @@ T.test("escape rules: escape Rift and moving out of a wave (game 071, 34:04-34:1
 	T.eq(R.MoveOutInsteadOfShift("low-hp-hit", false, false, true), false, "low-hp-hit stays a shift")
 end)
 
+T.test("escape rules: out of an enemy tower's range, hop over it on the way home (game 072, 19:56-20:05)", function()
+	local R = load()
+	-- t=1196: the Dire mid T2 (attack range 700 from the handle) hit her alone at 320, HP 0.49, out = 700 + 150 - 320.
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, true, true, 350), "orb-jaunt", "530 to go: the Orb and a Jaunt")
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, false, true, 350), "rift", "Orb down: the Rift")
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 300, true, true, 350), "rift", "300 to go: the Rift gets her out")
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 150, true, true, 350), "walk", "at the edge: walk")
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, false, false, 350), "walk", "nothing ready: walk")
+	T.eq(R.TowerEscape(true, 0.80, 0.12, 530, true, true, 350), "orb-jaunt", "healthy but falling fast")
+	T.eq(R.TowerEscape(true, 0.80, 0.05, 530, true, true, 350), nil, "healthy, slow loss")
+	T.eq(R.TowerEscape(false, 0.20, 0.30, 530, true, true, 350), nil, "the tower is not on her")
+	-- Behind the tower on the way home (home -6619,-6336, the TP target in the log; tower 1300,700).
+	T.eq(R.TowerHopWanted(11500, 10593, 15, 950, 700, true), true, "950 from the tower, the line home through it")
+	T.eq(R.TowerHopWanted(11500, 10593, 15, 1487, 700, true), false, "still far: walk on first")
+	T.eq(R.TowerHopWanted(9000, 10593, 15, 950, 700, true), false, "already past it")
+	T.eq(R.TowerHopWanted(11500, 10593, 1200, 950, 700, true), false, "the way home misses its range")
+	T.eq(R.TowerHopWanted(11500, 10593, 15, 950, 700, false), false, "not heading home")
+	local dx, dy, hopAt = R.HopDirection(2003, 1339, 1300, 700, 700, -6619, -6336, 1950)
+	T.ok(dx ~= nil and hopAt == 1800, "straight home, Jaunt 1800 along: " .. tostring(hopAt))
+	T.ok(dx < 0 and dy < 0, "toward home")
+	T.eq((R.HopDirection(3519, 2718, 1300, 700, 700, -6619, -6336, 1950)), nil, "3000 away: no line clears it")
+end)
+
 T.test("puck: the escape helpers run on the stub", function()
 	T.stub.reset({ hero = "npc_dota_hero_puck", slot = 2 })
 	local ok, X = T.stub.load("BotsLib/hero_puck")
@@ -239,6 +262,10 @@ T.test("puck: the escape helpers run on the stub", function()
 		"OrbFlightTime",
 		"OffensiveRiftBlocked",
 		"SafePoint",
+		"TowerOnHer",
+		"TowerEscape",
+		"TowerHop",
+		"TowerOrbJaunt",
 		"HeroOnHer",
 		"ExitJauntReady",
 		"EscapeRiftWanted",
