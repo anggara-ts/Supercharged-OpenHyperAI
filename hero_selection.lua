@@ -20,6 +20,7 @@ local heroPosWeights = require(GetScriptDirectory() .. "/FuncLib/data/hero_pos_w
 local HeroDisplayNames = require(GetScriptDirectory() .. "/FuncLib/data/hero_display_names")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
+local PosRules = require(GetScriptDirectory() .. "/FuncLib/systems/pos_command_rules")
 heroPosWeights = heroPosWeights.GetHeroPositions()
 if GAMEMODE_TURBO == nil then
 	GAMEMODE_TURBO = 23
@@ -479,7 +480,6 @@ local function getAllyPicks()
 	end
 	return allyPicks
 end
-local availablePositions = { TEAM_RADIANT = { "1", "2", "3", "4", "5" }, TEAM_DIRE = { "1", "2", "3", "4", "5" } }
 local function HeroPosWeight(heroName, pos)
 	if heroName == nil or heroName == "" then
 		return 10
@@ -518,110 +518,97 @@ local function ApplyLanesFromRoles(teamKey)
 		end
 	end
 end
--- locked[index] = position. Remaining bot slots filled by hero_pos_weights (cores stay 1-3).
-local function ReassignBotRoles(teamKey, locked)
-	locked = locked or {}
-	local teamId = teamKey == "TEAM_RADIANT" and TEAM_RADIANT or TEAM_DIRE
-	local players = GetTeamPlayers(teamId)
-	local takenPos = {}
-	for idx, pos in pairs(locked) do
-		Role.RoleAssignment[teamKey][idx] = pos
-		takenPos[pos] = true
+local function RoleLog(format, ...)
+	print(string.format("[OHA-ROLE] t=%.0f " .. format, DotaTime(), ...))
+end
+local function ShortHeroName(playerId)
+	local name = playerId ~= nil and GetSelectedHeroName(playerId) or ""
+	name = string.gsub(name or "", "npc_dota_hero_", "")
+	return name ~= "" and name or "-"
+end
+-- Position chat commands (#210). `!pos`: every bot of the team says its position (the bots answer from their own
+-- think, ability_item_usage_generic.lua, through Role.PosListRequest). `!pos Y` and `!Xpos Y` (pre-game only): one
+-- two-way swap, FuncLib/systems/pos_command_rules.lua PlanSwap: the mover takes Y, the holder of Y takes the mover's
+-- old position, nobody else moves. X counts the players of the team in GetTeamPlayers order (humans included), the
+-- same index as Role.RoleAssignment. hero_selection.lua and the team's bots share the Role module (game 068: Radiant
+-- slot 1 Puck played pos 2, a value only this file writes into Role.RoleAssignment), so the bots see the new positions.
+local function handlePosCommand(posCommand, commandText, senderId, teamPlayers)
+	local senderTeam = GetTeamForPlayer(senderId)
+	local who = ShortHeroName(senderId)
+	local teamTag = GetTeam() == TEAM_RADIANT and "radiant" or "dire"
+	-- The other team's hero_selection can get this line too (all chat): only the sender's team acts on it.
+	if senderTeam ~= GetTeam() then
+		RoleLog(
+			'%s cmd="%s" team=%s senderTeam=%s result=ignored why=other-team',
+			who,
+			commandText,
+			teamTag,
+			tostring(senderTeam)
+		)
+		return
 	end
-	local freePos = {}
-	for pos = 1, 5 do
-		if not takenPos[pos] then
-			freePos[#freePos + 1] = pos
-		end
+	if posCommand.kind == "list" then
+		Role.PosListRequest = { at = GameTime(), sender = senderId }
+		RoleLog('%s cmd="%s" team=%s result=list-request state=%s', who, commandText, teamTag, tostring(GetGameState()))
+		return
 	end
-	-- Fill core spots before support spots.
-	table.sort(freePos, function(posA, posB)
-		local groupA = posA <= 3 and 0 or 1
-		local groupB = posB <= 3 and 0 or 1
-		if groupA ~= groupB then
-			return groupA < groupB
-		end
-		return posA < posB
-	end)
-	local freeBots = {}
-	for idx, pid in pairs(players) do
-		if idx <= 5 and locked[idx] == nil then
-			freeBots[#freeBots + 1] = {
-				idx = idx,
-				pid = pid,
-				hero = GetSelectedHeroName(pid),
-			}
-		end
+	if posCommand.kind == "bad" then
+		RoleLog('%s cmd="%s" team=%s result=refused why=bad-format', who, commandText, teamTag)
+		return
 	end
-	local assigned = {}
-	for _, pos in ipairs(freePos) do
-		local best, bestScore = nil, -99999
-		for _, bot in ipairs(freeBots) do
-			if not assigned[bot.idx] then
-				local score = HeroPosWeight(bot.hero, pos)
-				if pos >= 4 and IsCorePreferredHero(bot.hero) then
-					score = score - 1000
-				elseif pos <= 3 and IsCorePreferredHero(bot.hero) then
-					score = score + 80
-				end
-				if pos >= 4 and not IsCorePreferredHero(bot.hero) then
-					score = score + 40
-				end
-				if score > bestScore then
-					bestScore = score
-					best = bot
-				end
+	if GetGameState() ~= GAME_STATE_PRE_GAME then
+		RoleLog(
+			'%s cmd="%s" team=%s result=refused why=not-pre-game state=%s',
+			who,
+			commandText,
+			teamTag,
+			tostring(GetGameState())
+		)
+		return
+	end
+	local roles = Role.RoleAssignment[ownTeamKey]
+	local humans, cores = {}, {}
+	local senderSlot = nil
+	for slot = 1, 5 do
+		local playerId = teamPlayers[slot]
+		if playerId ~= nil then
+			if playerId == senderId then
+				senderSlot = slot
+			end
+			if not IsPlayerBot(playerId) then
+				humans[slot] = true
+			elseif IsCorePreferredHero(GetSelectedHeroName(playerId)) then
+				cores[slot] = true
 			end
 		end
-		if best ~= nil then
-			assigned[best.idx] = true
-			Role.RoleAssignment[teamKey][best.idx] = pos
-			log(
-				"Reassign role ok. Team: %s idx: %s hero: %s -> pos %s (score %.0f)",
-				teamKey,
-				best.idx,
-				tostring(best.hero),
-				pos,
-				bestScore
-			)
-		end
 	end
-	ApplyLanesFromRoles(teamKey)
-	-- Force GetPosition() to re-read RoleAssignment.
-	Role.HeroPositions = {}
-end
--- Exchange roster slot idx with whoever currently holds newPos. Every other slot stays.
--- Returns "ok", "same", "human", or "missing".
-local function SwapRoleWithHolder(teamKey, players, idx, newPos)
-	local roles = Role.RoleAssignment[teamKey]
-	local oldPos = roles[idx]
-	if oldPos == nil then
-		return "missing"
+	local mover = posCommand.kind == "take" and senderSlot or posCommand.index
+	if mover == nil then
+		RoleLog('%s cmd="%s" team=%s result=refused why=sender-not-found', who, commandText, teamTag)
+		return
 	end
-	if oldPos == newPos then
-		return "same"
+	local plan = PosRules.PlanSwap(roles, humans, cores, mover, posCommand.pos, senderSlot)
+	if PosRules.Apply(roles, plan) then
+		ApplyLanesFromRoles(ownTeamKey)
+		-- Role.GetPosition re-reads Role.RoleAssignment in pre-game once its cache is empty.
+		Role.HeroPositions = {}
 	end
-	local holder = nil
-	for slot = 1, 5 do
-		if roles[slot] == newPos then
-			holder = slot
-			break
-		end
-	end
-	if holder ~= nil and holder ~= idx then
-		local pid = players[holder]
-		if pid ~= nil and not IsPlayerBot(pid) then
-			return "human"
-		end
-	end
-	roles[idx] = newPos
-	if holder ~= nil and holder ~= idx then
-		roles[holder] = oldPos
-	end
-	ApplyLanesFromRoles(teamKey)
-	Role.HeroPositions = {}
-	log("Swap role ok. Team: %s idx %s pos %s <-> idx %s pos %s", teamKey, idx, oldPos, tostring(holder), newPos)
-	return "ok"
+	RoleLog(
+		'%s swap cmd="%s" team=%s idx=%d hero=%s pos=%s->%s holder=%s holderHero=%s holderPos=%s->%s result=%s roles=%s',
+		who,
+		commandText,
+		teamTag,
+		mover,
+		ShortHeroName(teamPlayers[mover]),
+		tostring(plan.from),
+		tostring(plan.to),
+		tostring(plan.holder or "-"),
+		plan.holder ~= nil and ShortHeroName(teamPlayers[plan.holder]) or "-",
+		tostring(plan.holderFrom or "-"),
+		tostring(plan.holderTo or "-"),
+		plan.result,
+		PosRules.RolesText(roles)
+	)
 end
 local function countWeakHeroes(team)
 	local count = 0
@@ -771,8 +758,8 @@ local heroPickedByChat = false
 local function handleChatCommand(text, senderId, teamOnly)
 	local commandWord, commandText = splitCommand(text)
 	if commandWord == nil then
-		log("[WARN] Invalid command: %s", text)
-		return
+		-- A command without an argument, e.g. `!pos` (#210): it was dropped here as invalid.
+		commandWord, commandText = Utils.TrimString(text), ""
 	end
 	local teamPlayers = GetTeamPlayers(GetTeam())
 	if (teamPlayers == nil or #teamPlayers == 0) and senderId ~= nil then
@@ -834,7 +821,10 @@ local function handleChatCommand(text, senderId, teamOnly)
 	end
 	for _, command in ipairs(commands) do
 		local action, argument = command:match("(!%w+)%s*(.*)")
-		if action == "!pick" and GetGameMode() ~= GAMEMODE_CM and GetGameMode() ~= GAMEMODE_REVERSE_CM then
+		local posCommand = PosRules.Parse(command)
+		if posCommand ~= nil then
+			handlePosCommand(posCommand, command, senderId, teamPlayers)
+		elseif action == "!pick" and GetGameMode() ~= GAMEMODE_CM and GetGameMode() ~= GAMEMODE_REVERSE_CM then
 			log("Picking hero %s, is-for-ally: %s", argument, teamOnly)
 			local heroName = GetHumanChatHero(argument)
 			log("Actual picking hero %s ", heroName)
@@ -880,87 +870,6 @@ local function handleChatCommand(text, senderId, teamOnly)
 				log(
 					"Hero name not found or not supported! See: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71"
 				)
-			end
-		elseif action == "!pos" and GetGameState() == GAME_STATE_PRE_GAME then
-			log("Selecting pos %s", argument)
-			local teamKey = GetTeamForPlayer(senderId) == TEAM_RADIANT and "TEAM_RADIANT" or "TEAM_DIRE"
-			local positions = availablePositions[teamKey]
-			if Utils.HasValue(positions, argument) then
-				local position = tonumber(argument)
-				local requesterIndex = senderId + 1
-				for index, playerId in pairs(teamPlayers) do
-					if playerId == senderId then
-						requesterIndex = index
-					end
-				end
-				local ownerIsBot = false
-				for index, playerId in pairs(teamPlayers) do
-					if Role.RoleAssignment[teamKey][index] == position then
-						ownerIsBot = IsPlayerBot(playerId)
-						break
-					end
-				end
-				if not ownerIsBot and Role.RoleAssignment[teamKey][requesterIndex] ~= position then
-					log("Switch role failed: target role belongs to human.")
-				else
-					local locked = {}
-					-- Lock every human on this team; requester takes the chosen pos.
-					for idx, pid in pairs(teamPlayers) do
-						if idx <= 5 and not IsPlayerBot(pid) then
-							if pid == senderId then
-								locked[idx] = position
-							elseif Role.RoleAssignment[teamKey][idx] ~= position then
-								locked[idx] = Role.RoleAssignment[teamKey][idx]
-							end
-						end
-					end
-					locked[requesterIndex] = position
-					ReassignBotRoles(teamKey, locked)
-					log(
-						"Switch role ok (role-aware). Team: %s PID: %s, idx: %s, new role: %s",
-						teamKey,
-						senderId,
-						requesterIndex,
-						Role.RoleAssignment[teamKey][requesterIndex]
-					)
-				end
-			else
-				log("Cannot select pos: %s (not available).", argument)
-			end
-		elseif action:match("^!(%d+)pos$") ~= nil and GetGameState() == GAME_STATE_PRE_GAME then
-			local botIndexText, positionText = text:match("^!(%d+)pos (%d+)$")
-			if botIndexText and positionText then
-				log("Swap position for #%s to play pos %s", botIndexText, positionText)
-			else
-				log("Invalid command format for swapping pos")
-				return
-			end
-			local teamKey = GetTeamForPlayer(senderId) == TEAM_RADIANT and "TEAM_RADIANT" or "TEAM_DIRE"
-			local positions = availablePositions[teamKey]
-			if Utils.HasValue(positions, positionText) then
-				local position = tonumber(positionText)
-				local botIndex = tonumber(botIndexText)
-				if botIndex == nil or botIndex < 1 or botIndex > 5 then
-					log("Invalid bot index for !Npos")
-					return
-				end
-				local targetPid = teamPlayers[botIndex]
-				local targetHero = targetPid and GetSelectedHeroName(targetPid) or ""
-				-- Don't force a core hero onto 4/5. Leave the roster as it is.
-				if position >= 4 and IsCorePreferredHero(targetHero) then
-					log("Refuse !%spos %s: %s is a core hero", botIndexText, positionText, targetHero)
-				else
-					local swapped = SwapRoleWithHolder(teamKey, teamPlayers, botIndex, position)
-					if swapped == "human" then
-						log("Switch role failed: target role belongs to human.")
-					elseif swapped == "same" then
-						log("Switch role skipped: idx %s already pos %s", botIndex, position)
-					elseif swapped == "missing" then
-						log("Switch role failed: idx %s has no role", botIndex)
-					end
-				end
-			else
-				log("Cannot select pos: %s (not available).", positionText)
 			end
 		elseif action == "!sp" or action == "!speak" then
 			HandleLocaleSetting(argument)

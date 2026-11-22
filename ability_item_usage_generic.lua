@@ -244,7 +244,15 @@ local function LevelUpAbilities()
 			end)
 		end
 	elseif position ~= lastPosition then
-		log("[PosSwap] %s position changed: pos%s -> pos%s", botName, lastPosition, position)
+		print(
+			string.format(
+				"[OHA-ROLE] t=%.0f %s position-change pos=%s->%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(lastPosition),
+				tostring(position)
+			)
+		)
 		lastPosition = position
 		ReloadBotBuild("Position swap to pos" .. position)
 		bot.needPurchaseRebuild = true
@@ -846,6 +854,66 @@ function Usage.SetTalkMessage()
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
 end
+-- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Carry" ... "Pos 5 Hard Support".
+-- hero_selection.lua (draft and pre-game) and the reply member's chat callback (in game) put the request on the
+-- shared Role table; each bot answers it from its own think, pos 1 first (FuncLib/systems/pos_command_rules.lua).
+do
+	local PosRules = require(GetScriptDirectory() .. "/FuncLib/systems/pos_command_rules")
+	function Usage.NotePosRequest(chatText, senderPlayerId)
+		local posCommand = PosRules.Parse(chatText)
+		if posCommand == nil then
+			return false
+		end
+		if posCommand.kind == "list" and not IsPlayerBot(senderPlayerId) and Fu.Role.IsAllyMemberID(senderPlayerId) then
+			Fu.Role.PosListRequest = { at = GameTime(), sender = senderPlayerId }
+			print(
+				string.format(
+					'[OHA-ROLE] t=%.0f %s cmd="%s" result=list-request via=bot-chat',
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					chatText
+				)
+			)
+		end
+		return true
+	end
+	function Usage.AnswerPosRequest()
+		local request = Fu.Role.PosListRequest
+		if
+			request == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local position = Fu.GetPosition(bot)
+		local now = GameTime()
+		local state = PosRules.AnswerState(request.at, bot.posRequestHandledAt, bot.posAnsweredAt, now, position)
+		if state == "none" or state == "wait" then
+			return
+		end
+		bot.posRequestHandledAt = request.at
+		if state == "drop" then
+			return
+		end
+		bot.posAnsweredAt = now
+		local line = PosRules.Line(position, Localization.Get("pos_names"), Localization.Get("say_pos_prefix"))
+		pcall(function()
+			bot:ActionImmediate_Chat(line, false)
+		end)
+		print(
+			string.format(
+				'[OHA-ROLE] t=%.0f %s pos-say pos=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(position),
+				line
+			)
+		)
+	end
+end
 function Usage.SetReplyHumanTime(chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
@@ -853,6 +921,10 @@ function Usage.SetReplyHumanTime(chatEvent)
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
 		Fu.Customize.Localization = language
+		return
+	end
+	-- Position commands (#210): `!pos` asks the bots for their positions; none of them gets a chat reply.
+	if Usage.NotePosRequest(chatText, senderPlayerId) then
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
@@ -10858,6 +10930,7 @@ function AbilityLevelUpThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.AnswerPosRequest()
 	if bot.lastLevelUpFrameProcessTime == nil then
 		bot.lastLevelUpFrameProcessTime = DotaTime()
 	end
