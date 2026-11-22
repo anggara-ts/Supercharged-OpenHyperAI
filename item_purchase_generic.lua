@@ -20,6 +20,8 @@ local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local TeamItems = require(GetScriptDirectory() .. "/FuncLib/systems/item_strategy")
+local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local EddaRules = require(GetScriptDirectory() .. "/FuncLib/systems/edda_rules")
 -- Observer stock is shared with the human. When a ward lands in the shop, leave it
 -- for 30s. Buy only what is still there after that.
 local OBS_HUMAN_WINDOW = 30
@@ -653,6 +655,151 @@ local function CheckPulls()
 	end
 	bot._pullWatch = keep
 end
+-- [OHA-NEUTRAL] madstone (#116): the first neutral item came at 11-19 min in games 050-062 although tier 1 opens at
+-- 0:00. 7.42 rules (resource/localization/dota_english.txt, DOTA_Madstone_Explaination_1/2): "Fully clear a neutral
+-- creep camp to earn 2 Madstone for yourself and 1 for a random ally (Ancient camps earn 3 and 2)"; tier 1 takes 6
+-- (scripts/npc/neutral_items.txt craft_cost), later tiers 10; a team limit rises over time (its numbers are not in
+-- the game files). The reward drops as item_madstone_bundle (scripts/npc/items.txt: AutoPickup 1, ItemCastOnPickup
+-- 1, die_time 20). Whether bots collect it is not known, so every bundle that comes within 1200 of the bot is
+-- logged when seen and when gone (fate=expired when it lay the full 20 s, else taken; minDist = how close the bot
+-- came), and a bot without a neutral item says so every 2 min. No bundle line at all means the bundles are not in
+-- GetDroppedItemList. Until 30:00 only (tier 3).
+-- Games 063-067: no bundle came near any bot before 10:56 (one at 3:41 in game 064, a camp killed from the lane),
+-- because farm mode stays off while the laning phase lasts (mode_laning_generic.lua, up to 10:00). Who took each
+-- bundle was still unknown (every bot near it printed fate=taken), so the gone line names the hero nearest the
+-- bundle on the last scan (by=, byDist=; "enemy:" for an enemy hero), each bot counts the bundles it was nearest to
+-- (own=), and its first neutral item prints a first-neutral line with that count and the seconds since its last own
+-- bundle. The count is a rough lower bound: bundles went within 1 s with the nearest bot 200-400 away (the 1 s
+-- scan misses who touched it), and the "random ally" share never shows as a bundle (game 067: three Dire bots got
+-- their first item with bundlesSeen=0). So it only points at a late engine craft when own>=3 (6+ Madstone, tier 1)
+-- and no item follows soon.
+local MADSTONE_LOG_UNTIL = 1800
+local madstoneNextScan = 0
+-- The hero nearest a location (allied heroes, then visible enemy heroes): name, distance, whether it is this bot.
+local function NearestHeroTo(location)
+	local bestName, bestDist, bestIsSelf = "-", math.huge, false
+	for _, listType in ipairs({ UNIT_LIST_ALLIED_HEROES, UNIT_LIST_ENEMY_HEROES }) do
+		for _, hero in pairs(GetUnitList(listType) or {}) do
+			if hero ~= nil and not hero:IsNull() and hero:IsAlive() and not hero:IsIllusion() then
+				local dist = GetUnitToLocationDistance(hero, location)
+				if dist < bestDist then
+					local name = (string.gsub(hero:GetUnitName(), "npc_dota_hero_", ""))
+					bestName = listType == UNIT_LIST_ENEMY_HEROES and ("enemy:" .. name) or name
+					bestDist, bestIsSelf = dist, hero == bot
+				end
+			end
+		end
+	end
+	return bestName, bestDist, bestIsSelf
+end
+local function LogMadstone(neutralName)
+	local now = DotaTime()
+	if now < 0 or now > MADSTONE_LOG_UNTIL or now < madstoneNextScan then
+		return
+	end
+	madstoneNextScan = now + 1
+	local heroName = (string.gsub(botName, "npc_dota_hero_", ""))
+	local bundles = bot._madstoneBundles or {}
+	bot._madstoneBundles = bundles
+	local stats = bot._madstoneStats
+		or { seen = 0, taken = 0, expired = 0, own = 0, lastOwnAt = nil, nextSummary = 0, firstLogged = false }
+	bot._madstoneStats = stats
+	local present = {}
+	for _, drop in pairs(GetDroppedItemList() or {}) do
+		if
+			drop ~= nil
+			and drop.item ~= nil
+			and drop.location ~= nil
+			and not drop.item:IsNull()
+			and drop.item:GetName() == "item_madstone_bundle"
+		then
+			local key = string.format("%.0f,%.0f", drop.location.x, drop.location.y)
+			local dist = GetUnitToLocationDistance(bot, drop.location)
+			local entry = bundles[key]
+			if entry == nil then
+				entry = { firstAt = now, minDist = dist, logged = false }
+				bundles[key] = entry
+			end
+			present[key] = true
+			entry.minDist = math.min(entry.minDist, dist)
+			if dist <= 1200 then
+				entry.byName, entry.byDist, entry.bySelf = NearestHeroTo(drop.location)
+			end
+			if not entry.logged and dist <= 1200 then
+				entry.logged = true
+				stats.seen = stats.seen + 1
+				print(
+					string.format(
+						"[OHA-NEUTRAL] t=%.0f %s madstone-bundle seen at=%s dist=%.0f age=%.0f slot16=%s",
+						now,
+						heroName,
+						key,
+						dist,
+						now - entry.firstAt,
+						neutralName
+					)
+				)
+			end
+		end
+	end
+	for key, entry in pairs(bundles) do
+		if not present[key] then
+			bundles[key] = nil
+			if entry.logged then
+				local age = now - entry.firstAt
+				local fate = age >= 19 and "expired" or "taken"
+				stats[fate] = stats[fate] + 1
+				if fate == "taken" and entry.bySelf then
+					stats.own = stats.own + 1
+					stats.lastOwnAt = now
+				end
+				print(
+					string.format(
+						"[OHA-NEUTRAL] t=%.0f %s madstone-bundle gone at=%s age=%.0f fate=%s minDist=%.0f by=%s byDist=%.0f own=%d",
+						now,
+						heroName,
+						key,
+						age,
+						fate,
+						entry.minDist,
+						entry.byName or "-",
+						math.min(entry.byDist or -1, 99999),
+						stats.own
+					)
+				)
+			end
+		end
+	end
+	if neutralName == "none" and now >= stats.nextSummary then
+		stats.nextSummary = now + 120
+		print(
+			string.format(
+				"[OHA-NEUTRAL] t=%.0f %s no-neutral-yet bundlesSeen=%d taken=%d expired=%d own=%d lastHits=%d",
+				now,
+				heroName,
+				stats.seen,
+				stats.taken,
+				stats.expired,
+				stats.own,
+				bot:GetLastHits()
+			)
+		)
+	end
+	if neutralName ~= "none" and not stats.firstLogged then
+		stats.firstLogged = true
+		print(
+			string.format(
+				"[OHA-NEUTRAL] t=%.0f %s first-neutral item=%s own=%d sinceOwn=%.0f bundlesSeen=%d",
+				now,
+				heroName,
+				neutralName,
+				stats.own,
+				stats.lastOwnAt ~= nil and now - stats.lastOwnAt or -1,
+				stats.seen
+			)
+		)
+	end
+end
 local function PromoteBackpackCounters()
 	CheckPulls()
 	-- [OHA-NEUTRAL]: which neutral item the bot carries (slot 16), printed when it changes. Game 039: the
@@ -671,6 +818,9 @@ local function PromoteBackpackCounters()
 			)
 		)
 	end
+	-- An innate's item in slot 16 (Winter Wyvern's Eldwurm's Edda, Witch Doctor's Gris-Gris) is not a neutral item:
+	-- game 070 printed first-neutral item=item_eldwurms_edda at t=0 (#47).
+	pcall(LogMadstone, EddaRules.IsInnateSlotItem(neutralName) and "none" or neutralName)
 	if DotaTime() < promoteNextCheck then
 		return
 	end
@@ -1006,11 +1156,7 @@ local function BuyBasicItem()
 		bot.bPurchaseFromSecret = IsItemPurchasedFromSecretShop(bot.currBuyingBasicItem)
 		nextItemCost = GetItemCost(bot.currBuyingBasicItem)
 	end
-	if
-		bot.currBuyingBasicItem == "item_infused_raindrop"
-		or bot.currBuyingBasicItem == "item_tome_of_knowledge"
-		or bot.currBuyingBasicItem == "item_flask"
-	then
+	if bot.currBuyingBasicItem == "item_infused_raindrop" or bot.currBuyingBasicItem == "item_flask" then
 		if GetItemStockCount(bot.currBuyingBasicItem) <= 0 then
 			FinishBasicItem()
 			return
@@ -1216,7 +1362,7 @@ local function BuyBasicItemTurbo()
 		nextItemCost = GetItemCost(bot.currBuyingBasicItem)
 		bot.lastItemToBuy = bot.currBuyingBasicItem
 	end
-	if bot.currBuyingBasicItem == "item_infused_raindrop" or bot.currBuyingBasicItem == "item_tome_of_knowledge" then
+	if bot.currBuyingBasicItem == "item_infused_raindrop" then
 		if GetItemStockCount(bot.currBuyingBasicItem) <= 0 then
 			FinishBasicItem()
 			return
@@ -1524,6 +1670,9 @@ function ItemPurchaseThink()
 			and drop.item:GetName() ~= "item_ward_sentry"
 			and drop.item:GetName() ~= "item_ward_dispenser"
 			and Item.RoshanClaimKind(drop.item:GetName()) == nil
+			-- Not another player's item this bot dropped (#141): whether drop.owner names the buyer or whoever
+			-- dropped it is unverified, and the second would walk the bot straight back to it.
+			and not ForeignItems.WasDropped(bot, drop.item:GetName())
 		then
 			local distance = GetUnitToLocationDistance(bot, drop.location)
 			if distance > 200 and distance < 1000 then
@@ -2112,9 +2261,12 @@ function ItemPurchaseThink()
 			if it ~= nil and not it:IsNull() then
 				local name = it:GetName()
 				local backedOff = bot._forageSwapBackoff ~= nil and now < (bot._forageSwapBackoff[name] or -999)
+				-- Not another player's mushroom (#141; game 062, 44:39: Medusa swapped Nature's Prophet's into a main
+				-- slot): it can't be eaten, and the item think drops it.
 				if
 					(name == "item_foragers_health" or name == "item_foragers_stats" or name == "item_foragers_mana")
 					and not backedOff
+					and not ForeignItems.Check(bot, it)
 				then
 					return name, slot, it
 				end
