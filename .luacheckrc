@@ -11,4 +11,4 @@ max_line_length = false
 -- shadowing and overwritten values are noise in this code base. What stays: syntax errors,
 -- unreachable code, empty blocks, unused values, wrong goto, etc.
 ignore = { "1..", "211", "212", "213", "311", "411", "412", "421", "422", "423", "431", "432", "542" }
-exclude_files = { ".git/**", "Util/**" }
+exclude_files = { ".git/**", "tools/**" }
