@@ -423,6 +423,8 @@ function Dispel.AnalyzeDebuffs(unit)
 	local hasRoot = false
 	local canBasicDispel = false
 	local canStrongDispel = false
+	-- The severity of the listed debuffs a basic dispel removes (the others stay after one); Berserk Potion (#184).
+	local basicScore = 0
 	for _, entry in ipairs(debuffEntries) do
 		local modifierName = entry[1]
 		local info = entry[2]
@@ -466,6 +468,7 @@ function Dispel.AnalyzeDebuffs(unit)
 					end
 					if info.basicDispel then
 						canBasicDispel = true
+						basicScore = basicScore + info.severity
 					end
 					if info.strongDispel then
 						canStrongDispel = true
@@ -485,6 +488,7 @@ function Dispel.AnalyzeDebuffs(unit)
 		hasDisable = hasDisable,
 		hasRoot = hasRoot,
 		canBasicDispel = canBasicDispel,
+		basicScore = basicScore,
 		canStrongDispel = canStrongDispel,
 	}
 end
