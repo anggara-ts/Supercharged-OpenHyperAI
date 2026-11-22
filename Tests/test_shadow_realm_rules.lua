@@ -193,3 +193,144 @@ T.test("dark willow: a realm she dies in ends as release=died at her last tick",
 	T.ok(string.find(line, "t=152 dark_willow shadow-realm why=retreat held=1.00", 1, true) ~= nil, line)
 	T.ok(string.find(line, "release=died", 1, true) ~= nil, line)
 end)
+
+T.test("shadow realm: when to cast (game 069, #48)", function()
+	local R = load()
+	-- Attack realm: under 60% HP or more enemy heroes within 1200 than our heroes (her included).
+	T.eq(R.AttackSkip(0.9, 1, 1), nil, "1v1 at 90%")
+	T.eq(R.AttackSkip(0.9, 2, 2), nil, "2v2")
+	T.eq(R.AttackSkip(0.45, 1, 3), "low-hp", "14:01: cast at 45% HP")
+	T.eq(R.AttackSkip(0.99, 3, 2), "outnumbered", "12:55: 3 enemies, she and 1 ally")
+	T.eq(R.AttackSkip(0.66, 4, 2), "outnumbered", "44:59: 4 enemies, she and 1 ally")
+	-- Escape realm.
+	local function escape(retreating, engaging, hp, hit)
+		return R.Escape({ retreating = retreating, engaging = engaging, hp = hp, hit = hit })
+	end
+	T.eq(escape(true, false, 0.5, false), "retreat", "retreating at 50%")
+	T.eq(escape(true, false, 1.0, true), "retreat", "retreating at full HP, hit by a hero")
+	T.eq(select(2, escape(true, false, 1.0, false)), "full-hp", "9:39: retreating at full HP, not hit")
+	T.eq(escape(true, false, 0.85, false), nil, "retreating at 85%, not hit: no realm")
+	T.eq(escape(false, false, 0.5, true), "hit", "24:43: pushing at 50%, hit by a hero")
+	T.eq(escape(false, false, 0.5, false), nil, "pushing at 50%, not hit")
+	T.eq(escape(false, false, 0.7, true), nil, "pushing at 70%, hit")
+	T.eq(escape(false, true, 0.5, true), nil, "in a fight mode the attack and dodge rules decide")
+	T.eq(escape(true, true, 0.3, true), "retreat", "cornered (retreating and engaging): escape")
+	-- Release reasons, the early drop.
+	T.eq(R.JoinRelease(nil, "died"), "died", "only died")
+	T.eq(R.JoinRelease("mode", "died"), "mode+died", "44:59: both kept")
+	T.eq(R.JoinRelease("died", "died"), "died", "no repeat")
+	T.eq(R.EarlyDrop(nil, 0.67, 5), true, "5:03: gone after 0.67s, nothing released it")
+	T.eq(R.EarlyDrop("max", 3.3, 5), false, "the hit ended it")
+	T.eq(R.EarlyDrop(nil, 4.9, 5), false, "ran out")
+end)
+
+-- Everything but Shadow Realm out of reach, one enemy hero 400 away, the other heroes far.
+local function castBot(mode, hpRatio, hit)
+	local bot = T.stub.reset({ hero = "npc_dota_hero_dark_willow", slot = 4, time = 600 })
+	local ok, X = T.stub.load("BotsLib/hero_dark_willow")
+	T.ok(ok, "hero_dark_willow loads: " .. tostring(X))
+	local realm = bot:GetAbilityByName("dark_willow_shadow_realm")
+	realm.IsFullyCastable = function()
+		return true
+	end
+	local enemy = nil
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero ~= bot then
+			hero._loc = bot._loc + Vector(5000, 5000, 0)
+			if enemy == nil and hero._team ~= bot._team then
+				enemy = hero
+			end
+		end
+	end
+	enemy._loc = bot._loc + Vector(400, 0, 0)
+	bot._hp = bot._maxHp * hpRatio
+	bot.GetActiveMode = function()
+		return mode
+	end
+	bot.GetActiveModeDesire = function()
+		return 0.8
+	end
+	bot.DistanceFromFountain = function()
+		return 6000
+	end
+	bot.WasRecentlyDamagedByAnyHero = function()
+		return hit
+	end
+	local used = {}
+	bot.Action_UseAbility = function(_, ability)
+		used[#used + 1] = ability:GetName()
+	end
+	return bot, X, used
+end
+
+local function printedWith(text)
+	for _, line in ipairs(T.stub.printed) do
+		if string.find(line, text, 1, true) then
+			return line
+		end
+	end
+	return nil
+end
+
+T.test("dark willow: an escape realm when hit under 60% HP while pushing (game 069, 24:43)", function()
+	local _, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 0.5, true)
+	X.SkillsComplement()
+	T.eq(used[#used], "dark_willow_shadow_realm", "Shadow Realm cast")
+	local line = printedWith("shadow-realm-cast why=retreat")
+	T.ok(line ~= nil and string.find(line, "rule=hit", 1, true) ~= nil, tostring(line))
+end)
+
+T.test("dark willow: no retreat realm at full HP when no hero hit her (game 069, 9:39)", function()
+	local _, X, used = castBot(BOT_MODE_RETREAT, 1.0, false)
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm")
+	T.ok(printedWith("shadow-realm-skip kind=retreat why=full-hp") ~= nil, "the skip is logged")
+end)
+
+-- Game 069, 44:59: "release=died" lost the first reason.
+T.test("dark willow: a release before her death keeps both reasons", function()
+	local bot, X = realmBot()
+	bot.GetActiveMode = function()
+		return BOT_MODE_RETREAT
+	end
+	local target = T.stub.teams[TEAM_DIRE][1]
+	target._loc = bot._loc + Vector(600, 0, 0)
+	X.StartShadowRealm("attack", target)
+	T.stub.time = 100.5
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm.released, "mode", "the mode left attack")
+	bot._alive = false
+	T.stub.time = 101
+	X.ShadowRealmTick()
+	bot._alive = true
+	T.eq(bot._dwRealm, nil, "ended")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "release=mode+died", 1, true) ~= nil, line)
+end)
+
+-- Game 069, 5:03 9:40 45:55: realms gone after 0.67-1.17s with release=-.
+T.test("dark willow: an early realm drop says what she was doing", function()
+	local bot, X = realmBot()
+	local inRealm = true
+	bot.HasModifier = function(_, name)
+		return inRealm and name == "modifier_dark_willow_shadow_realm_buff"
+	end
+	bot.GetActiveMode = function()
+		return BOT_MODE_RETREAT
+	end
+	X.StartShadowRealm("retreat", nil)
+	T.stub.time = 100.4
+	X.ShadowRealmTick()
+	T.ok(bot._dwRealm ~= nil and bot._dwRealm.modSeen ~= nil, "in the realm")
+	inRealm = false
+	bot.GetLastAttackTime = function()
+		return 100.8
+	end
+	T.stub.time = 101
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm, nil, "ended")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "release=-", 1, true) ~= nil, line)
+	T.ok(string.find(line, "drop-mode=" .. BOT_MODE_RETREAT .. ">" .. BOT_MODE_RETREAT, 1, true) ~= nil, line)
+	T.ok(string.find(line, "attacked=yes", 1, true) ~= nil, line)
+end)

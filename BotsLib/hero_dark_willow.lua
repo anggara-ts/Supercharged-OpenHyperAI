@@ -186,10 +186,10 @@ function X.SkillsComplement()
 		lastBedlamTime = DotaTime()
 		return
 	end
-	local shadowRealmWhy, shadowRealmTarget
-	shadowRealmDesire, shadowRealmWhy, shadowRealmTarget = X.ConsiderShadowRealm()
+	local shadowRealmWhy, shadowRealmTarget, shadowRealmRule
+	shadowRealmDesire, shadowRealmWhy, shadowRealmTarget, shadowRealmRule = X.ConsiderShadowRealm()
 	if shadowRealmDesire > 0 then
-		X.StartShadowRealm(shadowRealmWhy, shadowRealmTarget)
+		X.StartShadowRealm(shadowRealmWhy, shadowRealmTarget, shadowRealmRule)
 		bot:Action_UseAbility(shadowRealmAbility)
 		-- return: without it the Cursed Crown order below replaced Shadow Realm in the same frame.
 		return
@@ -286,25 +286,75 @@ function X.ConsiderShadowRealm()
 			and botTarget:GetHealth()
 				> botTarget:GetActualIncomingDamage(bot:GetAttackDamage() * 2, DAMAGE_TYPE_PHYSICAL)
 		then
-			return BOT_ACTION_DESIRE_HIGH, "attack", botTarget
+			-- Not in a losing fight (#48, game 069): under 60% HP or outnumbered within 1200.
+			local enemies, ourHeroes = X.FightCounts()
+			local skip = ShadowRealmRules.AttackSkip(hpRatio, enemies, ourHeroes)
+			if skip == nil then
+				return BOT_ACTION_DESIRE_HIGH, "attack", botTarget, "attack"
+			end
+			X.LogRealmSkip("attack", skip, enemies, ourHeroes)
 		end
 	end
-	if
-		(isRetreating or isRetreating and hpRatio < 0.6 and bot:WasRecentlyDamagedByAnyHero(2))
-		and not Fu.IsRealInvisible(bot)
-		and nearbyEnemies ~= nil
-		and #nearbyEnemies >= 1
-	then
-		if Fu.DidEnemyCastAbility() or hpRatio < 0.5 or Fu.IsStunProjectileIncoming(bot, 800) then
-			return BOT_ACTION_DESIRE_HIGH, "retreat", nil
+	if not Fu.IsRealInvisible(bot) and nearbyEnemies ~= nil and #nearbyEnemies >= 1 then
+		local rule, skip = ShadowRealmRules.Escape({
+			retreating = isRetreating,
+			engaging = isGoingOnSomeone,
+			hp = hpRatio,
+			hit = bot:WasRecentlyDamagedByAnyHero(2),
+		})
+		if rule ~= nil then
+			if Fu.DidEnemyCastAbility() or hpRatio < 0.5 or Fu.IsStunProjectileIncoming(bot, 800) then
+				return BOT_ACTION_DESIRE_HIGH, "retreat", nil, rule
+			end
+			return BOT_ACTION_DESIRE_MODERATE, "retreat", nil, rule
 		end
-		return BOT_ACTION_DESIRE_MODERATE, "retreat", nil
+		if skip ~= nil then
+			local enemies, ourHeroes = X.FightCounts()
+			X.LogRealmSkip("retreat", skip, enemies, ourHeroes)
+		end
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Real enemy heroes and our heroes (her included) within ShadowRealmRules.FIGHT_RADIUS (1200).
+function X.FightCounts()
+	local radius = ShadowRealmRules.FIGHT_RADIUS
+	local enemies, ourHeroes = 0, 1
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			enemies = enemies + 1
+		end
+	end
+	for _, ally in pairs(Fu.GetNearbyHeroes(bot, radius, false, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+			ourHeroes = ourHeroes + 1
+		end
+	end
+	return enemies, ourHeroes
+end
+-- [OHA-DW] t= dark_willow shadow-realm-skip kind=attack|retreat why=low-hp|outnumbered|full-hp hp= enemies= allies=
+-- (allies: our heroes within 1200, her included): a realm the old rules would have cast. Once per 5s.
+function X.LogRealmSkip(kind, why, enemies, ourHeroes)
+	if DotaTime() < (bot._dwRealmSkipLogAt or -999) then
+		return
+	end
+	bot._dwRealmSkipLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[OHA-DW] t=%.0f dark_willow shadow-realm-skip kind=%s why=%s hp=%.2f enemies=%d allies=%d mode=%d",
+			DotaTime(),
+			kind,
+			why,
+			hpRatio or -1,
+			enemies,
+			ourHeroes,
+			bot:GetActiveMode()
+		)
+	)
+end
 -- The realm she is in (bot._dwRealm): why (attack | dodge | retreat), the cast time, the target, her attack range
 -- at the cast (GetAttackRange may already add the +600 inside the realm) and the bonus values from the ability.
-function X.StartShadowRealm(why, target)
+function X.StartShadowRealm(why, target, rule)
 	local bonusRange = shadowRealmAbility:GetSpecialValueInt("attack_range_bonus")
 	if bonusRange <= 0 then
 		bonusRange = 600
@@ -329,17 +379,23 @@ function X.StartShadowRealm(why, target)
 		tp = "-",
 		-- Deaths at the cast: a higher count later means she died in or right after the realm (#48).
 		deaths = GetHeroDeaths(bot:GetPlayerID()) or 0,
+		-- Her last attack time at the cast: a change means her own attack ended the realm (the early-drop line).
+		lastAttack = bot:GetLastAttackTime(),
 	}
+	local enemies, ourHeroes = X.FightCounts()
 	pcall(
 		print,
 		string.format(
-			"[OHA-DW] t=%.0f dark_willow shadow-realm-cast why=%s target=%s dist=%d hp=%.2f mode=%d",
+			"[OHA-DW] t=%.0f dark_willow shadow-realm-cast why=%s target=%s dist=%d hp=%.2f mode=%d rule=%s enemies=%d allies=%d",
 			DotaTime(),
 			tostring(why),
 			target ~= nil and (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")) or "-",
 			target ~= nil and GetUnitToUnitDistance(bot, target) or -1,
 			Fu.GetHP(bot),
-			bot:GetActiveMode()
+			bot:GetActiveMode(),
+			tostring(rule or why),
+			enemies,
+			ourHeroes
 		)
 	)
 end
@@ -348,7 +404,10 @@ end
 -- the realm was seen to end (the hit landed; about 5.2 when it ran out, or when the modifier was never seen).
 -- release=died: she died in the realm or the tick stopped (her think doesn't run while dead); t=, held= and ended=
 -- are then from the last tick she was alive (game 068: the lines printed at respawn, 18-51s late, held=51.10).
--- endedAt: that time (default now).
+-- endedAt: that time (default now). Both reasons are kept when she dies after a release (release=mode+died).
+-- An early drop (the modifier gone before the realm could run out, release=-) adds what she was doing:
+-- drop-mode=<mode at the last tick in the realm>><mode now> drop-act=<action type then>><now> attacked=yes|no (her
+-- last attack time changed since the cast: her own attack ended it).
 function X.EndShadowRealm(realm, since, endedAt)
 	bot._dwRealm = nil
 	local target = realm.target
@@ -370,7 +429,7 @@ function X.EndShadowRealm(realm, since, endedAt)
 			dist,
 			realm.modSeen ~= nil and string.format("%.2f", realm.modSeen) or "no",
 			tostring(realm.invuln == true)
-		)
+		) .. (realm.drop or "")
 	)
 end
 -- Another allied hero within 1500 in the attack mode (the TP rule's attackingAllies, without herself).
@@ -474,7 +533,8 @@ function X.ShadowRealmTick()
 	local died = not bot:IsAlive() or deaths > (realm.deaths or deaths)
 	if died or since > realm.duration + 1 then
 		local last = realm.lastTick or 0
-		realm.released, realm.releasedAt = died and "died" or "stale", realm.releasedAt or last
+		realm.released = ShadowRealmRules.JoinRelease(realm.released, died and "died" or "stale")
+		realm.releasedAt = realm.releasedAt or last
 		X.EndShadowRealm(realm, last, realm.at + last)
 		return false
 	end
@@ -492,8 +552,25 @@ function X.ShadowRealmTick()
 		return false
 	end
 	if since > realm.duration + 0.2 or realm.modSeen ~= nil and not inRealm then
+		if
+			realm.modSeen ~= nil
+			and not inRealm
+			and ShadowRealmRules.EarlyDrop(realm.released, since, realm.duration)
+		then
+			realm.drop = string.format(
+				" drop-mode=%d>%d drop-act=%d>%d attacked=%s",
+				realm.tickMode or -1,
+				bot:GetActiveMode(),
+				realm.tickAct or -1,
+				bot:GetCurrentActionType() or -1,
+				bot:GetLastAttackTime() ~= realm.lastAttack and "yes" or "no"
+			)
+		end
 		X.EndShadowRealm(realm, since)
 		return false
+	end
+	if inRealm then
+		realm.tickMode, realm.tickAct = bot:GetActiveMode(), bot:GetCurrentActionType()
 	end
 	if realm.tp == "ordered" and bot:IsChanneling() then
 		realm.tp = "now"
