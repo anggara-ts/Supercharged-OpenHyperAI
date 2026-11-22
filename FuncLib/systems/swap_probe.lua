@@ -4,9 +4,11 @@
 --
 -- Off unless the local setting Customize.Swap_Probe == true (never set in the shipped Customize/general.lua, so a
 -- Workshop copy never runs it). One Radiant bot (the highest position among the Radiant bots) runs it pre-game:
---   setup   buy a Clarity (marker) and Faerie Fires (fillers) until the main slots are full and two land in the
---           backpack, then sell main fillers until 4 main items are left (only at the fountain shop). Iron Branches
---           can not be used: the swap wrapper (global_overrides.lua) never moves a branch into the backpack.
+--   setup   buy an Enchanted Mango (marker) and Faerie Fires (fillers) until the main slots are full and two land in
+--           the backpack, then sell main fillers until 4 main items are left (only at the fountain shop). Before a
+--           case whose slots are missing it buys one filler into the full main slots (it lands in the backpack) and
+--           sells one main filler. No Iron Branch (the swap wrapper never moves one into the backpack) and no
+--           Clarity (#15's rule refuses a Clarity pulled into an occupied main slot).
 --   cases   1 swap(main item, bag item)  2 swap(bag item, main item)  3 main item -> empty bag slot, then
 --           bag item -> that main slot  4 bag item -> empty main slot, then main item -> that bag slot
 --           5 case 4 with 7s between the steps (the backpack cooldown is 6s). Slots are re-read before each case.
@@ -16,10 +18,12 @@
 -- Logs: [OHA-SWAP] probe (one line per step), probe-summary (per condition), probe-done; then one ALL chat line.
 local M = {}
 
-M.MARKER = "item_clarity" -- 60 gold, team stock 5 (7.42 items.txt)
+M.MARKER = "item_enchanted_mango" -- 65 gold, team stock 4 (7.42 items.txt)
+M.MARKER_COST = 65
 M.FILLER = "item_faerie_fire" -- 65 gold, no stock limit (7.42 items.txt)
-M.MAIN_KEEP = 4 -- main items after setup (2 empty main slots)
-M.BAG_WANT = 2 -- backpack items after setup (1 empty backpack slot)
+M.FILLER_COST = 65
+M.MAIN_KEEP = 4 -- main items after the first setup (2 empty main slots)
+M.BAG_WANT = 2 -- backpack items after the first setup (1 empty backpack slot)
 M.MAX_BUYS = 16
 M.DEADLINE = 180 -- game seconds: whatever is not done by then is cut short
 M.CONDITIONS = { "idle", "busy", "modes" }
@@ -57,37 +61,44 @@ function M.Classify(before, after05, after3)
 	return "other"
 end
 
--- names[0..8] (item name or "-") -> m1, m2, b1, b2 slots, or nil when the layout has no such set.
+-- names[0..8] (item name or "-") -> { m1, m2, b1, b2 } slots (a field is nil when the layout has none).
 -- m1 is a main item whose name differs from b1's, so a main <-> backpack swap is visible.
 function M.PickRoles(names)
-	local b1, b2, m2
+	local roles = {}
 	for slot = 6, 8 do
 		if names[slot] ~= "-" then
-			b1 = b1 or slot
+			roles.b1 = roles.b1 or slot
 		else
-			b2 = b2 or slot
+			roles.b2 = roles.b2 or slot
 		end
 	end
 	for slot = 0, 5 do
 		if names[slot] == "-" then
-			m2 = m2 or slot
+			roles.m2 = roles.m2 or slot
 		end
 	end
-	local m1
 	for slot = 0, 5 do
-		if names[slot] ~= "-" and (b1 == nil or names[slot] ~= names[b1]) then
-			m1 = slot
+		if names[slot] ~= "-" and (roles.b1 == nil or names[slot] ~= names[roles.b1]) then
+			roles.m1 = slot
 			break
 		end
 	end
-	if m1 == nil or m2 == nil or b1 == nil or b2 == nil then
-		return nil
+	return roles
+end
+
+-- Every role slot the case's steps name is there.
+function M.CaseReady(roles, caseDef)
+	for _, stepDef in ipairs(caseDef) do
+		if roles[stepDef[1]] == nil or roles[stepDef[2]] == nil then
+			return false
+		end
 	end
-	return { m1 = m1, m2 = m2, b1 = b1, b2 = b2 }
+	return true
 end
 
 -- The next setup action for names[0..8]: "ready", "buy", item | "sell", slot | "abort", reason.
-function M.SetupStep(names, gold, buys)
+-- restore = a later setup (one backpack item and one empty main slot are enough), else the first one.
+function M.SetupStep(names, gold, buys, restore)
 	local mainItems, bagItems, marker = 0, 0, false
 	for slot = 0, 8 do
 		if names[slot] ~= "-" then
@@ -109,22 +120,19 @@ function M.SetupStep(names, gold, buys)
 		return "buy", item
 	end
 	if not marker then
-		return buy(M.MARKER, 60)
+		return buy(M.MARKER, M.MARKER_COST)
 	end
-	if bagItems < M.BAG_WANT then
-		return buy(M.FILLER, 65)
+	if bagItems < (restore and 1 or M.BAG_WANT) then
+		return buy(M.FILLER, M.FILLER_COST)
 	end
-	if mainItems > M.MAIN_KEEP then
-		-- The highest main slot holding a filler: in the first setup that is the newest buy (full refund).
+	if mainItems > (restore and 5 or M.MAIN_KEEP) then
+		-- The highest main slot holding a filler: in the first setup that is the newest buy.
 		for slot = 5, 0, -1 do
 			if names[slot] == M.FILLER then
 				return "sell", slot
 			end
 		end
 		return "abort", "no-filler-to-sell"
-	end
-	if M.PickRoles(names) == nil then
-		return "abort", "layout"
 	end
 	return "ready"
 end
@@ -237,8 +245,8 @@ local function Hold(bot, now)
 end
 
 local function Release(bot)
+	-- Only the probe's own flag: _outpostHoldUntil may be a hero's own hold, and the probe's lapses in 0.5s.
 	bot._swapProbeHoldUntil = nil
-	bot._outpostHoldUntil = nil
 end
 
 local function Finish(bot, why)
@@ -294,7 +302,8 @@ local function StartCase(bot, now, names)
 		state.case,
 		Layout(names)
 	)
-	if roles == nil then
+	state.modesStarted = state.modesStarted or cond == "modes"
+	if not M.CaseReady(roles, M.CASES[state.case]) then
 		local c = Count(cond)
 		c.skipped = c.skipped + #M.CASES[state.case]
 		Log(
@@ -308,7 +317,6 @@ local function StartCase(bot, now, names)
 		state.nextAt = now + 0.2
 		return
 	end
-	state.modesStarted = state.modesStarted or cond == "modes"
 	state.roles = roles
 	state.step = 1
 	state.phase = "order"
@@ -397,9 +405,12 @@ end
 local function Setup(bot, now, names)
 	local cond = M.CONDITIONS[state.cond]
 	local atShop = bot:DistanceFromFountain() < 900
+	-- The first setup always; later only when the next case's slots are missing (each restore costs gold).
+	local caseDef = M.CASES[state.case]
+	local need = not state.setupDone or (caseDef ~= nil and not M.CaseReady(M.PickRoles(names), caseDef))
 	local action, arg = "ready", nil
-	if atShop then
-		action, arg = M.SetupStep(names, bot:GetGold(), state.buys)
+	if atShop and need then
+		action, arg = M.SetupStep(names, bot:GetGold(), state.buys, state.setupDone)
 	end
 	if action == "buy" then
 		state.buys = state.buys + 1
@@ -427,12 +438,13 @@ local function Setup(bot, now, names)
 	if action == "abort" then
 		Log("[OHA-SWAP] t=%.0f %s probe setup abort reason=%s cond=%s", DotaTime(), HeroName(bot), arg, cond)
 		-- Only the first setup ends the probe; a later restore that fails runs the case anyway (or skips it).
-		if state.cond == 1 and state.case == 1 then
+		if not state.setupDone then
 			Finish(bot, "setup-" .. tostring(arg))
 			return
 		end
 	end
 	-- Ready (or away from the shop: the case runs if the slots allow it, else it is skipped).
+	state.setupDone = true
 	if state.case > #M.CASES then
 		state.cond = state.cond + 1
 		state.case = 1
