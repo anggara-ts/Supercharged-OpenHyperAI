@@ -1450,8 +1450,40 @@ function GetDesireRaw()
 						closer ~= nil and closer:GetActiveMode() == BOT_MODE_RUNE,
 						waited
 					)
+					local claimKey = GetTeam() .. ":" .. id
+					local claim = RuneRules.passClaims[claimKey]
+					local skipWhy = nil
+					if RuneRules.ClaimedByOther(claim, bot, DotaTime()) and claim.holder:IsAlive() then
+						skipWhy = "claimed:" .. (string.gsub(claim.holder:GetUnitName(), "npc_dota_hero_", ""))
+					elseif closer ~= nil and not yield and bot:GetActiveMode() == BOT_MODE_ROSHAN then
+						-- A takeover loses to a running Roshan call (game 069 40:18-40:22: 0.97 never won over the
+						-- Roshan mode): leave the rune to an ally instead of taking it over.
+						skipWhy = "roshan"
+					end
+					if skipWhy ~= nil and not yield then
+						local skipKey = id .. ":" .. skipWhy .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+						if bot._passSkipKey ~= skipKey then
+							bot._passSkipKey = skipKey
+							pcall(
+								print,
+								string.format(
+									"[OHA-RUNE] t=%.0f %s passing-take-skip spot=%d type=%s dist=%d why=%s closer=%s mode=%s",
+									DotaTime(),
+									(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+									id,
+									tostring(GetRuneType(id)),
+									mine,
+									skipWhy,
+									closer ~= nil and (string.gsub(closer:GetUnitName(), "npc_dota_hero_", "")) or "-",
+									ModeTag(bot:GetActiveMode())
+								)
+							)
+						end
+					end
 					if yield then
 						bot._passWhy = "ally:" .. (string.gsub(closer:GetUnitName(), "npc_dota_hero_", ""))
+					elseif skipWhy ~= nil then
+						bot._passWhy = skipWhy
 					else
 						local runeInfo = bot.rune.normal
 						runeInfo.location = id
@@ -1479,6 +1511,9 @@ function GetDesireRaw()
 						-- backup spot 450 off the rune.
 						if closer ~= nil then
 							bot._passTake = { id = id, untilAt = DotaTime() + RuneRules.PASS_TAKE_FOR }
+							-- The team's claim: the other bots leave this rune to this one (see RuneRules.NextClaim).
+							RuneRules.passClaims[claimKey] =
+								RuneRules.NextClaim(claim, bot, DotaTime(), bot:GetActiveMode() == BOT_MODE_RUNE)
 						end
 						-- One line per rune and spawn cycle when the old rule would not have taken it.
 						local logKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))

@@ -129,6 +129,28 @@ function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
 	return oldDesire
 end
 
+-- A takeover claims the rune for the team (#32, game 069 40:18-40:22: during a Roshan take Vengeful Spirit took a rune
+-- over from Puck, Puck took it back from her, then Zeus from her: each takeover lost to the Roshan mode, nobody picked it
+-- up). Claims are shared by the team's bots (this module is one table per team VM), keyed by team and rune id: an
+-- ally's live claim makes the others leave the rune (pass=claimed:<hero>). A claim lasts PASS_TAKE_FOR and is renewed
+-- while its holder is in the rune mode, or within PASS_WAIT of taking it (its rune mode needs a think to win); a holder
+-- that never switches to the rune mode loses it after PASS_TAKE_FOR.
+RuneRules.passClaims = {}
+-- The claim after this think: a new one (claim nil), or the old one renewed or kept. holder: any value naming the bot.
+function RuneRules.NextClaim(claim, holder, now, inRuneMode)
+	if claim == nil or claim.holder ~= holder or now >= claim.untilAt then
+		return { holder = holder, at = now, untilAt = now + RuneRules.PASS_TAKE_FOR }
+	end
+	if inRuneMode or now - claim.at <= RuneRules.PASS_WAIT then
+		claim.untilAt = now + RuneRules.PASS_TAKE_FOR
+	end
+	return claim
+end
+-- Another bot's live claim on the rune: true when this bot should leave it.
+function RuneRules.ClaimedByOther(claim, holder, now)
+	return claim ~= nil and claim.holder ~= holder and now < claim.untilAt
+end
+
 -- Wisdom shrine (#32). Game data (7.42 pak01 scripts/npc/npc_units.txt, npc_dota_xp_fountain): RingRadius 100, so a
 -- hero can't walk closer than ~140 to the shrine's centre (game 068: Vengeful Spirit and Nyx stopped at 139-140 for
 -- the whole window). npc_abilities.txt, ability_xp_fountain: radius 300, countdown_time 3: a hero inside 300 for 3s
@@ -173,6 +195,19 @@ function RuneRules.WisdomStandFrom(standSince, mark, now)
 		return mark
 	end
 	return standSince
+end
+
+-- XP gained between two reads of GetXPNeededToLevel() and GetLevel() (the bot handle has no GetCurrentXP, game 069).
+-- Same level: the drop in XP still needed. A level up: at least the XP that was still needed then (the part into the
+-- new level is not known without the level table). Returns gain, leveled.
+function RuneRules.XpGain(prevNeeded, prevLevel, needed, level)
+	if prevNeeded == nil or needed == nil then
+		return 0, false
+	end
+	if (level or 0) > (prevLevel or 0) then
+		return prevNeeded, true
+	end
+	return math.max(0, prevNeeded - needed), false
 end
 
 return RuneRules

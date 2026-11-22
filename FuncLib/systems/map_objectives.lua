@@ -1356,7 +1356,9 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 			return true
 		end
 		local now = DotaTime()
-		local xp = bot.GetCurrentXP and bot:GetCurrentXP() or nil
+		-- The bot handle has no GetCurrentXP (game 069: 3 stands printed covered xp=+0; the [OHA-API] dump lists only
+		-- GetXPNeededToLevel), so the gain is read from the XP still needed to level and the level (RuneRules.XpGain).
+		local xp = { needed = bot:GetXPNeededToLevel(), level = bot:GetLevel() }
 		local interval = MapObjectives.WisdomInterval()
 		local mark = math.floor(math.max(0, now) / interval) * interval
 		local standFrom = RuneRules.WisdomStandFrom(bot._wisdomStandSince, mark, now)
@@ -1366,19 +1368,25 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 			bot._wisdomStandSince = standFrom
 			bot._wisdomXpAtStand = xp
 		else
-			local gotXp = xp ~= nil and bot._wisdomXpAtStand ~= nil and xp > bot._wisdomXpAtStand
+			local start = bot._wisdomXpAtStand
+			local gain, leveled = 0, false
+			if start ~= nil then
+				gain, leveled = RuneRules.XpGain(start.needed, start.level, xp.needed, xp.level)
+			end
+			local gotXp = gain > 0 or leveled
 			local covered = now - bot._wisdomStandSince >= RuneRules.WISDOM_COVER
 			if mark >= interval and now >= mark and (gotXp or covered) then
 				bot._wisdomClaimedMark = mark
 				pcall(
 					print,
 					string.format(
-						"[OHA-WISDOM] t=%.0f %s %s xp=+%d stood=%.1f late=%.0f %s",
+						"[OHA-WISDOM] t=%.0f %s %s xp=+%d lvlup=%s stood=%.1f late=%.0f %s",
 						now,
 						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 						-- covered: stood 3.5s on it with no XP seen (the old claim rule counts it as done)
 						gotXp and "taken" or "covered",
-						gotXp and (xp - bot._wisdomXpAtStand) or 0,
+						gain,
+						leveled and "yes" or "no",
 						now - bot._wisdomStandSince,
 						now - mark,
 						MapObjectives.WisdomShrineState(loc)
