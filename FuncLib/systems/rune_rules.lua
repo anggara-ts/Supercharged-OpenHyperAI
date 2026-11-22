@@ -250,4 +250,94 @@ function RuneRules.LotusTakeStep(state, have, now)
 	return "wait", nil
 end
 
+-- Healing Lotus tiers (7.42 items_all.txt): item_famango (stacks to 3), item_great_famango (recipe: 3 item_famango,
+-- stacks to 2), item_greater_famango (recipe: 2 item_great_famango, stacks to 3). The recipes consume the charges
+-- (ItemRecipeConsumesCharges 1), so a third lotus picked up next to two turns into one Great Healing Lotus and the charge
+-- total drops from 2 to 1. LotusValue counts every tier in Healing Lotuses (1 / 3 / 6), so a pickup, merged or not,
+-- always raises it. items: list of { name =, charges = }.
+RuneRules.LOTUS_TIER = { item_famango = 1, item_great_famango = 3, item_greater_famango = 6 }
+function RuneRules.LotusValue(items)
+	local value = 0
+	for i = 1, #(items or {}) do
+		local tier = RuneRules.LOTUS_TIER[items[i].name]
+		if tier ~= nil then
+			value = value + tier * math.max(1, items[i].charges or 1)
+		end
+	end
+	return value
+end
+
+-- Lotus stand result (#32, game 074, maintainer 2026-11-23: "45 seconds is too long. can bot check if their inventory
+-- change (added or upgraded lotus) after certain time in the area?"). The pool's lotus count can't be read
+-- (LotusCountOnUnit), so the stand reads the bot's own lotuses: a rise in LotusValue is a lotus taken by us; standing
+-- LOTUS_STAND_WAIT in the area after the spawn with no rise means the lotus is gone (someone else took it).
+-- Game data (7.42 npc_abilities.txt ability_lotus_pool): radius 350, first_lotus_pickup_time 1.5 (a hero in the pool
+-- gets its first lotus after 1.5s). Game 074, 6:00: Winter Wyvern stood from 357.5 and had the lotus at 361.4 (mark +1.4,
+-- `taken-leave after=1.2` at 362.6). LOTUS_STAND_WAIT = 1.5 + 1s for think and walk-in lag. With an enemy hero in the
+-- pool the wait is one second longer: whether a contesting hero delays the pickup is not in the game data (unverified).
+-- LOTUS_AREA: the bot fights and casts without walking back while within it (inside the 350 radius); stand time counts
+-- only there. LOTUS_HOLD_CAP: backstop, seconds from the first think within LOTUS_NEAR after the spawn.
+RuneRules.LOTUS_AREA = 300
+RuneRules.LOTUS_NEAR = 800
+RuneRules.LOTUS_STAND_WAIT = 2.5
+RuneRules.LOTUS_STAND_WAIT_CONTESTED = 3.5
+RuneRules.LOTUS_HOLD_CAP = 10
+-- Think gaps longer than this (the rune mode lost for a while) don't count as standing.
+RuneRules.LOTUS_THINK_GAP = 0.5
+function RuneRules.NewLotusStand(mark, value)
+	return { mark = mark, base = value, stood = 0 }
+end
+-- One think of a stand. mark: the spawn this stand is for; dist: bot to pool; contested: an enemy hero in the pool.
+-- Returns "wait" | "taken" | "gone" | "cap", the seconds stood in the area, and the seconds since the stand began.
+-- A result stays once given.
+function RuneRules.LotusStandStep(stand, now, value, dist, contested)
+	if stand.result ~= nil then
+		return stand.result, stand.stood, stand.held or 0
+	end
+	if value > stand.base then
+		stand.result = "taken"
+		stand.held = stand.since ~= nil and now - stand.since or 0
+		return "taken", stand.stood, stand.held
+	end
+	if value < stand.base then
+		-- Eaten or given away while standing: not a pickup, count from here.
+		stand.base = value
+	end
+	if now < stand.mark then
+		-- Waiting for the spawn: nothing to take yet.
+		stand.lastAt = nil
+		return "wait", 0, 0
+	end
+	if stand.since == nil and dist <= RuneRules.LOTUS_NEAR then
+		stand.since = now
+	end
+	local inArea = dist <= RuneRules.LOTUS_AREA
+	if inArea and stand.lastAt ~= nil then
+		stand.stood = stand.stood + math.min(now - stand.lastAt, RuneRules.LOTUS_THINK_GAP)
+	end
+	stand.lastAt = inArea and now or nil
+	local held = stand.since ~= nil and now - stand.since or 0
+	local wait = contested and RuneRules.LOTUS_STAND_WAIT_CONTESTED or RuneRules.LOTUS_STAND_WAIT
+	if stand.stood >= wait then
+		stand.result, stand.held = "gone", held
+		return "gone", stand.stood, held
+	end
+	if held >= RuneRules.LOTUS_HOLD_CAP then
+		stand.result, stand.held = "cap", held
+		return "cap", stand.stood, held
+	end
+	return "wait", stand.stood, held
+end
+
+-- Being hit at the pool (#32, maintainer 2026-11-23: "being hit by hero/creep should apply same mechanism like being
+-- hit in outside the area but they will try to maintain it unless retreat mode is active"). The hold desire (0.75)
+-- used to beat retreat: game 074, 3:00-3:19, Winter Wyvern was hit 1v1 by Leshrac from 0.96 to 0.34 HP while retreat
+-- asked 0.30-0.40 (and 0.61 at 0.42 HP) and lost to it. Now a bot that was hit gives the hold up as soon as retreat asks
+-- LOTUS_RETREAT_YIELD or more: the laning mode's 0.30, the level at which retreat took over from laning in that game
+-- (`[OHA-FLIP] ... retreat:0.30@184>laning:0.30@186`). retreatDesire: retreat's last desire (nil when not fresh).
+RuneRules.LOTUS_RETREAT_YIELD = 0.3
+function RuneRules.LotusHoldYields(retreatDesire, hit)
+	return hit == true and retreatDesire ~= nil and retreatDesire >= RuneRules.LOTUS_RETREAT_YIELD
+end
+
 return RuneRules

@@ -549,13 +549,15 @@ function MapObjectives.WisdomScore(hero, loc)
 	return score
 end
 
-local function LotusCharges(bot)
-	local totalCharges = 0
+-- The bot's Healing Lotuses as { name, charges } (main slots, backpack, stash), and their value in Healing Lotuses
+-- (RuneRules.LotusValue: a pickup that merges three into a Great still raises it).
+local function LotusItems(bot)
+	local items = {}
 	for slot = 0, 16 do
 		local item = bot:GetItemInSlot(slot)
 		if item ~= nil and item.GetName ~= nil then
 			local name = item:GetName()
-			if name == "item_famango" or name == "item_great_famango" or name == "item_greater_famango" then
+			if RuneRules.LOTUS_TIER[name] ~= nil then
 				local charges = 1
 				if item.GetCurrentCharges ~= nil then
 					local currentCharges = item:GetCurrentCharges()
@@ -563,11 +565,22 @@ local function LotusCharges(bot)
 						charges = currentCharges
 					end
 				end
-				totalCharges = totalCharges + charges
+				items[#items + 1] = { name = name, charges = charges }
 			end
 		end
 	end
-	return totalCharges
+	return items
+end
+local function LotusValueOf(bot)
+	return RuneRules.LotusValue(LotusItems(bot))
+end
+-- "great_famango:1,famango:2" for the stand lines ("-" with none).
+local function LotusItemsText(bot)
+	local parts = {}
+	for _, item in ipairs(LotusItems(bot)) do
+		parts[#parts + 1] = string.gsub(item.name, "^item_", "") .. ":" .. item.charges
+	end
+	return #parts > 0 and table.concat(parts, ",") or "-"
 end
 
 function MapObjectives.LotusCountOnUnit(pool)
@@ -608,23 +621,6 @@ function MapObjectives.LotusSpawnOpen()
 	end
 	local mark = math.floor(now / interval) * interval
 	return mark >= interval and now >= mark
-end
-
--- Inside the ring: a lotus that never arrives was taken or the pool is empty.
--- Time spent waiting for the mark does not count, or they walk off as it spawns.
-function MapObjectives.LotusPluckStalled(bot, enemyInRing)
-	if not MapObjectives.LotusSpawnOpen() then
-		bot._lotusHaveAt = nil
-		return false
-	end
-	local have = LotusCharges(bot)
-	local now = DotaTime()
-	if bot._lotusHave ~= have or bot._lotusHaveAt == nil then
-		bot._lotusHave = have
-		bot._lotusHaveAt = now
-	end
-	local limit = enemyInRing and 8 or 6
-	return now - bot._lotusHaveAt >= limit
 end
 
 local function EnemyOnPoint(bot, loc, radius)
@@ -719,6 +715,10 @@ function MapObjectives.StandFight(bot, loc, standDist, kind)
 	if bot:GetAttackTarget() ~= target then
 		bot:Action_AttackUnit(target, true)
 	end
+	-- The hero files aim their spells at GetProperTarget (bot:GetTarget() first).
+	if target:IsHero() then
+		bot:SetTarget(target)
+	end
 	if bot._standFightTarget ~= target then
 		bot._standFightTarget = target
 		pcall(
@@ -736,14 +736,49 @@ function MapObjectives.StandFight(bot, loc, standDist, kind)
 	end
 	return true
 end
-local function ActInsideLotus(bot, loc)
+-- [OHA-LOTUS] hold-act: the bot attacked or cast while holding the pool (#32, maintainer 2026-11-23: "make sure they can
+-- still cast ability/attack creep or hero in the area"). At most every 3s per bot.
+local function NoteHoldAct(bot, loc, act, what)
+	local now = DotaTime()
+	if now < (bot._lotusActLogAt or -999) or IsMeepoCloneBot(bot) then
+		return
+	end
+	bot._lotusActLogAt = now + 3
+	local stand = bot._lotusStand
+	pcall(
+		print,
+		string.format(
+			"[OHA-LOTUS] t=%.0f %s hold-act act=%s what=%s center=%d stood=%.1f hp=%.2f",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			act,
+			tostring(what),
+			GetUnitToLocationDistance(bot, loc),
+			stand ~= nil and stand.stood or 0,
+			bot:GetHealth() / math.max(1, bot:GetMaxHealth())
+		)
+	)
+end
+local function ActiveAbilityName(bot)
+	local ok, name = pcall(function()
+		local ability = bot:GetCurrentActiveAbility()
+		return ability ~= nil and ability:GetName() or nil
+	end)
+	return ok and name or "?"
+end
+-- Hold the pool area (RuneRules.LOTUS_AREA): a spell in progress is never cut by a move order; an enemy hero, else an
+-- enemy lane creep, within attack range of where the bot stands is attacked from the spot. inner: within the pluck
+-- ring (140), where the bot otherwise stands still; between the ring and the area edge it steps back in.
+local function ActInsideLotus(bot, loc, inner)
 	if bot:IsCastingAbility() or bot:IsChanneling() then
 		MarkLotusDo(bot, "channel")
+		NoteHoldAct(bot, loc, "cast", ActiveAbilityName(bot))
 		return
 	end
 	local action = bot:GetCurrentActionType()
 	if action == BOT_ACTION_TYPE_USE_ABILITY then
 		MarkLotusDo(bot, "ability")
+		NoteHoldAct(bot, loc, "cast", ActiveAbilityName(bot))
 		return
 	end
 	local range = bot:GetAttackRange() + 80
@@ -754,13 +789,24 @@ local function ActInsideLotus(bot, loc)
 			if bot:GetAttackTarget() ~= hero then
 				bot:Action_AttackUnit(hero, true)
 			end
+			-- The hero files aim their spells at GetProperTarget (bot:GetTarget() first).
+			bot:SetTarget(hero)
 			MarkLotusDo(bot, "hit")
+			NoteHoldAct(bot, loc, "attack", (string.gsub(hero:GetUnitName(), "npc_dota_hero_", "")))
 			return
 		end
 	end
-	-- Lane creeps in range too (an enemy hero first, above): fight from inside the pool, not after a target.
-	if MapObjectives.StandFight(bot, loc, 140, "lotus") then
+	-- Lane creeps in range too (an enemy hero first, above): fight from inside the pool area, not after a target.
+	if MapObjectives.StandFight(bot, loc, RuneRules.LOTUS_AREA, "lotus") then
 		MarkLotusDo(bot, "hit")
+		local target = bot:GetAttackTarget()
+		NoteHoldAct(bot, loc, "attack", target ~= nil and target:GetUnitName() or "?")
+		return
+	end
+	if not inner then
+		-- Nothing to hit: back into the pluck ring.
+		bot:Action_MoveToLocation(loc)
+		MarkLotusDo(bot, "move-in")
 		return
 	end
 	-- Stop the walk-in order once, so it does not carry the hero out of the ring.
@@ -873,6 +919,15 @@ local function LotusTripBlock(bot, loc, dist, foes, friends)
 		return "pool-foes"
 	end
 	return nil
+end
+
+-- Retreat's desire from its last think (mode_retreat_generic.lua publishes bot._retreatFinalDesire), or nil.
+local function RetreatDesireNow(bot)
+	local last = bot._retreatFinalDesire
+	if last == nil or last.t == nil or DotaTime() - last.t > 1 then
+		return nil
+	end
+	return last.d
 end
 
 -- Returns desire, location, kind ("lotus"|"wisdom"), eta. Desire 0 if none.
@@ -1113,10 +1168,38 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 			fightNow = fightNow or type(dist) == "number" and dist > 800 and DotaTime() < (bot._lotusFightUntil or -999)
 			local friends = bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}
 			local beside = dist <= 800 and spawnOpen and sinceLast >= 0 and sinceLast <= 45
+			-- Hit at the pool (#32, game 074 3:00-3:19): the hold gives way as soon as retreat asks for it
+			-- (RuneRules.LotusHoldYields), the same as a hit anywhere else, and the trip is over for this spawn.
+			-- Until then a hit doesn't end the hold: the bot fights from the pool area (ThinkObjective).
+			if beside then
+				local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
+				local hitNow = bot:WasRecentlyDamagedByAnyHero(1.5) or bot:WasRecentlyDamagedByCreep(1.5)
+				local retreatDesire = RetreatDesireNow(bot)
+				if bot._lotusSkipMark ~= spawnMark and RuneRules.LotusHoldYields(retreatDesire, hitNow) then
+					bot._lotusSkipMark = spawnMark
+					bot._lotusSkipPool = loc
+					beside = false
+					local stand = bot._lotusStand
+					pcall(
+						print,
+						string.format(
+							"[OHA-LOTUS] t=%.1f %s stand-end why=retreat retreat=%.2f hp=%.2f stood=%.1f late=%.1f dist=%d foes=%d",
+							DotaTime(),
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							retreatDesire,
+							bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
+							stand ~= nil and stand.mark == spawnMark and stand.stood or 0,
+							DotaTime() - spawnMark,
+							dist,
+							#foes
+						)
+					)
+				end
+			end
 			local lostBeside = false
 			if beside then
 				local hpNow = bot:GetHealth() / math.max(1, bot:GetMaxHealth())
-				-- The forced desire beats retreat. Do not hold a losing fight on the pool.
+				-- Backstop: do not hold a losing fight on the pool.
 				if hpNow < 0.5 and #foes > #friends + 1 then
 					beside = false
 					lostBeside = true
@@ -1176,6 +1259,11 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 						tripBlock = nil
 					end
 				end
+			end
+			-- Already in the pool area: enemies there are a fight, and retreat decides it (LotusHoldYields above).
+			-- Game 074 t=184/191: pool-foes dropped Winter Wyvern's hold inside the pool, then it came back 2s later.
+			if tripBlock == "pool-foes" and beside and dist <= RuneRules.LOTUS_AREA then
+				tripBlock = nil
 			end
 			if tripBlock ~= nil then
 				beside = false
@@ -1276,7 +1364,7 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 				failWhy = "low-hp"
 			elseif danger and dist > 700 then
 				failWhy = "danger"
-			elseif fightNow then
+			elseif fightNow and not beside then
 				failWhy = "fight"
 			elseif not beside then
 				failWhy = "not-best"
@@ -1288,7 +1376,8 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 				and dist <= maxWalk
 				and hp >= 0.28
 				and not (danger and dist > 700)
-				and not fightNow
+				-- A hit ends a walk; at the pool only retreat ends the hold (LotusHoldYields).
+				and not (fightNow and not beside)
 				and (
 					beside
 					or contester
@@ -1298,7 +1387,9 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 				note(passBy and "pass-by" or (beside and "beside" or (contester and "contest" or "walk")))
 				local desire = RemapValClamped(dist, maxWalk, 0, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_ABSOLUTE)
 				if beside then
-					-- Has to beat laning and a nearby fight, or Think never runs and they never say it.
+					-- Has to beat laning and a nearby fight, or Think never runs and they never say it. It no longer
+					-- beats a retreat that wants out after a hit: LotusHoldYields drops the hold above. The stand ends on
+					-- its own when the bot's lotuses show the result (LotusStandThink), not 45s after the spawn.
 					desire = BOT_MODE_DESIRE_ABSOLUTE + 0.05
 				elseif type(etaL) == "number" and etaL > arrive * 0.55 then
 					desire = math.min(desire, BOT_MODE_DESIRE_LOW + 0.05)
@@ -1455,16 +1546,28 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		return true
 	end
 
-	-- Step into the pool before fighting. Stopping on the lip never grants the lotus.
-	if kind == "lotus" and dist > gather and dist <= 700 then
-		bot._lotusHaveAt = nil
-		bot:Action_MoveToLocation(loc)
+	if kind ~= "lotus" then
+		return false
+	end
+	-- The stand's result from the bot's own lotuses (RuneRules.LotusStandStep): gone / cap end the trip for this spawn.
+	if dist <= RuneRules.LOTUS_NEAR and MapObjectives.LotusStandThink(bot, loc, dist) then
+		return false
+	end
+	-- Out of the pool area: step back in. A spell in progress finishes first. Stopping on the lip never grants the lotus.
+	if dist > RuneRules.LOTUS_AREA and dist <= 700 then
+		if
+			not bot:IsCastingAbility()
+			and not bot:IsChanneling()
+			and bot:GetCurrentActionType() ~= BOT_ACTION_TYPE_USE_ABILITY
+		then
+			bot:Action_MoveToLocation(loc)
+		end
 		MarkLotusDo(bot, "move-lip")
 		return true
 	end
 
 	-- Outnumbered on the way: walk back instead of standing still (it returned with no order, game 044 review).
-	if #enemies > 0 and #enemies > #allies and dist > gather then
+	if #enemies > 0 and #enemies > #allies and dist > RuneRules.LOTUS_AREA then
 		MarkLotusDo(bot, "outnumbered")
 		local fountain = GetShopLocation(GetTeam(), SHOP_HOME)
 		if fountain ~= nil then
@@ -1472,72 +1575,117 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		end
 		return true
 	end
-	-- No hero fights from this mode (game 048 38:58: it attacked Phoenix 1v1 on the way). A hit ends the trip
-	-- (fightNow) and the attack / retreat modes take the fight.
-	if dist > gather then
-		bot._lotusHaveAt = nil
+	-- No hero fights from this mode on the way (game 048 38:58: it attacked Phoenix 1v1 on the way). A hit ends the
+	-- trip (fightNow) and the attack / retreat modes take the fight.
+	if dist > RuneRules.LOTUS_AREA then
 		bot:Action_MoveToLocation(loc)
 		MarkLotusDo(bot, "move")
 		return true
 	end
-	if kind == "lotus" then
-		local Item = require(GetScriptDirectory() .. "/FuncLib/systems/item")
-		-- A full main inventory puts the lotus in the backpack, where it sits unused.
-		if Item.GetEmptyNonBackpackInventoryAmount(bot) <= 0 then
-			local interval = MapObjectives.LotusInterval()
-			bot._lotusSkipMark = math.floor(math.max(0, DotaTime()) / interval) * interval
-			bot._lotusSkipPool = loc
-			MarkLotusDo(bot, "full")
-			return false
-		end
-		local _, units = MapObjectives.GetLotusPoolLocations()
-		local count = MapObjectives.LotusCountNear(loc, units)
-		if count == 0 and MapObjectives.LotusSpawnOpen() then
-			local interval = MapObjectives.LotusInterval()
-			bot._lotusSkipMark = math.floor(math.max(0, DotaTime()) / interval) * interval
-			bot._lotusSkipPool = loc
-			MarkLotusDo(bot, "empty")
-			return false
-		end
-		-- Leave right after the lotus is taken (RuneRules.LotusTakeStep).
+	local Item = require(GetScriptDirectory() .. "/FuncLib/systems/item")
+	-- A full main inventory puts the lotus in the backpack, where it sits unused.
+	if Item.GetEmptyNonBackpackInventoryAmount(bot) <= 0 then
 		local interval = MapObjectives.LotusInterval()
-		local mark = math.floor(math.max(0, DotaTime()) / interval) * interval
-		local have = LotusCharges(bot)
-		local take = bot._lotusTake
-		if take == nil or take.mark ~= mark or take.pool ~= loc then
-			take = { mark = mark, pool = loc, base = have }
-			bot._lotusTake = take
-		end
-		local step, after = RuneRules.LotusTakeStep(take, have, DotaTime())
-		if step == "leave" then
-			bot._lotusSkipMark = mark
-			bot._lotusSkipPool = loc
-			bot._lotusTake = nil
-			MarkLotusDo(bot, "taken")
-			pcall(
-				print,
-				string.format(
-					"[OHA-LOTUS] t=%.1f %s taken-leave after=%.1f charges=%d",
-					DotaTime(),
-					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-					after or -1,
-					have
-				)
-			)
-			return false
-		end
-		if MapObjectives.LotusSpawnOpen() or (count ~= nil and count > 0) then
-			if MapObjectives.LotusPluckStalled(bot, EnemyInLotusRing(bot, loc)) then
-				bot._lotusSkipMark = mark
-				bot._lotusSkipPool = loc
-				MarkLotusDo(bot, "stalled")
-				return false
-			end
-		end
-		ActInsideLotus(bot, loc)
-		return true
+		bot._lotusSkipMark = math.floor(math.max(0, DotaTime()) / interval) * interval
+		bot._lotusSkipPool = loc
+		MarkLotusDo(bot, "full")
+		return false
 	end
-	return false
+	local _, units = MapObjectives.GetLotusPoolLocations()
+	local count = MapObjectives.LotusCountNear(loc, units)
+	if count == 0 and MapObjectives.LotusSpawnOpen() then
+		local interval = MapObjectives.LotusInterval()
+		bot._lotusSkipMark = math.floor(math.max(0, DotaTime()) / interval) * interval
+		bot._lotusSkipPool = loc
+		MarkLotusDo(bot, "empty")
+		return false
+	end
+	-- Leave right after the lotus is taken (RuneRules.LotusTakeStep).
+	local interval = MapObjectives.LotusInterval()
+	local mark = math.floor(math.max(0, DotaTime()) / interval) * interval
+	local have = LotusValueOf(bot)
+	local take = bot._lotusTake
+	if take == nil or take.mark ~= mark or take.pool ~= loc then
+		take = { mark = mark, pool = loc, base = have }
+		bot._lotusTake = take
+	end
+	local step, after = RuneRules.LotusTakeStep(take, have, DotaTime())
+	if step == "leave" then
+		bot._lotusSkipMark = mark
+		bot._lotusSkipPool = loc
+		bot._lotusTake = nil
+		MarkLotusDo(bot, "taken")
+		pcall(
+			print,
+			string.format(
+				"[OHA-LOTUS] t=%.1f %s taken-leave after=%.1f value=%d",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				after or -1,
+				have
+			)
+		)
+		return false
+	end
+	ActInsideLotus(bot, loc, dist <= gather)
+	return true
+end
+
+-- The lotus stand (#32, game 074): remember the bot's lotuses when it comes to the pool for a spawn, then read the
+-- result from them (RuneRules.LotusStandStep). [OHA-LOTUS] stand-result result=taken|gone|cap item=<lotuses now>
+-- value=<before>-><now> stood=<s in the area> held=<s since within 800 after the spawn> late=<s since the spawn>.
+-- Returns true when the stand ended without a lotus (gone / cap: the spawn is skipped, _lotusSkipMark).
+function MapObjectives.LotusStandThink(bot, loc, dist)
+	local now = DotaTime()
+	local interval = MapObjectives.LotusInterval()
+	-- The spawn this stand is for: the next one while walking in before it (the walk window opens 32s before).
+	local key = math.floor((math.max(0, now) + 32) / interval) * interval
+	if key < interval then
+		return false
+	end
+	local value = LotusValueOf(bot)
+	local stand = bot._lotusStand
+	if stand == nil or stand.mark ~= key or stand.pool == nil or (stand.pool - loc):Length2D() > 300 then
+		stand = RuneRules.NewLotusStand(key, value)
+		stand.pool = loc
+		stand.from = value
+		bot._lotusStand = stand
+	end
+	if stand.logged then
+		return false
+	end
+	local result, stood, held = RuneRules.LotusStandStep(stand, now, value, dist, EnemyInLotusRing(bot, loc))
+	if result == "wait" then
+		return false
+	end
+	stand.logged = true
+	if not IsMeepoCloneBot(bot) then
+		pcall(
+			print,
+			string.format(
+				"[OHA-LOTUS] t=%.1f %s stand-result result=%s item=%s value=%d->%d stood=%.1f held=%.1f late=%.1f dist=%d",
+				now,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				result,
+				LotusItemsText(bot),
+				stand.from or 0,
+				value,
+				stood,
+				held,
+				now - key,
+				dist
+			)
+		)
+	end
+	if result == "taken" then
+		-- The take step leaves a second later (a next lotus in the pool comes 0.45s after the first).
+		return false
+	end
+	bot._lotusSkipMark = key
+	bot._lotusSkipPool = loc
+	bot._lotusTake = nil
+	MarkLotusDo(bot, result)
+	return true
 end
 
 -- Shrine trip lines (#32, game 039: Tusk announced the shrine after respawning and was farming 14s later; no line said
