@@ -80,10 +80,14 @@ function PaBlurRules.Approach(o)
 	return true, "approach"
 end
 
--- Enemy-area hide (level 7+, in the enemy half). o: heroesClose (enemy heroes within AREA_CLOSE), heroesSeen
--- (within 1600), towers (enemy towers within 1600). The old rule read the same 1600 list twice
--- ("== 0 and <= 2"), so the "<= 2" part did nothing.
+-- Enemy-area hide (level 7+, in the enemy half). o: hunting (going on someone: only Approach decides that cast, so a
+-- target with a friend near is not blurred into), heroesClose (enemy heroes within AREA_CLOSE), heroesSeen (within
+-- 1600), towers (enemy towers within 1600). The old rule read the same 1600 list twice ("== 0 and <= 2"), so the
+-- "<= 2" part did nothing.
 function PaBlurRules.AreaHide(o)
+	if o.hunting then
+		return false
+	end
 	return (o.heroesClose or 0) == 0 and (o.heroesSeen or 0) <= PaBlurRules.AREA_MAX_SEEN and (o.towers or 0) == 0
 end
 

@@ -72,6 +72,12 @@ T.test("pa blur: the enemy-area rule reads two hero ranges", function()
 	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 3, towers = 0 }), false, "three seen")
 	T.eq(R.AreaHide({ heroesClose = 1, heroesSeen = 1, towers = 0 }), false, "one within 900")
 	T.eq(R.AreaHide({ heroesClose = 0, heroesSeen = 0, towers = 1 }), false, "a tower")
+	-- Going on a hero 950 away with a friend beside it: Approach says not-alone, the area rule must not cast instead.
+	T.eq(
+		R.AreaHide({ hunting = true, heroesClose = 0, heroesSeen = 2, towers = 0 }),
+		false,
+		"hunting: Approach decides"
+	)
 end)
 
 T.test("pa blur: dodge result after 1s", function()

@@ -614,6 +614,8 @@ function X.WatchBlurDodge()
 	if watch == nil then
 		return
 	end
+	-- thinks: how many thinks ran in the window, so the line shows whether the watcher ran during a stun at all.
+	watch.thinks = watch.thinks + 1
 	if bot:IsAlive() and (bot:IsStunned() or bot:HasModifier("modifier_stunned")) then
 		watch.stunned = true
 	end
@@ -627,12 +629,13 @@ function X.WatchBlurDodge()
 	pcall(
 		print,
 		string.format(
-			"[OHA-PA] t=%.0f blur-dodge-result stunned=%s cast=%s spell=%s after=%.1f alive=%s hp=%.2f",
+			"[OHA-PA] t=%.0f blur-dodge-result stunned=%s cast=%s spell=%s after=%.1f thinks=%d alive=%s hp=%.2f",
 			now,
 			stunned,
 			cast and "yes" or "no",
 			watch.spell,
 			now - watch.at,
+			watch.thinks,
 			tostring(bot:IsAlive()),
 			Fu.GetHP(bot)
 		)
@@ -674,7 +677,7 @@ function X.ConsiderE()
 			pcall(print, string.format("[OHA-PA] t=%.0f blur-disjoint hp=%.2f", DotaTime(), Fu.GetHP(bot)))
 		end
 		if bot._paBlurWatch == nil then
-			bot._paBlurWatch = { at = DotaTime(), spell = stunSpell, stunned = false }
+			bot._paBlurWatch = { at = DotaTime(), spell = stunSpell, stunned = false, thinks = 0 }
 		end
 		return BOT_ACTION_DESIRE_HIGH
 	end
@@ -709,7 +712,8 @@ function X.ConsiderE()
 		end
 	end
 	-- Chase-approach (maintainer, game 069: only when hunting a lone enemy): close in unseen and 12% faster.
-	if Fu.IsGoingOnSomeone(bot) and Fu.IsValidHero(botTarget) and not Fu.IsSuspiciousIllusion(botTarget) then
+	local hunting = Fu.IsGoingOnSomeone(bot)
+	if hunting and Fu.IsValidHero(botTarget) and not Fu.IsSuspiciousIllusion(botTarget) then
 		local dist = GetUnitToUnitDistance(bot, botTarget)
 		local targetLoc = botTarget:GetLocation()
 		local targetId = botTarget:GetPlayerID()
@@ -756,9 +760,11 @@ function X.ConsiderE()
 		local heroesSeen = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 		local areaTowers = bot:GetNearbyTowers(1600, true)
 		-- (#48) The old rule read the same 1600 hero list twice ("== 0 and <= 2"). Now: none within 900 (the 600
-		-- reveal radius plus a step), at most 2 within 1600, no tower within 1600.
+		-- reveal radius plus a step), at most 2 within 1600, no tower within 1600, and not while going on someone (the
+		-- approach rule above decides that one: a target with a friend near is not blurred into).
 		if
 			PaBlurRules.AreaHide({
+				hunting = hunting,
 				heroesClose = heroesClose and #heroesClose or 0,
 				heroesSeen = heroesSeen and #heroesSeen or 0,
 				towers = areaTowers and #areaTowers or 0,
