@@ -103,7 +103,12 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
    `Tests/stub_api.lua`. A real bug that isn't fixed in the same PR stays as `T.xfail(name, reason, fn)` plus an
    issue; an XPASS means it got fixed, so remove the xfail.
 
-Run them locally before pushing. After pushing, don't block on CI: start a background wait (e.g. `gh pr checks <pr> --watch` run in the background) and keep working; look at the result before merging or when it reports a failure.
+Locally, before pushing: StyLua (`stylua --check` on the changed files; the commit hook runs it too) and a syntax
+check. **The test suite runs in CI, not locally** (maintainer, 2026-11-22): without LuaJIT the local runner is slow,
+and several agents running it at once hog the laptop's CPU for the same result CI gives on every push. Run one test
+file locally only to debug a failure. After pushing, don't block on CI: start a background wait (e.g.
+`gh pr checks <pr> --watch` run in the background) and keep working; fix a red run with a new commit, and look at
+the result before merging.
 
 **pre-commit hooks.** Once per clone: `pip install pre-commit` then `pre-commit install --install-hooks`
 (`.pre-commit-config.yaml`; installs the commit hooks and the post-checkout/commit/merge/rewrite hooks that
@@ -301,6 +306,42 @@ game, an outdated mechanic, or an idea that has a better alternative. Not every 
 | `/merge-pr` | a PR is READY TO MERGE: mute proven logs, tick checks, squash-merge, tick issue items |
 | `/goodnight` | the maintainer is away: fix every open, unresolved issue in priority order, one ready PR each, build the next game |
 | `/release` | a release: next version, release notes from the PRs merged since the last tag (dry run by default), then version files, tag and GitHub release on "publish" |
+
+## Working notes for AI agents
+
+Project knowledge belongs in this repo (this file, `Docs/`, `.claude/skills/`), not in an agent's local memory
+(maintainer, 2026-11-22): when a session learns a rule, a fact or a working preference, write it here in the PR it
+came with (or a small `docs/` PR).
+
+- **Reporting.** End every summary to the maintainer with the test-game readiness as the last sentence ("Ready
+  for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
+  reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
+  that quotes it), so later sessions and agents see it.
+- **Commits** are authored as the maintainer's GitHub account `anggara-ts` with its GitHub no-reply e-mail
+  (`10489830+anggara-ts@users.noreply.github.com`), set in the repo-local git config; check `git config user.name`
+  in a fresh clone or worktree.
+- **Game facts.** Besides the hero datafeed, `.../datafeed/itemdata?language=english&item_id=N` (costs, values; no
+  component list: use cost arithmetic for recipes) and `.../datafeed/itemlist?language=english` (item ids). Herodata
+  enum fields: `damage` 2 = magical, 4 = pure; `immunity` 3 = pierces debuff immunity, 4 = does not; `dispellable`
+  3 = not dispellable. When the data can't settle a point, say it is unverified.
+- **Parallel agents** (used by `/goodnight` and fix rounds): one issue per agent, each in its own `git worktree`
+  branched from `origin/main`, never in the main clone (it stays on `test/next` with the uncommitted lineup). Give
+  every agent one shared brief file (these rules, the latest game's log and review, which files another agent owns)
+  and name only its issue in the prompt. Run waves of a few agents, highest priority first; an agent stopped by a
+  usage limit keeps its worktree and is resumed, not restarted. Check each result yourself (CI, diff against the
+  asked scope, tracker) before reporting it; say plainly when a PR covers less than asked.
+- **Parallel game reviewers** are read-only: they return `node Util/verify.js set <pr> <item> <verdict> "<note>"`
+  lines and findings, and the lead applies them one by one (the tracker file and the PR descriptions are not safe
+  for concurrent writes).
+- **Windows / Git Bash quirks** (the maintainer's laptop): `gh` is not on PATH in a new shell
+  (`export PATH="$PATH:/c/Program Files/GitHub CLI"`); a doubled backslash in a heredoc or `node -e` string
+  arrives as one and apostrophes break `node -e '...'`, so write scripts to files; run `git commit -F - <<'EOF'` as
+  its own command; never chain `<check> | tail && git commit` (the chain sees tail's exit code).
+- **Local test settings.** The maintainer's uncommitted `Customize/general.lua` keeps `Weak_Hero_Cap = 5` while
+  testing (shipped default 1): remind the maintainer to set it back when a test series ends.
+- **After every Dota patch** check the `[OHA-API]` dump for changes, and whether outposts and watchers work for
+  bots again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[OHA-OUTPOST] capture-off`;
+  #111, discussion #50); remind the maintainer to re-implement them when Valve fixes it.
 
 ## Things not to do
 
