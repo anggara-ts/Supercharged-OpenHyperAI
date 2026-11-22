@@ -34,6 +34,9 @@ Open cards and PRs drift: a merged PR fixes items nobody ticked, and finished PR
   first (AGENTS.md step 1) and say so in the report.
 
 ## 3. Each issue, one at a time
+With many issues, run them as parallel background agents (one issue per agent and worktree, one shared brief;
+AGENTS.md "Working notes for AI agents"). Secure the morning deliverable first (step 5's build and lineup, the report
+file) and rebuild after each wave, so a usage limit mid-night still leaves a playable game.
 1. **Read** the card, its comments and the PR that refers to it (if any). Pull the evidence: the logs named in
    the items (`Util/match-logs/`), the code, game data or datafeed for any mechanic. Per task item decide:
    - **fixed earlier**: a merged PR or `main` already does it; tick it with the evidence (as in step 1);
@@ -73,6 +76,8 @@ Open cards and PRs drift: a merged PR fixes items nobody ticked, and finished PR
   `node Util/build-info.js`.
 - `node Util/verify.js lineup --suggest --write` (free slots only). Put P1/P2 heroes first when slots are short.
 - Parse-check `Customize/general.lua`.
+- Copy the build into Dota last: `node Util/export-bots.js --test-game` (skill `prepare-game` step 4). Without it the
+  morning game runs the previous copy.
 
 ## 6. Morning report
 Write `Util/verify/goodnight-YYYY-MM-DD.md` (git-ignored) and post the same summary:

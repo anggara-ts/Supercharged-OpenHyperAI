@@ -12,7 +12,8 @@ Rules: `AGENTS.md` ("Reviewing a game", workflow steps 7-8). Checklist:
    maintainer's PR comments since the last review, and writes `Util/match-logs/game-NNN_review.md`.
 2. **Read the skeleton**, then go deeper only where needed (spawn parallel read-only reviewers for big games:
    one for heroes/features, one for team behaviour; give them the review file, the build commit and what is
-   already fixed).
+   already fixed). Reviewers edit nothing: they return `verify.js set` lines and findings, and you apply them
+   (AGENTS.md "Working notes for AI agents").
 3. **Tracker:** for every item `verify.js check` left pending or flagged, read the sample lines and set
    `node Util/verify.js set <pr> <item> pass|fail|skip [note]`. Items whose situation didn't happen stay pending.
    `set` and `check` also update the PR: its "How to verify in game" checkboxes and, once every item is done,
@@ -24,7 +25,8 @@ Rules: `AGENTS.md` ("Reviewing a game", workflow steps 7-8). Checklist:
 5b. **Re-triage:** check the priority labels of the issues this game touched (raise what keeps happening,
    lower what was rare), then `node Util/issue-prs.js` so the PRs follow.
 6. **Lineup for the next game:** `node Util/verify.js lineup` and `lineup --suggest [--write]` (free slots
-   only; wait a game if none are free).
+   only; wait a game if none are free). The game runs the lineup only after the export (skill `prepare-game`
+   step 4); run `/prepare-game` before the next game.
 7. **Merge what passed:** skill `merge-pr` for every PR that `node Util/verify.js show` marks READY.
 8. **Report** to the user: how the game went in 3-4 lines, what passed/failed per PR, new issues, the next
    lineup, and what you'll fix next.
