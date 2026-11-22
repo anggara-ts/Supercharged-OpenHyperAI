@@ -191,7 +191,8 @@ local function installDebugHelpers(Fu)
 		end
 		return false, bot, currentName
 	end
-	function Fu.ModeAnnounce(bot, modeKey, cooldown)
+	-- decisionOnly: a decision line, said only with `!debug` (FuncLib/systems/chat_rules.lua SayDecision).
+	function Fu.ModeAnnounce(bot, modeKey, cooldown, decisionOnly)
 		local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
 		if bot.lastModeChatTime == nil then
 			bot.lastModeChatTime = {}
@@ -203,7 +204,12 @@ local function installDebugHelpers(Fu)
 		bot.lastModeChatTime[modeKey] = GameTime()
 		local lines = Localization.Get(modeKey)
 		if lines ~= nil and #lines > 0 then
-			bot:ActionImmediate_Chat(lines[RandomInt(1, #lines)], false)
+			local line = lines[RandomInt(1, #lines)]
+			if decisionOnly then
+				require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules").SayDecision(bot, line, modeKey)
+			else
+				bot:ActionImmediate_Chat(line, false)
+			end
 		end
 	end
 end

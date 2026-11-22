@@ -9,6 +9,7 @@ then
 end
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 local CustomizeGeneral = require(GetScriptDirectory() .. "/Customize/general")
 local FarmDefend = require(GetScriptDirectory() .. "/FuncLib/systems/farm_defend")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
@@ -915,7 +916,7 @@ function GetDesire()
 		local modeName = Localization.Get(localeKey) or localeKey
 		local message = Localization.Get("say_not_defending")
 		if message then
-			bot:ActionImmediate_Chat(string.format(message, modeName), false)
+			ChatRules.SayDecision(bot, string.format(message, modeName), "say_not_defending")
 		end
 	end
 	return desire
@@ -939,9 +940,9 @@ function GetDesireHelper()
 		if FarmDefend.ClaimDecisionChat("leave_farm_defend") then
 			local chatLines = Localization.Get("say_leave_farm_defend")
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, "leave_farm")
 			end
 		end
 		return BOT_MODE_DESIRE_VERYLOW
@@ -956,9 +957,9 @@ function GetDesireHelper()
 		if FarmDefend.ClaimDecisionChat("leave_farm_base") then
 			local chatLines = Localization.Get("say_base_defend")
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, "leave_farm")
 			end
 		end
 		return BOT_MODE_DESIRE_NONE
@@ -1449,9 +1450,9 @@ function GetDesireHelper()
 				if FarmDefend.ClaimDecisionChat(chatKind) then
 					local chatLines = Localization.Get(chatKey)
 					if type(chatLines) == "table" and #chatLines > 0 then
-						bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+						ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 					elseif type(chatLines) == "string" then
-						bot:ActionImmediate_Chat(chatLines, false)
+						ChatRules.SayDecision(bot, chatLines, "leave_farm")
 					end
 				end
 				return BOT_MODE_DESIRE_LOW

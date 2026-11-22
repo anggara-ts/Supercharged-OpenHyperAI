@@ -14,6 +14,7 @@ then
 end
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 local ObjectiveTravel = require(GetScriptDirectory() .. "/FuncLib/systems/objective_travel")
 local tormentorUnit = nil
 local tormentorLocation = 0
@@ -600,7 +601,7 @@ function X.IsGoodRighClickDamage()
 		and DotaTime() - lastThresholdChatTime < 30
 		and totalDamage >= 500.0
 	then
-		bot:ActionImmediate_Chat("Tormentor threshold met..", false)
+		ChatRules.SayDecision(bot, "Tormentor threshold met..", "tormentor_threshold")
 		lastThresholdChatTime = DotaTime()
 	end
 	return totalDamage >= 500.0

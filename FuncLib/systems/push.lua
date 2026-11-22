@@ -1064,6 +1064,7 @@ if not hasLocalization then
 	}
 end
 local FarmDefend = require(GetScriptDirectory() .. "/FuncLib/systems/farm_defend")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 local function getLocalizedLine(key)
 	local lines = Localization.Get(key)
 	if type(lines) == "table" and #lines > 0 then
@@ -1093,7 +1094,7 @@ function Push.GetPushDesire(bot, lane)
 		local chatKey = lane == Lane.Top and "say_push_top" or (lane == Lane.Mid and "say_push_mid" or "say_push_bot")
 		local chatLine = getLocalizedLine(chatKey) or getLocalizedLine("say_leave_farm_push")
 		if chatLine then
-			bot:ActionImmediate_Chat(chatLine, false)
+			ChatRules.SayDecision(bot, chatLine, chatKey)
 		end
 	end
 	bot._lastPushChatDesire = desire

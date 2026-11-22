@@ -1,6 +1,7 @@
 -- Override for the built-in mode_laning_generic mode.
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 BotsInit = require("game/botsinit")
 local X = BotsInit.CreateGeneric()
 local bot = GetBot()
@@ -232,7 +233,7 @@ function X.Think()
 									return " " .. string.upper(letter)
 								end)
 								name = string.upper(string.sub(name, 1, 1)) .. string.sub(name, 2)
-								bot:ActionImmediate_Chat("Harassing " .. name, false)
+								ChatRules.SayDecision(bot, "Harassing " .. name, "harass")
 							end
 							bot:Action_AttackUnit(enemy, true)
 							return

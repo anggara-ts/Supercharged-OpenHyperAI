@@ -2,6 +2,7 @@
 local MapObjectives = {}
 
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 
 local cachedLotus = { at = -999, units = {} }
 local cachedWisdom = { at = -999, units = {} }
@@ -1244,8 +1245,8 @@ local function AnnounceObjective(bot, kind)
 			msg = lines
 		end
 	end
-	-- false = team chat
-	bot:ActionImmediate_Chat(msg, false)
+	-- Team chat, only with `!debug`.
+	ChatRules.SayDecision(bot, msg, key)
 end
 
 -- Cover the gather/pluck ring. kind: "lotus" | "wisdom"

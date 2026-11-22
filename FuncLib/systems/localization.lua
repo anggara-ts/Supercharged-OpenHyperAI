@@ -11,13 +11,13 @@ local strings = {
 	en = {
 		say_play_pos = "I will play position ",
 		pos_select_closed = "Position selection closed.",
-		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome). {version} and {date}:
+		-- FuncLib/systems/chat_rules.lua WelcomeVersion.
 		welcome = {
-			"Bot chat commands:",
+			"Supercharged OpenHyperAI {version} (update: {date})",
 			"!pos 2 - take position 2, a bot swaps with you. !3pos 5 - the team's 3rd player plays pos 5. Before the horn.",
 			"!pos - every bot says its position (Pos 1 Carry ... Pos 5 Hard Support).",
 			"!sp en / zh / ru / ja - the language of the bots' chat.",
-			"!debug - bots explain more of their decisions in chat (wards etc.); again to stop. After the horn.",
 			"Feedback and known limitations: see the bot script's Workshop page.",
 		},
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
@@ -270,11 +270,10 @@ local strings = {
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"机器人聊天指令：",
+			"Supercharged OpenHyperAI {version}（更新：{date}）",
 			"!pos 2 - 换到2号位，机器人与你交换。!3pos 5 - 让队伍第3个玩家打5号位。仅限号角响起前。",
 			"!pos - 每个机器人说出自己的位置。",
 			"!sp en / zh / ru / ja - 机器人聊天所用的语言。",
-			"!debug - 机器人在聊天中说明更多决策（如眼位），再输入一次关闭。号角响起后可用。",
 			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
 		},
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
@@ -494,11 +493,10 @@ local strings = {
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Команды чата для ботов:",
+			"Supercharged OpenHyperAI {version} (обновление: {date})",
 			"!pos 2 - взять позицию 2, бот поменяется с вами. !3pos 5 - 3-й игрок команды играет позицию 5. До горна.",
 			"!pos - каждый бот назовёт свою позицию.",
 			"!sp en / zh / ru / ja - язык чата ботов.",
-			"!debug - боты пишут в чат больше о своих решениях (варды и т.д.); ещё раз - выключить. После горна.",
 			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
 		},
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
@@ -753,11 +751,10 @@ local strings = {
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"ボット用チャットコマンド：",
+			"Supercharged OpenHyperAI {version}（更新：{date}）",
 			"!pos 2 - ポジション2に変更（ボットと交換）。!3pos 5 - チームの3番目のプレイヤーがポジション5。ホーン前のみ。",
 			"!pos - 各ボットが自分のポジションを伝えます。",
 			"!sp en / zh / ru / ja - ボットのチャットの言語。",
-			"!debug - ボットが判断（ワードなど）をチャットで詳しく伝えます。もう一度で解除。ホーン後に使用可。",
 			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
 		},
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",

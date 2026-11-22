@@ -6,6 +6,7 @@ local LaneHarassRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_h
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
 local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
 local TeamMemory = require(GetScriptDirectory() .. "/FuncLib/systems/team_memory")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -615,7 +616,7 @@ local function AnnounceOffsideHarass(target)
 		return
 	end
 	bot.sOffsideHarassChatTime = now
-	bot:ActionImmediate_Chat("Harassing " .. PrettyHeroName(target), false)
+	ChatRules.SayDecision(bot, "Harassing " .. PrettyHeroName(target), "harass")
 end
 -- Right-clicking a hero pulls every enemy lane creep within 500 that is not already on us.
 local function CreepAggroCounts(hero)
@@ -1426,8 +1427,9 @@ function PickOneAnnouncer()
 	hasPickedAnnouncer = true
 end
 -- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
--- WELCOME_GAP seconds. The lines name only commands that work then: !pos / !Npos (pre-game only, hero_selection.lua),
--- !sp (any time) and !debug (handled from the horn on, ability_item_usage_generic.lua). No URL: chat links are not
+-- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (update: 22 Nov
+-- 2026)", maintainer 2026-11-23), the others only commands that work then: !pos / !Npos (pre-game only,
+-- hero_selection.lua) and !sp (any time). No !debug hint (maintainer, 2026-11-23). No URL: chat links are not
 -- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
 -- announcer) don't repeat it.
 local WELCOME_START = -80
@@ -1447,15 +1449,19 @@ local function SayWelcome()
 	end
 	TeamMemory.Set(team, "welcomeNext", nextLine + 1)
 	TeamMemory.Set(team, "welcomeAt", DotaTime())
-	bot:ActionImmediate_Chat(lines[nextLine], false)
+	local versionOk, versionModule = pcall(require, GetScriptDirectory() .. "/Customize/version")
+	local versionText, dateText = ChatRules.WelcomeVersion(versionOk and versionModule or nil)
+	bot:ActionImmediate_Chat(ChatRules.FillWelcomeLine(lines[nextLine], versionText, dateText), false)
 	if nextLine == #lines then
 		print(
 			string.format(
-				"[OHA-CHAT] t=%.0f %s welcome lines=%d locale=%s",
+				"[OHA-CHAT] t=%.0f %s welcome lines=%d locale=%s version=%s date=%s",
 				DotaTime(),
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				#lines,
-				tostring(Localization.GetLocale())
+				tostring(Localization.GetLocale()),
+				(string.gsub(versionText, " ", "_")),
+				(string.gsub(dateText, " ", "_"))
 			)
 		)
 	end
