@@ -190,9 +190,9 @@ local NIMBUS_HELP_MIN_HP = 0.15
 -- How far from a fleeing ally a chaser is looked for.
 local NIMBUS_HELP_CHASER_RANGE = 1200
 local nimbusHelpCast = nil -- { why, ally, allyHp, deaths, chaser, chaserHp, at, castAt, stunnedAfter, stuns, wasStunned }
--- Finish (#47, game 068 t=2785 and t=2899): Clinkz at 8-12% HP with 2-3 Radiant heroes hitting him got the cloud
--- and died the same second, so the 45 s cooldown went for nothing. A target this low with an allied hero this close
--- hitting it is left to the allies.
+-- Finish (#47, game 068 t=2785 and t=2899): Clinkz with 2-3 Radiant heroes hitting him got the cloud and died the
+-- same second (t=2899 at 9-10% HP; t=2785 somewhere from 33% one second before to 12% at his death), so the 45 s
+-- cooldown went for nothing. A target this low with an allied hero this close hitting it is left to the allies.
 local NIMBUS_ALLY_FINISH_HP = 0.15
 local NIMBUS_ALLY_FINISH_RANGE = 600
 -- The finish result line comes this long after the cast: the first bolt struck 2.5 s after a cast in game 068
@@ -867,11 +867,25 @@ function X.ConsiderD()
 					end
 				end
 				local zeusDist = GetUnitToLocationDistance(bot, targetLoc)
-				local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, Fu.GetHP(target))
-				if hold == nil then
-					return BOT_ACTION_DESIRE_HIGH, target:GetExtrapolatedLocation(1.0), "ally-fight", target
+				local targetHp = Fu.GetHP(target)
+				local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
+				-- The allies are killing it (#47, game 068): no cast here either, or the finish skip falls through.
+				local alliesHitting = 0
+				if hold == nil and targetHp < NIMBUS_ALLY_FINISH_HP then
+					alliesHitting = X.NimbusAlliesHitting(target, NIMBUS_ALLY_FINISH_RANGE)
+					if X.NimbusAllyFinishing(targetHp, alliesHitting) then
+						X.LogNimbusAllyFinishing("ally-fight", target, targetHp, alliesHitting)
+						hold = "ally-finishing"
+					end
 				end
-				if DotaTime() >= (bot._zeusNimbusHoldLogAt or -999) then
+				if hold == nil then
+					return BOT_ACTION_DESIRE_HIGH,
+						target:GetExtrapolatedLocation(1.0),
+						"ally-fight",
+						target,
+						string.format(" targetHp=%.2f allies=%d", targetHp, alliesHitting)
+				end
+				if hold ~= "ally-finishing" and DotaTime() >= (bot._zeusNimbusHoldLogAt or -999) then
 					bot._zeusNimbusHoldLogAt = DotaTime() + 10
 					pcall(
 						print,
@@ -913,7 +927,7 @@ function X.NimbusAllyFinishing(targetHp, alliesHitting)
 	return targetHp < NIMBUS_ALLY_FINISH_HP and (alliesHitting or 0) >= 1
 end
 -- Allied heroes within range of the enemy that attack it or hit it in the last second (Zeus not counted).
-local function NimbusAlliesHitting(enemy, range)
+function X.NimbusAlliesHitting(enemy, range)
 	local count = 0
 	for _, ally in pairs(Fu.GetAlliesNearLoc(enemy:GetLocation(), range) or {}) do
 		if
@@ -925,6 +939,25 @@ local function NimbusAlliesHitting(enemy, range)
 		end
 	end
 	return count
+end
+-- nimbus-skip why=ally-finishing, at most every 5 s; rule: the cast it replaced (finish / ally-fight).
+function X.LogNimbusAllyFinishing(rule, enemy, hp, allies)
+	if DotaTime() < (bot._zeusNimbusFinishSkipLogAt or -999) then
+		return
+	end
+	bot._zeusNimbusFinishSkipLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[OHA-ZEUS] t=%.0f zuus nimbus-skip why=ally-finishing rule=%s target=%s targetHp=%.2f allies=%d dist=%d",
+			DotaTime(),
+			rule,
+			enemy:GetUnitName(),
+			hp,
+			allies,
+			math.floor(GetUnitToUnitDistance(bot, enemy))
+		)
+	)
 end
 -- A visible enemy hero under 25% HP, or under 50% and fleeing from an allied hero that chases it (a walking
 -- enemy alone is not worth a 275-mana, 45 s spell); not one the allies are finishing (NimbusAllyFinishing).
@@ -953,22 +986,9 @@ function X.NimbusFinishTarget()
 				end
 			end
 			if (hp < 0.25 or fleeing) and hp < bestHp then
-				local allies = NimbusAlliesHitting(enemy, NIMBUS_ALLY_FINISH_RANGE)
+				local allies = X.NimbusAlliesHitting(enemy, NIMBUS_ALLY_FINISH_RANGE)
 				if X.NimbusAllyFinishing(hp, allies) then
-					if DotaTime() >= (bot._zeusNimbusFinishSkipLogAt or -999) then
-						bot._zeusNimbusFinishSkipLogAt = DotaTime() + 5
-						pcall(
-							print,
-							string.format(
-								"[OHA-ZEUS] t=%.0f zuus nimbus-skip why=ally-finishing target=%s targetHp=%.2f allies=%d dist=%d",
-								DotaTime(),
-								enemy:GetUnitName(),
-								hp,
-								allies,
-								math.floor(GetUnitToUnitDistance(bot, enemy))
-							)
-						)
-					end
+					X.LogNimbusAllyFinishing("finish", enemy, hp, allies)
 				else
 					best, bestHp, bestAllies = enemy, hp, allies
 				end

@@ -134,3 +134,29 @@ T.test("zeus: finish target and its result line run against the stub API", funct
 	X.ThinkNimbusFinishResult()
 	T.ok(true, "no stub missing call")
 end)
+
+T.test("zeus: nimbus-result why=finish reads the target's death from its player ID", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	enemy._hp = 100
+	X.RecordNimbusFinish(enemy, 0)
+	Stub.time = 1
+	X.ThinkNimbusFinishResult()
+	local function resultLine()
+		for _, line in ipairs(Stub.printed) do
+			if string.find(line, "nimbus-result why=finish", 1, true) then
+				return line
+			end
+		end
+		return nil
+	end
+	T.eq(resultLine(), nil, "no line before 3 s")
+	enemy._alive = false
+	Stub.time = 3.5
+	X.ThinkNimbusFinishResult()
+	local line = resultLine()
+	T.ok(line ~= nil, "the line prints 3 s after")
+	T.ok(line ~= nil and string.find(line, "alive=false", 1, true) ~= nil, "the death is seen: " .. tostring(line))
+	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
+	T.ok(line ~= nil and string.find(line, "cast=false", 1, true) ~= nil, "the stub never puts Nimbus on cooldown")
+end)
