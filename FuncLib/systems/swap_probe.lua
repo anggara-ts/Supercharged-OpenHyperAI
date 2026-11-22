@@ -426,8 +426,11 @@ local function Setup(bot, now, names)
 	end
 	if action == "abort" then
 		Log("[OHA-SWAP] t=%.0f %s probe setup abort reason=%s cond=%s", DotaTime(), HeroName(bot), arg, cond)
-		Finish(bot, "setup-" .. tostring(arg))
-		return
+		-- Only the first setup ends the probe; a later restore that fails runs the case anyway (or skips it).
+		if state.cond == 1 and state.case == 1 then
+			Finish(bot, "setup-" .. tostring(arg))
+			return
+		end
 	end
 	-- Ready (or away from the shop: the case runs if the slots allow it, else it is skipped).
 	if state.case > #M.CASES then
