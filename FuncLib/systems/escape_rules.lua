@@ -169,6 +169,9 @@ end
 -- (3.25s), so the Jaunt goes at the earlier one. sinceOrb / orbFlight nil: Orb time unknown, shift end only.
 EscapeRules.JAUNT_BEFORE_END = 0.2
 EscapeRules.JAUNT_ORB_MARGIN = 0.3
+-- With no Orb out at an escape shift's end, the Orb ready again is thrown home in the shift's last 0.15s (its cast
+-- point 0.1, datafeed hero 13, ends about with the shift).
+EscapeRules.ORB_EXIT_BEFORE_END = 0.15
 function EscapeRules.ShiftJauntNow(sinceOrder, duration, sinceOrb, orbFlight)
 	if sinceOrder >= duration - EscapeRules.JAUNT_BEFORE_END then
 		return true
@@ -176,24 +179,72 @@ function EscapeRules.ShiftJauntNow(sinceOrder, duration, sinceOrb, orbFlight)
 	return sinceOrb ~= nil and orbFlight ~= nil and sinceOrb >= orbFlight - EscapeRules.JAUNT_ORB_MARGIN
 end
 
--- No offensive Waning Rift (the "group" and "target" jumps into enemies) for RIFT_BLOCK seconds after a shift ends
--- when it was an escape shift, she is under ESCAPE_HP, or the enemy heroes outnumber her side (allies counts her).
--- Game 068: t=2329 (escape shift, Rift why=group, dead at 2330), t=2456 (dodge shift, 2 enemies near and no ally,
--- Rift why=group, dead at 2458), t=2788 (35% HP, Rift why=target, dead at 2791). sinceEnd nil: no shift yet.
+-- No offensive Waning Rift (the "group" and "target" jumps into enemies) when she is under ESCAPE_HP with an enemy
+-- hero near, or the enemy heroes outnumber her side (allies counts her), at any time; and for RIFT_BLOCK seconds
+-- after an escape shift ends. Game 068: t=2329 (escape shift, Rift why=group, dead at 2330), t=2456 (2 enemies near
+-- and no ally), t=2788 (26% HP, Rift why=target). Game 069: group / target Rifts outside the 2s block at about
+-- 50-70% HP into 2-4 heroes (t=909, 2091, 2255). sinceEnd nil: no shift yet. Returns blocked, why
+-- ("hurt" | "outnumbered" | "after-shift" | nil).
 EscapeRules.RIFT_BLOCK = 2.0
-function EscapeRules.RiftBlockedAfterShift(sinceEnd, escapeShift, hp, enemies, allies)
-	if sinceEnd == nil or sinceEnd < 0 or sinceEnd > EscapeRules.RIFT_BLOCK then
-		return false
+function EscapeRules.OffensiveRiftBlocked(sinceEnd, escapeShift, hp, enemies, allies)
+	enemies = enemies or 0
+	if (hp or 1) < EscapeRules.ESCAPE_HP and enemies >= 1 then
+		return true, "hurt"
 	end
-	return escapeShift == true or (hp or 1) < EscapeRules.ESCAPE_HP or (enemies or 0) > (allies or 0)
+	if enemies > (allies or 0) then
+		return true, "outnumbered"
+	end
+	if escapeShift == true and sinceEnd ~= nil and sinceEnd >= 0 and sinceEnd <= EscapeRules.RIFT_BLOCK then
+		return true, "after-shift"
+	end
+	return false, nil
 end
 
--- A dodge Phase Shift goes out in the same think, without waiting for the outpost hold (up to 0.2s), when the hit
--- is due sooner than PHASE_NOW_TTI (#36, game 067 t=3039: Impale tti=0.20, the wait let the stun land first).
--- Phase Shift's cast point is 0.01 (datafeed hero 13). tti nil (unknown): keep the wait.
+-- The Orb stays for the escape (Orb + Jaunt) under ESCAPE_HP with an enemy hero within KEEP_ORB_RANGE: no kill,
+-- fight, push, farm or lane Orb then, only the escape Orbs (#36, game 069: at 6 of 6 escape shifts the Orb was
+-- already out as a fight Orb or on cooldown, so no Orb was there to Jaunt to).
+EscapeRules.KEEP_ORB_RANGE = 1200
+function EscapeRules.KeepOrbForEscape(hp, enemiesNear)
+	return (hp or 1) < EscapeRules.ESCAPE_HP and (enemiesNear or 0) >= 1
+end
+
+-- A Jaunt out of a shift goes to an Orb at least EXIT_JAUNT_MIN away on the escape side, with fewer enemy heroes
+-- within 700 of the Orb than within 700 of her (#36, game 069 t=2547: a Jaunt to an Orb 532 away, 282 closer to
+-- home, Io 320 -> 628 away, dead 2s later). Returns ok, why ("wrong-side" | "near" | "crowded" | nil).
+EscapeRules.EXIT_JAUNT_MIN = 900
+function EscapeRules.ExitJauntOk(dist, escapeSide, enemiesAtOrb, enemiesHere)
+	if escapeSide ~= true then
+		return false, "wrong-side"
+	end
+	if (dist or 0) < EscapeRules.EXIT_JAUNT_MIN then
+		return false, "near"
+	end
+	if (enemiesAtOrb or 0) >= math.max(1, enemiesHere or 0) then
+		return false, "crowded"
+	end
+	return true, nil
+end
+
+-- A dodge Phase Shift goes out in the same think when the outpost hold is the active mode (held), or when the hit is
+-- due in under PHASE_LAST_CALL (no time left to wait). Otherwise it waits a think for the hold, which was asked for
+-- when the stun was first seen (X.AskDodgeHold). Game 069, t=761 (tti 0.20) and t=830 (tti 0.30): cast at once in
+-- attack mode, the hold not up (hold-left after=0.03 mode=2 hold-desire=0.00), the shift broke at 0.10s and Impale
+-- landed. PHASE_LAST_CALL: the dodge's reaction time 0.11 (DodgeRules.LATENCY 0.1 + cast point 0.01, datafeed hero 13)
+-- plus about three frames. tti nil (unknown): keep the wait.
 EscapeRules.PHASE_NOW_TTI = 0.35
-function EscapeRules.PhaseDodgeNow(tti)
-	return tti ~= nil and tti < EscapeRules.PHASE_NOW_TTI
+EscapeRules.PHASE_LAST_CALL = 0.22
+function EscapeRules.PhaseDodgeNow(tti, held)
+	if tti == nil or tti >= EscapeRules.PHASE_NOW_TTI then
+		return false
+	end
+	return held == true or tti < EscapeRules.PHASE_LAST_CALL
+end
+-- Ask for the outpost hold before a dodge: an enemy hero is casting a linear stun at her (its cast point, Impale
+-- 0.3s, datafeed hero 88), or a linear stun is flying at her with tti under DODGE_HOLD_TTI. The hold then has time
+-- to be the active mode when the dodge casts.
+EscapeRules.DODGE_HOLD_TTI = 1.0
+function EscapeRules.AskDodgeHold(castingAtHer, tti)
+	return castingAtHer == true or (tti ~= nil and tti < EscapeRules.DODGE_HOLD_TTI)
 end
 -- cast: the order went out before the hit time (or the time was unknown); late: after it.
 function EscapeRules.PhaseDodgeResult(waited, tti)

@@ -106,20 +106,49 @@ T.test("escape rules: escape shifts throw the Orb first and Jaunt out (game 068)
 	T.eq(R.ShiftJauntNow(3.1, 3.25, nil, nil), true, "unknown Orb, shift ending")
 end)
 
-T.test("escape rules: no offensive Rift right after a shift (game 068)", function()
+T.test(
+	"escape rules: no offensive Rift when hurt, outnumbered or right after an escape shift (games 068-069)",
+	function()
+		local R = load()
+		T.eq(R.OffensiveRiftBlocked(0.5, true, 0.58, 2, 2), true, "game 068 t=2329: after an escape shift")
+		T.eq(select(2, R.OffensiveRiftBlocked(0.5, true, 0.58, 2, 2)), "after-shift", "why after-shift")
+		T.eq(select(2, R.OffensiveRiftBlocked(0.2, false, 0.88, 2, 1)), "outnumbered", "game 068 t=2456: 2 vs her")
+		T.eq(select(2, R.OffensiveRiftBlocked(nil, false, 0.26, 2, 3)), "hurt", "game 068 t=2788: 26% HP")
+		T.eq(select(2, R.OffensiveRiftBlocked(nil, false, 0.6, 3, 2)), "outnumbered", "game 069: 60% HP into 3 heroes")
+		T.eq((R.OffensiveRiftBlocked(nil, false, 0.9, 2, 3)), false, "healthy, not outnumbered")
+		T.eq((R.OffensiveRiftBlocked(2.5, true, 0.8, 1, 2)), false, "the after-shift block is over")
+		T.eq((R.OffensiveRiftBlocked(nil, false, 0.3, 0, 1)), false, "hurt but no enemy hero near")
+	end
+)
+
+T.test("escape rules: the Orb stays for the escape, the exit Jaunt needs a real way out (game 069)", function()
 	local R = load()
-	T.eq(R.RiftBlockedAfterShift(0.5, true, 0.58, 3, 2), true, "game 068 t=2329: escape shift")
-	T.eq(R.RiftBlockedAfterShift(0.2, false, 0.88, 2, 1), true, "game 068 t=2456: dodge shift, 2 enemies vs her")
-	T.eq(R.RiftBlockedAfterShift(0.3, false, 0.26, 2, 3), true, "game 068 t=2788: 26% HP")
-	T.eq(R.RiftBlockedAfterShift(0.3, false, 0.9, 2, 3), false, "healthy, not outnumbered")
-	T.eq(R.RiftBlockedAfterShift(2.5, true, 0.3, 3, 1), false, "the block is over")
-	T.eq(R.RiftBlockedAfterShift(nil, true, 0.3, 3, 1), false, "no shift yet")
+	T.eq(R.KeepOrbForEscape(0.45, 2), true, "under 50% with enemies near")
+	T.eq(R.KeepOrbForEscape(0.45, 0), false, "no enemy hero near")
+	T.eq(R.KeepOrbForEscape(0.7, 3), false, "healthy")
+	T.eq((R.ExitJauntOk(532, true, 1, 3)), false, "game 069 t=2547: 532 away")
+	T.eq(select(2, R.ExitJauntOk(532, true, 1, 3)), "near", "why near")
+	T.eq(select(2, R.ExitJauntOk(2054, false, 0, 3)), "wrong-side", "game 069 t=922")
+	T.eq(select(2, R.ExitJauntOk(1400, true, 2, 2)), "crowded", "as many enemies at the Orb")
+	T.eq((R.ExitJauntOk(1400, true, 0, 3)), true, "far, home side, clear")
+	T.eq((R.ExitJauntOk(1400, true, 0, 0)), true, "nobody near either")
+end)
+
+T.test("escape rules: a dodge waits for the hold it asked for (game 069, t=761 / 830)", function()
+	local R = load()
+	T.eq(R.PhaseDodgeNow(0.30, false), false, "game 069 t=830: tti 0.30, hold not up: wait a think")
+	T.eq(R.PhaseDodgeNow(0.30, true), true, "hold up: cast")
+	T.eq(R.PhaseDodgeNow(0.20, false), true, "game 069 t=761: tti 0.20, no time left")
+	T.eq(R.AskDodgeHold(true, nil), true, "Nyx casting Impale at her")
+	T.eq(R.AskDodgeHold(false, 0.6), true, "a stun flying at her")
+	T.eq(R.AskDodgeHold(false, 1.4), false, "far off")
+	T.eq(R.AskDodgeHold(false, nil), false, "nothing")
 end)
 
 T.test("escape rules: a close dodge Phase Shift goes out at once (game 067, t=3039)", function()
 	local R = load()
-	T.eq(R.PhaseDodgeNow(0.20), true, "game 067: Impale tti=0.20")
-	T.eq(R.PhaseDodgeNow(0.5), false, "time for the hold")
+	T.eq(R.PhaseDodgeNow(0.15), true, "game 067: Impale close, no hold: cast")
+	T.eq(R.PhaseDodgeNow(0.5, true), false, "time for the hold")
 	T.eq(R.PhaseDodgeNow(nil), false, "unknown time: keep the wait")
 	T.eq(R.PhaseDodgeResult(0.0, 0.20), "cast", "cast in the same think")
 	T.eq(R.PhaseDodgeResult(0.21, 0.20), "late", "game 067: waited 0.2s, hit at 0.20")
@@ -143,7 +172,10 @@ T.test("puck: the escape helpers run on the stub", function()
 		"TombstoneDistance",
 		"PhaseDodgeThreat",
 		"OrbFlightTime",
-		"RiftAfterShiftBlocked",
+		"OffensiveRiftBlocked",
+		"AskDodgeHold",
+		"ExitOrbJaunt",
+		"ConsiderIllusoryOrbRaw",
 		"CastHoldTick",
 		"SkillsComplement",
 	}) do
