@@ -42,7 +42,7 @@ function GlyphRules.EnemiesNeeded(aliveEnemies)
 	return nil
 end
 
--- Towers take no regeneration, so any drop between two samples (2s apart) means something hits it.
+-- Any HP drop between two samples (2s apart) counts as the tower being hit.
 function GlyphRules.HpFalling(prevHp, hp)
 	return prevHp ~= nil and hp < prevHp
 end

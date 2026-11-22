@@ -9461,14 +9461,14 @@ local function UseGlyphIfNeeded()
 	end
 	local prevHp = GlyphState.towerHp
 	GlyphState.towerHp = towerHp
-	if GetGlyphCooldown() > 0 then
-		return
-	end
+	-- On cooldown: no cast, but the fight scan still runs so glyph-skip why=cooldown shows what the API reads.
+	local glyphCd = GetGlyphCooldown()
 	-- 1. Save a dying building (unchanged thresholds), first.
 	for _, info in ipairs(GLYPH_TOWERS) do
 		local tower = GetTower(team, info.id)
 		if
-			tower ~= nil
+			glyphCd <= 0
+			and tower ~= nil
 			and tower:GetHealth() > 0
 			and tower:CanBeSeen()
 			and GlyphRules.ShouldSave(
@@ -9492,7 +9492,8 @@ local function UseGlyphIfNeeded()
 	for _, info in ipairs(barracksList) do
 		local barracks = GetBarracks(team, info.id)
 		if
-			barracks ~= nil
+			glyphCd <= 0
+			and barracks ~= nil
 			and barracks:GetHealth() > 0
 			and GlyphRules.ShouldSave(
 				"building",
@@ -9508,7 +9509,8 @@ local function UseGlyphIfNeeded()
 	end
 	local ancient = GetAncient(team)
 	if
-		ancient ~= nil
+		glyphCd <= 0
+		and ancient ~= nil
 		and ancient:GetHealth() > 0
 		and GlyphRules.ShouldSave(
 			"building",
@@ -9543,16 +9545,19 @@ local function UseGlyphIfNeeded()
 					charges = GlyphState.charges.charges,
 					fortified = tower:HasModifier("modifier_fountain_glyph"),
 				})
-				if ok then
+				if ok and glyphCd <= 0 then
 					GlyphCast("fight", tower, info.name, #enemies, allies)
 					return
 				end
 				-- A fight under the tower that did not get the Glyph: say why (at most every 10s).
+				if ok then
+					why = "cooldown"
+				end
 				if allies >= 1 and why ~= "fortified" and now - GlyphState.lastWaitLog >= 10 then
 					GlyphState.lastWaitLog = now
 					print(
 						string.format(
-							"[OHA-GLYPH] t=%.0f %s glyph-skip why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d",
+							"[OHA-GLYPH] t=%.0f %s glyph-skip why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d cd=%.1f",
 							now,
 							string.gsub(botName, "npc_dota_hero_", ""),
 							why,
@@ -9561,7 +9566,8 @@ local function UseGlyphIfNeeded()
 							allies,
 							tower:GetHealth() / tower:GetMaxHealth(),
 							team,
-							GlyphState.charges.charges
+							GlyphState.charges.charges,
+							glyphCd
 						)
 					)
 				end
