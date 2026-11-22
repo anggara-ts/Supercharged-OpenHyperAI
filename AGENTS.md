@@ -16,7 +16,7 @@ no unit-test harness: the checks below plus a real bot game are the test.
 | `FuncLib/hero/` | Shared hero code: minions/illusions, Rubick's stolen spells (`rubick_hero/`), sub-units. |
 | `FuncLib/data/` | Static tables (hero names, matchups, position weights, spell lists). |
 | `FuncLib/dota/` | Dota API names and constants (`index`, `enums`, `interfaces`, `heroes`). |
-| `FuncLib/lib/` | Generic libraries: `json` (dkjson), `http_req`, `native_operators`. |
+| `FuncLib/lib/` | Generic libraries: `json` (dkjson), `native_operators`. |
 | `mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, rune, ward, ...). |
 | `ability_item_usage_generic.lua`, `item_purchase_generic.lua`, `hero_selection.lua`, `bot_generic.lua` | Item/ability use, buying, drafting, per-bot think. |
 | `Customize/general.lua` | User settings and **local test lineups**. |
