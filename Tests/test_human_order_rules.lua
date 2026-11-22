@@ -161,9 +161,11 @@ T.test("human orders: who answers", function()
 		{ id = 5, dist = 6000, state = "ok" },
 	}
 	local obey, queue, ignore = R.PickResponders("push", cands, 3)
-	T.eq(#obey, 2, "two free bots")
+	T.eq(#obey, 3, "three free bots, the far one too")
 	T.eq(obey[1], 2, "nearest first")
-	T.eq(queue[1], 3, "the fighter is queued")
+	T.eq(#queue, 0, "free bots first: the fighter is not needed")
+	obey, queue = R.PickResponders("push", cands, 4)
+	T.eq(queue[1], 3, "a fourth place: the fighter goes after its fight")
 	T.eq(#ignore, 1, "the retreating bot")
 	T.eq(ignore[1].why, "retreat", "why")
 	obey = R.PickResponders("focus", cands, 5)
