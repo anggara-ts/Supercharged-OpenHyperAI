@@ -188,29 +188,36 @@ end)
 
 T.test("tower hold: the clock stops during a pause (game 068, Clinkz at Radiant's mid T1, t=924-932)", function()
 	local R = rules()
-	-- Stop at t=919.5 (9s hold, ends 928.5); a push pauses it at t=924 with left=4.0 (the pause stores 4.0).
-	local startTime, remaining = 919.5, 4.0
-	local untilTime, floored = R.TowerHoldPausedUntil(926, remaining, nil, startTime)
-	T.near(untilTime, 930, 0.01, "t=926 still paused: the end moves with the clock")
+	-- Stop at t=919.5 (9s hold, ends 928.5); a push pauses it at t=924 with left=4.0.
+	local startTime = 919.5
+	local remaining, floored = R.TowerHoldPauseLeft(4.0, nil)
+	T.near(remaining, 4.0, 0.01, "4s left kept")
 	T.eq(floored, nil, "4s left: no floor")
+	T.near(R.TowerHoldPausedUntil(926, remaining, startTime), 930, 0.01, "t=926 still paused: the end moves")
 	-- t=928 resume: the hold has its 4s back, so it does not run out at t=929 inside the zone.
-	untilTime = R.TowerHoldPausedUntil(928, remaining, floored, startTime)
+	local untilTime = R.TowerHoldPausedUntil(928, remaining, startTime)
 	T.near(untilTime, 932, 0.01, "t=928 resume: hold until 932")
-	T.eq(R.TowerHoldState(929, untilTime, true, false, true), "resume", "t=929 not expired")
+	T.eq(R.TowerHoldState(929, untilTime, true, false, nil), "keep", "t=929 not expired")
 	T.eq(R.TowerHoldState(932.5, untilTime, true, false, nil), "expire", "t=932.5 over")
 end)
 
-T.test("tower hold: the 2s floor once per hold, and a 30s cap from the stop", function()
+T.test("tower hold: the 2s floor once per hold, kept over many paused checks; a 30s cap from the stop", function()
 	local R = rules()
-	-- Undying: paused with 0.3s left; the resume gets 2s, once.
-	local untilTime, floored = R.TowerHoldPausedUntil(930, 0.3, nil, 920)
-	T.near(untilTime, 932, 0.01, "floor 2s")
+	-- Undying: paused at t=928 with 0.3s left. Several paused checks, then the resume: still 2s.
+	local remaining, floored = R.TowerHoldPauseLeft(0.3, nil)
+	T.near(remaining, 2, 0.01, "floor 2s")
 	T.eq(floored, true, "floor used")
-	untilTime, floored = R.TowerHoldPausedUntil(933, 0.5, floored, 920)
-	T.near(untilTime, 933.5, 0.01, "second pause: no second floor")
+	local untilTime
+	for _, now in ipairs({ 928.3, 928.6, 929.0, 929.4 }) do
+		untilTime = R.TowerHoldPausedUntil(now, remaining, 920)
+	end
+	T.near(untilTime - 929.4, 2, 0.01, "resume after 4 paused checks: 2s left")
+	-- A second pause in the same hold with 0.5s left: no second floor.
+	remaining, floored = R.TowerHoldPauseLeft(0.5, floored)
+	T.near(remaining, 0.5, 0.01, "second pause: no second floor")
 	T.eq(floored, true, "still floored")
 	-- A long push: the frozen clock never goes past stop + HOLD_MAX_AGE.
-	untilTime = R.TowerHoldPausedUntil(960, 5, true, 920)
+	untilTime = R.TowerHoldPausedUntil(960, 5, 920)
 	T.near(untilTime, 920 + R.HOLD_MAX_AGE, 0.01, "capped")
 	T.eq(R.TowerHoldState(960, untilTime, true, true, true), "expire", "past the cap: expire even while pushing")
 end)

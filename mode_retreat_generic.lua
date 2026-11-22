@@ -604,6 +604,27 @@ function GetDesireHelper()
 	local enemyLaneCreeps = nearby.enemyLaneCreeps1200
 	local weAreStronger = Fu.WeAreStronger(bot, 1600)
 	local isInTeamFight = Fu.IsInTeamFight(bot, 1200)
+	-- Since when, and in which mode, the bot stands inside the nearest enemy tower's range (the tower stop lines'
+	-- inside= / inMode=). Here, ahead of the early returns, so a walk-in during a push counts too. Game 068: 9 of 48
+	-- stops died within 5s, 7 of them chase-stops with the tower already shooting at 198-468; read whether a stop
+	-- comes late (long inside, walked in by push or attack) or turns the bot into the enemies.
+	local insideTower = enemyTowers ~= nil and enemyTowers[1] or nil
+	if Fu.IsValidBuilding(insideTower) then
+		local okRange, rawRange = pcall(function()
+			return insideTower:GetAttackRange()
+		end)
+		local insideRange = (okRange and type(rawRange) == "number" and rawRange > 0) and rawRange or 700
+		if GetUnitToUnitDistance(bot, insideTower) > insideRange then
+			insideTower = nil
+		end
+	else
+		insideTower = nil
+	end
+	if insideTower == nil then
+		bot._towerInside = nil
+	elseif bot._towerInside == nil or bot._towerInside.name ~= insideTower:GetUnitName() then
+		bot._towerInside = { name = insideTower:GetUnitName(), since = DotaTime(), mode = activeMode or -1 }
+	end
 	-- A live tower hold (after chase-stop / tower-entry-stop / tower-approach-stop) runs ahead of the NONE returns
 	-- below (team push, 3+ allies and no enemy hero, ...). It ran only from Retreat.ShouldRun (tag 383), so any of them
 	-- let attack or push walk the bot back in: game 065, t=944-948, Dark Willow's hold flipped retreat 1.10 /
@@ -1078,7 +1099,7 @@ local function TowerHoldCheck()
 	end
 	-- The clock stops while a push pauses the hold (DiveRules.TowerHoldPausedUntil; game 068, t=924-932, Clinkz).
 	if hold.paused then
-		hold.untilTime, hold.floored = DiveRules.TowerHoldPausedUntil(now, hold.remaining, hold.floored, hold.startTime)
+		hold.untilTime = DiveRules.TowerHoldPausedUntil(now, hold.remaining, hold.startTime)
 	end
 	-- Every end of a hold says why (tower-hold-end why=siege has its own line below). age: seconds since the stop;
 	-- lastDist / lastAgo: the bot's distance to the tower at the last check before (for why=death: where it died).
@@ -1086,7 +1107,7 @@ local function TowerHoldCheck()
 		pcall(
 			print,
 			string.format(
-				"[OHA-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d seen=%d alive=%d",
+				"[OHA-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d vis=%d alive=%d",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				why,
@@ -1206,8 +1227,9 @@ local function TowerHoldCheck()
 	if state == "pause" then
 		if not hold.paused then
 			hold.paused = true
-			-- The time left now is what the hold gets back when the push ends (DiveRules.TowerHoldPausedUntil).
-			hold.remaining = hold.untilTime - now
+			-- The time left now (at least 2s, once per hold) is what the hold gets back when the push ends
+			-- (DiveRules.TowerHoldPauseLeft / TowerHoldPausedUntil).
+			hold.remaining, hold.floored = DiveRules.TowerHoldPauseLeft(hold.untilTime - now, hold.floored)
 			logChange("pause")
 		end
 		return 0
@@ -1227,7 +1249,7 @@ local function TowerHoldCheck()
 		pcall(
 			print,
 			string.format(
-				"[OHA-RETREAT] t=%.0f %s tower-hold why=%s tower=%s dist=%d zone=%d left=%.1f hp=%.2f mode=%d",
+				"[OHA-RETREAT] t=%.0f %s tower-hold why=%s tower=%s dist=%d zone=%d left=%.1f hp=%.2f mode=%d age=%.1f",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				hold.why,
@@ -1236,7 +1258,8 @@ local function TowerHoldCheck()
 				math.floor(hold.range + (hold.margin or DiveRules.HOLD_MARGIN)),
 				hold.untilTime - now,
 				hpRatio,
-				activeMode or -1
+				activeMode or -1,
+				now - (hold.startTime or now)
 			)
 		)
 	end
@@ -1260,13 +1283,11 @@ local function TowerChaseRun()
 	-- Range + APPROACH_MARGIN (700 + 600) for the check before the edge (DiveRules.TowerApproachDecision).
 	local tower = (bot:GetNearbyTowers(700 + DiveRules.APPROACH_MARGIN, true) or {})[1]
 	if not Fu.IsValidBuilding(tower) then
-		bot._towerInside = nil
 		return 0
 	end
 	-- No new stop on a tower whose hold is still on (9s): the hold itself keeps the bot out (game 067, t=2522: Nyx was
 	-- stopped again at Radiant's mid T3 7s into the hold, which restarted the 9s).
 	if bot._towerChaseHold ~= nil and bot._towerChaseHold.name == tower:GetUnitName() then
-		bot._towerInside = nil
 		return 0
 	end
 	local okRange, rawRange = pcall(function()
@@ -1275,18 +1296,7 @@ local function TowerChaseRun()
 	local towerRange = (okRange and type(rawRange) == "number" and rawRange > 0) and rawRange or 700
 	local towerDist = GetUnitToUnitDistance(bot, tower)
 	if towerDist > towerRange + DiveRules.APPROACH_MARGIN then
-		bot._towerInside = nil
 		return 0
-	end
-	-- Since when, and in which mode, the bot stands inside this tower's range (the stop line's inside= / inMode=):
-	-- game 068, 9 of 48 stops died within 5s, 7 of them chase-stops with the tower already shooting at 198-468; read
-	-- whether a stop comes late (long inside, walked in by push or attack) or turns the bot into the enemies.
-	if towerDist <= towerRange then
-		if bot._towerInside == nil or bot._towerInside.name ~= tower:GetUnitName() then
-			bot._towerInside = { name = tower:GetUnitName(), since = DotaTime(), mode = activeMode or -1 }
-		end
-	else
-		bot._towerInside = nil
 	end
 	local atEdge = towerDist <= towerRange + DiveRules.HOLD_MARGIN
 	local towerOnBot = atEdge and (tower:GetAttackTarget() == bot or bot:WasRecentlyDamagedByTower(1.5))
@@ -1422,6 +1432,11 @@ local function TowerChaseRun()
 		bot._towerChaseAnyAt = DotaTime() + 2
 		bot._towerChaseLogAt = DotaTime() + 5
 		local name
+		-- The inside= / inMode= record, only when it is about this tower (GetDesireHelper keeps it every think).
+		local insideSince = bot._towerInside
+		if insideSince ~= nil and insideSince.name ~= tower:GetUnitName() then
+			insideSince = nil
+		end
 		if approaching then
 			name = "tower-approach-stop"
 		elseif entering then
@@ -1454,8 +1469,8 @@ local function TowerChaseRun()
 				math.max(0, #(bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}) - 1),
 				hpRatio,
 				-- Seconds inside the tower's range before this line (-1: not inside) and the mode it walked in with.
-				bot._towerInside ~= nil and DotaTime() - bot._towerInside.since or -1,
-				bot._towerInside ~= nil and bot._towerInside.mode or -1
+				insideSince ~= nil and DotaTime() - insideSince.since or -1,
+				insideSince ~= nil and insideSince.mode or -1
 			)
 		)
 	end

@@ -137,24 +137,28 @@ end
 -- The hold's clock stops during a pause. Game 068, t=924-932: Clinkz's hold was paused by a push at left=4.0 and
 -- resumed at t=928 with left=0.1 (the clock had run on), 753 from Radiant's mid T1 (zone 900); it ran out at t=929
 -- with him inside the zone and attack mode walked him back in (tower-entry-stop t=932, attack/retreat/push flips
--- t=922-936). Undying the same at t=928-933 (resume left=1.3). The caller stores the time left at the pause
--- (remaining) and calls this on every paused check; the new end is now + remaining, at least HOLD_RESUME_MIN once per
--- hold (floored: the floor was used; a push/attack flip every second would otherwise keep adding it), and never later
--- than HOLD_MAX_AGE after the stop (startTime): a frozen clock alone would keep a stale hold through a long push.
--- Returns the new end and the floored flag.
+-- t=922-936). Undying the same at t=928-933 (resume left=1.3). At the pause the caller stores the time left
+-- (TowerHoldPauseLeft: at least HOLD_RESUME_MIN, once per hold - floored: the floor was used; a push/attack flip every
+-- second would otherwise keep adding it); on every paused check the end moves to now + that time
+-- (TowerHoldPausedUntil), never later than HOLD_MAX_AGE after the stop (startTime): a frozen clock alone would keep a
+-- stale hold through a long push.
 DiveRules.HOLD_RESUME_MIN = 2
 DiveRules.HOLD_MAX_AGE = 30
-function DiveRules.TowerHoldPausedUntil(now, remaining, floored, startTime)
-	local left = math.max(remaining or 0, 0)
+-- At the pause: the time the hold keeps (left, floored once per hold). Returns remaining and the new floored flag.
+function DiveRules.TowerHoldPauseLeft(left, floored)
+	left = math.max(left or 0, 0)
 	if left < DiveRules.HOLD_RESUME_MIN and not floored then
-		left = DiveRules.HOLD_RESUME_MIN
-		floored = true
+		return DiveRules.HOLD_RESUME_MIN, true
 	end
-	local untilTime = now + left
+	return left, floored
+end
+-- On every paused check: the new end.
+function DiveRules.TowerHoldPausedUntil(now, remaining, startTime)
+	local untilTime = now + (remaining or 0)
 	if startTime ~= nil then
 		untilTime = math.min(untilTime, startTime + DiveRules.HOLD_MAX_AGE)
 	end
-	return untilTime, floored
+	return untilTime
 end
 
 -- Why a hold ends at this check, or nil (it goes on). In order:
