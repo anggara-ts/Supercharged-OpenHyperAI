@@ -1,6 +1,8 @@
 -- Outpost capture mode.
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
+-- Interaction probe (#111, off unless Customize.Interact_Probe): walks one bot to a watcher, a Twin Gate, an outpost.
+local InteractProbe = require(GetScriptDirectory() .. "/FuncLib/systems/interact_probe")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -228,6 +230,11 @@ function GetDesire()
 			return holdDesire
 		end
 	end
+	-- The interaction probe's try (before the invulnerable skip: the Twin Gate warp must not be cut short).
+	local okInteract, interactDesire = pcall(InteractProbe.Desire, bot)
+	if okInteract and interactDesire ~= nil then
+		return interactDesire
+	end
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
 	end
@@ -341,6 +348,9 @@ function GetDesireHelper()
 	return BOT_MODE_DESIRE_NONE
 end
 function Think()
+	if InteractProbe.Think(bot) then
+		return
+	end
 	-- A hero hold (Puck's Phase Shift): no order at all, or the channel ends.
 	if bot._outpostHoldUntil ~= nil and DotaTime() < bot._outpostHoldUntil then
 		return
