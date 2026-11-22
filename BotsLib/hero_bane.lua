@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -12,64 +13,67 @@ local tAllAbilityBuildList = { { 2, 3, 2, 3, 2, 6, 2, 3, 3, 1, 6, 1, 1, 1, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 95 matches, built from pos 2 (2,421) (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
-	"item_crystal_maiden_outfit",
-	"item_point_booster",
+	"item_tango",
+	"item_double_branches",
+	"item_faerie_fire",
+	"item_circlet",
+	"item_mantle",
+	"item_null_talisman",
+	"item_magic_wand",
+	"item_boots",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_shadow_amulet",
-	"item_rod_of_atos",
-	"item_invis_sword",
-	"item_black_king_bar",
-	"item_silver_edge",
-	"item_shivas_guard",
-	"item_gungir",
-	"item_mystic_staff",
+	"item_blink",
+	"item_travel_boots",
+	"item_octarine_core",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_soul_booster",
+	"item_refresher",
+	"item_yasha_and_kaya",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 2,421 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
-	"item_mage_outfit",
-	"item_ancient_janggo",
-	"item_glimmer_cape",
-	"item_boots_of_bearing",
-	"item_pipe",
-	"item_aghanims_shard",
-	"item_shivas_guard",
-	"item_ultimate_scepter",
-	"item_wind_waker",
-	"item_mystic_staff",
-	"item_ultimate_scepter_2",
-	"item_sheepstick",
-}
-sRoleItemsBuyList["pos_3"] = {
-	"item_crystal_maiden_outfit",
-	"item_point_booster",
+	"item_tango",
+	"item_double_branches",
+	"item_faerie_fire",
+	"item_circlet",
+	"item_mantle",
+	"item_null_talisman",
+	"item_magic_wand",
+	"item_boots",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_shadow_amulet",
-	"item_rod_of_atos",
-	"item_invis_sword",
-	"item_black_king_bar",
-	"item_silver_edge",
-	"item_shivas_guard",
-	"item_gungir",
-	"item_mystic_staff",
+	"item_blink",
+	"item_travel_boots",
+	"item_octarine_core",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_soul_booster",
+	"item_refresher",
+	"item_yasha_and_kaya",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3 has 291 matches, built from pos 2 (2,421) (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_2"]
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 15,327 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
-	"item_priest_outfit",
+	"item_tango",
+	"item_blood_grenade",
+	"item_double_branches",
+	"item_magic_stick",
+	"item_faerie_fire",
+	"item_magic_wand",
+	"item_arcane_boots",
 	"item_aether_lens",
 	"item_aghanims_shard",
-	"item_blink",
-	"item_glimmer_cape",
 	"item_ultimate_scepter",
-	"item_shivas_guard",
-	"item_mystic_staff",
-	"item_sheepstick",
 	"item_ultimate_scepter_2",
+	"item_aeon_disk",
+	"item_force_staff",
+	"item_soul_booster",
+	"item_refresher",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 25,365 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -79,15 +83,14 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_aether_lens",
-	"item_glimmer_cape",
 	"item_aghanims_shard",
-	"item_blink",
 	"item_ultimate_scepter",
-	"item_mystic_staff",
-	"item_sheepstick",
-	"item_octarine_core",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
+	"item_aeon_disk",
+	"item_force_staff",
+	"item_refresher",
+	"item_mystic_staff",
+	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_circlet", "item_magic_wand" }
@@ -107,16 +110,15 @@ local brainSapAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[2]), "sAbi
 local nightmareAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAbilityList[3]", "bane")
 local fiendsGripAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "bane")
 local talent4 = SafeAbility(bot:GetAbilityByName(sTalentList[4]), "sTalentList[4]", "bane")
-local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "bane")
 local enfeebleDesire, enfeebleTarget
 local brainSapDesire, brainSapTarget
 local nightmareDesire, nightmareTarget
 local fiendsGripDesire, fiendsGripTarget
-local brainSapBonusDamage = 0
 local brainSapTargetType = nil
 local botLevel, mpRatio, nearbyEnemies, nearbyAllies
 local botTarget -- was a global set every think
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if brainSapTargetType == nil and brainSapAbility:IsTrained() then
 		brainSapTargetType = brainSapAbility:GetTargetType()
 	end
@@ -129,9 +131,6 @@ function X.SkillsComplement()
 	botTarget = context.target
 	nearbyEnemies = context.enemies
 	nearbyAllies = context.allies
-	if talent7:IsTrained() then
-		brainSapBonusDamage = talent7:GetSpecialValueInt("value")
-	end
 	enfeebleDesire, enfeebleTarget = X.ConsiderQ()
 	if enfeebleDesire > 0 then
 		Fu.SetQueuePtToINT(bot, true)
@@ -277,7 +276,9 @@ function X.ConsiderW()
 	local radius = 600
 	local castPoint = brainSapAbility:GetCastPoint()
 	local manaCost = brainSapAbility:GetManaCost()
-	local damage = brainSapAbility:GetSpecialValueInt("brain_sap_damage") + brainSapBonusDamage
+	-- 7.42 game files: special_bonus_unique_bane_2 (+275) is linked into bane_brain_sap "brain_sap_damage", and the
+	-- read includes it once learned (FuncLib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
+	local damage = brainSapAbility:GetSpecialValueInt("brain_sap_damage")
 	-- datafeed: Brain Sap deals pure damage (damage 4), not magical.
 	local damageType = DAMAGE_TYPE_PURE
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)

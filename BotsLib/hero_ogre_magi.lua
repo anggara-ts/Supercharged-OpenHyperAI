@@ -5,6 +5,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -25,81 +26,92 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 66,410 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
-	"item_gauntlets",
+	"item_double_gauntlets",
 	"item_double_branches",
+	"item_quelling_blade",
+	"item_bracer",
+	"item_magic_wand",
+	"item_soul_ring",
+	"item_power_treads",
+	"item_hand_of_midas",
+	"item_blink",
+	"item_ultimate_scepter",
+	"item_heart",
+	"item_sheepstick",
+	"item_ultimate_scepter_2",
+	"item_abyssal_blade",
+	"item_kaya_and_sange",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 3,580 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_gauntlets",
 	"item_quelling_blade",
 	"item_circlet",
 	"item_bracer",
 	"item_magic_wand",
 	"item_power_treads",
 	"item_hand_of_midas",
-	"item_crimson_guard",
-	"item_aghanims_shard",
-	"item_ultimate_scepter",
 	"item_blink",
-	"item_travel_boots",
-	"item_assault",
-	"item_sheepstick",
-	"item_moon_shard",
-	"item_travel_boots_2",
-	"item_ultimate_scepter_2",
-	"item_octarine_core",
-}
-sRoleItemsBuyList["pos_1"] = {
-	"item_bristleback_outfit",
-	"item_hand_of_midas",
-	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_dagon_5",
-	"item_travel_boots",
-	"item_sheepstick",
-	"item_octarine_core",
-	"item_moon_shard",
-	"item_travel_boots_2",
+	"item_black_king_bar",
+	"item_heart",
+	"item_overwhelming_blink",
 	"item_ultimate_scepter_2",
-	"item_bloodthorn",
+	"item_moon_shard",
+	"item_aether_lens",
+	"item_aghanims_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 33,673 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
+	"item_gauntlets",
+	"item_quelling_blade",
+	"item_circlet",
 	"item_bracer",
-	"item_bottle",
-	"item_phase_boots",
-	"item_soul_ring",
 	"item_magic_wand",
+	"item_soul_ring",
+	"item_arcane_boots",
 	"item_hand_of_midas",
-	"item_blade_mail",
-	"item_heart",
-	"item_black_king_bar",
-	"item_shivas_guard",
-	"item_ultimate_scepter",
-	"item_octarine_core",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
-	"item_sheepstick",
-	"item_travel_boots_2",
-	"item_moon_shard",
-	"item_aghanims_shard",
-}
-sRoleItemsBuyList["pos_4"] = {
-	"item_priest_outfit",
-	"item_hand_of_midas",
-	"item_mekansm",
-	"item_glimmer_cape",
-	"item_aghanims_shard",
-	"item_guardian_greaves",
 	"item_blink",
-	"item_lotus_orb",
-	"item_gungir",
 	"item_ultimate_scepter",
-	"item_sheepstick",
-	"item_mystic_staff",
+	"item_black_king_bar",
+	"item_heart",
 	"item_ultimate_scepter_2",
-	"item_shivas_guard",
+	"item_overwhelming_blink",
+	"item_kaya_and_sange",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 117,353 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_magic_stick",
+	"item_branches",
+	"item_enchanted_mango",
+	"item_magic_wand",
+	"item_arcane_boots",
+	"item_hand_of_midas",
+	"item_blink",
+	"item_aether_lens",
+	"item_ultimate_scepter",
+	"item_sheepstick",
+	"item_ultimate_scepter_2",
+	"item_lotus_orb",
+	"item_glimmer_cape",
+	"item_overwhelming_blink",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 123,696 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	-- Arcane Boots instead of Tranquil Boots, and Blink Dagger instead of
 	-- Spirit Vessel: Arcane 71% (#2), Blink 64% (#3) of his matches (Dotabuff, last patch).
@@ -111,19 +123,15 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_hand_of_midas",
-	"item_glimmer_cape",
 	"item_blink",
-	"item_pavise",
-	"item_pipe",
-	"item_solar_crest",
-	"item_lotus_orb",
-	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_shivas_guard",
-	"item_mystic_staff",
-	"item_ultimate_scepter_2",
-	"item_moon_shard",
 	"item_sheepstick",
+	"item_ultimate_scepter_2",
+	"item_pipe",
+	"item_force_staff",
+	"item_solar_crest",
+	"item_aghanims_shard",
+	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade", "item_sheepstick", "item_hand_of_midas" }
@@ -147,17 +155,16 @@ local unrefinedFireblastAbility =
 	SafeAbility(bot:GetAbilityByName("ogre_magi_unrefined_fireblast"), "ogre_magi_unrefined_fireblast", "ogre_magi")
 local fireShieldAbility = SafeAbility(bot:GetAbilityByName("ogre_magi_smash"), "ogre_magi_smash", "ogre_magi")
 local talent2 = SafeAbility(bot:GetAbilityByName(sTalentList[2]), "sTalentList[2]", "ogre_magi")
-local talent8 = SafeAbility(bot:GetAbilityByName(sTalentList[8]), "sTalentList[8]", "ogre_magi")
 local fireblastDesire, fireblastTarget
 local igniteDesire, igniteTarget
 local bloodlustDesire, bloodlustTarget
 local unrefinedFireblastDesire, unrefinedFireblastTarget
 local fireShieldDesire, fireShieldTarget
 local aetherRange = 0
-local fireblastDamageBonus = 0
 local isAttacking
 local botLevel, manaReserve, mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
 		return
 	end
@@ -165,16 +172,12 @@ function X.SkillsComplement()
 	local context = AbilityContext.Build(bot)
 	manaReserve = 300
 	aetherRange = context.aetherRange
-	fireblastDamageBonus = 0
 	botLevel = context.level
 	mpRatio = context.mp
 	hpRatio = context.hp
 	botTarget = context.target
 	nearbyEnemies = context.enemies
 	nearbyAllies = context.allies
-	if talent8:IsTrained() then
-		fireblastDamageBonus = fireblastDamageBonus + talent8:GetSpecialValueInt("value")
-	end
 	fireblastDesire, fireblastTarget = X.ConsiderQ()
 	if fireblastDesire > 0 then
 		Fu.SetQueuePtToINT(bot, true)
@@ -217,7 +220,10 @@ function X.ConsiderQ()
 	end
 	local castPoint = fireblastAbility:GetCastPoint()
 	local manaCost = fireblastAbility:GetManaCost()
-	local damage = fireblastAbility:GetSpecialValueInt("fireblast_damage") + fireblastDamageBonus
+	-- The old bonus came from talent 8 (Multicast chance), not the Fireblast talent.
+	-- 7.42 game files: special_bonus_unique_ogre_magi_2 (+125) is linked into Fireblast "fireblast_damage",
+	-- and the read includes it once learned (talent_watch.lua). The old talent "value" read added 0 (#46).
+	local damage = fireblastAbility:GetSpecialValueInt("fireblast_damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 50, true, BOT_MODE_NONE)
 	local enemiesInSearchRange = Fu.GetNearbyHeroes(bot, castRange + 200, true, BOT_MODE_NONE)

@@ -6,6 +6,8 @@ local OHA_MUTED = {
 	-- Only the 20s laning summary (standoff / last hits). lasthit-skip, harass-step, summons-step-back and
 	-- go-home print again: the whole tag was muted, so game 037 could not show them working.
 	"^%[OHA%-LANE%] t=%S+ %S+ pos=%d",
+	-- #157: the last-hit overlay owning the swing (691 of 1707 [OHA-LH] lines in game 068, proven in games 064-068).
+	"^%[OHA%-LH%] t=%S+ %S+ skip why=overlay%-owns",
 	"^%[OHA%-TUSK%] t=%S+ snowball%-launch", -- early launch (median 0.6s)
 	"^%[OHA%-TUSK%] t=%S+ punch ", -- Tag Team before Punch
 	"^%[OHA%-TUSK%] t=%S+ tag%-team ",
@@ -295,9 +297,30 @@ end
 -- 27:48: Techies' escape Blast Off (1s cast point) was cancelled while he was in a defend mode.
 -- Every mode Think wrapped here (name ending in _Think) is skipped while the bot casts or
 -- channels; farm, ward, Roshan and lotus Thinks call OhaCastGuard themselves.
+-- Also skipped while the last-hit overlay owns a hit (#165, game 064: the mode's own move / push / attack order
+-- replaced the overlay's swing; FuncLib/systems/last_hit_overlay.lua HoldModeThink). Loaded on first use.
+local LastHitOverlay = nil
+local function LastHitHold(bot)
+	if bot._lhOwn == nil then
+		return false
+	end
+	if LastHitOverlay == nil then
+		local ok, overlay = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/last_hit_overlay")
+		LastHitOverlay = ok and overlay or false
+	end
+	return LastHitOverlay ~= false and LastHitOverlay.HoldModeThink(bot)
+end
 function OhaCastGuard(bot)
+	-- The last-hit overlay holds its hit (#165); checked first so it sits apart from other guard edits (#36).
+	if bot ~= nil and bot:IsAlive() and LastHitHold(bot) then
+		return true
+	end
 	if bot == nil or not bot:IsAlive() then
 		return false
+	end
+	-- A hero file's own hold (Puck's Phase Shift: the API shows neither the channel nor the modifier, #36).
+	if bot._castHoldUntil ~= nil and DotaTime() < bot._castHoldUntil then
+		return true
 	end
 	return bot:IsCastingAbility() or bot:IsChanneling()
 end
@@ -1027,6 +1050,33 @@ function CDOTA_Bot_Script:GetMaxMana()
 		return 0
 	end
 	return originalGetMaxMana(self)
+end
+-- A team says the same chat text at most once per 30s (FuncLib/systems/chat_guard.lua, issue #56).
+local ChatGuard = require(GetScriptDirectory() .. "/FuncLib/systems/chat_guard")
+if ChatGuard.originalChat == nil and CDOTA_Bot_Script.ActionImmediate_Chat ~= nil then
+	ChatGuard.originalChat = CDOTA_Bot_Script.ActionImmediate_Chat
+	ChatGuard.said = {}
+	function CDOTA_Bot_Script:ActionImmediate_Chat(text, allChat)
+		local key = tostring(self:GetTeam()) .. (allChat and "a:" or "t:") .. tostring(text)
+		local allowed, since = ChatGuard.Allow(ChatGuard.said, key, DotaTime())
+		if not allowed then
+			if DotaTime() >= (self._chatDropLogAt or -999) then
+				self._chatDropLogAt = DotaTime() + 5
+				pcall(
+					print,
+					string.format(
+						"[OHA-CHAT] t=%.0f %s drop-repeat since=%.0f text=%s",
+						DotaTime(),
+						(string.gsub(self:GetUnitName(), "npc_dota_hero_", "")),
+						since or -1,
+						tostring(text)
+					)
+				)
+			end
+			return
+		end
+		return ChatGuard.originalChat(self, text, allChat)
+	end
 end
 local GlobalOverrides = { orig_GetTeamPlayers = originalGetTeamPlayers, GetTeamPlayers = GetTeamPlayers }
 return GlobalOverrides

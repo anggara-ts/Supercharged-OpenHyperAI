@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/FuncLib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/FuncLib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -12,21 +13,30 @@ local tAllAbilityBuildList = { { 2, 3, 3, 1, 3, 6, 3, 1, 1, 1, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 2,762 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
-	"item_sven_outfit",
-	"item_blade_mail",
+	"item_tango",
+	"item_double_branches",
+	"item_quelling_blade",
+	"item_gauntlets",
+	"item_circlet",
+	"item_bracer",
+	"item_magic_wand",
+	"item_phase_boots",
 	"item_blink",
+	"item_blade_mail",
 	"item_aghanims_shard",
-	"item_black_king_bar",
 	"item_ultimate_scepter",
+	"item_black_king_bar",
 	"item_travel_boots",
 	"item_overwhelming_blink",
-	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
+	"item_vanguard",
+	"item_kaya_and_sange",
+	"item_crimson_guard",
 	"item_moon_shard",
-	"item_heart",
-	"item_travel_boots_2",
 }
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 304,872 matches (Util/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -36,22 +46,84 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_bracer",
 	"item_magic_wand",
 	"item_phase_boots",
-	"item_blade_mail",
 	"item_blink",
+	"item_blade_mail",
+	"item_aghanims_shard",
+	"item_black_king_bar",
+	"item_ultimate_scepter",
+	"item_overwhelming_blink",
+	"item_ultimate_scepter_2",
+	"item_vanguard",
 	"item_crimson_guard",
+	"item_pipe",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 2, 7,068 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_2"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_quelling_blade",
+	"item_gauntlets",
+	"item_circlet",
+	"item_bracer",
+	"item_magic_wand",
+	"item_phase_boots",
+	"item_blink",
+	"item_blade_mail",
+	"item_aghanims_shard",
+	"item_black_king_bar",
+	"item_ultimate_scepter",
+	"item_ultimate_scepter_2",
+	"item_overwhelming_blink",
+	"item_vanguard",
+	"item_lotus_orb",
+	"item_crimson_guard",
+	"item_moon_shard",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 10,018 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_4"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_double_branches",
+	"item_gauntlets",
+	"item_circlet",
+	"item_bracer",
+	"item_magic_wand",
+	"item_phase_boots",
+	"item_blink",
+	"item_blade_mail",
+	"item_aghanims_shard",
+	"item_black_king_bar",
+	"item_heart",
+	"item_overwhelming_blink",
+	"item_vanguard",
+	"item_crimson_guard",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+}
+-- Stratz 7.41f, week of 9 Nov 2026: pos 5, 5,217 matches (Util/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_branches",
+	"item_magic_stick",
+	"item_circlet",
+	"item_magic_wand",
+	"item_urn_of_shadows",
+	"item_phase_boots",
+	"item_blink",
+	"item_blade_mail",
 	"item_aghanims_shard",
 	"item_black_king_bar",
 	"item_travel_boots",
-	"item_assault",
-	"item_ultimate_scepter_2",
-	"item_moon_shard",
-	"item_heart",
+	"item_spirit_vessel",
+	"item_vanguard",
 	"item_overwhelming_blink",
+	"item_crimson_guard",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
-sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_1"]
-sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_3"]
-sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_3"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_travel_boots", "item_quelling_blade", "item_abyssal_blade", "item_magic_wand" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
@@ -71,7 +143,6 @@ local berserkersCallAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[1]),
 local battleHungerAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[2]), "sAbilityList[2]", "axe")
 local counterHelixAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAbilityList[3]", "axe")
 local cullingBladeAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "axe")
-local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "axe")
 local talent5 = SafeAbility(bot:GetAbilityByName(sTalentList[5]), "sTalentList[5]", "axe")
 local berserkersCallDesire
 local battleHungerDesire, battleHungerTarget
@@ -82,6 +153,7 @@ local isAttacking
 local mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 local botTarget -- was a global set every think
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
 		return
 	end
@@ -127,10 +199,9 @@ function X.ConsiderQ()
 		return 0
 	end
 	local abilityLevel = berserkersCallAbility:GetLevel()
+	-- 7.42 game files: special_bonus_unique_axe_2 (+70) is linked into axe_berserkers_call "radius", and the
+	-- read includes it once learned (FuncLib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
 	local radius = berserkersCallAbility:GetSpecialValueInt("radius")
-	if talent7:IsTrained() then
-		radius = radius + talent7:GetSpecialValueInt("value")
-	end
 	local castRange = radius
 	local castPoint = berserkersCallAbility:GetCastPoint()
 	local manaCost = berserkersCallAbility:GetManaCost()
