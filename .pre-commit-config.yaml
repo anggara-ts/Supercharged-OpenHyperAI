@@ -6,8 +6,8 @@
 #   - StyLua formats the staged .lua files with stylua.toml (same version as CI). If it changed a file,
 #     the commit stops: review, `git add` the formatted files, and commit again.
 # After every checkout, commit, merge and rebase:
-#   - Util/build-info.js writes Customize/build_info.lua (git-ignored), so the game prints the commit it runs
-#     ([OHA-BUILD], and version=<commit date>-<sha> in [OHA-MATCH]). Run it by hand after editing files
+#   - tools/build-info.js writes bots/customize/build_info.lua (git-ignored), so the game prints the commit it runs
+#     ([SHy-BUILD], and version=<commit date>-<sha> in [SHy-MATCH]). Run it by hand after editing files
 #     without a commit, so "+dirty" is current before a test game.
 default_install_hook_types: [pre-commit, post-checkout, post-commit, post-merge, post-rewrite]
 default_stages: [pre-commit]
@@ -26,9 +26,9 @@ repos:
   - repo: local
     hooks:
       - id: build-info
-        name: build info (Customize/build_info.lua)
+        name: build info (bots/customize/build_info.lua)
         language: system
-        entry: node Util/build-info.js
+        entry: node tools/build-info.js
         always_run: true
         pass_filenames: false
         stages: [post-checkout, post-commit, post-merge, post-rewrite]
