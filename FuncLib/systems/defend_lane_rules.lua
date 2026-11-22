@@ -304,4 +304,24 @@ function DefendLaneRules.RimAlive(why, enemyNear, sinceThreat)
 	return (enemyNear or 0) >= 1 and (sinceThreat or math.huge) <= DefendLaneRules.RELEASE_SECONDS
 end
 
+-- T1 / T2 lane defence: after a lane-back (outnumbered at the tower) the bot stays back LANE_BACK_SECONDS, unless the
+-- numbers have been even or better for LANE_EVEN_SECONDS (game 069, 11:12-12:40: Nyx flipped lane-defend / lane-back
+-- 13 times at the Dire mid T1, Io 8). Choices, not game data.
+--   now        game time
+--   even       allies at the tower >= enemy heroes there (or the fight reads as ours) right now
+--   backUntil  the hold set by the last lane-back (nil: none)
+--   evenSince  when the numbers became even (nil: not even)
+-- Returns true while the bot should stay back.
+DefendLaneRules.LANE_BACK_SECONDS = 4
+DefendLaneRules.LANE_EVEN_SECONDS = 3
+function DefendLaneRules.LaneStayBack(now, even, backUntil, evenSince)
+	if not even then
+		return true
+	end
+	if backUntil == nil or now >= backUntil then
+		return false
+	end
+	return evenSince == nil or now - evenSince < DefendLaneRules.LANE_EVEN_SECONDS
+end
+
 return DefendLaneRules

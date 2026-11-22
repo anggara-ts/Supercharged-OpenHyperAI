@@ -650,7 +650,7 @@ local function Tier3Spot(team, lane)
 	-- All three lanes on every read, so a lane is known before its own defence first asks.
 	for spotLane, id in pairs(tier3TowerIds) do
 		local tower = GetTower(team, id)
-		if Fu.IsValidBuilding(tower) then
+		if isAliveBuilding(tower) then
 			tier3Spots[team][spotLane] = tower:GetLocation()
 		end
 	end
@@ -670,7 +670,7 @@ function getHighGroundWaitPoint(team, lane)
 	if anchorLocation == nil then
 		for _, id in ipairs(laneBarracksIds[lane] or {}) do
 			local barracks = GetBarracks(team, id)
-			if anchorLocation == nil and Fu.IsValidBuilding(barracks) then
+			if anchorLocation == nil and isAliveBuilding(barracks) then
 				anchorLocation = barracks:GetLocation()
 			end
 		end
@@ -2069,25 +2069,31 @@ local function HoldDefendLane(bot, lane, desire, reason)
 	if (decision ~= bot._lanePickLast or now >= (bot._lanePickLogAt or -999)) and why ~= "no-held" then
 		bot._lanePickLast = decision
 		bot._lanePickLogAt = now + 5
+		-- Numbers in chose/other order (game 069: they were held/other, so after a switch they read swapped).
+		local chose, rest, choseLane, restLane, choseFront = held, other, heldLane, lane, heldFront
+		if not keep then
+			chose, rest, choseLane, restLane, choseFront = other, held, lane, heldLane, otherFront
+		end
 		pcall(
 			print,
 			string.format(
-				"[OHA-DEFEND] t=%.0f %s lane-pick chose=%s other=%s myDist=%d threat=%d/%d heroes=%d/%d hp=%.2f/%.2f tier=%d/%d desire=%.2f/%.2f otherWhy=%s why=%s",
+				"[OHA-DEFEND] t=%.0f %s lane-pick chose=%s other=%s held=%s myDist=%d threat=%d/%d heroes=%d/%d hp=%.2f/%.2f tier=%d/%d desire=%.2f/%.2f otherWhy=%s why=%s",
 				now,
 				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-				tostring(laneNames[keep and heldLane or lane]),
-				tostring(laneNames[keep and lane or heldLane]),
-				math.floor(GetUnitToLocationDistance(bot, heldFront)),
-				held.creeps,
-				other.creeps,
-				held.heroes,
-				other.heroes,
-				held.hp,
-				other.hp,
-				held.tier,
-				other.tier,
-				held.desire,
-				desire,
+				tostring(laneNames[choseLane]),
+				tostring(laneNames[restLane]),
+				tostring(laneNames[heldLane]),
+				math.floor(GetUnitToLocationDistance(bot, choseFront)),
+				chose.creeps,
+				rest.creeps,
+				chose.heroes,
+				rest.heroes,
+				chose.hp,
+				rest.hp,
+				chose.tier,
+				rest.tier,
+				chose.desire,
+				rest.desire,
 				tostring(reason),
 				decision
 			)
@@ -2189,6 +2195,97 @@ local function BaseAssignDesire(bot, lane, desire, why)
 	end
 	return result
 end
+-- #53, game 069: 5 of 10 T1 / T2 that fell had no lane-* line for that lane in the 30s before. Diagnostic: a T1 / T2
+-- losing HP with no ally within 1600 prints why nobody came: each living bot's mode and its final defend desire for
+-- that lane with the reason (dead, roshan, defend-other, desire below the mode, cut by a defend rule).
+-- [OHA-DEFEND] tower-undefended lane= tier= hp= creeps= heroes= why=<class:count,...> bots=<hero:mode/desire(why),...>
+-- (once a second for the team, each lane at most every 10s).
+local laneReads = {}
+local undefended = { checkAt = -999, logAt = {}, hp = {} }
+local function NoteLaneRead(bot, lane, desire, why)
+	local id = bot:GetPlayerID()
+	laneReads[id] = laneReads[id] or {}
+	laneReads[id][lane] = { desire = desire, why = why, at = DotaTime() }
+end
+local function CheckUndefended()
+	local now = DotaTime()
+	if now < undefended.checkAt then
+		return
+	end
+	undefended.checkAt = now + 1
+	for _, lane in ipairs(creepLaneIds) do
+		local building, tier = LaneBuildingEntry(lane)
+		if building ~= nil and tier <= 2 then
+			local hp = building:GetHealth() / math.max(1, building:GetMaxHealth())
+			local last = undefended.hp[lane]
+			local losing = last ~= nil and last.unit == building and hp < last.hp
+			undefended.hp[lane] = { unit = building, hp = hp }
+			local location = building:GetLocation()
+			if losing and now >= (undefended.logAt[lane] or -999) and #Fu.GetAlliesNearLoc(location, 1600) == 0 then
+				undefended.logAt[lane] = now + 10
+				local classes, order, bots = {}, {}, {}
+				for i = 1, #GetTeamPlayers(ourTeam) do
+					local member = GetTeamMember(i)
+					if member ~= nil then
+						local name = string.gsub(member:GetUnitName(), "npc_dota_hero_", "")
+						local class, detail
+						if not member:IsAlive() then
+							class, detail = "dead", name .. ":dead"
+						else
+							local mode = member:GetActiveMode()
+							local read = (laneReads[member:GetPlayerID()] or {})[lane]
+							local desire = read ~= nil and now - read.at <= 2 and read.desire or nil
+							local readWhy = read ~= nil and tostring(read.why) or "?"
+							if mode == BotMode.Roshan then
+								class = "roshan"
+							elseif defendModeLane[mode] ~= nil then
+								class = "defend-other"
+							elseif desire ~= nil and desire > 0 then
+								class = "below-" .. ModeName(mode)
+							elseif desire ~= nil then
+								class = "cut-" .. readWhy
+							else
+								class = "no-read"
+							end
+							detail = string.format(
+								"%s:%s/%.2f(%s)",
+								name,
+								ModeName(mode),
+								desire or -1,
+								desire ~= nil and readWhy or "-"
+							)
+						end
+						if classes[class] == nil then
+							classes[class] = 0
+							order[#order + 1] = class
+						end
+						classes[class] = classes[class] + 1
+						bots[#bots + 1] = detail
+					end
+				end
+				local why = {}
+				for _, class in ipairs(order) do
+					why[#why + 1] = class .. ":" .. classes[class]
+				end
+				pcall(
+					print,
+					string.format(
+						"[OHA-DEFEND] t=%.0f %s tower-undefended lane=%s tier=%d hp=%.2f creeps=%d heroes=%d why=%s bots=%s",
+						now,
+						ourTeam == TEAM_DIRE and "dire" or "radiant",
+						tostring(laneNames[lane]),
+						tier,
+						hp,
+						(LaneThreat(lane)),
+						#Fu.GetLastSeenEnemiesNearLoc(location, 1600),
+						table.concat(why, ","),
+						table.concat(bots, ",")
+					)
+				)
+			end
+		end
+	end
+end
 do
 	local getDefendDesire = Defend.GetDefendDesire
 	Defend.GetDefendDesire = function(bot, lane)
@@ -2197,7 +2294,10 @@ do
 			return desire
 		end
 		desire = BaseAssignDesire(bot, lane, desire, bot._defendWhy)
-		return HoldDefendLane(bot, lane, desire, bot._defendWhy)
+		desire = HoldDefendLane(bot, lane, desire, bot._defendWhy)
+		NoteLaneRead(bot, lane, desire, bot._defendWhy)
+		CheckUndefended()
+		return desire
 	end
 end
 -- #53: the defend modes' Think (mode_defend_tower_*_generic.lua). It replaces Valve's defend Think, which walked the bot
@@ -2334,7 +2434,15 @@ local function LaneDefendThink(bot, lane, building, info)
 	if #enemies >= 1 then
 		local ancient = GetAncient(ourTeam)
 		local ancientLow = ancient ~= nil and ancient:IsAlive() and Fu.GetHP(ancient) < 0.5
-		if #allies >= #enemies or ancientLow or Fu.WeAreStronger(bot, 2500) then
+		local now = DotaTime()
+		local even = #allies >= #enemies or ancientLow or Fu.WeAreStronger(bot, 2500)
+		if even then
+			bot._laneEvenSince = bot._laneEvenSince or now
+		else
+			bot._laneEvenSince = nil
+		end
+		local stayBack = DefendLaneRules.LaneStayBack(now, even, bot._laneBackUntil, bot._laneEvenSince)
+		if not stayBack then
 			local attackRange = bot:GetAttackRange()
 			local engageRange = attackRange < 900 and 900 or math.min(attackRange, defendRadius)
 			local target, targetDist = NearestAttackableHero(defendLocation, defendRadius, bot)
@@ -2351,9 +2459,22 @@ local function LaneDefendThink(bot, lane, building, info)
 				info
 			)
 		end
+		-- Outnumbered: back, and hold there (DefendLaneRules.LaneStayBack) instead of flipping back in each think.
+		if not even then
+			bot._laneBackUntil = now + DefendLaneRules.LANE_BACK_SECONDS
+		end
 		local fallback = Fu.AdjustLocationWithOffsetTowardsFountain(defendLocation, 400)
-		return DefendStep(bot, lane, "lane-back", "outnumbered", "move", vectorAdd(fallback, offset), info)
+		return DefendStep(
+			bot,
+			lane,
+			"lane-back",
+			even and "hold-back" or "outnumbered",
+			"move",
+			vectorAdd(fallback, offset),
+			info
+		)
 	end
+	bot._laneEvenSince = nil
 	local best, bestScore, nearest, nearestDist = nil, -1, nil, math.huge
 	for _, entry in ipairs(EnemyCreepLanes()) do
 		local creep = entry.unit
@@ -2517,7 +2638,8 @@ function Defend.DefendThink(bot, lane)
 	elseif step == "hg-back" then
 		-- With the T3 standing, just behind it; once it is down, back to the Ancient.
 		local backSpot = homeSpot
-		if tier == 3 and Fu.IsValidBuilding(GetTower(ourTeam, tier3TowerIds[lane])) then
+		-- isAliveBuilding, not Fu.IsValidBuilding: that rejects an invulnerable T3 (Glyph, or its T2 still up; game 069).
+		if tier == 3 and isAliveBuilding(GetTower(ourTeam, tier3TowerIds[lane])) then
 			backSpot = Fu.AdjustLocationWithOffsetTowardsFountain(rim, 400)
 		end
 		if GetUnitToLocationDistance(bot, backSpot) > 400 then

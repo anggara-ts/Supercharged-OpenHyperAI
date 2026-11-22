@@ -230,3 +230,13 @@ T.test("early start (game 069): the next wave's ETA against the defender's", fun
 	T.eq(R.RimThreat({ waveEta = 40, waveCreeps = 4, waveAllied = 0 }), nil, "too far off")
 	T.eq(R.RimNeed("early", 4, true), 2)
 end)
+
+T.test("lane defence (game 069): after a lane-back, stay back 4s unless even for 3s", function()
+	local R = rules()
+	T.eq(R.LaneStayBack(100, false, nil, nil), true, "outnumbered")
+	-- Back at 100 (hold to 104): even again at 101, still back at 102; even for 3s at 104 or the hold over.
+	T.eq(R.LaneStayBack(102, true, 104, 101), true, "even for 1s")
+	T.eq(R.LaneStayBack(103.5, true, 104, 100.5), false, "even for 3s")
+	T.eq(R.LaneStayBack(104, true, 104, 103.9), false, "hold over")
+	T.eq(R.LaneStayBack(102, true, nil, nil), false, "no hold, even: go")
+end)
