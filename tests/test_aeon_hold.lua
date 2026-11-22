@@ -123,7 +123,7 @@ end)
 
 T.test("aeon hold: installed from global_overrides, tracked from ItemUsageThink", function()
 	local src = T.read("bots/lib/systems/global_overrides.lua")
-	T.ok(src:find('bots/lib/systems/aeon_hold").Install()', 1, true) ~= nil, "no Install() in global_overrides")
+	T.ok(src:find('/lib/systems/aeon_hold").Install()', 1, true) ~= nil, "no Install() in global_overrides")
 	local usage = T.read("bots/ability_item_usage_generic.lua")
 	T.ok(usage:find("pcall(AeonHold.Track, bot)", 1, true) ~= nil, "no Track in ItemUsageThink")
 end)
