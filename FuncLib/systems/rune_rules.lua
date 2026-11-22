@@ -270,74 +270,95 @@ end
 -- Lotus stand result (#32, game 074, maintainer 2026-11-23: "45 seconds is too long. can bot check if their inventory
 -- change (added or upgraded lotus) after certain time in the area?"). The pool's lotus count can't be read
 -- (LotusCountOnUnit), so the stand reads the bot's own lotuses: a rise in LotusValue is a lotus taken by us; standing
--- LOTUS_STAND_WAIT in the area after the spawn with no rise means the lotus is gone (someone else took it).
+-- LOTUS_STAND_WAIT in the pluck ring after the spawn with no rise means the lotus is gone (someone else took it).
 -- Game data (7.42 npc_abilities.txt ability_lotus_pool): radius 350, first_lotus_pickup_time 1.5 (a hero in the pool
 -- gets its first lotus after 1.5s). Game 074, 6:00: Winter Wyvern stood from 357.5 and had the lotus at 361.4 (mark +1.4,
 -- `taken-leave after=1.2` at 362.6). LOTUS_STAND_WAIT = 1.5 + 1s for think and walk-in lag. With an enemy hero in the
 -- pool the wait is one second longer: whether a contesting hero delays the pickup is not in the game data (unverified).
--- LOTUS_AREA: the bot fights and casts without walking back while within it (inside the 350 radius); stand time counts
--- only there. LOTUS_HOLD_CAP: backstop, seconds from the first think within LOTUS_NEAR after the spawn.
+-- LOTUS_AREA: the bot fights and casts without walking back while within it (inside the 350 radius). Stand time counts
+-- only in the pluck ring (LOTUS_RING): the bot walks to 140 and a pickup is proven there (game 074: taken at 132; the
+-- old comment in map_objectives says the pool's lip never granted one), so a bot fighting at 250 doesn't read "gone" on
+-- a lotus that may still be there. LOTUS_HOLD_CAP: backstop, seconds of thinks within LOTUS_NEAR after the spawn; it
+-- also ends a stand whose lotus was taken but whose take step never ran.
 RuneRules.LOTUS_AREA = 300
+RuneRules.LOTUS_RING = 150
 RuneRules.LOTUS_NEAR = 800
 RuneRules.LOTUS_STAND_WAIT = 2.5
 RuneRules.LOTUS_STAND_WAIT_CONTESTED = 3.5
 RuneRules.LOTUS_HOLD_CAP = 10
--- Think gaps longer than this (the rune mode lost for a while) don't count as standing.
+-- A think gap longer than this (the rune mode lost for a while) counts as no time at the pool.
 RuneRules.LOTUS_THINK_GAP = 0.5
 function RuneRules.NewLotusStand(mark, value)
-	return { mark = mark, base = value, stood = 0 }
+	return { mark = mark, base = value, stood = 0, held = 0 }
 end
 -- One think of a stand. mark: the spawn this stand is for; dist: bot to pool; contested: an enemy hero in the pool.
--- Returns "wait" | "taken" | "gone" | "cap", the seconds stood in the area, and the seconds since the stand began.
--- A result stays once given.
+-- stood (in the ring) and held (within LOTUS_NEAR) count think time only, so a stretch in another mode adds nothing.
+-- Returns "wait" | "taken" | "gone" | "cap", stood and held. gone / cap stay; taken can still become cap.
 function RuneRules.LotusStandStep(stand, now, value, dist, contested)
-	if stand.result ~= nil then
-		return stand.result, stand.stood, stand.held or 0
+	if stand.result == "gone" or stand.result == "cap" then
+		return stand.result, stand.stood, stand.held
+	end
+	if now < stand.mark then
+		-- Waiting for the spawn: nothing to take yet.
+		stand.lastAt = nil
+		if value < stand.base then
+			stand.base = value
+		end
+		if value > stand.base then
+			-- A lotus left in the pool from before: taken.
+			stand.result = "taken"
+		end
+		return stand.result or "wait", 0, 0
+	end
+	local dt = 0
+	if stand.lastAt ~= nil then
+		dt = now - stand.lastAt
+		if dt > RuneRules.LOTUS_THINK_GAP or dt < 0 then
+			dt = 0
+		end
+	end
+	stand.lastAt = now
+	if dist <= RuneRules.LOTUS_NEAR then
+		stand.held = stand.held + dt
+	end
+	if stand.result == "taken" then
+		if stand.held >= RuneRules.LOTUS_HOLD_CAP then
+			stand.result = "cap"
+		end
+		return stand.result, stand.stood, stand.held
 	end
 	if value > stand.base then
 		stand.result = "taken"
-		stand.held = stand.since ~= nil and now - stand.since or 0
 		return "taken", stand.stood, stand.held
 	end
 	if value < stand.base then
 		-- Eaten or given away while standing: not a pickup, count from here.
 		stand.base = value
 	end
-	if now < stand.mark then
-		-- Waiting for the spawn: nothing to take yet.
-		stand.lastAt = nil
-		return "wait", 0, 0
+	if dist <= RuneRules.LOTUS_RING then
+		stand.stood = stand.stood + dt
 	end
-	if stand.since == nil and dist <= RuneRules.LOTUS_NEAR then
-		stand.since = now
-	end
-	local inArea = dist <= RuneRules.LOTUS_AREA
-	if inArea and stand.lastAt ~= nil then
-		stand.stood = stand.stood + math.min(now - stand.lastAt, RuneRules.LOTUS_THINK_GAP)
-	end
-	stand.lastAt = inArea and now or nil
-	local held = stand.since ~= nil and now - stand.since or 0
 	local wait = contested and RuneRules.LOTUS_STAND_WAIT_CONTESTED or RuneRules.LOTUS_STAND_WAIT
 	if stand.stood >= wait then
-		stand.result, stand.held = "gone", held
-		return "gone", stand.stood, held
+		stand.result = "gone"
+	elseif stand.held >= RuneRules.LOTUS_HOLD_CAP then
+		stand.result = "cap"
 	end
-	if held >= RuneRules.LOTUS_HOLD_CAP then
-		stand.result, stand.held = "cap", held
-		return "cap", stand.stood, held
-	end
-	return "wait", stand.stood, held
+	return stand.result or "wait", stand.stood, stand.held
 end
 
--- Being hit at the pool (#32, maintainer 2026-11-23: "being hit by hero/creep should apply same mechanism like being
--- hit in outside the area but they will try to maintain it unless retreat mode is active"). The hold desire (0.75)
--- used to beat retreat: game 074, 3:00-3:19, Winter Wyvern was hit 1v1 by Leshrac from 0.96 to 0.34 HP while retreat
--- asked 0.30-0.40 (and 0.61 at 0.42 HP) and lost to it. Now a bot that was hit gives the hold up as soon as retreat asks
--- LOTUS_RETREAT_YIELD or more: the laning mode's 0.30, the level at which retreat took over from laning in that game
--- (`[OHA-FLIP] ... retreat:0.30@184>laning:0.30@186`). retreatDesire: retreat's last desire (nil when not fresh).
-RuneRules.LOTUS_RETREAT_YIELD = 0.3
-function RuneRules.LotusHoldYields(retreatDesire, hit)
-	return hit == true and retreatDesire ~= nil and retreatDesire >= RuneRules.LOTUS_RETREAT_YIELD
+-- At the pool (#32, maintainer 2026-11-23: "being hit by hero/creep should apply same mechanism like being hit in
+-- outside the area but they will try to maintain it unless retreat mode is active"). The hold desire (0.75) used to
+-- beat retreat: game 074, 3:00-3:19, Winter Wyvern was hit 1v1 by Leshrac from 0.96 to 0.34 HP while retreat asked
+-- 0.30-0.40 (0.61 at 0.42 HP) and lost to it. Now the hold gives way as soon as retreat asks LOTUS_RETREAT_YIELD or
+-- more: about the laning mode's 0.30, the level at which retreat took over from laning in that game
+-- (`[OHA-FLIP] ... retreat:0.30@184>laning:0.30@186`, printed with %.2f, so a little under 0.30). Retreat's base formula
+-- (mode_retreat_generic.lua, the line-533 return) stays well under that for a bot that isn't hit and isn't low: about
+-- 0.18 for a healthy bot with an enemy near, minus 0.175 in the laning phase when not hit, so no hit gate is needed.
+-- retreatDesire: retreat's last desire (nil when not fresh).
+RuneRules.LOTUS_RETREAT_YIELD = 0.29
+function RuneRules.LotusHoldYields(retreatDesire)
+	return retreatDesire ~= nil and retreatDesire >= RuneRules.LOTUS_RETREAT_YIELD
 end
 
 return RuneRules

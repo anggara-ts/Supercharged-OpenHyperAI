@@ -715,10 +715,6 @@ function MapObjectives.StandFight(bot, loc, standDist, kind)
 	if bot:GetAttackTarget() ~= target then
 		bot:Action_AttackUnit(target, true)
 	end
-	-- The hero files aim their spells at GetProperTarget (bot:GetTarget() first).
-	if target:IsHero() then
-		bot:SetTarget(target)
-	end
 	if bot._standFightTarget ~= target then
 		bot._standFightTarget = target
 		pcall(
@@ -789,8 +785,6 @@ local function ActInsideLotus(bot, loc, inner)
 			if bot:GetAttackTarget() ~= hero then
 				bot:Action_AttackUnit(hero, true)
 			end
-			-- The hero files aim their spells at GetProperTarget (bot:GetTarget() first).
-			bot:SetTarget(hero)
 			MarkLotusDo(bot, "hit")
 			NoteHoldAct(bot, loc, "attack", (string.gsub(hero:GetUnitName(), "npc_dota_hero_", "")))
 			return
@@ -1173,11 +1167,11 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 			-- Until then a hit doesn't end the hold: the bot fights from the pool area (ThinkObjective).
 			if beside then
 				local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
-				local hitNow = bot:WasRecentlyDamagedByAnyHero(1.5) or bot:WasRecentlyDamagedByCreep(1.5)
 				local retreatDesire = RetreatDesireNow(bot)
-				if bot._lotusSkipMark ~= spawnMark and RuneRules.LotusHoldYields(retreatDesire, hitNow) then
+				if bot._lotusSkipMark ~= spawnMark and RuneRules.LotusHoldYields(retreatDesire) then
 					bot._lotusSkipMark = spawnMark
-					bot._lotusSkipPool = loc
+					-- Not "checked" for the team (LotusCheckedThisMark): nobody saw whether the lotus is there.
+					bot._lotusSkipPool = nil
 					beside = false
 					local stand = bot._lotusStand
 					pcall(
@@ -1633,7 +1627,7 @@ end
 
 -- The lotus stand (#32, game 074): remember the bot's lotuses when it comes to the pool for a spawn, then read the
 -- result from them (RuneRules.LotusStandStep). [OHA-LOTUS] stand-result result=taken|gone|cap item=<lotuses now>
--- value=<before>-><now> stood=<s in the area> held=<s since within 800 after the spawn> late=<s since the spawn>.
+-- value=<before>-><now> stood=<s in the pluck ring> held=<s of thinks within 800 after the spawn> late=<s since the spawn>.
 -- Returns true when the stand ended without a lotus (gone / cap: the spawn is skipped, _lotusSkipMark).
 function MapObjectives.LotusStandThink(bot, loc, dist)
 	local now = DotaTime()
@@ -1651,14 +1645,11 @@ function MapObjectives.LotusStandThink(bot, loc, dist)
 		stand.from = value
 		bot._lotusStand = stand
 	end
-	if stand.logged then
-		return false
-	end
 	local result, stood, held = RuneRules.LotusStandStep(stand, now, value, dist, EnemyInLotusRing(bot, loc))
-	if result == "wait" then
-		return false
+	if result == "wait" or result == stand.logged then
+		return result == "gone" or result == "cap"
 	end
-	stand.logged = true
+	stand.logged = result
 	if not IsMeepoCloneBot(bot) then
 		pcall(
 			print,
@@ -1682,7 +1673,9 @@ function MapObjectives.LotusStandThink(bot, loc, dist)
 		return false
 	end
 	bot._lotusSkipMark = key
-	bot._lotusSkipPool = loc
+	-- gone: the bot stood in the pool and nothing came, so the team counts the pool checked (LotusCheckedThisMark).
+	-- cap: it never stood there long enough to tell.
+	bot._lotusSkipPool = result == "gone" and loc or nil
 	bot._lotusTake = nil
 	MarkLotusDo(bot, result)
 	return true

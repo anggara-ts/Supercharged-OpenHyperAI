@@ -232,66 +232,88 @@ T.test("rune rules: lotus value counts the tiers, so a merging pickup still rise
 	)
 end)
 
+-- Runs a stand from 'from' to 'to' in 0.1s thinks at one distance; returns the first result that isn't "wait" (or
+-- "wait"), the time it came, and stood / held.
+local function standRun(R, stand, from, to, value, dist, contested)
+	local t = from
+	local result, stood, held = R.LotusStandStep(stand, t, value, dist, contested)
+	while result == "wait" and t < to - 1e-6 do
+		t = t + 0.1
+		result, stood, held = R.LotusStandStep(stand, t, value, dist, contested)
+	end
+	return result, t, stood, held
+end
+
 T.test("rune rules: the lotus stand reads taken or gone from the bot's own lotuses (game 074)", function()
 	local R = load()
-	-- Game 074, 6:00: Winter Wyvern in the pool from 357.5, the lotus came at 361.4.
+	-- Game 074, 6:00: Winter Wyvern in the pool (132) from 357.5, the lotus came at 361.4.
 	local stand = R.NewLotusStand(360, 0)
 	T.eq(R.LotusStandStep(stand, 357.5, 0, 132, false), "wait", "before the spawn")
-	T.eq(R.LotusStandStep(stand, 360.0, 0, 132, false), "wait", "the spawn: the clock starts")
-	T.eq(R.LotusStandStep(stand, 361.0, 0, 132, false), "wait", "1s stood")
+	T.eq(standRun(R, stand, 360, 361.3, 0, 132, false), "wait", "1.3s stood, no lotus yet")
 	local result, stood = R.LotusStandStep(stand, 361.4, 1, 132, false)
 	T.eq(result, "taken", "a lotus came")
 	T.ok(stood < R.LOTUS_STAND_WAIT, "taken before the wait ran out")
-	T.eq(R.LotusStandStep(stand, 362, 0, 132, false), "taken", "the result stays (eaten right after)")
+	T.eq(R.LotusStandStep(stand, 361.5, 0, 132, false), "taken", "the result stays (eaten right after)")
 
 	-- Game 074, 3:00: in the pool from 176.9, someone else took the spawn. The stand now ends 2.5s after the mark
 	-- instead of the 45s window (she stood and fought there until she died at 199).
 	local gone = R.NewLotusStand(180, 0)
 	R.LotusStandStep(gone, 176.9, 0, 132, false)
-	local t = 180
-	local res = R.LotusStandStep(gone, t, 0, 132, false)
-	while res == "wait" and t < 190 do
-		t = t + 0.1
-		res = R.LotusStandStep(gone, t, 0, 132, false)
-	end
+	local res, at = standRun(R, gone, 180, 190, 0, 132, false)
 	T.eq(res, "gone", "no lotus: gone")
-	T.near(t, 180 + R.LOTUS_STAND_WAIT, 0.15, "gone 2.5s after the spawn")
-	T.eq(R.LotusStandStep(R.NewLotusStand(180, 0), 180, 0, 132, true), "wait", "contested: the first think waits")
-end)
-
-T.test("rune rules: lotus stand time counts in the area only, keeps across a push-out, and has a cap", function()
-	local R = load()
-	-- Game 074 3:00: pushed out to 456 at t=186, back at 188, out again at 193.
-	local stand = R.NewLotusStand(180, 0)
-	R.LotusStandStep(stand, 180, 0, 132, false)
-	R.LotusStandStep(stand, 181, 0, 132, false) -- 0.5 counted (think gap cap)
-	R.LotusStandStep(stand, 181.4, 0, 456, false) -- out of the area: not counted
-	R.LotusStandStep(stand, 183, 0, 456, false)
-	R.LotusStandStep(stand, 184, 0, 200, false) -- back: the first think in the area starts the count again
-	local result, stood = R.LotusStandStep(stand, 184.4, 0, 200, false)
-	T.eq(result, "wait", "0.9s stood")
-	T.near(stood, 0.9, 0.01, "time outside the area and long gaps don't count")
-	-- Never back in the area: the cap ends it, counted from the first think within 800 after the spawn.
-	local away = R.NewLotusStand(180, 0)
-	T.eq(R.LotusStandStep(away, 185, 0, 1300, false), "wait", "walking, not near yet")
-	R.LotusStandStep(away, 186, 0, 700, false)
-	T.eq(R.LotusStandStep(away, 195.9, 0, 500, false), "wait", "9.9s near")
-	local capped, _, held = R.LotusStandStep(away, 196, 0, 500, false)
-	T.eq(capped, "cap", "10s near without standing: cap")
-	T.near(held, R.LOTUS_HOLD_CAP, 0.01, "held= is the cap")
+	T.near(at, 180 + R.LOTUS_STAND_WAIT, 0.15, "gone 2.5s after the spawn")
+	local contested = R.NewLotusStand(180, 0)
+	res, at = standRun(R, contested, 180, 190, 0, 132, true)
+	T.eq(res, "gone", "contested: gone too")
+	T.near(at, 180 + R.LOTUS_STAND_WAIT_CONTESTED, 0.15, "an enemy hero in the pool: 3.5s")
 	-- An eaten lotus is no pickup.
 	local eaten = R.NewLotusStand(180, 2)
 	T.eq(R.LotusStandStep(eaten, 180, 1, 132, false), "wait", "ate one")
-	T.eq(R.LotusStandStep(eaten, 180.3, 2, 132, false), "taken", "and picked one: taken")
+	T.eq(R.LotusStandStep(eaten, 180.1, 2, 132, false), "taken", "and picked one: taken")
 end)
 
-T.test("rune rules: a hit bot gives the lotus hold up when retreat asks (game 074)", function()
+T.test("rune rules: lotus stand time counts in the pluck ring only, keeps across a push-out, and has a cap", function()
+	local R = load()
+	-- Game 074 3:00: pushed out to 456 at t=186, back in the pool later.
+	local stand = R.NewLotusStand(180, 0)
+	standRun(R, stand, 180, 181, 0, 132, false) -- 1s in the ring
+	standRun(R, stand, 181.1, 183, 0, 456, false) -- pushed out: not counted
+	standRun(R, stand, 183.1, 184, 0, 250, false) -- fighting in the area but outside the ring: not counted
+	local result, _, stood = standRun(R, stand, 184.1, 184.5, 0, 132, false)
+	T.eq(result, "wait", "1.5s stood in the ring")
+	T.near(stood, 1.5, 0.05, "time out of the ring doesn't count, the count keeps across it")
+	-- A long gap (another mode won) adds nothing.
+	local gap = R.NewLotusStand(180, 0)
+	R.LotusStandStep(gap, 180, 0, 132, false)
+	local _, _, gapStood, gapHeld = standRun(R, gap, 185, 185, 0, 132, false)
+	T.eq(gapStood, 0, "a 5s gap is not standing")
+	T.eq(gapHeld, 0, "nor holding")
+	-- Never in the ring: the cap ends it after 10s of thinks within 800.
+	local away = R.NewLotusStand(180, 0)
+	T.eq(standRun(R, away, 185, 186, 0, 1300, false), "wait", "walking, not near yet")
+	local capped, at, _, held = standRun(R, away, 186.1, 200, 0, 500, false)
+	T.eq(capped, "cap", "10s near without standing in the ring: cap")
+	T.near(at, 196.1, 0.15, "10s after it came within 800")
+	T.ok(held <= R.LOTUS_HOLD_CAP + 0.15, "held= is the cap")
+	-- Taken but never leaving (the take step missed it): the cap still ends it.
+	local taken = R.NewLotusStand(180, 0)
+	T.eq(R.LotusStandStep(taken, 180, 1, 132, false), "taken", "taken at once")
+	local after, t = "taken", 180
+	while after == "taken" and t < 195 do
+		t = t + 0.1
+		after = R.LotusStandStep(taken, t, 1, 320, false)
+	end
+	T.eq(after, "cap", "held 10s more after taken: cap")
+	T.near(t, 190, 0.15, "10s after the stand began")
+end)
+
+T.test("rune rules: the lotus hold gives way when retreat asks (game 074)", function()
 	local R = load()
 	-- Game 074 retreat desires while Leshrac hit Winter Wyvern at the pool: 0.30 (t=184), 0.34, 0.40 (t=193), 0.61.
-	T.eq(R.LotusHoldYields(0.30, true), true, "0.30 hit: yield")
-	T.eq(R.LotusHoldYields(0.34, true), true, "0.34 hit: yield")
-	T.eq(R.LotusHoldYields(0.40, true), true, "0.40 hit: yield")
-	T.eq(R.LotusHoldYields(0.25, true), false, "retreat below the laning level: hold")
-	T.eq(R.LotusHoldYields(0.61, false), false, "not hit: the engine compares the desires as usual")
-	T.eq(R.LotusHoldYields(nil, true), false, "no fresh retreat desire: hold")
+	T.eq(R.LotusHoldYields(0.297), true, "0.30 as printed: yield")
+	T.eq(R.LotusHoldYields(0.34), true, "0.34: yield")
+	T.eq(R.LotusHoldYields(0.40), true, "0.40: yield")
+	T.eq(R.LotusHoldYields(0.61), true, "0.61: yield")
+	T.eq(R.LotusHoldYields(0.18), false, "a healthy bot with an enemy near: hold")
+	T.eq(R.LotusHoldYields(nil), false, "no fresh retreat desire: hold")
 end)
