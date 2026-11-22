@@ -2,6 +2,7 @@
 // eight reviewer agents following BRIEF.md, and the page.tpl.html template.
 // Usage: node tools/hero-review/gen.js
 const fs = require("fs");
+const path = require("path");
 const D = __dirname;
 const names = {};
 for (const l of fs.readFileSync(D + "/heroes.tsv", "utf8").split(/\r?\n/)) {
@@ -55,5 +56,7 @@ let nChanges = 0, nFlags = 0;
 for (const h of heroes) { counts[h.status]++; nChanges += h.changes.length; nFlags += h.flags.filter(f => !f.note).length; }
 const data = { heroes, shared, open, counts, nChanges, nFlags, total: heroes.length };
 const tpl = fs.readFileSync(D + "/page.tpl.html", "utf8");
-fs.writeFileSync(D + "/hero-review.html", tpl.replace("/*DATA*/null", JSON.stringify(data).replace(/</g, "\\u003c")));
+const OUT = path.join(__dirname, "..", "..", "local", "hero-review");
+fs.mkdirSync(OUT, { recursive: true });
+fs.writeFileSync(path.join(OUT, "hero-review.html"), tpl.replace("/*DATA*/null", JSON.stringify(data).replace(/</g, "\\u003c")));
 console.log(heroes.length, counts, nChanges, nFlags);
