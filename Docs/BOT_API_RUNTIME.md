@@ -20,10 +20,10 @@ confirmed or disproved.
 - **Tested in 7.42 games (063-064):**
   - `Action_ClearActions(true)` stops an attack wind-up: 70 of 70 stops held (`[OHA-LH] cancel-result stopped=yes method=clear`, #157).
   - The time left on an enemy hero's `modifier_teleporting` counts down with the clock (`[OHA-ALCHEMIST] tp-left ... real=yes`, 4 of 4, #122/#166), so it is the real remaining TP time.
+  - **No `GetCurrentXP` on the bot handle**: the unit methods have only `GetXPNeededToLevel` (and `GetLevel`), so a hero's XP gain has to be read from the drop in XP still needed plus a level change (game 069: the shrine stand read `xp=+0` every time, #32). The Shrine of Wisdom's `ability_xp_fountain` reads `GetCurrentCharges()` -1 and `GetCooldownTimeRemaining()` -1 (`[OHA-WISDOM] covered ... charges=-1 cd=-1`, game 069), so whether the shrine is ready can't be read.
   - `Action_PickUpRune` on a river rune spot: a water rune (type 7) was taken (`river-pickup-try worked=yes type=7`, 1 sample); the river bounty (type 5) was not, 0 of 4 (games 063-064). Valve's own item mode takes both (#149).
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[OHA-API] slots`, #172, game 064).
-  - **No `GetCurrentXP` on the bot handle**: the unit methods have only `GetXPNeededToLevel` (and `GetLevel`), so a hero's XP gain has to be read from the drop in XP still needed plus a level change (game 069: the shrine stand read `xp=+0` every time, #32). The Shrine of Wisdom's `ability_xp_fountain` reads `GetCurrentCharges()` -1 and `GetCooldownTimeRemaining()` -1 (`[OHA-WISDOM] covered ... charges=-1 cd=-1`, game 069), so whether the shrine is ready can't be read.
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
 
 ## 7.42 check (2026-11-19)
