@@ -1,7 +1,7 @@
 -- Refresher Orb / Refresher Shard: the mana a refresh needs (#47).
 -- 7.42 game files (items.txt): item_refresher AbilityManaCost 325, cooldown 180; item_refresher_shard
 -- AbilityManaCost 200, one charge. The refresh itself costs that mana, and the spell it brings back has to be
--- cast again after it, so the bot needs both: refresher cost + the cost of every spell it means to recast.
+-- cast again after it, so the bot needs both: refresher cost + the ultimate's cost (other spells: optional, Combo).
 -- The old shared rule asked for 2x the ultimate's cost and left the refresher out: a 150-mana ultimate passed
 -- with 300 mana, then the 325-mana Orb left too little to cast it again.
 local RefresherRules = {}
@@ -51,25 +51,29 @@ function RefresherRules.IsUseful(spell)
 		and not RefresherRules.MOVEMENT[spell.name or ""]
 end
 
--- The combo a refresh pays for: the useful spells (besides the ultimate) still ready, and the mana needed: the
--- refresher, the ultimate once, and every useful spell on cooldown (each cast again after the refresh). A ready
--- spell is not refreshed, so its mana is not counted. Returns othersReady (count), needed (mana), the names of the
--- ready spells and the names of the spells in the combo (ultimate first).
+-- The combo a refresh is for: the useful spells (besides the ultimate) still ready, and its mana. The gate (needed)
+-- is the refresher plus the ultimate once (maintainer, 2026-11-22, #47: "zeus could refresher + wrath only,
+-- refreshed nimbus is optional"; game 068 t=2788 Zeus kept his Orb at 908 mana because 325 Orb + 500 Wrath + 275
+-- Nimbus = 1100, and died 5s later). Every useful spell on cooldown is optional: the refresh brings it back and the
+-- hero's own rules cast it again if mana is left; its mana is summed in optional. A ready spell is not refreshed,
+-- so its mana is not counted. Returns othersReady (count), needed (gate mana), the names of the ready spells, the
+-- names of the spells the refresh brings back (ultimate first) and optional (mana of the others).
 function RefresherRules.Combo(refresherCost, ultimateName, ultimateCost, spells)
 	local othersReady, readyNames = 0, {}
-	local recastCosts, comboNames = { ultimateCost or 0 }, { ultimateName or "ult" }
+	local optional, comboNames = 0, { ultimateName or "ult" }
 	for _, spell in ipairs(spells or {}) do
 		if RefresherRules.IsUseful(spell) and not spell.ultimate and spell.name ~= ultimateName then
 			if spell.ready then
 				othersReady = othersReady + 1
 				readyNames[#readyNames + 1] = spell.name
 			elseif spell.onCooldown then
-				recastCosts[#recastCosts + 1] = spell.cost or 0
+				optional = optional + (spell.cost or 0)
 				comboNames[#comboNames + 1] = spell.name
 			end
 		end
 	end
-	return othersReady, RefresherRules.ManaNeeded(refresherCost, recastCosts), readyNames, comboNames
+	local needed = RefresherRules.ManaNeeded(refresherCost, { ultimateCost or 0 })
+	return othersReady, needed, readyNames, comboNames, optional
 end
 
 -- Hold the refresh up to HOLD_FOR seconds while a useful spell is still ready, so the hero's own rules can cast it

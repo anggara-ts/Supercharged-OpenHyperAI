@@ -72,7 +72,7 @@ local function installItemAbility(Fu)
 	end
 	-- The shared refresh decision (#47): step "window" (the ultimate is not in its refresh window), "hold" (a useful
 	-- spell is still ready: wait up to 1s for the hero's rules to cast it, RefresherRules.HoldStep), "mana" (short of
-	-- RefresherRules.Combo's mana) or "go". The hold state lives on the bot (bot._refresherHold).
+	-- the refresher + the ultimate, RefresherRules.Combo's gate; spells on cooldown are optional) or "go". The hold state lives on the bot (bot._refresherHold).
 	function Fu.RefresherPlan(bot, refresher)
 		local state = bot._refresherHold
 		if state == nil then
@@ -85,11 +85,12 @@ local function installItemAbility(Fu)
 		end
 		local ultimate = Fu.GetUltimateAbility(bot)
 		local refresherCost = refresher ~= nil and refresher:GetManaCost() or 0
-		local othersReady, needed, readyNames, comboNames =
+		local othersReady, needed, readyNames, comboNames, optional =
 			RefresherRules.Combo(refresherCost, ultimate:GetName(), ultimate:GetManaCost(), Fu.RefresherSpells(bot))
 		local plan = {
 			othersReady = othersReady,
 			needed = needed,
+			optional = optional,
 			ready = table.concat(readyNames, ","),
 			combo = table.concat(comboNames, "+"),
 		}

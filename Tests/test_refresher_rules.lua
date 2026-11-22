@@ -44,7 +44,7 @@ T.test("refresher: which spells count as useful (maintainer, 2026-11-21)", funct
 	T.eq(R.IsUseful(spell("x", { hidden = true })), false, "hidden slot")
 end)
 
-T.test("refresher: the combo mana counts the spells on cooldown, the ultimate once", function()
+T.test("refresher: the gate is the refresher + the ultimate; spells on cooldown are optional", function()
 	local R = rules()
 	local spells = {
 		spell("ult", { ultimate = true, onCooldown = true, cost = 150 }),
@@ -53,14 +53,16 @@ T.test("refresher: the combo mana counts the spells on cooldown, the ultimate on
 		spell("aura", { passive = true, onCooldown = true, cost = 0 }),
 		spell("short", { cooldown = 5, onCooldown = true, cost = 50 }),
 	}
-	local othersReady, needed, readyNames, comboNames = R.Combo(325, "ult", 150, spells)
+	local othersReady, needed, readyNames, comboNames, optional = R.Combo(325, "ult", 150, spells)
 	T.eq(othersReady, 1, "the nuke is still ready")
-	T.eq(needed, 325 + 150 + 100, "Orb + ultimate + the stun on cooldown (the ready nuke is not refreshed)")
+	T.eq(needed, 325 + 150, "gate: Orb + ultimate")
+	T.eq(optional, 100, "optional: the stun on cooldown (the ready nuke is not refreshed)")
 	T.eq(readyNames[1], "nuke", "ready names")
 	T.eq(table.concat(comboNames, "+"), "ult+stun", "combo names")
-	local none, onlyUlt = R.Combo(200, "ult", 150, {})
+	local none, onlyUlt, _, _, noOptional = R.Combo(200, "ult", 150, {})
 	T.eq(none, 0, "no other spells")
 	T.eq(onlyUlt, 350, "Shard + ultimate")
+	T.eq(noOptional, 0, "nothing optional")
 end)
 
 T.test("refresher: a ready spell holds the refresh up to 1s", function()
@@ -95,14 +97,34 @@ T.test("refresher: movement spells neither hold the refresh nor count in its man
 		spell("zuus_cloud", { cooldown = 40, onCooldown = true, cost = 275 }),
 		spell("zuus_thundergods_wrath", { ultimate = true, cooldown = 130, onCooldown = true, cost = 400 }),
 	}
-	local othersReady, needed, readyNames, comboNames = R.Combo(325, "zuus_thundergods_wrath", 400, spells)
+	local othersReady, needed, readyNames, comboNames, optional = R.Combo(325, "zuus_thundergods_wrath", 400, spells)
 	T.eq(othersReady, 0, "the ready jump doesn't hold the refresh")
 	T.eq(#readyNames, 0, "no ready names")
-	T.eq(needed, 325 + 400 + 275, "Orb + Wrath + Nimbus")
+	T.eq(needed, 325 + 400, "gate: Orb + Wrath")
+	T.eq(optional, 275, "optional: Nimbus")
 	T.eq(table.concat(comboNames, "+"), "zuus_thundergods_wrath+zuus_cloud", "combo")
 	T.eq(R.HoldStep({}, 3818, othersReady), "go", "refresh at once")
 	-- On cooldown it isn't paid for either.
 	spells[3].ready, spells[3].onCooldown = false, true
-	local _, needed2 = R.Combo(325, "zuus_thundergods_wrath", 400, spells)
+	local _, needed2, _, _, optional2 = R.Combo(325, "zuus_thundergods_wrath", 400, spells)
 	T.eq(needed2, needed, "a jump on cooldown adds no mana")
+	T.eq(optional2, optional, "not even optional mana")
+end)
+
+T.test("refresher: game 068 t=2788, Zeus refreshes Wrath with 908 mana (maintainer, 2026-11-22)", function()
+	local R = rules()
+	-- The game read mana=908 needed=1100 itemCost=325 combo=zuus_thundergods_wrath+zuus_cloud: 325 Orb + 500 Wrath
+	-- (level 3) + 275 Nimbus. "zeus could refresher + wrath only, refreshed nimbus is optional."
+	local spells = {
+		spell("zuus_heavenly_jump", { cooldown = 14, ready = true, cost = 100 }),
+		spell("zuus_cloud", { cooldown = 40, onCooldown = true, cost = 275 }),
+		spell("zuus_thundergods_wrath", { ultimate = true, cooldown = 120, onCooldown = true, cost = 500 }),
+	}
+	local othersReady, needed, _, comboNames, optional = R.Combo(325, "zuus_thundergods_wrath", 500, spells)
+	T.eq(othersReady, 0, "nothing to hold for")
+	T.eq(needed, 825, "gate: Orb + Wrath")
+	T.eq(optional, 275, "Nimbus is optional")
+	T.eq(table.concat(comboNames, "+"), "zuus_thundergods_wrath+zuus_cloud", "the refresh still brings Nimbus back")
+	T.eq(908 >= needed, true, "908 mana refreshes now")
+	T.eq(800 >= needed, false, "800 mana still waits")
 end)
