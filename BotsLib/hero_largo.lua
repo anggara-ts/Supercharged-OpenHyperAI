@@ -172,6 +172,8 @@ local rhapsody = {
 	hits = 0,
 	reanchors = 0,
 	noCast = 0,
+	missStreak = 0,
+	holdOwned = false,
 	holdUntil = -99,
 	stacks = 0,
 }
@@ -989,6 +991,7 @@ function X.TrackRhapsody(now)
 		rhapsody.lastReasonAt = now
 		rhapsody.pending = nil
 		rhapsody.strums, rhapsody.hits, rhapsody.reanchors, rhapsody.noCast = 0, 0, 0, 0
+		rhapsody.missStreak = 0
 		-- Settles what the game files can't: are the basic abilities hidden during the song, are the songs
 		-- unhidden, trained and castable.
 		local song = songByKey[rhapsody.first] or fightSongAbility
@@ -1043,13 +1046,57 @@ function X.TrackRhapsody(now)
 end
 
 -- What the strum in flight did: one [OHA-LARGO] strum line per strum, written once the result is known.
+-- Game 071 18:00: in a retreat the strum orders were lost (cast=no) and the song was turned off. A song order is
+-- held for a moment against our own mode Thinks (bot._castHoldUntil: OhaCastGuard skips every SafeCall-wrapped
+-- Think, and the item think calls X.CastHoldTick instead of SkillsComplement), and pushed again while the beat's
+-- window lasts. Valve's own retreat Think (mode_retreat_generic.lua has no Think) is not held: the re-push covers it.
+local STRUM_HOLD = 0.12
+function X.HoldForStrum(now)
+	if bot._castHoldUntil == nil or bot._castHoldUntil < now or rhapsody.holdOwned then
+		bot._castHoldUntil = now + STRUM_HOLD
+		rhapsody.holdOwned = true
+		return "push-hold"
+	end
+	return "push"
+end
+function X.ReleaseStrumHold()
+	if rhapsody.holdOwned then
+		bot._castHoldUntil = nil
+		rhapsody.holdOwned = false
+	end
+end
+function X.CastHoldTick()
+	X.TrackRhapsody(DotaTime())
+end
+-- Largo runs from a fight: a lost order or a blocked beat then does not end the song (he needs the run and heal songs).
+function X.IsEscaping()
+	return Fu.IsRetreating(bot) or rhapsody.why ~= nil and string.find(rhapsody.why, "escape", 1, true) ~= nil
+end
+
 function X.CheckStrum(now, stacks)
 	local pending = rhapsody.pending
 	local since = now - pending.at
 	-- The strum went out: the songs' shared cooldown runs, or the mana is gone.
 	local manaSpent = pending.mana - bot:GetMana()
-	if pending.song:GetCooldownTimeRemaining() > 0 or manaSpent >= pending.cost * 0.6 then
+	if not pending.cast and (pending.song:GetCooldownTimeRemaining() > 0 or manaSpent >= pending.cost * 0.6) then
 		pending.cast = true
+		pending.castAt = now
+		pending.cdSeen = pending.song:GetCooldownTimeRemaining()
+		X.ReleaseStrumHold()
+	end
+	-- Not out yet: the order was lost (a mode's move replaced it). Again, while the beat's window lasts.
+	if
+		not pending.cast
+		and X.CanStrum()
+		and now - pending.lastPushAt >= 0.06
+		and LargoRules.ShouldRepush(now - pending.beat, pending.attempts)
+		and X.SongBlockReason(pending.song) == nil
+	then
+		pending.attempts = pending.attempts + 1
+		pending.lastPushAt = now
+		bot:ActionPush_UseAbility(pending.song)
+		X.HoldForStrum(now)
+		return
 	end
 	if pending.cost2 ~= nil and manaSpent >= (pending.cost + pending.cost2) * 0.8 then
 		pending.both = true
@@ -1077,15 +1124,33 @@ function X.CheckStrum(now, stacks)
 	if result == "hit" then
 		rhapsody.hits = rhapsody.hits + 1
 	end
-	rhapsody.noCast = pending.cast and 0 or rhapsody.noCast + 1
+	local castDelay = pending.cast and pending.castAt - pending.beat or -1
+	-- Only a strum that went out on time says anything about the beat (a late or lost order does not, game 071).
+	local castOnTime = pending.cast and castDelay <= LargoRules.GRACE
+	if result == "miss" and castOnTime then
+		rhapsody.missStreak = rhapsody.missStreak + 1
+	elseif result ~= "miss" then
+		rhapsody.missStreak = 0
+	end
+	if pending.cast then
+		rhapsody.noCast = 0
+	elseif LargoRules.CountsAsNoCast(false, nil, X.IsEscaping()) then
+		if LargoRules.CountsAsNoCast(false, blocked, X.IsEscaping()) then
+			rhapsody.noCast = rhapsody.noCast + 1
+		end
+	end
 	local reanchor = "no"
-	if LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits) then
-		local newAnchor = LargoRules.Reanchor(rhapsody.anchor, result, pending.cast, LargoRules.REANCHOR_SHIFT)
+	if LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits, rhapsody.missStreak) then
+		local newAnchor = LargoRules.Reanchor(rhapsody.anchor, result, castOnTime, LargoRules.REANCHOR_SHIFT)
 		if newAnchor ~= rhapsody.anchor then
 			rhapsody.anchor = newAnchor
 			rhapsody.reanchors = rhapsody.reanchors + 1
+			rhapsody.missStreak = 0
 			reanchor = "yes"
-			if not LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits) then
+			if
+				not LargoRules.MayReanchor(rhapsody.reanchors, rhapsody.hits, rhapsody.missStreak)
+				and rhapsody.hits == 0
+			then
 				-- A whole beat swept with no hit: the stacks don't tell, keep the toggle-on beat from now on.
 				rhapsody.anchor = rhapsody.onAt
 				reanchor = "stop"
@@ -1094,7 +1159,7 @@ function X.CheckStrum(now, stacks)
 	end
 	print(
 		string.format(
-			"[OHA-LARGO] t=%.0f largo strum song=%s second=%s why=%s before=%d after=%d hit=%s cast=%s double=%s phase=%.2f frac=%.2f late=%.2f reanchor=%s n=%d hits=%d",
+			"[OHA-LARGO] t=%.0f largo strum song=%s second=%s why=%s before=%d after=%d hit=%s cast=%s via=%s attempts=%d castDelay=%.2f cdSeen=%.2f double=%s phase=%.2f frac=%.2f late=%.2f reanchor=%s n=%d hits=%d",
 			now,
 			pending.key,
 			tostring(pending.key2),
@@ -1103,6 +1168,10 @@ function X.CheckStrum(now, stacks)
 			stacks,
 			result,
 			Bool(pending.cast),
+			pending.via,
+			pending.attempts,
+			castDelay,
+			pending.cdSeen or -1,
 			pending.key2 == nil and "none" or pending.both and "both" or pending.retried and "retried" or "first-only",
 			(pending.at - rhapsody.onAt) % 1,
 			pending.at % 1,
@@ -1251,12 +1320,15 @@ function X.RhapsodyThink(now)
 		cast = false,
 		both = false,
 		retried = false,
+		attempts = 1,
+		lastPushAt = now,
 	}
 	-- Push, not Action_: the instant song goes first and the walk or other order resumes after it.
 	if secondSong ~= nil then
 		bot:ActionPush_UseAbility(secondSong)
 	end
 	bot:ActionPush_UseAbility(firstSong)
+	rhapsody.pending.via = X.HoldForStrum(now)
 	return true
 end
 return X

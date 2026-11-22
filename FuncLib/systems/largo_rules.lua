@@ -73,9 +73,29 @@ function LargoRules.Reanchor(anchor, result, castWentOut, shift)
 	return anchor
 end
 
--- Whether a miss may still move the beat: always after a hit (the stacks work), else for MAX_REANCHORS shifts.
-function LargoRules.MayReanchor(reanchors, hits)
-	return hits > 0 or reanchors < LargoRules.MAX_REANCHORS
+-- Whether a miss may move the beat. A beat that has hit (the stacks work) moves only after two on-time misses in a row
+-- (game 071: one lost or late order moved a proven beat); before any hit, for MAX_REANCHORS shifts.
+function LargoRules.MayReanchor(reanchors, hits, missStreak)
+	if hits > 0 then
+		return (missStreak or 0) >= 2
+	end
+	return reanchors < LargoRules.MAX_REANCHORS
+end
+
+-- A strum order that has not gone out yet is pushed again while the beat's window lasts (LATE + 0.1s after the beat,
+-- inside the 0.4s grace), at most MAX_PUSHES times.
+LargoRules.MAX_PUSHES = 6
+function LargoRules.ShouldRepush(sinceBeat, attempts)
+	return sinceBeat <= LargoRules.LATE + 0.1 and attempts < LargoRules.MAX_PUSHES
+end
+
+-- Whether a beat with no song out counts toward the no-cast toggle-off. Not while he runs (game 071: the song went off
+-- in a retreat, when the run and heal songs mattered), not for a block by the shared cooldown (a song just went out).
+function LargoRules.CountsAsNoCast(castWentOut, blockedWhy, escaping)
+	if escaping or castWentOut then
+		return false
+	end
+	return blockedWhy ~= "cooldown"
 end
 
 -- Which songs to play. s (all optional):
