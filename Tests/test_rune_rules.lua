@@ -144,3 +144,20 @@ T.test("rune mode: the water walk before the spawn beats laning near the spot (g
 	bot._waterWalk = { id = 0, loc = bot:GetLocation() + Vector(2100, 0, 0), t0 = 120 }
 	T.ok(GetDesire() < 0.6, "2100 away, not the closest: below 0.6")
 end)
+
+T.test("rune rules: wisdom shrine trip and stand", function()
+	local R = load()
+	-- 7.42 game data: ability_xp_fountain radius 300; the shrine's RingRadius 100 stops a hero at ~140.
+	T.ok(R.WISDOM_STAND < R.WISDOM_RADIUS and R.WISDOM_STAND > 140, "stand distance reachable and inside the radius")
+	-- Game 068 t=428: Vengeful Spirit at dist=140, travel 0.4s, eta -8 read cant-arrive.
+	T.eq(R.WisdomTrip(140, 0.4, -8), "window", "on the shrine at the window end: window, not cant-arrive")
+	T.eq(R.WisdomTrip(140, 0.4, -5), "go", "on the shrine with 3s left: stay")
+	T.eq(R.WisdomTrip(7225, 24, 8), "cant-arrive", "24s walk with 16s left")
+	T.eq(R.WisdomTrip(2000, 6, -7.5), "window", "under 1s left: the window, not the walk")
+	T.eq(R.WisdomTrip(2679, 7, 12), "go", "7s walk with 20s left")
+	-- The stand clock starts at the mark.
+	T.eq(R.WisdomStandFrom(nil, 0, 412), 412, "first think on the shrine")
+	T.eq(R.WisdomStandFrom(412, 0, 415), 412, "before the mark the clock keeps running")
+	T.eq(R.WisdomStandFrom(412, 420, 420.1), 420, "the mark passed while standing: counts from the mark")
+	T.eq(R.WisdomStandFrom(420, 420, 423), 420, "after the mark it stays")
+end)

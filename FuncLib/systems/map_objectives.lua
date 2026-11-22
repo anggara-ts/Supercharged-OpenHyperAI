@@ -2,6 +2,7 @@
 local MapObjectives = {}
 
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
+local RuneRules = require(GetScriptDirectory() .. "/FuncLib/systems/rune_rules")
 
 local cachedLotus = { at = -999, units = {} }
 local cachedWisdom = { at = -999, units = {} }
@@ -920,14 +921,20 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 		local loc, dist = MapObjectives.PickWisdomForBot(bot, locs)
 		local maxWalk = MapObjectives.MaxWalk(bot, true)
 		local arrive = MapObjectives.ArriveEarlyForDistance(dist, bot)
-		local inWisdom, etaW = MapObjectives.InMarkWindow(wInterval, arrive, 8)
+		local inWisdom, etaW = MapObjectives.InMarkWindow(wInterval, arrive, RuneRules.WISDOM_STAY)
 		local cantArrive = false
+		local windowEnd = false
 		-- Only go when the walk fits the window (it closes 8s after the mark). Game 039, 21:00: Tusk said
 		-- "Grabbing the XP shrine" from far away at 20:59, then gave up at 21:08 and went farming (#32).
 		if inWisdom and loc ~= nil and type(etaW) == "number" then
 			local travel = dist / math.max(250, bot:GetCurrentMovementSpeed())
 			local markKey = math.floor(DotaTime() / wInterval + (etaW > 0 and 1 or 0))
-			if travel > etaW + 8 then
+			local trip = RuneRules.WisdomTrip(dist, travel, etaW)
+			if trip == "window" then
+				-- The window closes now (game 068 t=428: a bot on the shrine read cant-arrive travel=0 eta=-8).
+				inWisdom = false
+				windowEnd = true
+			elseif trip == "cant-arrive" then
 				inWisdom = false
 				cantArrive = true
 				if bot._wisdomSkipLogged ~= markKey then
@@ -964,7 +971,7 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 		local noWhy = nil
 		if cantArrive then
 			noWhy = "cant-arrive"
-		elseif not inWisdom then
+		elseif windowEnd or not inWisdom then
 			noWhy = "window"
 		elseif loc == nil then
 			noWhy = "no-shrine"
@@ -1337,9 +1344,10 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 			end
 			return true
 		end
-		-- 280 only says "near the shrine". The real capture area is smaller: at 14:00 Techies
-		-- stood ~280 out "covering" it and got nothing. Walk onto the centre before covering.
-		if dist > 100 then
+		-- 280 only says "near the shrine" (at 14:00 Techies stood ~280 out "covering" it and got nothing). Stand at
+		-- RuneRules.WISDOM_STAND (220, inside the 300 capture radius). The old 100 was never reached: the shrine's
+		-- ring (RingRadius 100) stops a hero at ~140 (game 068), so no stand was timed and nothing claimed.
+		if dist > RuneRules.WISDOM_STAND then
 			bot._wisdomStandSince = nil
 			bot._wisdomXpAtStand = nil
 			if not bot:IsCastingAbility() and not bot:IsChanneling() then
@@ -1349,14 +1357,17 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		end
 		local now = DotaTime()
 		local xp = bot.GetCurrentXP and bot:GetCurrentXP() or nil
-		if bot._wisdomStandSince == nil then
-			bot._wisdomStandSince = now
+		local interval = MapObjectives.WisdomInterval()
+		local mark = math.floor(math.max(0, now) / interval) * interval
+		local standFrom = RuneRules.WisdomStandFrom(bot._wisdomStandSince, mark, now)
+		if bot._wisdomStandSince == nil or standFrom ~= bot._wisdomStandSince then
+			-- First think on the shrine, or the mark passed while standing: the clock and the XP baseline start
+			-- now, so creep XP from before the mark doesn't read as the shrine's.
+			bot._wisdomStandSince = standFrom
 			bot._wisdomXpAtStand = xp
 		else
 			local gotXp = xp ~= nil and bot._wisdomXpAtStand ~= nil and xp > bot._wisdomXpAtStand
-			local covered = now - bot._wisdomStandSince >= 3.5
-			local interval = MapObjectives.WisdomInterval()
-			local mark = math.floor(math.max(0, now) / interval) * interval
+			local covered = now - bot._wisdomStandSince >= RuneRules.WISDOM_COVER
 			if mark >= interval and now >= mark and (gotXp or covered) then
 				bot._wisdomClaimedMark = mark
 				pcall(

@@ -129,4 +129,50 @@ function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
 	return oldDesire
 end
 
+-- Wisdom shrine (#32). Game data (7.42 pak01 scripts/npc/npc_units.txt, npc_dota_xp_fountain): RingRadius 100, so a
+-- hero can't walk closer than ~140 to the shrine's centre (game 068: Vengeful Spirit and Nyx stopped at 139-140 for
+-- the whole window). npc_abilities.txt, ability_xp_fountain: radius 300, countdown_time 3: a hero inside 300 for 3s
+-- takes the XP. The old stand rule waited for dist <= 100, which a hero never reaches, so no stand was ever timed and
+-- no shrine claimed (games 064-068). Stand at 220: inside the 300 radius with 80 to spare, outside the ~140 the
+-- shrine's ring allows.
+RuneRules.WISDOM_RADIUS = 300
+RuneRules.WISDOM_STAND = 220
+-- Seconds on the shrine after the mark before a stand with no XP seen counts as covered (countdown_time 3 + 0.5).
+RuneRules.WISDOM_COVER = 3.5
+-- Seconds the shrine window stays open after the mark (the InMarkWindow stayAfter of the shrine trip).
+RuneRules.WISDOM_STAY = 8
+
+-- Can this shrine trip still make it? Returns "go" | "cant-arrive" | "window". etaW: seconds to the mark (negative
+-- after it). A bot already on the shrine never reads cant-arrive, and a window with under 1s left reads "window":
+-- game 068 t=428, Vengeful Spirit at dist=140 printed `cant-arrive travel=0 eta=-8` (travel 0.4s > 0s left).
+function RuneRules.WisdomTrip(dist, travel, etaW)
+	local left = etaW + RuneRules.WISDOM_STAY
+	if dist <= RuneRules.WISDOM_STAND then
+		if left <= 0 then
+			return "window"
+		end
+		return "go"
+	end
+	if travel > left then
+		if left <= 1 then
+			return "window"
+		end
+		return "cant-arrive"
+	end
+	return "go"
+end
+
+-- The stand clock on the shrine starts at the mark: a stand from before the mark counts from the mark, so a bot that
+-- arrived early does not read "covered" (and leave) the moment the mark passes, before the 3s countdown ran.
+-- Returns the stand start to use.
+function RuneRules.WisdomStandFrom(standSince, mark, now)
+	if standSince == nil then
+		return now
+	end
+	if now >= mark and standSince < mark then
+		return mark
+	end
+	return standSince
+end
+
 return RuneRules
