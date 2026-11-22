@@ -1,7 +1,7 @@
 -- Pure danger map rules (#227, no bot API calls), so Tests/test_danger_map_rules.lua drives them with plain numbers.
 -- FuncLib/systems/danger_map.lua builds the team's enemy list from the last-seen info and calls these.
 -- Game 073: 29 of 86 deaths came with no ally within 1200 ([OHA-DEATH] allies=0), 22 of them against 3-5 enemies,
--- most of them on the bot's own half (Dire jungle at 2663,3483 / 4093,3443 / 3984,1702 with 4-5 Radiant heroes).
+-- many of them on the bot's own half (Dire jungle at 2663,3483 / 4093,3443 / 3984,1702 with 4-5 Radiant heroes).
 -- An enemy entry: { x =, y =, unseen = seconds since seen (0 = visible), speed = move speed }.
 local Rules = {}
 
@@ -10,7 +10,7 @@ Rules.RADIUS = 1200 -- an enemy within this of the spot counts as a danger there
 Rules.UNSEEN_CAP = 10 -- the reach stops growing after this long unseen (the enemy is "missing", see Missing)
 Rules.MISSING_AFTER = 10 -- unseen this long (and alive): missing
 -- No enemy movement speed read yet: 300, the middle of the heroes' base MovementSpeed (270-330) in npc_heroes.txt
--- (installed game files). danger_map.lua keeps the fastest speed it has seen for each enemy.
+-- (installed game files). danger_map.lua keeps the latest speed it has seen for each enemy, at least this.
 Rules.DEFAULT_SPEED = 300
 Rules.ISOLATED_RADIUS = 1500 -- no other enemy could be this close: the target is alone
 Rules.ISOLATED_SEEN = 3 -- the target itself was seen within this many seconds

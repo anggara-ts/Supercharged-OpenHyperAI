@@ -360,30 +360,45 @@ local function CampAllowedBySide(camp)
 	-- With at most 2 enemies alive the enemy jungle is open anyway.
 	return aliveEnemyCountNow <= 2 or EnemyCampCovered(camp)
 end
--- Team danger map (#227, FuncLib/systems/danger_map.lua): after the laning phase a farm spot (camp or lane front)
--- is skipped when no ally is within 1500 of it and 3+ enemies could reach it within 5s, or it is on the far side
--- (enemy camp, or nearer their living towers than ours) with 2+ enemies able to reach it or 3+ enemies missing.
--- Game 073: 29 of 86 deaths with no ally near, 22 of them against 3-5 enemies. [OHA-DANGER] farm-skip names a spot
--- when its skip reason changes (5s throttle per bot; a change held back prints later), with the camp or lane
--- picked instead (alt=). dangerFallbackKey: the camp kept when every camp is skipped (no farm stall).
-local dangerLogged, dangerLogAt, dangerFallbackKey = {}, -999, nil
+-- Team danger map (#227, FuncLib/systems/danger_map.lua): after the laning phase a farm spot (camp, lane front or
+-- the wave next to the bot) is skipped when no ally is within 1500 of it and 3+ enemies could reach it within 5s, or
+-- it is on the far side (enemy camp, or nearer their living towers than ours) with 2+ enemies able to reach it or 3+
+-- enemies missing. Game 073: 29 of 86 deaths with no ally within 1200, 22 of them against 3-5 enemies, 9 of those
+-- with farm active in the 30s before. When every camp is skipped the list is empty (alt=none): the farm then takes
+-- a safe lane, the idle walk or the team. [OHA-DANGER] farm-skip names a spot when its skip reason changes (5s
+-- throttle per bot; a change held back prints later), with the spot taken instead (alt=).
+local dangerLogged, dangerLogAt = {}, -999
+-- One answer per spot per danger snapshot (rebuilt every 0.5s): the farm desire asks for every camp every think.
+local spotCache, spotCacheAt = {}, nil
 local function SpotDangerWhy(loc, enemyCamp)
 	if loc == nil or Fu.IsInLaningPhase() then
 		return nil, 0, 0, 0
 	end
-	return DangerMap.FarmSkip(bot, loc, enemyCamp)
+	local snap = DangerMap.Snapshot()
+	local at = snap ~= nil and snap.at or nil
+	if at ~= spotCacheAt then
+		spotCache, spotCacheAt = {}, at
+	end
+	local key = math.floor(loc.x) * 100000 + math.floor(loc.y)
+	local cached = spotCache[key]
+	if cached == nil then
+		local why, danger, missing, allies = DangerMap.FarmSkip(bot, loc, enemyCamp)
+		cached = { why = why, danger = danger, missing = missing, allies = allies }
+		spotCache[key] = cached
+	end
+	return cached.why, cached.danger, cached.missing, cached.allies
 end
 -- skips: { key =, why =, danger =, missing =, allies =, loc = } for spots skipped this call; clear: keys of spots
--- that are not skipped (their logged state resets). alt: the spot farmed instead, as text.
+-- that are not skipped (their logged state resets). alt: the spot farmed instead, as text (or a function for it).
 local function LogDangerSkips(skips, clear, alt)
 	for _, key in ipairs(clear or {}) do
 		dangerLogged[key] = nil
 	end
-	if DotaTime() < dangerLogAt then
+	if skips == nil or DotaTime() < dangerLogAt then
 		return
 	end
 	local first, changed = nil, 0
-	for _, skip in ipairs(skips or {}) do
+	for _, skip in ipairs(skips) do
 		if dangerLogged[skip.key] ~= skip.why then
 			changed = changed + 1
 			first = first or skip
@@ -413,11 +428,14 @@ local function LogDangerSkips(skips, clear, alt)
 		)
 	)
 end
+local function DangerSkipEntry(key, loc, why, danger, missing, allies)
+	return { key = key, why = why, danger = danger, missing = missing, allies = allies, loc = loc }
+end
 local function CampAllowed(camp)
 	if not CampAllowedBySide(camp) then
 		return false
 	end
-	return CampKey(camp) == dangerFallbackKey or SpotDangerWhy(CampLoc(camp), Fu.Site.IsEnemyCamp(camp)) == nil
+	return SpotDangerWhy(CampLoc(camp), Fu.Site.IsEnemyCamp(camp)) == nil
 end
 local function FilterCamps(camps)
 	local allowed, skips, clear = {}, nil, {}
@@ -430,39 +448,13 @@ local function FilterCamps(camps)
 				clear[#clear + 1] = CampKey(camp)
 			else
 				skips = skips or {}
-				skips[#skips + 1] = {
-					camp = camp,
-					key = CampKey(camp),
-					why = why,
-					danger = danger,
-					missing = missing,
-					allies = allies,
-					loc = loc,
-				}
+				skips[#skips + 1] = DangerSkipEntry(CampKey(camp), loc, why, danger, missing, allies)
 			end
 		end
 	end
-	dangerFallbackKey = nil
 	if skips ~= nil then
-		if #allowed == 0 then
-			-- Every camp is skipped: keep the least dangerous one, own side first, so the farm still has a target.
-			local fallback = nil
-			for _, skip in ipairs(skips) do
-				local ownSide = not Fu.Site.IsEnemyCamp(skip.camp)
-				if
-					fallback == nil
-					or ownSide and not fallback.ownSide
-					or ownSide == fallback.ownSide and skip.danger < fallback.danger
-				then
-					fallback = { camp = skip.camp, danger = skip.danger, ownSide = ownSide }
-				end
-			end
-			allowed[1] = fallback.camp
-			dangerFallbackKey = CampKey(fallback.camp)
-		end
 		LogDangerSkips(skips, clear, function()
-			local alt = Fu.Site.GetClosestNeutralSpwan(bot, allowed)
-			return (dangerFallbackKey ~= nil and "fallback:" or "") .. CampKey(alt)
+			return CampKey(Fu.Site.GetClosestNeutralSpwan(bot, allowed))
 		end)
 	else
 		LogDangerSkips(nil, clear, nil)
@@ -696,13 +688,20 @@ local function IdleTarget()
 			and not LaneBehind(lane)
 			and #Fu.GetLastSeenEnemiesNearLoc(front, 1600) == 0
 			and IsLocationPassable(front)
+			and SpotDangerWhy(front, false) == nil
 		then
 			best, bestDist, bestKind = front, dist, "wave-" .. lane
 		end
 	end
 	for _, camp in ipairs(Fu.Role["availableCampTable"] or {}) do
 		local loc = CampLoc(camp)
-		if loc ~= nil and not Fu.Site.IsEnemyCamp(camp) and not Fu.Site.IsCampDangerous(bot, camp) then
+		-- The danger map's skip too (#227): with no safe wave or camp the walk goes to the team.
+		if
+			loc ~= nil
+			and not Fu.Site.IsEnemyCamp(camp)
+			and not Fu.Site.IsCampDangerous(bot, camp)
+			and SpotDangerWhy(loc, false) == nil
+		then
 			local dist = GetUnitToLocationDistance(bot, loc)
 			if dist > 800 and dist < bestDist then
 				best, bestDist, bestKind, bestCamp = loc, dist, "camp", camp
@@ -1439,6 +1438,18 @@ function GetDesireHelper()
 				laneCreeps = {}
 			end
 		end
+		-- The wave next to the bot, by the danger map (#227): 3+ enemies could be there within 5s and no ally is near
+		-- (or the far side with 2+ / 3+ missing). The lane fronts and camps below are checked the same way.
+		if #laneCreeps > 0 then
+			local waveCenter = Fu.GetCenterOfUnits(laneCreeps)
+			local why, danger, missing, allies = SpotDangerWhy(waveCenter, false)
+			if why ~= nil then
+				LogDangerSkips({ DangerSkipEntry("wave", waveCenter, why, danger, missing, allies) }, nil, "next-spot")
+				laneCreeps = {}
+			else
+				LogDangerSkips(nil, { "wave" }, nil)
+			end
+		end
 		if #laneCreeps > 0 then
 			local enemiesNearCreeps = Fu.GetEnemiesNearLoc(Fu.GetCenterOfUnits(laneCreeps), 1600)
 			if #enemiesNearCreeps == 0 then
@@ -1464,14 +1475,8 @@ function GetDesireHelper()
 						dangerWhy, danger, missing, allies = SpotDangerWhy(laneFront, false)
 						if dangerWhy ~= nil then
 							laneSkips = laneSkips or {}
-							laneSkips[#laneSkips + 1] = {
-								key = "lane" .. lane,
-								why = dangerWhy,
-								danger = danger,
-								missing = missing,
-								allies = allies,
-								loc = laneFront,
-							}
+							laneSkips[#laneSkips + 1] =
+								DangerSkipEntry("lane" .. lane, laneFront, dangerWhy, danger, missing, allies)
 						else
 							laneClear[#laneClear + 1] = "lane" .. lane
 						end

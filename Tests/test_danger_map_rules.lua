@@ -7,14 +7,15 @@ local function rules()
 	return require(GetScriptDirectory() .. "/FuncLib/systems/danger_map_rules")
 end
 
--- Game 073 t=2774: Io (Dire) farmed alone at 3538,2482 (farm 0.63, no enemy in sight 3.5s before) and died at
--- 3525,3025 to Alchemist, Spirit Breaker, Zeus and Puck (allies=0). Their last-seen spots are not in the log: the
--- points below put them 2000-2600 from the camp, seen 2-3s earlier, the way a gank walks in.
+-- Game 073 t=1291-1320: Undying (Dire, 1-3 of 5 Dire alive) farmed alone in the Dire bottom jungle ([OHA-FARM]
+-- camp-switch to=4352,48) and died at 3984,1702 to all five Radiant heroes (allies=0). Their last-seen spots are not
+-- in the log: the points below are SYNTHETIC, 1900-2600 from the camp and seen 2-3s earlier, the way a gank walks in.
+local CAMP = { x = 4352, y = 48 }
 local GANK = {
-	{ x = 1600, y = 2000, unseen = 2, speed = 330 },
-	{ x = 2000, y = 4200, unseen = 3, speed = 350 },
-	{ x = 1300, y = 3300, unseen = 2, speed = 300 },
-	{ x = 5600, y = 3600, unseen = 3, speed = 310 },
+	{ x = 2600, y = 700, unseen = 2, speed = 330 },
+	{ x = 3000, y = 2200, unseen = 3, speed = 350 },
+	{ x = 5000, y = 2600, unseen = 2, speed = 300 },
+	{ x = 2400, y = -1200, unseen = 3, speed = 310 },
 }
 -- Game 062 lane towers (Tests/test_farm_rules.lua: from the [OHA-FARM] withdraw points).
 local RADIANT_TOWERS = {
@@ -48,15 +49,15 @@ T.test("danger map: reach grows with time unseen, capped at 10s", function()
 	T.eq(R.Reach(0, nil, 0), 0, "default speed, no horizon")
 end)
 
-T.test("danger map: game 073 Io camp - four Radiant heroes could reach it within 5s", function()
+T.test("danger map: game 073 Undying camp - four Radiant heroes could reach it within 5s", function()
 	local R = rules()
-	T.eq(R.Danger(GANK, 3538, 2482), 4, "all four within reach + 1200")
+	T.eq(R.Danger(GANK, CAMP.x, CAMP.y), 4, "all four within reach + 1200")
 	-- The same heroes seen 6000+ away a second ago are no danger at the camp.
 	local far = {
 		{ x = -3000, y = -2000, unseen = 1, speed = 330 },
 		{ x = -2500, y = -3000, unseen = 1, speed = 330 },
 	}
-	T.eq(R.Danger(far, 3538, 2482), 0, "far enemies")
+	T.eq(R.Danger(far, CAMP.x, CAMP.y), 0, "far enemies")
 	T.eq(R.Missing(GANK), 0, "all seen within 3s")
 	local missing = {
 		{ x = 0, y = 0, unseen = 12 },
@@ -108,7 +109,11 @@ end)
 
 T.test("danger map: farm skip decision", function()
 	local R = rules()
-	T.eq(R.FarmSkipWhy({ danger = 4, missing = 0, allies = 0, farSide = false }), "danger", "game 073 Io: own camp, 4")
+	T.eq(
+		R.FarmSkipWhy({ danger = 4, missing = 0, allies = 0, farSide = false }),
+		"danger",
+		"game 073 Undying: own camp"
+	)
 	T.eq(R.FarmSkipWhy({ danger = 4, missing = 0, allies = 1, farSide = false }), nil, "an ally at the camp")
 	T.eq(R.FarmSkipWhy({ danger = 2, missing = 0, allies = 0, farSide = false }), nil, "own side, 2")
 	T.eq(R.FarmSkipWhy({ danger = 2, missing = 0, allies = 0, farSide = true }), "danger-far", "far side, 2")

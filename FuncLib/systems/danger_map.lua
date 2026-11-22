@@ -53,13 +53,13 @@ end
 
 local function Rebuild(snap, team, now)
 	local enemyTeam = GetOpposingTeam()
-	-- The fastest speed seen per enemy (a slowed hero reads low for a moment; boots only add).
+	-- The latest speed seen per enemy, at least DEFAULT_SPEED (a slow reads low for a moment). Not the fastest ever:
+	-- one haste rune or Charge of Darkness would keep a huge reach for the rest of the game.
 	for _, hero in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES) or {}) do
 		if hero ~= nil and hero:IsAlive() and hero:IsHero() and not hero:IsIllusion() then
 			local pid = hero:GetPlayerID()
-			local speed = hero:GetCurrentMovementSpeed() or 0
-			if pid ~= nil and speed > (snap.speeds[pid] or 0) then
-				snap.speeds[pid] = speed
+			if pid ~= nil then
+				snap.speeds[pid] = math.max(hero:GetCurrentMovementSpeed() or 0, Rules.DEFAULT_SPEED)
 			end
 		end
 	end
@@ -120,7 +120,7 @@ function DangerMap.Snapshot(team)
 	if fresh or team ~= GetTeam() then
 		return snap
 	end
-	snap = snap or { speeds = {}, dead = {}, respawnAt = {} }
+	snap = snap or { speeds = {}, dead = {}, respawnAt = {}, sideMemo = {}, memo = {} }
 	DangerMap.byTeam[team] = snap
 	local ok, err = pcall(Rebuild, snap, team, now)
 	if not ok then
