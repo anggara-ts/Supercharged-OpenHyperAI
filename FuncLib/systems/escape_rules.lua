@@ -134,6 +134,12 @@ function EscapeRules.PhaseMaxWait(why, retreatModeThroughout)
 	end
 	return EscapeRules.PHASE_WAIT_HOLD
 end
+-- Is a wait (age: seconds since it started) still the one for this cast? A wait is kept for its cap + 0.3s; an
+-- older one is from an earlier decision and its fields (escape, Orb first) must not be read (game 068, t=2453: a
+-- close dodge cast with waited=3.77, from a retreat wait that never cast). nil age: no wait.
+function EscapeRules.PhaseWantFresh(age, maxWait)
+	return age ~= nil and age <= (maxWait or EscapeRules.PHASE_WAIT_HOLD) + 0.3
+end
 
 -- An escape shift: one she uses to get away, not a dodge in a fight she stays in. Low-HP, Siphon and Roshan shifts
 -- always; any other non-dodge shift when she was retreating as the wait started (Valve's retreat mode or a hard

@@ -752,7 +752,7 @@ end
 -- (EscapeRules.IsEscapeShift); for an escape shift it throws the Orb toward the escape point now, inside the wait
 -- (EscapeRules.PhaseOrbFirst), so X.ShiftExit can Jaunt to it as the shift ends (game 068, t=2326-2330: shift in
 -- place, Orb after it, dead). bot._phaseOrbFirstWhy: thrown | rooted | orb-out | orb-down | jaunt-down | - (not an
--- escape shift), printed on the phase cast line. True: wait this think.
+-- escape shift), printed on the phase cast line (thrown as left or cancelled). True: wait this think.
 function X.StartPhaseWant(outpostMode)
 	local now = DotaTime()
 	local mode = bot:GetActiveMode()
@@ -905,8 +905,10 @@ function X.SkillsComplement()
 	if phaseShiftDesire > 0 and not castNow then
 		local now = DotaTime()
 		if
-			bot._phaseWantAt == nil
-			or now - bot._phaseWantAt > (bot._phaseWantMaxWait or EscapeRules.PHASE_WAIT_HOLD) + 0.3
+			not EscapeRules.PhaseWantFresh(
+				bot._phaseWantAt ~= nil and now - bot._phaseWantAt or nil,
+				bot._phaseWantMaxWait
+			)
 		then
 			if X.StartPhaseWant(outpostMode) then
 				return
@@ -918,11 +920,12 @@ function X.SkillsComplement()
 			bot._phaseWantMode == BOT_MODE_RETREAT and activeMode == BOT_MODE_RETREAT
 		)
 		-- The Orb thrown for this shift leaves first: a shift order inside its cast point (0.1s, datafeed hero 13)
-		-- would cancel it. Its cooldown starts once it is out.
+		-- would cancel it, and she may have to turn to the point first (0.2s more at most). Its cooldown starts once
+		-- it is out.
 		if
 			bot._phaseOrbFirstAt ~= nil
 			and illusoryOrbAbility:GetCooldownTimeRemaining() <= 0
-			and now - bot._phaseOrbFirstAt < illusoryOrbAbility:GetCastPoint() + 0.1
+			and now - bot._phaseOrbFirstAt < illusoryOrbAbility:GetCastPoint() + 0.3
 		then
 			return
 		end
@@ -932,14 +935,25 @@ function X.SkillsComplement()
 	end
 	if phaseShiftDesire > 0 then
 		local activeMode = bot:GetActiveMode()
+		-- The wait's fields only when the wait is this cast's (a close dodge skips the wait and can find an old one).
+		local wantFresh = EscapeRules.PhaseWantFresh(
+			bot._phaseWantAt ~= nil and DotaTime() - bot._phaseWantAt or nil,
+			bot._phaseWantMaxWait
+		)
 		-- An escape shift (EscapeRules.IsEscapeShift) ends with a Jaunt to the Orb (X.ShiftExit) and blocks the
 		-- offensive Rift for 2s after it (X.RiftAfterShiftBlocked).
-		local escapeShift = bot._phaseWantEscape == true
+		local escapeShift = wantFresh and bot._phaseWantEscape == true
 			or EscapeRules.IsEscapeShift(
 				X.phaseWhy,
 				isRetreating or activeMode == BOT_MODE_RETREAT or DotaTime() < (bot._hardRetreatUntil or -1),
 				Fu.GetHP(bot)
 			)
+		-- orb-first=left (the Orb thrown for this shift is out: its cooldown runs) | cancelled (it never left) |
+		-- rooted | orb-out | orb-down | jaunt-down | - (not an escape shift, or no wait).
+		local orbFirst = wantFresh and bot._phaseOrbFirstWhy or "-"
+		if wantFresh and bot._phaseOrbFirstAt ~= nil then
+			orbFirst = illusoryOrbAbility:GetCooldownTimeRemaining() > 0 and "left" or "cancelled"
+		end
 		-- via=now (a close dodge), hold (the outpost hold is the active mode) or timeout (the wait ran out first).
 		pcall(
 			print,
@@ -958,7 +972,7 @@ function X.SkillsComplement()
 				castNow and "now" or (activeMode == outpostMode and "hold" or "timeout"),
 				bot._phaseWantMaxWait or -1,
 				tostring(escapeShift),
-				tostring(bot._phaseOrbFirstWhy or "-")
+				orbFirst
 			)
 		)
 		if bot._phaseDodgeWant ~= nil then
