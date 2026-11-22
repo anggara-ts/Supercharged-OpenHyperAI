@@ -1,8 +1,6 @@
 -- Outpost capture mode.
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
--- Interaction probe (#111, off unless Customize.Interact_Probe): walks one bot to a watcher, a Twin Gate, an outpost.
-local InteractProbe = require(GetScriptDirectory() .. "/FuncLib/systems/interact_probe")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -76,6 +74,8 @@ local function OutpostProbeLog(what, try, outpost)
 	)
 end
 local isCapturingOutpost = false
+-- Interaction probe (#111, off unless Customize.Interact_Probe): walks one bot to a watcher, a Twin Gate, an outpost.
+local InteractProbe = require(GetScriptDirectory() .. "/FuncLib/systems/interact_probe")
 -- Chain Frost bouncing around us (Valve data: bounces to a hero within 550, 10 jumps). The
 -- projectile is visible in GetIncomingTrackingProjectiles of whoever it is flying at. Returns the
 -- ally (or this bot) it is heading to, when that one is this bot or within 700 of it.
