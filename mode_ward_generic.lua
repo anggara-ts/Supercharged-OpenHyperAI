@@ -14,6 +14,7 @@ local Ward = require(GetScriptDirectory() .. "/FuncLib/systems/ward")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local localizationOk, Localization = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/localization")
+local ChatRules = require(GetScriptDirectory() .. "/FuncLib/systems/chat_rules")
 if not localizationOk then
 	Localization = {
 		Get = function()
@@ -28,7 +29,8 @@ local observerWard = nil
 local sentryWard = nil
 local wardSpot = nil
 local wardModeOffUntil = -math.huge
--- Switched off on purpose: ping/chat when a ward is planted (user request) and per-try plant logging.
+-- Switched off on purpose: the ping when a ward is planted (user request) and per-try plant logging. The ward chat
+-- lines need `!debug` instead (ChatRules).
 local ANNOUNCE_WARD_PLANT = false
 local LOG_PLANT_TRIES = false
 local function DispenserSentryCharges(item)
@@ -228,13 +230,10 @@ local function AnnounceWard(kind)
 			wardLoc and string.format("%d,%d", math.floor(wardLoc.x), math.floor(wardLoc.y)) or "?"
 		)
 	)
-	-- No ping and no team chat on a plant any more: warding is proven to work (user request).
-	if not ANNOUNCE_WARD_PLANT then
-		return
-	end
 	Fu.Utils.GameStates = Fu.Utils.GameStates or {}
+	-- No ping on a plant any more: warding is proven to work (user request).
 	-- Bot API has no "Enemy Ward Here" wheel ping — danger ping (X) is the closest mark.
-	if kind == "sentry" and wardLoc ~= nil then
+	if ANNOUNCE_WARD_PLANT and kind == "sentry" and wardLoc ~= nil then
 		if DotaTime() - (Fu.Utils.GameStates.wardPingTime or -100) >= 8 then
 			Fu.Utils.GameStates.wardPingTime = DotaTime()
 			bot:ActionImmediate_Ping(wardLoc.x, wardLoc.y, false)
@@ -251,17 +250,17 @@ local function AnnounceWard(kind)
 		key = kind == "sentry" and "say_ward_sentry_offense" or "say_ward_observer_offense"
 	end
 	local text = PickChat(key, kind == "sentry" and "Planting sentry." or "Planting observer.")
-	bot:ActionImmediate_Chat(text, false)
-	if Fu.Utils.DebugMode or Fu.Utils.GameStates.verboseChat then
-		local extra = string.format(
-			"[debug] ward %s role=%s at (%.0f, %.0f)",
-			kind,
-			tostring(role or "n/a"),
-			wardSpot and wardSpot.location.x or 0,
-			wardSpot and wardSpot.location.y or 0
-		)
-		bot:ActionImmediate_Chat(extra, false)
-	end
+	-- The ward lines are decision chat: team chat only with `!debug` ("placing ward also goes to !debug",
+	-- maintainer 2026-11-23).
+	ChatRules.SayDecision(bot, text, key)
+	local extra = string.format(
+		"[debug] ward %s role=%s at (%.0f, %.0f)",
+		kind,
+		tostring(role or "n/a"),
+		wardSpot and wardSpot.location.x or 0,
+		wardSpot and wardSpot.location.y or 0
+	)
+	ChatRules.SayDecision(bot, extra, "ward_debug")
 end
 function GetDesire()
 	DumpWards()
