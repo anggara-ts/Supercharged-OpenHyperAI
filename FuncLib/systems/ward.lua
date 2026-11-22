@@ -523,6 +523,32 @@ function Ward.GetAvailabeObserverWardSpots(bot)
 			if pushing and onOurs then
 				return
 			end
+			-- Game 069 6:28 (maintainer): an observer on our own cliff with every tower up watches nothing. Our cliff is a
+			-- defensive ward (a lane of ours with its T1 down, as the hunt spots use), the enemy's an offensive one
+			-- (pushing, or past the early game).
+			local skipWhy = nil
+			if onOurs and not defending and HomeWardTooEarly(spot.location) then
+				skipWhy = "home-too-early"
+			elseif not onOurs and Fu.IsEarlyGame() and not pushing then
+				skipWhy = "not-pushing"
+			end
+			if skipWhy ~= nil then
+				if DotaTime() >= (spot._uberSkipLogAt or -999) then
+					spot._uberSkipLogAt = DotaTime() + 60
+					print(
+						string.format(
+							"[OHA-WARD] t=%.0f %s uber-skip why=%s spot=%s at=%.0f,%.0f",
+							DotaTime(),
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							skipWhy,
+							tostring(spot.label or spot.side),
+							spot.location.x,
+							spot.location.y
+						)
+					)
+				end
+				return
+			end
 		elseif spot.role == "contest" then
 			if defending and not onOurs then
 				return
