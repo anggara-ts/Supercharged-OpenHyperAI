@@ -28,15 +28,17 @@ with the Workshop folder `<Steam>/steamapps/workshop/content/570/3843444501` as 
 
 ## Settings
 
-Picks, bans, the bot language, chat and other options are in `bots/customize/general.lua` (comments explain each one).
-A Workshop update replaces that file. To keep your settings, copy the whole `bots/customize` folder to
+Picks, bans, the bot language, chat and other options are in `customize/general.lua` in the Workshop folder
+(`<Steam>/steamapps/workshop/content/570/3843444501`; `bots/customize/general.lua` in this repository). Comments
+explain each one. A Workshop update replaces that file. To keep your settings, copy the whole `customize` folder to
 
 ```text
 <Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/game/customize
 ```
 
-and edit the copy there; it wins over the one in the script. Per-hero overrides go in `bots/customize/hero/`
-(see `bots/customize/hero/viper.lua` for an example).
+and edit the copy there; it wins over the one in the script. A copy made before the folder names went lowercase
+(`game/Customize`) still works. Per-hero overrides go in `customize/hero/` (see `customize/hero/viper.lua` for an <!-- restructure:keep -->
+example).
 
 ## In-game chat commands
 
@@ -56,17 +58,17 @@ For the newest changes before they reach the Workshop, or to work on the scripts
 
 1. **Get the code**: `git clone https://github.com/anggara-ts/Supercharged-OpenHyperAI.git`, or download
    [the `main` zip](https://github.com/anggara-ts/Supercharged-OpenHyperAI/archive/refs/heads/main.zip) and extract it.
-2. **Put it where Dota loads bot scripts**: `<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots`.
-   The files must sit directly in `bots` (`.../vscripts/bots/bot_generic.lua`, not `.../bots/<folder>/bot_generic.lua`).
-   Rename an existing `bots` folder first (e.g. `bots_old`). Either move the extracted folder there and name it
-   `bots`, or link it so updates apply at once:
+2. **Put its `bots` folder where Dota loads bot scripts**: `<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots`.
+   The repository's `bots/` folder is that folder (`.../vscripts/bots/bot_generic.lua` is the repository's
+   `bots/bot_generic.lua`). Rename an existing `bots` folder first (e.g. `bots_old`). Either copy the repository's
+   `bots` folder there, or link it so updates apply at once:
    - Windows (Command Prompt as Administrator):
      ```bat
-     mklink /d "C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\bots" "C:\path\to\Supercharged-OpenHyperAI"
+     mklink /d "C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\bots" "C:\path\to\Supercharged-OpenHyperAI\bots"
      ```
    - macOS / Linux:
      ```bash
-     ln -s "/path/to/Supercharged-OpenHyperAI" "<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
+     ln -s "/path/to/Supercharged-OpenHyperAI/bots" "<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
      ```
    Contributors use `node tools/export-bots.js` instead, which copies only the bot scripts (see
    [`CONTRIBUTING.md`](CONTRIBUTING.md)).
@@ -78,14 +80,16 @@ The helper scripts in [`install/`](install/README.md) do step 2 for the Workshop
 
 | Path | What it is |
 |---|---|
+| `bots/` | The bot scripts: exactly what goes into Dota's `vscripts/bots` |
 | `bots/heroes/` | One file per hero: skill build, item build, ability use |
 | `bots/lib/` | Shared libraries and systems (push, defend, wards, items, roles, ...) |
 | `bots/customize/` | Player settings (picks, bans, language) |
-| `mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, runes, ...) |
+| `bots/mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, runes, ...) |
 | `tools/` | Developer tools (log splitter, game review, test tracker, bot-script export) |
 | `tests/` | LuaJIT tests against a stub bot API |
 | `docs/` | Notes, e.g. what the bot API really exposes |
 | `install/` | Link helpers for the Workshop folder |
+| `workshop/` | Workshop page cover images |
 
 More on the libraries: [`bots/lib/README.md`](bots/lib/README.md). The optional Fretbots / Buff plugin (extra gold,
 XP and neutral items for bots) lives on the [`plugin-fretbots`](../../tree/plugin-fretbots) branch.
