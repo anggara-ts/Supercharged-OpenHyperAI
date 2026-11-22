@@ -1924,13 +1924,15 @@ local function GlyphWaitThink(bot, lane)
 	if mode == "back" then
 		return false
 	end
-	-- Hit a hero, else a creep, in reach; at the edge only those outside the tower's reach. Glyphed creeps (3s) and the
-	-- tower itself fail Fu.CanBeAttacked.
+	-- Hit a hero, else a creep, in reach and within 300 of the tower's reach (no chase away from it); at the edge only
+	-- those outside its reach. Glyphed creeps (3s) and the tower itself fail Fu.CanBeAttacked.
 	local attackRange = bot:GetAttackRange()
 	local function canHit(unit)
-		return Fu.IsValid(unit)
-			and Fu.CanBeAttacked(unit)
-			and (mode == "stay" or GetUnitToUnitDistance(unit, tower) > reach)
+		if not Fu.IsValid(unit) or not Fu.CanBeAttacked(unit) then
+			return false
+		end
+		local toTower = GetUnitToUnitDistance(unit, tower)
+		return toTower <= reach + 300 and (mode == "stay" or toTower > reach)
 	end
 	local target, lowestHealth = nil, math.huge
 	for _, enemyHero in ipairs(bot:GetNearbyHeroes(math.min(attackRange + 150, 1600), true, BotMode.None) or {}) do
