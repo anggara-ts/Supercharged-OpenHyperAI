@@ -1,0 +1,246 @@
+-- Pure rules for Spirit Breaker's long Charge of Darkness (#47): save an ally ganked in another lane, or join a
+-- teamfight far away. No bot API calls, so tests/test_charge_rules.lua drives them with plain numbers;
+-- bots/heroes/hero_spirit_breaker.lua (X.ConsiderChargeOfDarkness) gathers the numbers and calls them.
+--
+-- Game data (Valve datafeed herodata hero_id=71, 2026-11-22): spirit_breaker_charge_of_darkness
+--   movement_speed 275/325/375/425  bonus move speed on top of his own
+--   windup_time 1.5, min_movespeed_bonus_pct 25  the charge starts at 25% of the bonus and reaches all of it after 1.5s
+--   AbilityCastPoint 0.1, global (cast range 0), cooldown 22/19/16/13, mana 80/90/100/110
+--   target team enemy, does not pierce debuff immunity (immunity 4); if the target dies he retargets the nearest enemy
+--   unit to that spot. The datafeed says nothing about cancelling the charge or about the move speed cap.
+-- Tower attack range 700: scripts/npc/units.txt (npc_dota_goodguys_tower1_top AttackRange, 7.42 pak01_dir.vpk).
+local Rules = {}
+
+-- A target this close is the near rules' job (channel interrupt, engage, an ally's target at 600-1900).
+Rules.FAR_DIST = 1600
+-- Unverified: whether the charge ignores the 550 move speed cap. Capping makes the ETA longer (the safer side for
+-- the save's "does the ally live until he lands" check). The [SHy-SB] charge-land line (eta= vs took=) measures it.
+-- 7.42 hero file (pak01_dir.vpk npc_dota_hero_spirit_breaker.txt): the same values, a +50 charge speed talent
+-- (special_bonus_unique_spirit_breaker_increased_charge_speed, read with movement_speed) and ROOT_DISABLES.
+Rules.MAX_SPEED = 550
+-- A teamfight charge that lands later than this is likely too late (fights end; no duration estimate exists).
+Rules.MAX_FIGHT_ETA = 7
+-- Spirit Breaker himself below this HP ratio does not charge into a fight or a gank.
+Rules.SELF_HP_MIN = 0.4
+Rules.TOWER_RANGE = 700
+-- A save needs the ally in real danger (game 072 t=863: a 14.5s charge for an ally at ttd=99 ran him into four
+-- heroes under their tier 1): dying within DANGER_MARGIN seconds after he lands, or under DANGER_HP while hit.
+Rules.DANGER_MARGIN = 5
+Rules.DANGER_HP = 0.5
+-- A running long charge is re-checked (CancelWhy) until he is this close to the target: then he is committed.
+Rules.COMMIT_DIST = 600
+-- The tower cancel must come before he is inside the tower's range + this margin.
+Rules.TOWER_MARGIN = 300
+-- The ally counts as safe (save no longer needed) after it has looked safe this long.
+Rules.SAFE_FOR = 1.0
+-- HP-loss samples: kept for KEEP seconds; the rate is read from a sample MIN_AGE..MAX_AGE seconds old.
+Rules.SAMPLE_KEEP = 2.0
+Rules.SAMPLE_MIN_AGE = 0.5
+Rules.SAMPLE_MAX_AGE = 1.5
+
+-- Seconds from the cast to the arrival over dist. moveSpeed = his move speed now, bonus = movement_speed at his
+-- level. The windup is assumed linear (from minPct% of the bonus to all of it over windup seconds): unverified.
+function Rules.ChargeEta(dist, moveSpeed, bonus, windup, minPct, castPoint, maxSpeed)
+	windup = windup or 1.5
+	minPct = minPct or 25
+	castPoint = castPoint or 0.1
+	local top = moveSpeed + bonus
+	local start = moveSpeed + bonus * minPct / 100
+	if maxSpeed ~= nil then
+		top = math.min(top, maxSpeed)
+		start = math.min(start, maxSpeed)
+	end
+	if top <= 0 then
+		return math.huge
+	end
+	local windupDist = (start + top) / 2 * windup
+	if dist <= windupDist then
+		local accel = windup > 0 and (top - start) / windup or 0
+		if accel <= 0 then
+			return castPoint + dist / math.max(start, 1)
+		end
+		-- dist = start * t + accel * t^2 / 2
+		return castPoint + (-start + math.sqrt(start * start + 2 * accel * dist)) / accel
+	end
+	return castPoint + windup + (dist - windupDist) / top
+end
+
+-- HP history of one hero: an array of { t = seconds, hp = health }, oldest first.
+function Rules.PushSample(samples, now, hp)
+	samples[#samples + 1] = { t = now, hp = hp }
+	while #samples > 1 and now - samples[1].t > Rules.SAMPLE_KEEP do
+		table.remove(samples, 1)
+	end
+end
+
+-- HP lost per second, from the oldest sample that is SAMPLE_MIN_AGE..SAMPLE_MAX_AGE old to hpNow (0 when healing).
+-- nil when no sample is old enough (the hero was not sampled long enough: the caller must not guess).
+function Rules.LossRate(samples, now, hpNow)
+	for _, sample in ipairs(samples) do
+		local age = now - sample.t
+		if age <= Rules.SAMPLE_MAX_AGE and age >= Rules.SAMPLE_MIN_AGE then
+			return math.max(0, (sample.hp - hpNow) / age)
+		end
+	end
+	return nil
+end
+
+-- Seconds until an ally at hp dies at rate HP/s (math.huge when it is not losing HP).
+function Rules.TimeToDie(hp, rate)
+	if rate == nil or rate <= 0 then
+		return math.huge
+	end
+	return hp / rate
+end
+
+-- Why Spirit Breaker does not charge, or nil to charge. s:
+--   kind        "save" (an ally ganked in another lane) or "fight" (a teamfight far away)
+--   selfHp      his HP ratio; retreating: his mode is retreat
+--   hit         an enemy hero hit him in the last ~1.5s; away: the charge heads away from those attackers (IsAway)
+--               Being hit does not block a long charge (maintainer, #208: the charge's speed carries him out too);
+--               under 40% HP or retreating it goes only when it doubles as his escape (hit and away).
+--   dist, eta   to the charge target (ChargeEta)
+--   allies      our heroes at the spot without him (the ganked ally counts); enemies: enemy heroes there
+--   hitBy       (save) enemy heroes that hit the ally recently
+--   allyHp, lossRate   (save) the ally's health and HP lost per second (LossRate; nil = no sample yet)
+--   allyHpRatio (save) the ally's HP ratio
+--   tower       the target stands in a standing enemy tower's range
+function Rules.ChargeSkipWhy(s)
+	-- first: not a gank at all (the caller doesn't log this one: lane harass on any ally would flood the log)
+	if s.kind == "save" then
+		-- ganked: 2+ heroes on it, or 1+ hitting it while their side outnumbers ours there
+		local ganked = s.hitBy >= 2 or s.hitBy >= 1 and s.enemies > s.allies
+		if not ganked then
+			return "no-gank"
+		end
+	end
+	local escape = s.hit and s.away
+	if s.selfHp < Rules.SELF_HP_MIN and not escape then
+		return "low-hp"
+	end
+	if s.retreating and not escape then
+		return "retreat"
+	end
+	if s.dist <= Rules.FAR_DIST then
+		return "near"
+	end
+	if s.kind == "save" then
+		if s.lossRate == nil then
+			return "no-sample"
+		end
+		local ttd = Rules.TimeToDie(s.allyHp, s.lossRate)
+		if ttd <= s.eta then
+			return "too-late"
+		end
+		if ttd > s.eta + Rules.DANGER_MARGIN and (s.allyHpRatio or 1) >= Rules.DANGER_HP then
+			return "no-danger"
+		end
+	elseif s.eta > Rules.MAX_FIGHT_ETA then
+		return "too-far"
+	end
+	-- after he lands: him + the allies there not outnumbered (the same test as CancelWhy, so a charge never starts
+	-- in a state its first re-check would cancel; maintainer, #208 game 072: "ours < enemies" cancels)
+	if s.allies + 1 < s.enemies then
+		return "outnumbered"
+	end
+	-- a tower in range of the landing spot: only when our side already wins there without him
+	if s.tower and s.allies <= s.enemies then
+		return "tower"
+	end
+	return nil
+end
+
+-- Why a running long charge should be cancelled now, or nil to keep charging. c:
+--   kind        "save" or "fight"; distLeft: him to the target
+--   allyDead    (save) the ally died; allySafeFor: seconds the ally has looked safe (no enemy hero near it, or not
+--               hit and not losing HP above DANGER_HP, or back home)
+--   ours        our heroes within reach of the target when he lands, him included; enemies: enemy heroes seen or
+--               last seen there
+--   tower       the target stands in a standing enemy tower's range; towerDist: him to that tower
+function Rules.CancelWhy(c)
+	local towerEdge = Rules.TOWER_RANGE + Rules.TOWER_MARGIN
+	if c.tower and c.towerDist ~= nil and c.towerDist <= towerEdge then
+		-- already inside the tower's range + margin: cancelling now leaves him under the tower anyway
+		return nil
+	end
+	if c.distLeft < Rules.COMMIT_DIST then
+		return nil
+	end
+	if c.kind == "save" then
+		if c.allyDead then
+			return "ally-dead"
+		end
+		if (c.allySafeFor or 0) >= Rules.SAFE_FOR then
+			return "ally-safe"
+		end
+	end
+	if c.ours < c.enemies then
+		return "outnumbered"
+	end
+	-- the fight is ours there when our side outnumbers theirs without him
+	if c.tower and c.ours - 1 <= c.enemies then
+		return "tower"
+	end
+	return nil
+end
+
+-- Does a ganked ally still need the save? Safe when no enemy hero is near it, it is back home, or nobody hit it
+-- lately, it is not losing HP and it is at DANGER_HP or more. lossRate nil (no sample): not safe on that count.
+function Rules.AllySafe(enemiesNear, atHome, hitRecently, lossRate, hpRatio)
+	if enemiesNear == 0 or atHome then
+		return true
+	end
+	return not hitRecently and lossRate ~= nil and lossRate <= 0 and hpRatio >= Rules.DANGER_HP
+end
+
+-- Clearance between an attacker and the charge's path: bash_radius 275 (datafeed) plus room for his hit box.
+Rules.PATH_CLEAR = 400
+
+local function segmentDist(ax, ay, bx, by, px, py)
+	local dx, dy = bx - ax, by - ay
+	local len2 = dx * dx + dy * dy
+	local u = 0
+	if len2 > 0 then
+		u = math.max(0, math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2))
+	end
+	local cx, cy = ax + u * dx - px, ay + u * dy - py
+	return math.sqrt(cx * cx + cy * cy)
+end
+
+-- Does a charge from me to target (tables with x, y) head away from the attackers (array of {x, y})? Away when, for
+-- every attacker, the target is farther from it than I am and the straight path never passes within PATH_CLEAR of
+-- it (he runs through units, so crossing them means charging into them). No attackers: not an escape (false).
+function Rules.IsAway(me, target, attackers)
+	if #attackers == 0 then
+		return false
+	end
+	for _, a in ipairs(attackers) do
+		local mine = math.sqrt((me.x - a.x) ^ 2 + (me.y - a.y) ^ 2)
+		local theirs = math.sqrt((target.x - a.x) ^ 2 + (target.y - a.y) ^ 2)
+		if theirs <= mine then
+			return false
+		end
+		-- an attacker already closer than PATH_CLEAR: the path must not get any closer to it than he is now
+		if segmentDist(me.x, me.y, target.x, target.y, a.x, a.y) < math.min(Rules.PATH_CLEAR, mine) - 1 then
+			return false
+		end
+	end
+	return true
+end
+
+-- Which enemy hero to charge (higher is better). t:
+--   hp          HP ratio; core: a core (pos 1-3)
+--   hitsAlly    (save) it attacks / recently damaged the ganked ally
+--   distToSpot  to the ally (save) or the fight centre (fight)
+function Rules.TargetScore(t)
+	local score = (1 - t.hp) * 100 - (t.distToSpot or 0) / 20
+	if t.core then
+		score = score + 30
+	end
+	if t.hitsAlly then
+		score = score + 1000
+	end
+	return score
+end
+
+return Rules
