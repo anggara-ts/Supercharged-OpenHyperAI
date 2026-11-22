@@ -230,4 +230,72 @@ function DiveRules.HighGroundChaseDecision(s)
 	return "leave", "outnumbered"
 end
 
+-- The walk home from behind an enemy tower. Game 072, 19:48-19:56: after Radiant's dive past Dire's mid T2 and the
+-- kill, Puck walked home down the lane through the T2's range (chase-stop why=no-target inside=8.2 inMode=9), lost
+-- HP from 0.70 to 0.43 and died at t=1205. A bot farther from home than a standing enemy tower, whose straight way
+-- home crosses that tower's range + DETOUR_RING_MARGIN, and that is heading home, takes a path round the tower
+-- (mode_outpost_generic.lua drives it; FuncLib/systems/home_detour.lua).
+DiveRules.DETOUR_RING_MARGIN = 150
+DiveRules.DETOUR_BEHIND_MARGIN = 200
+DiveRules.DETOUR_PAST_MARGIN = 300
+DiveRules.DETOUR_MAX_SECONDS = 15
+
+-- Does the segment A-B pass within r of C?
+function DiveRules.SegmentNearPoint(ax, ay, bx, by, cx, cy, r)
+	local sx, sy = bx - ax, by - ay
+	local len2 = sx * sx + sy * sy
+	local k = len2 > 0 and math.max(0, math.min(1, ((cx - ax) * sx + (cy - ay) * sy) / len2)) or 0
+	local dx, dy = ax + sx * k - cx, ay + sy * k - cy
+	return dx * dx + dy * dy < r * r
+end
+
+-- s.botHome / s.towerHome: the bot's and the tower's distance to home (our fountain); s.crosses: the straight line
+-- bot -> home passes within the tower's range + DETOUR_RING_MARGIN. Behind = farther from home than the tower by
+-- DETOUR_BEHIND_MARGIN, with the way home through its range.
+function DiveRules.BehindTower(s)
+	return s.crosses == true and s.botHome > s.towerHome + DiveRules.DETOUR_BEHIND_MARGIN
+end
+
+-- Start a detour: behind a standing enemy tower, heading home (retreat mode, or moving toward home), not going on
+-- someone (a chase toward our side is not a walk home), no fight on (no enemy hero hit it in the last 1s), and no
+-- detour ended in the last few seconds (s.cooldown).
+function DiveRules.HomeDetourStart(s)
+	return DiveRules.BehindTower(s) and s.headingHome == true and not s.chasing and not s.fight and not s.cooldown
+end
+
+-- Why a running detour ends, or nil: "dead", "fight" (an enemy hero hit the bot: the fight modes take it), "past"
+-- (nearer home than the tower by DETOUR_PAST_MARGIN, or the straight way home no longer crosses the range),
+-- "done" (the last waypoint reached), "timeout" (DETOUR_MAX_SECONDS).
+function DiveRules.HomeDetourStop(s)
+	if s.dead then
+		return "dead"
+	end
+	if s.fight then
+		return "fight"
+	end
+	if s.botHome < s.towerHome - DiveRules.DETOUR_PAST_MARGIN or not s.crosses then
+		return "past"
+	end
+	if s.done then
+		return "done"
+	end
+	if (s.age or 0) > DiveRules.DETOUR_MAX_SECONDS then
+		return "timeout"
+	end
+	return nil
+end
+
+-- Does a path (a list of {x=, y=} points from the bot's spot sx, sy) keep out of the ring round tx, ty? A path that
+-- cuts through it means the avoidance zones were not used: walk it not.
+function DiveRules.PathAvoids(sx, sy, points, tx, ty, ring)
+	local ax, ay = sx, sy
+	for _, p in ipairs(points or {}) do
+		if DiveRules.SegmentNearPoint(ax, ay, p.x, p.y, tx, ty, ring) then
+			return false
+		end
+		ax, ay = p.x, p.y
+	end
+	return true
+end
+
 return DiveRules

@@ -296,3 +296,58 @@ T.test("high-ground chase: stop outnumbered at a standing T3, keep the 33:30 cha
 	early.pushing, early.highGround = false, false
 	T.eq(R.HighGroundChaseDecision(early), nil, "no standing T3")
 end)
+
+T.test("walk home from behind an enemy tower: behind test, start and stop (game 072, Puck at Dire's mid T2)", function()
+	local R = rules()
+	-- Radiant's fountain near (-7000, -6500); Dire's mid T2 at (2593, 2170) (game 069 log), range 700.
+	local home = { x = -7000, y = -6500 }
+	local tower = { x = 2593, y = 2170 }
+	local ring = 700 + R.DETOUR_RING_MARGIN
+	local function dist(a, b)
+		return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
+	end
+	local function situation(at)
+		return {
+			botHome = dist(at, home),
+			towerHome = dist(tower, home),
+			crosses = R.SegmentNearPoint(at.x, at.y, home.x, home.y, tower.x, tower.y, ring),
+		}
+	end
+	-- Puck after the kill, behind the T2 toward their high ground: the lane walk home goes through its range.
+	local behind = situation({ x = 3300, y = 2900 })
+	T.eq(R.BehindTower(behind), true, "behind the T2")
+	-- In front of it (between the tower and home): no detour.
+	T.eq(R.BehindTower(situation({ x = 1500, y = 1100 })), false, "in front")
+	-- Beside it, far off the line home (the way home doesn't cross the range): no detour.
+	T.eq(R.BehindTower(situation({ x = 4800, y = -1500 })), false, "way home clear")
+	behind.headingHome, behind.fight, behind.cooldown, behind.chasing = true, false, false, false
+	T.eq(R.HomeDetourStart(behind), true, "start: retreating home")
+	behind.fight = true
+	T.eq(R.HomeDetourStart(behind), false, "a fight: no start")
+	behind.fight, behind.chasing = false, true
+	T.eq(R.HomeDetourStart(behind), false, "a chase toward our side: no start")
+	behind.chasing, behind.headingHome = false, false
+	T.eq(R.HomeDetourStart(behind), false, "not heading home: no start")
+	behind.headingHome, behind.cooldown = true, true
+	T.eq(R.HomeDetourStart(behind), false, "cooldown")
+	-- Stop: past the tower, a fight, the time, the last waypoint.
+	local running = situation({ x = 3300, y = 2900 })
+	running.age = 3
+	T.eq(R.HomeDetourStop(running), nil, "still behind: go on")
+	local past = situation({ x = 1200, y = 2600 })
+	past.age = 6
+	T.eq(R.HomeDetourStop(past), "past", "round it and nearer home")
+	running.fight = true
+	T.eq(R.HomeDetourStop(running), "fight", "fight")
+	running.fight, running.age = false, R.DETOUR_MAX_SECONDS + 1
+	T.eq(R.HomeDetourStop(running), "timeout", "timeout")
+	running.age, running.done = 4, true
+	T.eq(R.HomeDetourStop(running), "done", "last waypoint")
+	T.eq(R.HomeDetourStop({ dead = true }), "dead", "dead")
+	-- A path round the tower (through their jungle side) avoids the range; the lane walk doesn't.
+	local round = { { x = 3600, y = 1500 }, { x = 3000, y = 900 }, { x = 1800, y = 1000 }, { x = 0, y = -200 } }
+	T.eq(R.PathAvoids(3300, 2900, round, tower.x, tower.y, 700), true, "round path")
+	local lane = { { x = 2600, y = 2200 }, { x = 0, y = -200 } }
+	T.eq(R.PathAvoids(3300, 2900, lane, tower.x, tower.y, 700), false, "lane path crosses")
+	T.eq(R.PathAvoids(3300, 2900, {}, tower.x, tower.y, 700), true, "empty path (the caller rejects it)")
+end)

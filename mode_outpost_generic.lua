@@ -28,6 +28,9 @@ local bearLeashRange = 1100
 local tetherRange = 1000
 local heroSpecificDesire = {}
 local gankLane = nil
+-- #12: the walk home from behind an enemy tower (FuncLib/systems/home_detour.lua); homeDetourOn: GetDesire chose it.
+local HomeDetour = require(GetScriptDirectory() .. "/FuncLib/systems/home_detour")
+local homeDetourOn = false
 local gankLaneStartTime = 0
 local gankLaneCommitTime = 30
 local twinGates = Fu.Utils.GameStates.twinGates
@@ -239,6 +242,15 @@ function GetDesire()
 			return 1.06
 		end
 	end
+	-- The walk home from behind an enemy tower, round its range (#12, FuncLib/systems/home_detour.lua).
+	homeDetourOn = false
+	if bot:IsHero() and not bot:IsIllusion() then
+		local okD, detourDesire = pcall(HomeDetour.Desire, bot)
+		if okD and detourDesire ~= nil then
+			homeDetourOn = true
+			return detourDesire
+		end
+	end
 	wardReturnTo = nil
 	if bot:IsHero() and not bot:IsIllusion() then
 		local okW, to = pcall(WardReturnTarget)
@@ -350,6 +362,9 @@ function Think()
 	end
 	if leaveFountain ~= nil then
 		bot:Action_MoveToLocation(leaveFountain)
+		return
+	end
+	if homeDetourOn and HomeDetour.Think(bot) then
 		return
 	end
 	if wardReturnTo ~= nil then
