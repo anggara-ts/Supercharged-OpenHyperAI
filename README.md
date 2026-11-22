@@ -28,15 +28,15 @@ with the Workshop folder `<Steam>/steamapps/workshop/content/570/3843444501` as 
 
 ## Settings
 
-Picks, bans, the bot language, chat and other options are in `Customize/general.lua` (comments explain each one).
-A Workshop update replaces that file. To keep your settings, copy the whole `Customize` folder to
+Picks, bans, the bot language, chat and other options are in `bots/customize/general.lua` (comments explain each one).
+A Workshop update replaces that file. To keep your settings, copy the whole `bots/customize` folder to
 
 ```text
-<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/game/Customize
+<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/game/customize
 ```
 
-and edit the copy there; it wins over the one in the script. Per-hero overrides go in `Customize/hero/`
-(see `Customize/hero/viper.lua` for an example).
+and edit the copy there; it wins over the one in the script. Per-hero overrides go in `bots/customize/hero/`
+(see `bots/customize/hero/viper.lua` for an example).
 
 ## In-game chat commands
 
@@ -68,26 +68,26 @@ For the newest changes before they reach the Workshop, or to work on the scripts
      ```bash
      ln -s "/path/to/Supercharged-OpenHyperAI" "<Steam>/steamapps/common/dota 2 beta/game/dota/scripts/vscripts/bots"
      ```
-   Contributors use `node Util/export-bots.js` instead, which copies only the bot scripts (see
+   Contributors use `node tools/export-bots.js` instead, which copies only the bot scripts (see
    [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 3. **Play** as above, but choose **Local Dev Script** in Bot Settings.
 
-The helper scripts in [`Install-to-vscript/`](Install-to-vscript/README.md) do step 2 for the Workshop folder.
+The helper scripts in [`install/`](install/README.md) do step 2 for the Workshop folder.
 
 ## Project layout
 
 | Path | What it is |
 |---|---|
-| `BotsLib/` | One file per hero: skill build, item build, ability use |
-| `FuncLib/` | Shared libraries and systems (push, defend, wards, items, roles, ...) |
-| `Customize/` | Player settings (picks, bans, language) |
+| `bots/heroes/` | One file per hero: skill build, item build, ability use |
+| `bots/lib/` | Shared libraries and systems (push, defend, wards, items, roles, ...) |
+| `bots/customize/` | Player settings (picks, bans, language) |
 | `mode_*_generic.lua` | Bot modes (laning, farm, retreat, push, defend, roshan, runes, ...) |
-| `Util/` | Developer tools (log splitter, game review, test tracker, bot-script export) |
-| `Tests/` | LuaJIT tests against a stub bot API |
-| `Docs/` | Notes, e.g. what the bot API really exposes |
-| `Install-to-vscript/` | Link helpers for the Workshop folder |
+| `tools/` | Developer tools (log splitter, game review, test tracker, bot-script export) |
+| `tests/` | LuaJIT tests against a stub bot API |
+| `docs/` | Notes, e.g. what the bot API really exposes |
+| `install/` | Link helpers for the Workshop folder |
 
-More on the libraries: [`FuncLib/README.md`](FuncLib/README.md). The optional Fretbots / Buff plugin (extra gold,
+More on the libraries: [`bots/lib/README.md`](bots/lib/README.md). The optional Fretbots / Buff plugin (extra gold,
 XP and neutral items for bots) lives on the [`plugin-fretbots`](../../tree/plugin-fretbots) branch.
 
 ## Contributing
