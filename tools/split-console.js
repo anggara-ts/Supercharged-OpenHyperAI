@@ -31,6 +31,7 @@ const fs = require("fs");
 const path = require("path");
 
 const DEFAULT_DIR = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\dota 2 beta\\game\\dota";
+const { LOCAL_DIR, normTags } = require("./shared.js");
 const MARKER = /\[SHy-MATCH\] (start|game|end) team=(\w+)(.*)$/;
 const PHASE_RANK = { start: 0, game: 1, end: 2 };
 const BUILDING = /Building: npc_dota_(goodguys|badguys)_(\w+) destroyed at (\d+(?:\.\d+)?)/;
@@ -56,7 +57,7 @@ function engineEnd(line) {
 
 function parseArgs(argv) {
 	let dir = null;
-	let out = path.join(__dirname, "match-logs");
+	let out = path.join(LOCAL_DIR, "match-logs");
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--out") {
 			out = path.resolve(argv[++i]);
@@ -169,7 +170,8 @@ function summarize(g) {
 	let vscriptCount = 0;
 	const tags = {};
 	const errors = new Map();
-	for (const line of g.lines) {
+	// Old logs print [OHA-...]: read every line in the new form (tools/shared.js normTags). // restructure:keep
+	for (const line of g.lines.map(normTags)) {
 		const body = vscript(line);
 		if (body) {
 			vscriptCount++;
@@ -536,7 +538,7 @@ async function main() {
 		}
 	}
 	for (const { line, id } of lines) {
-		const m = line.match(MARKER);
+		const m = normTags(line).match(MARKER);
 		if (m) {
 			const [, phase, team, rest] = m;
 			const rank = PHASE_RANK[phase];
