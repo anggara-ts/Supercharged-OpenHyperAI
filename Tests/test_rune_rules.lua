@@ -190,3 +190,31 @@ T.test("rune rules: XP gained from the XP still needed and the level", function(
 	T.eq((R.XpGain(500, 10, 500, 10)), 0, "nothing")
 	T.eq((R.XpGain(nil, 10, 500, 10)), 0, "unknown start")
 end)
+
+T.test("rune rules: a shrine stand runs the countdown out", function()
+	local R = load()
+	-- Live game 2026-11-23: largo t=423 xp=+1 stood=0.3, winter_wyvern t=428 xp=+1 stood=1.2 left as "taken".
+	T.eq(R.WisdomStandDone(0.3, 1, false), false, "0.3s with +1 XP: keep standing")
+	T.eq(R.WisdomStandDone(1.2, 400, false), false, "a big gain before the 3s countdown is not the shrine's")
+	local done, label = R.WisdomStandDone(3.6, 1, false)
+	T.eq(done, true, "the countdown ran out")
+	T.eq(label, "covered", "+1 XP: covered")
+	done, label = R.WisdomStandDone(3.6, R.WISDOM_BIG_XP, false)
+	T.eq(label, "taken", "a big gain: taken")
+	done, label = R.WisdomStandDone(3.6, 20, true)
+	T.eq(label, "taken", "a level up: taken")
+end)
+
+T.test("rune rules: the lotus stand ends a second after the lotus is taken", function()
+	local R = load()
+	local state = { base = 0 }
+	T.eq(R.LotusTakeStep(state, 0, 180), "wait", "no lotus yet")
+	T.eq(R.LotusTakeStep(state, 1, 181.5), "wait", "just taken: a second one may come 0.45s later")
+	T.eq(R.LotusTakeStep(state, 2, 182), "wait", "a second one came")
+	local step, after = R.LotusTakeStep(state, 2, 183)
+	T.eq(step, "leave", "nothing for 1s: leave")
+	T.eq(after, 1.5, "1.5s after the first lotus")
+	local eaten = { base = 2 }
+	T.eq(R.LotusTakeStep(eaten, 1, 190), "wait", "one eaten while standing is no lotus taken")
+	T.eq(eaten.base, 1, "the base follows it down")
+end)

@@ -688,6 +688,54 @@ local function MarkLotusDo(bot, name)
 		print("[OHA-LOTUS] err " .. tostring(err))
 	end
 end
+-- Fight from a stand (#32, maintainer 2026-11-23: "make sure bots still hit creeps/hero when covering shrine/lotus but
+-- maintain in the area"): attack an enemy hero, else an enemy lane creep, within attack range of where the bot stands,
+-- so it hits without walking. A bot pushed or drawn past standDist from the centre walks back first (the callers' move
+-- branches do that on their next think). Neutrals are left alone (no camp aggro from the stand). Returns true when it
+-- gave an attack order. [OHA-WISDOM] / [OHA-LOTUS] stand-fight target= on a new target.
+function MapObjectives.StandFight(bot, loc, standDist, kind)
+	if bot:IsCastingAbility() or bot:IsChanneling() or GetUnitToLocationDistance(bot, loc) > standDist then
+		return false
+	end
+	local range = bot:GetAttackRange() + 50
+	local target = nil
+	for _, hero in ipairs(bot:GetNearbyHeroes(math.min(range, 1600), true, BOT_MODE_NONE) or {}) do
+		if hero ~= nil and hero:IsAlive() and GetUnitToUnitDistance(bot, hero) <= range then
+			target = hero
+			break
+		end
+	end
+	if target == nil then
+		for _, creep in ipairs(bot:GetNearbyLaneCreeps(math.min(range, 1600), true) or {}) do
+			if creep ~= nil and creep:IsAlive() and GetUnitToUnitDistance(bot, creep) <= range then
+				target = creep
+				break
+			end
+		end
+	end
+	if target == nil then
+		return false
+	end
+	if bot:GetAttackTarget() ~= target then
+		bot:Action_AttackUnit(target, true)
+	end
+	if bot._standFightTarget ~= target then
+		bot._standFightTarget = target
+		pcall(
+			print,
+			string.format(
+				"[OHA-%s] t=%.0f %s stand-fight target=%s dist=%d center=%d",
+				kind == "wisdom" and "WISDOM" or "LOTUS",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				(string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
+				GetUnitToUnitDistance(bot, target),
+				GetUnitToLocationDistance(bot, loc)
+			)
+		)
+	end
+	return true
+end
 local function ActInsideLotus(bot, loc)
 	if bot:IsCastingAbility() or bot:IsChanneling() then
 		MarkLotusDo(bot, "channel")
@@ -709,6 +757,11 @@ local function ActInsideLotus(bot, loc)
 			MarkLotusDo(bot, "hit")
 			return
 		end
+	end
+	-- Lane creeps in range too (an enemy hero first, above): fight from inside the pool, not after a target.
+	if MapObjectives.StandFight(bot, loc, 140, "lotus") then
+		MarkLotusDo(bot, "hit")
+		return
 	end
 	-- Stop the walk-in order once, so it does not carry the hero out of the ring.
 	-- Chasing a camp here walks them out before the lotus plucks.
@@ -1373,19 +1426,20 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 			if start ~= nil then
 				gain, leveled = RuneRules.XpGain(start.needed, start.level, xp.needed, xp.level)
 			end
-			local gotXp = gain > 0 or leveled
-			local covered = now - bot._wisdomStandSince >= RuneRules.WISDOM_COVER
-			if mark >= interval and now >= mark and (gotXp or covered) then
+			-- The stand runs the countdown out; a small gain doesn't end it (RuneRules.WisdomStandDone).
+			local done, label = RuneRules.WisdomStandDone(now - bot._wisdomStandSince, gain, leveled)
+			if mark >= interval and now >= mark and done then
 				bot._wisdomClaimedMark = mark
 				pcall(
 					print,
 					string.format(
-						"[OHA-WISDOM] t=%.0f %s %s xp=+%d lvlup=%s stood=%.1f late=%.0f %s",
+						"[OHA-WISDOM] t=%.0f %s %s xp=+%d min=%d lvlup=%s stood=%.1f late=%.0f %s",
 						now,
 						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-						-- covered: stood 3.5s on it with no XP seen (the old claim rule counts it as done)
-						gotXp and "taken" or "covered",
+						-- covered: stood the countdown out with a gain under min (the shrine's payout can't be read)
+						label,
 						gain,
+						RuneRules.WISDOM_BIG_XP,
 						leveled and "yes" or "no",
 						now - bot._wisdomStandSince,
 						now - mark,
@@ -1396,7 +1450,8 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 				bot._wisdomXpAtStand = nil
 			end
 		end
-		-- Covering the shrine is enough. An attack or a spell does not cancel it.
+		-- Covering the shrine is enough. An attack or a spell does not cancel it: fight from the spot.
+		MapObjectives.StandFight(bot, loc, RuneRules.WISDOM_STAND, "wisdom")
 		return true
 	end
 
@@ -1444,10 +1499,36 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 			MarkLotusDo(bot, "empty")
 			return false
 		end
+		-- Leave right after the lotus is taken (RuneRules.LotusTakeStep).
+		local interval = MapObjectives.LotusInterval()
+		local mark = math.floor(math.max(0, DotaTime()) / interval) * interval
+		local have = LotusCharges(bot)
+		local take = bot._lotusTake
+		if take == nil or take.mark ~= mark or take.pool ~= loc then
+			take = { mark = mark, pool = loc, base = have }
+			bot._lotusTake = take
+		end
+		local step, after = RuneRules.LotusTakeStep(take, have, DotaTime())
+		if step == "leave" then
+			bot._lotusSkipMark = mark
+			bot._lotusSkipPool = loc
+			bot._lotusTake = nil
+			MarkLotusDo(bot, "taken")
+			pcall(
+				print,
+				string.format(
+					"[OHA-LOTUS] t=%.1f %s taken-leave after=%.1f charges=%d",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					after or -1,
+					have
+				)
+			)
+			return false
+		end
 		if MapObjectives.LotusSpawnOpen() or (count ~= nil and count > 0) then
 			if MapObjectives.LotusPluckStalled(bot, EnemyInLotusRing(bot, loc)) then
-				local interval = MapObjectives.LotusInterval()
-				bot._lotusSkipMark = math.floor(math.max(0, DotaTime()) / interval) * interval
+				bot._lotusSkipMark = mark
 				bot._lotusSkipPool = loc
 				MarkLotusDo(bot, "stalled")
 				return false

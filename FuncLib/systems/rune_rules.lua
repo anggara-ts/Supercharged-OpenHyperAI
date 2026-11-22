@@ -210,4 +210,44 @@ function RuneRules.XpGain(prevNeeded, prevLevel, needed, level)
 	return math.max(0, prevNeeded - needed), false
 end
 
+-- When a shrine stand is done (#32, live game 2026-11-23: `t=423 largo taken xp=+1 stood=0.3`, `t=428 winter_wyvern
+-- taken xp=+1 stood=1.2`: a 1-XP rise, creep XP or rounding, read as the shrine paying out, and they left before its
+-- countdown). The shrine pays a hero that stays inside its radius for countdown_time 3 (7.42 npc_abilities.txt
+-- ability_xp_fountain), so a gain before that is not the shrine's: the stand always runs WISDOM_COVER (3 + 0.5) from
+-- the mark or the arrival. How much the shrine gives is a runtime value (dota_en.txt "Shrine of Wisdom ({d:xp} XP)"),
+-- not in the game files, so the label uses WISDOM_BIG_XP, a guess above a creep's share: "taken" with a gain of at
+-- least that, else "covered". Returns done, label.
+RuneRules.WISDOM_BIG_XP = 100
+function RuneRules.WisdomStandDone(stood, gain, leveled)
+	if stood < RuneRules.WISDOM_COVER then
+		return false, nil
+	end
+	if leveled or (gain or 0) >= RuneRules.WISDOM_BIG_XP then
+		return true, "taken"
+	end
+	return true, "covered"
+end
+
+-- Lotus pool (7.42 npc_abilities.txt ability_lotus_pool): radius 350, first_lotus_pickup_time 1.5,
+-- pickup_time_reduction_pct 70, min_lotus_pickup_time 0.3: after the first lotus, each next one in the pool comes
+-- 0.45s later. Live game 2026-11-23: a bot that took the lotus stood ~6s more (the pluck-stall clock restarted on the
+-- new charge, `do=hold` ... `do=stalled`). Now a stand ends LOTUS_MORE_WAIT after the last lotus taken when no other
+-- came. state: { base = lotus charges at the stand's start, lastRise, first } (kept per bot and mark).
+-- Returns "wait" or "leave", and the seconds since the first lotus taken.
+RuneRules.LOTUS_MORE_WAIT = 1.0
+function RuneRules.LotusTakeStep(state, have, now)
+	if have < state.base then
+		-- Eaten or used while standing: count from here.
+		state.base = have
+	elseif have > state.base then
+		state.base = have
+		state.lastRise = now
+		state.first = state.first or now
+	end
+	if state.lastRise ~= nil and now - state.lastRise >= RuneRules.LOTUS_MORE_WAIT then
+		return "leave", now - state.first
+	end
+	return "wait", nil
+end
+
 return RuneRules
