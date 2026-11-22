@@ -1835,9 +1835,21 @@ local function GlyphWaitTick(bot)
 end
 -- Returns true when it gave the bot an order this think.
 local function GlyphWaitThink(bot, lane)
+	-- The Glyph covers every building of theirs: a wait starts only at a tower the bot is at (within 1200, the finish
+	-- radius) or holds a finish on, and then follows that tower while it is within 1600.
 	local tower = nil
+	local wait = bot._glyphWait
+	local hold = bot._finishHold
 	for _, nearbyTower in ipairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if IsStandingTower(nearbyTower) and nearbyTower:HasModifier(GLYPH_MODIFIER) then
+		if
+			IsStandingTower(nearbyTower)
+			and nearbyTower:HasModifier(GLYPH_MODIFIER)
+			and (
+				wait ~= nil and wait.tower == nearbyTower
+				or hold ~= nil and hold.tower == nearbyTower
+				or GetUnitToUnitDistance(bot, nearbyTower) <= 1200
+			)
+		then
 			tower = nearbyTower
 			break
 		end
@@ -1848,13 +1860,19 @@ local function GlyphWaitThink(bot, lane)
 	local now = DotaTime()
 	local towerLocation = tower:GetLocation()
 	local reach = TowerReach(bot, tower)
-	local allies = 0
+	local distance = GetUnitToUnitDistance(bot, tower)
+	-- Heroes at the tower (1200); the bot counts itself when it stands farther. Enemies: the larger of those at the
+	-- tower and those within 1600 of the bot (PushThink's own count), so a flank counts too.
+	local allies = distance > 1200 and 1 or 0
 	for _, ally in pairs(Fu.GetAlliesNearLoc(towerLocation, 1200) or {}) do
 		if Fu.IsValidHero(ally) and not ally:IsIllusion() then
 			allies = allies + 1
 		end
 	end
-	local enemies = #(Fu.GetEnemiesNearLoc(towerLocation, 1200) or {})
+	local enemies = math.max(
+		#(Fu.GetEnemiesNearLoc(towerLocation, 1200) or {}),
+		#(Fu.GetEnemiesNearLoc(bot:GetLocation(), 1600) or {})
+	)
 	local creeps = 0
 	for _, creep in ipairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
 		if Fu.IsValid(creep) and GetUnitToUnitDistance(creep, tower) <= reach then
@@ -1879,8 +1897,6 @@ local function GlyphWaitThink(bot, lane)
 		towerHurts = towerHurts,
 		creeps = creeps,
 	})
-	local distance = GetUnitToUnitDistance(bot, tower)
-	local wait = bot._glyphWait
 	if wait == nil or wait.tower ~= tower then
 		if wait ~= nil then
 			GlyphWaitEnd(bot, "retarget")
@@ -1924,12 +1940,22 @@ local function GlyphWaitThink(bot, lane)
 	if mode == "back" then
 		return false
 	end
-	-- Hit a hero, else a creep, in reach and within 300 of the tower's reach (no chase away from it); at the edge only
-	-- those outside its reach. Glyphed creeps (3s) and the tower itself fail Fu.CanBeAttacked.
+	local edgeSpot = Fu.AdjustLocationWithOffsetTowardsFountain(towerLocation, reach + 100)
+	-- At the edge: out of the tower's reach first.
+	if mode == "edge" and distance < reach + 50 then
+		bot:Action_MoveToLocation(edgeSpot)
+		return true
+	end
+	-- Hit a hero, else a creep: one the bot reaches from where it stands, or one it walks to that stands within 300 of
+	-- the tower's reach (no chase away from it) and, at the edge, outside it. Glyphed creeps (3s) and the tower itself
+	-- fail Fu.CanBeAttacked.
 	local attackRange = bot:GetAttackRange()
 	local function canHit(unit)
 		if not Fu.IsValid(unit) or not Fu.CanBeAttacked(unit) then
 			return false
+		end
+		if GetUnitToUnitDistance(bot, unit) <= attackRange + 50 then
+			return true
 		end
 		local toTower = GetUnitToUnitDistance(unit, tower)
 		return toTower <= reach + 300 and (mode == "stay" or toTower > reach)
@@ -1958,8 +1984,8 @@ local function GlyphWaitThink(bot, lane)
 		return true
 	end
 	-- Nothing to hit: wait. The edge spot is just outside the tower's reach, toward our fountain.
-	if (mode == "edge" and distance < reach + 50) or distance > reach + 150 then
-		bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(towerLocation, reach + 100))
+	if distance > reach + 150 then
+		bot:Action_MoveToLocation(edgeSpot)
 	else
 		bot:Action_MoveToLocation(bot:GetLocation())
 	end
