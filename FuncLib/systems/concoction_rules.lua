@@ -41,8 +41,12 @@ end
 --   ownHit       the damage one of his attacks does to it (after armor)
 --   ownInReach   it is within his attack range (+150): his next hit lands about at once
 --   allyPending  damage of our team already on its way to it (projectiles in flight, allies' next hits)
--- Returns "own-hit", "ally-damage" or nil (brew as usual).
-function ConcoctionRules.FinishedWithoutBrew(health, ownHit, ownInReach, allyPending)
+--   lossRate     HP per second it loses now while allies are on it (0: no allies on it, or not losing HP)
+--   horizon      seconds until the brew's throw would land
+-- Game 068 t=2899: Clinkz at 9% had lost about 6-9% of his HP per second to Ember Spirit and Vengeful Spirit (0.85 at
+-- t=2891, 0.33 at 2895, 0.10 at 2899) and died 0.2s into an engage brew. Returns "own-hit", "ally-damage", "hp-rate" (at this rate it dies
+-- before the throw lands) or nil (brew as usual).
+function ConcoctionRules.FinishedWithoutBrew(health, ownHit, ownInReach, allyPending, lossRate, horizon)
 	if health == nil or health <= 0 then
 		return nil
 	end
@@ -51,6 +55,9 @@ function ConcoctionRules.FinishedWithoutBrew(health, ownHit, ownInReach, allyPen
 	end
 	if (allyPending or 0) >= health then
 		return "ally-damage"
+	end
+	if (lossRate or 0) > 0 and (horizon or 0) > 0 and (allyPending or 0) + lossRate * horizon >= health then
+		return "hp-rate"
 	end
 	return nil
 end
