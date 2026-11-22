@@ -1356,6 +1356,10 @@ local function ConsiderItems()
 	if Usage.TryConsumeGrisGris and Usage.TryConsumeGrisGris() then
 		return BOT_ACTION_DESIRE_HIGH
 	end
+	-- Winter Wyvern: consume Eldwurm's Edda when it is off cooldown (#47); also runs the edda-result probe.
+	if Usage.TryConsumeEdda and Usage.TryConsumeEdda() then
+		return BOT_ACTION_DESIRE_HIGH
+	end
 	-- Shadow Amulet during a teleport channel (item use below is off while channelling).
 	if bot:IsAlive() and bot:HasModifier("modifier_teleporting") and Usage.AmuletDuringTeleport() then
 		return BOT_ACTION_DESIRE_NONE
@@ -1507,6 +1511,10 @@ local function ConsiderItems()
 					)
 					if string.find(itemName, "tpscroll", 1, true) or string.find(itemName, "travel_boots", 1, true) then
 						Usage.LogTeleport(itemName, target, castReason, botMode)
+						-- #53: the last defend TP (lane, time) for DefendLaneRules.DefendTpBlock, stamped at the cast.
+						if string.find(tostring(castReason), "前往守塔", 1, true) ~= nil then
+							bot._defendTpLane, bot._defendTpAt = bot._defendTpCandidateLane, DotaTime()
+						end
 					end
 					Usage.SetUseItem(item, target, castType)
 				end
@@ -3592,6 +3600,195 @@ function Usage.TryConsumeGrisGris()
 		slot,
 		string.format("packed buy=%s bagFull=%s", tostring(buyName), tostring(bagFull))
 	)
+end
+
+-- Winter Wyvern innate (#47): consume Eldwurm's Edda once it is off cooldown. The rules and the game data are in
+-- FuncLib/systems/edda_rules.lua. The order is Action_UseAbility on the item from whatever slot it is in (it is
+-- UNSWAPPABLE: every swap of it was reverted in game 070). Whether that order consumes a passive item, and what
+-- the engine does with the basic-ability choice, is what [OHA-ITEM] edda-result shows.
+local EddaRules = require(GetScriptDirectory() .. "/FuncLib/systems/edda_rules")
+local function EddaSlot()
+	for slot = 0, 16 do
+		local item = bot:GetItemInSlot(slot)
+		if item ~= nil and not item:IsNull() and item:GetName() == EddaRules.ITEM then
+			return slot, item
+		end
+	end
+	return -1, nil
+end
+local function EddaSnapshot()
+	local levels = {}
+	for _, name in ipairs(EddaRules.BASIC_ABILITIES) do
+		local ability = bot:GetAbilityByName(name)
+		local level, max, up = -1, -1, "-"
+		if ability ~= nil and not ability:IsNull() then
+			level, max = ability:GetLevel() or -1, ability:GetMaxLevel() or -1
+			-- Raw value: the repo reads it as a boolean, the engine may return an enum.
+			up = tostring(ability:CanAbilityBeUpgraded())
+		end
+		levels[#levels + 1] = { name = name, level = level, max = max, up = up }
+	end
+	local slot = EddaSlot()
+	return {
+		at = DotaTime(),
+		levels = levels,
+		points = bot:GetAbilityPoints() or 0,
+		int = bot:GetAttributeValue(ATTRIBUTE_INTELLECT) or 0,
+		heroLevel = bot:GetLevel() or 0,
+		itemPresent = slot >= 0,
+		slot = slot,
+	}
+end
+local function EddaUpgradeText(levels)
+	local parts = {}
+	for _, entry in ipairs(levels) do
+		parts[#parts + 1] = entry.up
+	end
+	return table.concat(parts, "/")
+end
+local function EddaHeroName()
+	return (string.gsub(botName, "npc_dota_hero_", ""))
+end
+local function LogEddaState(when, slot, item)
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-state when=%s slot=%d passive=%s castable=%s ready=%s cd=%.0f cdLeft=%.0f",
+			DotaTime(),
+			EddaHeroName(),
+			when,
+			slot,
+			tostring(item:IsPassive()),
+			tostring(item:IsFullyCastable()),
+			tostring(item:IsCooldownReady()),
+			item:GetCooldown() or -1,
+			item:GetCooldownTimeRemaining() or -1
+		)
+	)
+end
+-- The probe after a consume order: levels, max levels, ability points, int and the item at +1s and +5s.
+local function EddaFollowUp(state)
+	local probe = state.probe
+	if probe == nil then
+		return
+	end
+	local step = EddaRules.RESULT_AFTER[probe.step]
+	if step == nil then
+		state.probe = nil
+		return
+	end
+	if DotaTime() - probe.before.at < step then
+		return
+	end
+	probe.step = probe.step + 1
+	local after = EddaSnapshot()
+	local outcome, changed = EddaRules.Outcome(probe.before, after)
+	if outcome ~= "not-consumed" then
+		state.consumed = true
+	end
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-result after=%.1f try=%d outcome=%s changed=%s consumed=%d levels=%s was=%s up=%s points=%d->%d int=%.0f->%.0f slot=%d",
+			DotaTime(),
+			EddaHeroName(),
+			DotaTime() - probe.before.at,
+			state.tries,
+			outcome,
+			changed ~= nil and (string.gsub(changed, "^winter_wyvern_", "")) or "-",
+			outcome ~= "not-consumed" and 1 or 0,
+			EddaRules.LevelsText(after.levels),
+			EddaRules.LevelsText(probe.before.levels),
+			EddaUpgradeText(after.levels),
+			probe.before.points,
+			after.points,
+			probe.before.int,
+			after.int,
+			after.slot
+		)
+	)
+	-- The only API call that could answer the ability choice: tried once per game, logged, nothing further.
+	if not state.choiceTried and EddaRules.ShouldTryChoice(after, outcome) then
+		state.choiceTried = true
+		bot:ActionImmediate_LevelAbility(EddaRules.KEY_ABILITY)
+		pcall(
+			print,
+			string.format(
+				"[OHA-ITEM] t=%.0f %s edda-choice try=LevelAbility ability=%s outcome=%s points=%d",
+				DotaTime(),
+				EddaHeroName(),
+				(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+				outcome,
+				after.points
+			)
+		)
+	end
+end
+function Usage.TryConsumeEdda()
+	if botName ~= "npc_dota_hero_winter_wyvern" or DotaTime() <= 0 then
+		return false
+	end
+	local state = bot._edda
+	if state == nil then
+		state = { tries = 0 }
+		bot._edda = state
+	end
+	EddaFollowUp(state)
+	if state.consumed then
+		return false
+	end
+	local slot, item = EddaSlot()
+	if item == nil then
+		return false
+	end
+	if state.loggedSlot ~= slot then
+		state.loggedSlot = slot
+		LogEddaState(state.loggedFirst and "slot" or "first", slot, item)
+		state.loggedFirst = true
+	end
+	local cooldown = item:GetCooldownTimeRemaining() or 0
+	if cooldown <= 0 and not state.loggedReady then
+		state.loggedReady = true
+		LogEddaState("ready", slot, item)
+	end
+	local why = EddaRules.ConsumeWhy({
+		cooldown = cooldown,
+		tries = state.tries,
+		sinceTry = state.lastTryAt ~= nil and DotaTime() - state.lastTryAt or nil,
+		canAct = bot:IsAlive()
+			and not bot:IsMuted()
+			and not bot:IsStunned()
+			and not bot:IsHexed()
+			and not bot:IsChanneling(),
+		inDanger = bot:WasRecentlyDamagedByAnyHero(2.0),
+	})
+	if why == nil then
+		return false
+	end
+	local before = EddaSnapshot()
+	state.tries = state.tries + 1
+	state.lastTryAt = DotaTime()
+	state.probe = { before = before, step = 1 }
+	local key = bot:GetAbilityByName(EddaRules.KEY_ABILITY)
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s edda-consume why=%s try=%d ability=%s level=%s heroLevel=%d int=%.0f slot=%d levels=%s points=%d",
+			DotaTime(),
+			EddaHeroName(),
+			why,
+			state.tries,
+			(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+			key ~= nil and string.format("%d/%d", key:GetLevel() or -1, key:GetMaxLevel() or -1) or "-",
+			before.heroLevel,
+			before.int,
+			slot,
+			EddaRules.LevelsText(before.levels),
+			before.points
+		)
+	)
+	bot:Action_UseAbility(item)
+	return true
 end
 Usage.ConsiderItemDesire["item_glimmer_cape"] = function(item)
 	local castRange = 800 + castRangeBonus
@@ -5988,7 +6185,66 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		if laneAmount.distance > tpDistance or laneAmount.amount < laneFrontAmount / 5 then
 			tpLocation = Usage.GetDefendTPLocation(defendLane)
 		end
+		-- #53, game 066 81:55 / 82:35: Elder Titan TP'd to mid's far end, walked 10,000 back to his high ground and TP'd
+		-- out the same way again. No repeat to the same lane within 20s, and no TP away from our base while enemy creeps
+		-- or heroes are at it (DefendLaneRules.DefendTpBlock). The TP target itself is #87's.
+		local blockWhy = nil
 		if tpLocation ~= nil and GetUnitToLocationDistance(bot, tpLocation) > tpDistance - 500 then
+			local DefendLaneRules = require(GetScriptDirectory() .. "/FuncLib/systems/defend_lane_rules")
+			local ancient = GetAncient(team)
+			local botToAncient = ancient ~= nil and GetUnitToUnitDistance(bot, ancient) or 0
+			local targetToAncient = ancient ~= nil
+					and Fu.GetLocationToLocationDistance(tpLocation, ancient:GetLocation())
+				or 0
+			local baseThreat = false
+			if ancient ~= nil and targetToAncient > botToAncient + 1500 then
+				local creepsAtBase = 0
+				for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
+					if unit ~= nil and unit:IsAlive() and GetUnitToUnitDistance(unit, ancient) <= 4000 then
+						creepsAtBase = creepsAtBase + 1
+					end
+				end
+				baseThreat = creepsAtBase >= 2 or #Fu.GetLastSeenEnemiesNearLoc(ancient:GetLocation(), 4000) >= 1
+			end
+			blockWhy = DefendLaneRules.DefendTpBlock(
+				DotaTime(),
+				bot._defendTpLane,
+				bot._defendTpAt,
+				defendLane,
+				baseThreat,
+				botToAncient,
+				targetToAncient
+			)
+			local enemyFront = GetLaneFrontLocation(GetOpposingTeam(), defendLane, 0)
+			local ourFront = GetLaneFrontLocation(team, defendLane, 0)
+			local logKey = blockWhy ~= nil and "_defendTpSkipLogAt" or "_defendTpLogAt"
+			if DotaTime() >= (bot[logKey] or -999) then
+				bot[logKey] = DotaTime() + 5
+				pcall(
+					print,
+					string.format(
+						"[OHA-TP] t=%.0f %s %s lane=%s to=%.0f,%.0f ourFront=%.0f,%.0f enemyFront=%.0f,%.0f botAnc=%d toAnc=%d base=%s last=%s ago=%s",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						blockWhy ~= nil and ("defend-tp-skip why=" .. blockWhy) or "defend-tp-try",
+						towerLabel,
+						tpLocation.x,
+						tpLocation.y,
+						ourFront.x,
+						ourFront.y,
+						enemyFront.x,
+						enemyFront.y,
+						math.floor(botToAncient),
+						math.floor(targetToAncient),
+						tostring(baseThreat),
+						tostring(bot._defendTpLane),
+						bot._defendTpAt ~= nil and string.format("%.0f", DotaTime() - bot._defendTpAt) or "-"
+					)
+				)
+			end
+			bot._defendTpCandidateLane = defendLane
+		end
+		if blockWhy == nil and tpLocation ~= nil and GetUnitToLocationDistance(bot, tpLocation) > tpDistance - 500 then
 			hEffectTarget = tpLocation
 			castReason = "前往守塔:" .. towerLabel
 			if botName == "npc_dota_hero_furion" then

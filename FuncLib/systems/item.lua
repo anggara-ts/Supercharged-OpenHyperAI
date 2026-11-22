@@ -361,6 +361,10 @@ Item["sCanNotSwitchItems"] = {
 	-- Clarity in for their Dust every 6-13s from 7:21 to 33:39 (31 sent, none ever swapped back, so none took effect),
 	-- and each one restarted the 11s swap gap for every other swap.
 	"item_dust",
+	-- Winter Wyvern's innate item (#47). scripts/npc/items.txt: UNSWAPPABLE, AllowedInBackpack 0. Game 070: once a
+	-- real neutral took slot 16 it sat in main slot 2, and Dust was swapped in for it 20 times (24:46-50:40), every
+	-- swap reverted ([OHA-ITEM] pull-check promote dust result=reverted dest=2(eldwurms_edda)).
+	"item_eldwurms_edda",
 }
 Item["sSellList"] = {
 	"item_black_king_bar",
