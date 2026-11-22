@@ -25,6 +25,7 @@ local LastHitOverlay = require(GetScriptDirectory() .. "/FuncLib/systems/last_hi
 -- Logs switched off once their feature works (the TP diag lines, game 029).
 local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
+local AboutRules = require(GetScriptDirectory() .. "/FuncLib/systems/about_rules")
 local BotBuild = dofile(GetScriptDirectory() .. "/BotsLib/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
@@ -35,7 +36,6 @@ local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_t
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
-local AboutRules = require(GetScriptDirectory() .. "/FuncLib/systems/about_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
