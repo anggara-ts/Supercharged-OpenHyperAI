@@ -1476,9 +1476,11 @@ local function ConsiderItems()
 			)
 		end
 		-- The backpack swap-cooldown gate is for items moved from the backpack into a main slot. Smoke and the Banner
-		-- are cast from the backpack itself (7.42 game files: "ItemCanBeUsedWithoutInventory" "1" for both), and a
-		-- backpack item is stamped on every think, so the gate always held them back: game 069, Vengeful Spirit kept
-		-- the Banner in slot 7 from 41:21 to the end, 23 x [OHA-BANNER] plant-skip why=stash, no plant (#15).
+		-- are cast from the backpack itself (both carry "ItemCanBeUsedWithoutInventory" "1" in the 7.42 game files,
+		-- read as the backpack-use flag: an inference, the proof is [OHA-BANNER] plant-result planted=yes and
+		-- [OHA-ITEM] smoke ... slot=6-8 in a game), and a backpack item is stamped on every think, so the gate always
+		-- held them back: game 069, Vengeful Spirit kept the Banner in slot 7 from 41:21 to the end, 23 x
+		-- [OHA-BANNER] plant-skip why=stash, no plant (#15).
 		local swapCooldown = not smokeFromBag and itemName ~= nil and Usage.WasInBackpackRecently(itemName)
 		if ready and itemName == "item_roshans_banner" and swapCooldown then
 			Usage.BannerSkip("swap-cooldown", nil)
@@ -7548,11 +7550,13 @@ local function SmokeLog(why, allies)
 	pcall(
 		print,
 		string.format(
-			"[OHA-ITEM] t=%.0f %s smoke why=%s allies=%d",
+			"[OHA-ITEM] t=%.0f %s smoke why=%s allies=%d slot=%d",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			why,
-			allies or 0
+			allies or 0,
+			-- 6-8: used from the backpack (#15: blocked until game 069's fix).
+			bot:FindItemSlot("item_smoke_of_deceit")
 		)
 	)
 end
