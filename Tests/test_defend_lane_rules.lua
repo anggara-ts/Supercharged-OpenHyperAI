@@ -186,3 +186,23 @@ T.test("base split: a bot keeps its rim mid-wave, a cleared rim frees its bots, 
 	T.eq(assign.a, "top")
 	T.eq(assign.b, "top")
 end)
+
+T.test("base split: a hero pull is not kept after the heroes leave; a held wave frees its bots after 5s", function()
+	local R = rules()
+	local five =
+		bots({ { "a", 500, 6000 }, { "b", 900, 5500 }, { "c", 1200, 400 }, { "d", 1500, 800 }, { "e", 2000, 1500 } })
+	local rims = { { lane = "top", why = "heroes", need = 5, alive = true, heroes = 2 } }
+	local assign, count, keep = R.AssignRims(rims, five, {})
+	T.eq(count.top, 5, "everyone to the heroes")
+	-- The heroes left, 3 creeps remain: 1 kept (the nearest), 4 freed.
+	rims[1] = { lane = "top", why = "wave", need = 1, alive = true }
+	assign, count = R.AssignRims(rims, five, keep)
+	T.eq(count.top, 1)
+	T.eq(assign.a, "top")
+	T.eq(assign.b, nil, "freed")
+	-- RimAlive: threatened, or the wave lives up to 5s after the last threat.
+	T.eq(R.RimAlive("wave", 3, 0), true)
+	T.eq(R.RimAlive(nil, 3, 4), true, "our creeps hold it, 4s")
+	T.eq(R.RimAlive(nil, 3, 6), false, "held for 6s: free the bots")
+	T.eq(R.RimAlive(nil, 0, 1), false, "cleared")
+end)

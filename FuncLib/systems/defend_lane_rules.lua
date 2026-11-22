@@ -191,14 +191,15 @@ function DefendLaneRules.RimNeed(why, creeps, siege)
 	return math.min(5, need)
 end
 -- Assign defenders to rims.
---   rims     list of { lane = key, why = RimThreat reason or nil, need = RimNeed, alive = its wave still has a creep,
+--   rims     list of { lane = key, why = RimThreat reason or nil, need = RimNeed, alive = RimAlive,
 --            heroes = enemy heroes there }
 --   bots     list of { id = key, dist = { [lane] = distance to that rim } } (the bots that can defend)
 --   previous { [bot id] = lane } from the last assignment
 -- Rules: enemy heroes at a rim pull every bot there (the rim with the most heroes). Otherwise a bot keeps its rim while
 -- that rim's wave is alive (no walking rim to rim mid-wave), then the nearest free bots fill each rim up to its need,
 -- nearest pair first. A bot no rim needs gets nothing (it leaves the defence).
--- Returns { [bot id] = lane } and { [lane] = assigned count }.
+-- Returns { [bot id] = lane }, { [lane] = assigned count } and the map to pass as previous next time (empty after a
+-- hero pull: once the heroes leave, the bots are reassigned by need, not kept where the heroes were).
 function DefendLaneRules.AssignRims(rims, bots, previous)
 	local assign, count = {}, {}
 	local byLane = {}
@@ -217,7 +218,7 @@ function DefendLaneRules.AssignRims(rims, bots, previous)
 			assign[b.id] = heroRim.lane
 			count[heroRim.lane] = count[heroRim.lane] + 1
 		end
-		return assign, count
+		return assign, count, {}
 	end
 	previous = previous or {}
 	local free = {}
@@ -250,7 +251,16 @@ function DefendLaneRules.AssignRims(rims, bots, previous)
 		assign[b.id] = bestRim.lane
 		count[bestRim.lane] = count[bestRim.lane] + 1
 	end
-	return assign, count
+	return assign, count, assign
+end
+-- Does a rim keep its bots? While it is threatened, and while its wave lives up to RELEASE_SECONDS after the last
+-- threat (a wave that our creeps now hold frees its bots after that, instead of keeping them all game).
+DefendLaneRules.RELEASE_SECONDS = 5
+function DefendLaneRules.RimAlive(why, enemyNear, sinceThreat)
+	if why ~= nil then
+		return true
+	end
+	return (enemyNear or 0) >= 1 and (sinceThreat or math.huge) <= DefendLaneRules.RELEASE_SECONDS
 end
 
 return DefendLaneRules

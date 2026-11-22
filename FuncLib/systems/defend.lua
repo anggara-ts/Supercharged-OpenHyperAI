@@ -791,9 +791,11 @@ local function BaseAssignment()
 	if now - baseAssign.at < 1 then
 		return baseAssign
 	end
-	local previous = baseAssign.assign or {}
+	local previous = baseAssign.keep or {}
 	local logKey = baseAssign.logKey or {}
-	baseAssign = { at = now, active = false, assign = {}, rims = {}, logKey = logKey }
+	local lastThreat = baseAssign.lastThreat or {}
+	baseAssign =
+		{ at = now, active = false, assign = {}, keep = {}, rims = {}, logKey = logKey, lastThreat = lastThreat }
 	local ancient = GetAncient(ourTeam)
 	if ancient == nil or not ancient:IsAlive() then
 		return baseAssign
@@ -868,7 +870,10 @@ local function BaseAssignment()
 			ancientHit = rim == baseRim and ancientHit,
 		})
 		rim.need = DefendLaneRules.RimNeed(rim.why, rim.enemyNear, rim.siege)
-		rim.alive = rim.enemyNear >= 1 or rim.why ~= nil
+		if rim.why ~= nil then
+			lastThreat[rim.lane] = now
+		end
+		rim.alive = DefendLaneRules.RimAlive(rim.why, rim.enemyNear, now - (lastThreat[rim.lane] or -999))
 	end
 	local bots, names = {}, {}
 	for i = 1, #GetTeamPlayers(ourTeam) do
@@ -888,8 +893,8 @@ local function BaseAssignment()
 			names[member:GetPlayerID()] = string.gsub(member:GetUnitName(), "npc_dota_hero_", "")
 		end
 	end
-	local assign, count = DefendLaneRules.AssignRims(rimList, bots, previous)
-	baseAssign.assign, baseAssign.rims, baseAssign.count = assign, byLane, count
+	local assign, count, keep = DefendLaneRules.AssignRims(rimList, bots, previous)
+	baseAssign.assign, baseAssign.rims, baseAssign.count, baseAssign.keep = assign, byLane, count, keep
 	for _, rim in ipairs(rimList) do
 		local who = {}
 		for id, lane in pairs(assign) do
@@ -2076,8 +2081,11 @@ end
 -- Ancient, the last stand, a human ping) and lanes with a standing T3 or a T1 / T2 are left alone. Enemy heroes at a
 -- rim pull every bot there, at the desire the defend rules gave (outnumbered rules as before).
 local BASE_ASSIGN_KEEP = { ["group-up"] = true, ["ancient-heroes"] = true, ["ancient-last-stand"] = true, ping = true }
+-- Cuts the floor never lifts (they may still be zeroed for another lane): outnumbered by enemy heroes, and a siege
+-- group-up on another lane.
+local BASE_ASSIGN_NO_RAISE = { ["hg-outnumbered"] = true, outnumbered = true, ["group-up-other-lane"] = true }
 local function BaseAssignDesire(bot, lane, desire, why)
-	if BASE_ASSIGN_KEEP[why or ""] or not IsBaseLane(lane) then
+	if BASE_ASSIGN_KEEP[why or ""] or bot:IsIllusion() or not bot:IsHero() or not IsBaseLane(lane) then
 		return desire
 	end
 	local assignment = BaseAssignment()
@@ -2092,7 +2100,7 @@ local function BaseAssignDesire(bot, lane, desire, why)
 		result, reason = 0, "base-assigned-other"
 	else
 		local rim = assignment.rims[rimLane]
-		if rim ~= nil and rim.alive and rim.why ~= "heroes" then
+		if rim ~= nil and rim.alive and rim.why ~= "heroes" and not BASE_ASSIGN_NO_RAISE[why or ""] then
 			local floor = (rim.enemyNear >= 6 or rim.siege) and 0.85 or 0.7
 			if floor > desire then
 				result, reason = floor, "base-assign"
@@ -2100,10 +2108,12 @@ local function BaseAssignDesire(bot, lane, desire, why)
 		end
 	end
 	bot._defendWhy = reason
+	-- Throttled per lane: the three lanes' reads of one think give different reasons.
 	local key = tostring(rimLane) .. "|" .. tostring(reason)
-	if result ~= desire and (key ~= bot._baseAssignLogKey or DotaTime() >= (bot._baseAssignLogAt or -999)) then
-		bot._baseAssignLogKey = key
-		bot._baseAssignLogAt = DotaTime() + 5
+	bot._baseAssignLog = bot._baseAssignLog or {}
+	local last = bot._baseAssignLog[lane] or {}
+	if result ~= desire and (key ~= last.key or DotaTime() >= (last.at or -999)) then
+		bot._baseAssignLog[lane] = { key = key, at = DotaTime() + 5 }
 		pcall(
 			print,
 			string.format(
