@@ -35,6 +35,7 @@ local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_t
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local RelocateRules = require(GetScriptDirectory() .. "/FuncLib/systems/relocate_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -10427,6 +10428,46 @@ function Usage.WalkOutOfSnakes()
 	bot:Action_MoveToLocation(exit.loc)
 	return true
 end
+-- Io's Relocate save (#47, BotsLib/hero_wisp.lua): the ally Io took to the fountain doesn't TP out or walk away
+-- from Io before the return; Io decides near the return whether it comes back (tether kept) or stays home (tether
+-- broken: the record is released). Io's cast writes TeamMemory "wispRelocate"; every bot runs in one Lua state.
+function Usage.HoldRelocatedAlly()
+	local rec = TeamMemory.Get(GetTeam(), "wispRelocate")
+	if rec == nil or rec.allyId ~= bot:GetPlayerID() or not bot:IsAlive() then
+		return false
+	end
+	local now = DotaTime()
+	local io = rec.io
+	local distIo = nil
+	if io ~= nil and not io:IsNull() and io:IsAlive() then
+		distIo = GetUnitToUnitDistance(bot, io)
+	end
+	local holdTp, moveBack = RelocateRules.AllyHold(rec, now, Fu.GetDistanceFromAllyFountain(bot), distIo)
+	if not holdTp then
+		return false
+	end
+	-- Renewed every think, so it ends by itself when Io lets the ally go or returns.
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 0.5)
+	if moveBack and not bot:IsChanneling() then
+		-- A short cast hold keeps the mode Thinks (OhaCastGuard) from replacing the move.
+		bot._castHoldUntil = now + 0.3
+		bot:Action_MoveToLocation(io:GetLocation())
+	end
+	if now >= (bot._relocateHoldLogAt or -999) then
+		bot._relocateHoldLogAt = now + 3
+		print(
+			string.format(
+				"[OHA-WISP] t=%.0f %s relocate-ally-hold distIo=%d move=%s left=%.1f",
+				now,
+				botName,
+				distIo or -1,
+				tostring(moveBack),
+				rec.returnAt - now
+			)
+		)
+	end
+	return moveBack
+end
 function Usage.RunePickupLock()
 	return bot:IsAlive() and bot:GetActiveMode() == BOT_MODE_RUNE and DotaTime() - (bot._runePickupAt or -999) < 0.5
 end
@@ -10522,6 +10563,7 @@ function ItemUsageThink()
 	if Usage.RunePickupLock() then
 		return
 	end
+	pcall(Usage.HoldRelocatedAlly)
 	-- A hero file's own hold (Puck's Phase Shift, #36): an item order would end the channel. Game 050: a hero hit
 	-- her within 1s of the cast in 12 of 24 probes, and item orders were the one thing not held.
 	if bot._castHoldUntil ~= nil and DotaTime() < bot._castHoldUntil then
