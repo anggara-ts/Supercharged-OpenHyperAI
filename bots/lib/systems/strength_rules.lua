@@ -189,7 +189,80 @@ end
 
 -- Seconds to wait after an end before a new window.
 function StrengthRules.Cooldown(endWhy)
+	if endWhy == "roshan-first" then
+		return 0
+	end
 	return endWhy == "building-down" and D.cooldownAfterFall or D.cooldown
+end
+
+-- Roshan first (maintainer: "would they take aegis first when available?"; on #87: "Aegis first rather than forcing a
+-- 5v5 high-ground push"). When a strength window would open (or is open) and Roshan is up and takeable by our side,
+-- the push waits for the Aegis; with the Aegis it starts at once (the Aegis thresholds apply).
+-- "Takeable" is the Roshan mode's own verdict (mode_roshan_generic.lua, bot._roshWhy): these reasons are returned
+-- only after its safety checks passed (numbers edge, pit not contested, enough damage).
+StrengthRules.ROSH_PAST_SAFETY = {
+	["team-call"] = true,
+	["timer"] = true,
+	["kill-window"] = true,
+	["finishing"] = true,
+	["ping"] = true,
+	["too-early-no-kill"] = true,
+	["human-invite"] = true,
+	["human-invite-expired"] = true,
+	["human-cooldown"] = true,
+}
+-- Of those, the ones where the Roshan mode would not call the take itself (or only at a low desire): the strength
+-- push raises the Roshan desire of its bots for these (StrengthPush.RoshanDesire).
+StrengthRules.ROSH_BOOSTABLE = {
+	["timer"] = true,
+	["too-early-no-kill"] = true,
+	["human-invite"] = true,
+	["human-invite-expired"] = true,
+	["human-cooldown"] = true,
+}
+D.roshGiveUpIdle = 90 -- no ally in Roshan mode this long after Roshan first started: give up
+D.roshGiveUpMax = 150 -- give up after this long whatever happens (unless finishing)
+D.roshBlockSeconds = 180 -- after giving up, no Roshan first for this long
+D.roshKeepTargetHp = 0.4 -- a running window whose building is under this HP finishes it first
+
+-- r = { aegis (we hold it), roshAlive, contested (2+ enemies seen at the pit), whys (list of our alive bots'
+-- Roshan reasons), blockedUntil, now }. Returns on, why.
+function StrengthRules.RoshanFirst(r)
+	if r.aegis then
+		return false, "have-aegis"
+	end
+	if not r.roshAlive then
+		return false, "rosh-dead"
+	end
+	if (r.now or 0) < (r.blockedUntil or -math.huge) then
+		return false, "gave-up"
+	end
+	if r.contested then
+		return false, "contested"
+	end
+	local whys = r.whys or {}
+	local past, refusal = 0, nil
+	for _, why in ipairs(whys) do
+		if StrengthRules.ROSH_PAST_SAFETY[why] then
+			past = past + 1
+		elseif refusal == nil then
+			refusal = why
+		end
+	end
+	if past >= 2 or past >= 1 and #whys == 1 then
+		return true, "rosh-ok"
+	end
+	return false, "rosh-" .. tostring(refusal or "no-bots")
+end
+
+-- Whether a running Roshan first is given up: since = when it started, inRoshan = our bots in Roshan mode now,
+-- finishing = one of them is finishing Roshan.
+function StrengthRules.RoshanGiveUp(since, now, inRoshan, finishing)
+	if finishing then
+		return false
+	end
+	local waited = now - since
+	return waited >= D.roshGiveUpMax or waited >= D.roshGiveUpIdle and (inRoshan or 0) == 0
 end
 
 return StrengthRules

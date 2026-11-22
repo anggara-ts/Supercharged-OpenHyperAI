@@ -7,7 +7,7 @@ local function rules()
 	return require(GetScriptDirectory() .. "/lib/systems/strength_rules")
 end
 
--- Game 074, ~45:00 (t=2702-2746 [OHA-CS] lines, bots only): Radiant alchemist 15577 (lvl 18), puck 13446 (18),
+-- Game 074, ~45:00 (t=2702-2746, the per-minute CS lines of the bots): Radiant alchemist 15577 (lvl 18), puck 13446 (18),
 -- spirit_breaker 11801 (16), largo 9567 (16) + the human Leshrac (no CS line; ~12000 and level 17 assumed here);
 -- Dire undying 15478 (20), wisp 14006 (19), phantom_assassin 18187 (22), winter_wyvern 11583 (18), dark_willow
 -- 9891 (19). Radiant was behind: the strength push must hold back there.
@@ -240,4 +240,70 @@ T.test("strength push: the team tick runs on the stub API and raises only the wi
 	T.eq(S.LaneDesire(bot, 2, 0.2), 0.2, "under 45% HP: not raised")
 	T.stub.time = 1802
 	T.eq(S.FarmCap(bot, 0.85), 0.85, "mark stale after 1s: farm as it was")
+end)
+
+T.test("strength: Roshan first - wait for the Aegis when the Roshan mode passed its safety checks", function()
+	local R = rules()
+	local function first(over)
+		local r =
+			{ aegis = false, roshAlive = true, contested = false, whys = { "timer", "timer", "timer" }, now = 100 }
+		for k, v in pairs(over or {}) do
+			r[k] = v
+		end
+		return R.RoshanFirst(r)
+	end
+	local function pair(got, on, why, what)
+		T.eq(got[1], on, what .. " (on)")
+		T.eq(got[2], why, what .. " (why)")
+	end
+	pair({ first() }, true, "rosh-ok", "Roshan up, our bots past the safety checks: Aegis first")
+	pair({ first({ whys = { "too-early-no-kill", "team-call", "even(5v5)" } }) }, true, "rosh-ok", "2 of 3")
+	pair({ first({ whys = { "timer" } }) }, true, "rosh-ok", "a single bot (humans on the team)")
+	pair({ first({ aegis = true }) }, false, "have-aegis", "we hold the Aegis: push")
+	pair({ first({ roshAlive = false }) }, false, "rosh-dead", "Roshan dead: push")
+	pair({ first({ contested = true }) }, false, "contested", "enemies at the pit: push")
+	pair({ first({ blockedUntil = 200 }) }, false, "gave-up", "recently given up: push")
+	pair(
+		{ first({ whys = { "even(5v5)", "even(5v5)", "timer" } }) },
+		false,
+		"rosh-even(5v5)",
+		"the Roshan mode refuses on numbers (no take in a 5v5): push"
+	)
+	pair({ first({ whys = { "no-dps", "no-dps" } }) }, false, "rosh-no-dps", "the group can't kill it: push")
+	pair({ first({ whys = {} }) }, false, "rosh-no-bots", "no bot reasons yet")
+	T.eq(R.Cooldown("roshan-first"), 0, "a window ended for Roshan: no cooldown")
+	T.ok(R.ROSH_BOOSTABLE["timer"] and not R.ROSH_BOOSTABLE["team-call"], "boost only where the mode would not call")
+end)
+
+T.test("strength: Roshan first gives up when nobody goes or it takes too long", function()
+	local R = rules()
+	T.eq(R.RoshanGiveUp(100, 150, 0, false), false, "50s: still waiting")
+	T.eq(R.RoshanGiveUp(100, 190, 0, false), true, "90s and nobody in Roshan mode: give up")
+	T.eq(R.RoshanGiveUp(100, 190, 3, false), false, "90s with three at Roshan: keep waiting")
+	T.eq(R.RoshanGiveUp(100, 250, 3, false), true, "150s: give up")
+	T.eq(R.RoshanGiveUp(100, 300, 3, true), false, "finishing Roshan: never")
+end)
+
+T.test("strength push: Roshan desire boost only during a Roshan first, for boostable reasons", function()
+	local bot = T.stub.reset({ hero = "npc_dota_hero_alchemist" })
+	T.stub.time = 1800
+	local S = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	local state = S.State()
+	state.lastTick = 1800
+	bot._level = 20
+	bot._roshWhy = "timer"
+	T.eq(S.RoshanDesire(bot, 0.3), 0.3, "no Roshan first: unchanged")
+	state.roshanFirstOn = true
+	T.eq(S.RoshanDesire(bot, 0.3), S.ROSH_BOOST, "Roshan first, timer at 0.30: raised")
+	T.eq(S.FarmCap(bot, 0.85), S.FARM_CAP, "farm capped while raised")
+	bot._roshWhy = "team-call"
+	T.eq(S.RoshanDesire(bot, 0.3), 0.3, "an already called take: unchanged")
+	bot._roshWhy = "even(5v5)"
+	T.eq(S.RoshanDesire(bot, 0), 0, "a refusal: unchanged")
+	bot._roshWhy = "timer"
+	bot._retreatFinalDesire = { d = 0.5, t = 1800 }
+	T.near(S.RoshanDesire(bot, 0.3), 0.48, 0.001, "under the bot's retreat")
+	T.stub.time = 1810
+	bot._retreatFinalDesire = nil
+	T.eq(S.RoshanDesire(bot, 0.3), 0.3, "team tick stale: unchanged")
 end)

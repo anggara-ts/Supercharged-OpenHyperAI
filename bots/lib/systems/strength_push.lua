@@ -34,6 +34,10 @@ local MIN_HP = 0.45
 local SUPPORT_RANGE = 4500
 local FRONT_RADIUS = 1800
 local BASE_HERO_RADIUS = 2200
+local ROSH_PIT_RADIUS = 1600
+-- Roshan desire of a bot during a Roshan first, when the Roshan mode passed its safety checks but would not call the
+-- take itself (StrengthRules.ROSH_BOOSTABLE): above farm, under retreat.
+StrengthPush.ROSH_BOOST = 0.8
 
 local LANES = { LANE_TOP or 1, LANE_MID or 2, LANE_BOT or 3 }
 local states = {}
@@ -346,11 +350,60 @@ local function EndWindow(state, team, now, why, i)
 end
 -- The compare, once per SKIP_LOG_SECONDS per team whatever happens (maintainer 2026-11-23: "need more data"):
 -- strength-skip why= while no window runs (laning and cooldown included), strength-compare state=active in a window.
+-- Roshan first (StrengthRules.RoshanFirst): our alive bots' Roshan reasons (mode_roshan_generic.lua bot._roshWhy),
+-- the pit (2+ enemies seen there = contested), and the give-up clock. Returns on, why.
+local function ReadRoshan(state, team, now, aegis)
+	local whys, inRoshan, finishing = {}, 0, false
+	for slot = 1, #(GetTeamPlayers(team) or {}) do
+		local member = GetTeamMember(slot)
+		if member ~= nil and member:IsAlive() and IsPlayerBot(member:GetPlayerID()) then
+			local why = member._roshWhy
+			if why ~= nil then
+				whys[#whys + 1] = tostring(why)
+			end
+			if member:GetActiveMode() == BOT_MODE_ROSHAN then
+				inRoshan = inRoshan + 1
+			end
+			if why == "finishing" then
+				finishing = true
+			end
+		end
+	end
+	local pit = Fu.GetCurrentRoshanLocation()
+	local contested = pit ~= nil and #(Fu.GetLastSeenEnemiesNearLoc(pit, ROSH_PIT_RADIUS) or {}) >= 2
+	local on, why = Rules.RoshanFirst({
+		aegis = aegis,
+		roshAlive = Fu.IsRoshanAlive(),
+		contested = contested,
+		whys = whys,
+		blockedUntil = state.roshBlockedUntil,
+		now = now,
+	})
+	if on and state.roshanFirstAt ~= nil and Rules.RoshanGiveUp(state.roshanFirstAt, now, inRoshan, finishing) then
+		print(
+			string.format(
+				"[SHy-PUSH] t=%.0f %s strength-roshan-giveup waited=%.0f inRoshan=%d",
+				now,
+				TeamName(team),
+				now - state.roshanFirstAt,
+				inRoshan
+			)
+		)
+		state.roshBlockedUntil = now + Rules.DEFAULTS.roshBlockSeconds
+		state.roshanFirstAt = nil
+		on, why = false, "gave-up"
+	end
+	state.lastRoshWhy = why
+	return on, why
+end
+-- A changed reason prints at once (at most every 5s), so a roshan-first shows when it starts.
 local function LogCompare(state, team, now, why, i)
-	if now - state.lastSkipLog < SKIP_LOG_SECONDS then
+	local age = now - state.lastSkipLog
+	if age < SKIP_LOG_SECONDS and (why == state.lastLogWhy or age < 5) then
 		return
 	end
 	state.lastSkipLog = now
+	state.lastLogWhy = why
 	local _, _, _, nwPct, lvlLead = Rules.Lead(i)
 	if state.active then
 		print(
@@ -366,11 +419,12 @@ local function LogCompare(state, team, now, why, i)
 	else
 		print(
 			string.format(
-				"[SHy-PUSH] t=%.0f %s strength-skip why=%s %s",
+				"[SHy-PUSH] t=%.0f %s strength-skip why=%s %s rosh=%s",
 				now,
 				TeamName(team),
 				tostring(why),
-				Fields(i, nwPct, lvlLead)
+				Fields(i, nwPct, lvlLead),
+				tostring(state.lastRoshWhy or "-")
 			)
 		)
 	end
@@ -404,6 +458,16 @@ local function TickTeam(bot)
 		else
 			state.lastTargetHp = 0
 		end
+		-- Roshan up and takeable: the Aegis first, unless the building is nearly down.
+		if i.targetAlive and (state.lastTargetHp or 1) >= Rules.DEFAULTS.roshKeepTargetHp then
+			local roshOn = ReadRoshan(state, team, now, i.aegis)
+			state.roshanFirstOn = roshOn
+			if roshOn then
+				state.roshanFirstAt = state.roshanFirstAt or now
+				EndWindow(state, team, now, "roshan-first", i)
+				return state
+			end
+		end
 		local why = Rules.EndWhy(state, now, i)
 		if why ~= nil then
 			EndWindow(state, team, now, why, i)
@@ -413,7 +477,18 @@ local function TickTeam(bot)
 		return state
 	end
 	local ok, why, nwPct, lvlLead = Rules.Decide(i)
-	if ok and now < state.cooldownUntil then
+	-- The Aegis taken during a Roshan first: push at once (the Aegis thresholds already apply in Decide).
+	local afterAegis = ok and i.aegis and state.roshanFirstAt ~= nil
+	state.roshanFirstOn = false
+	if ok and not afterAegis then
+		local roshOn = ReadRoshan(state, team, now, i.aegis)
+		if roshOn then
+			state.roshanFirstOn = true
+			state.roshanFirstAt = state.roshanFirstAt or now
+			ok, why = false, "roshan-first"
+		end
+	end
+	if ok and now < state.cooldownUntil and not afterAegis then
 		ok, why = false, "cooldown"
 	end
 	local pick = ok and Rules.PickLane(LaneEntries(team)) or nil
@@ -432,9 +507,10 @@ local function TickTeam(bot)
 	state.aliveAtStart = i.aliveUs
 	state.arrivedAt = nil
 	state.lastTargetHp = pick.hp
+	state.roshanFirstAt = nil
 	print(
 		string.format(
-			"[SHy-PUSH] t=%.0f %s strength-push lead=%s %s lane=%d target=%s tier=%d targetHp=%.2f allyDist=%.0f",
+			"[SHy-PUSH] t=%.0f %s strength-push lead=%s %s lane=%d target=%s tier=%d targetHp=%.2f allyDist=%.0f after=%s rosh=%s",
 			now,
 			TeamName(team),
 			tostring(why),
@@ -443,7 +519,9 @@ local function TickTeam(bot)
 			state.targetName,
 			pick.tier,
 			pick.hp,
-			pick.allyDist
+			pick.allyDist,
+			afterAegis and "aegis" or "-",
+			tostring(state.lastRoshWhy or "-")
 		)
 	)
 	return state
@@ -543,6 +621,50 @@ function StrengthPush.FarmCap(bot, desire)
 		)
 	end
 	return StrengthPush.FARM_CAP
+end
+
+-- Roshan desire (wrapped at the end of mode_roshan_generic.lua): raised to ROSH_BOOST for a bot of a team in a Roshan
+-- first, when its own Roshan reason is one the mode would not call (timer at a low desire, before 20 min without a
+-- kill, the human invite). Already called takes (team-call, kill-window, ping, finishing) and refusals stay as they
+-- are. Log [SHy-ROSH] strength-boost.
+function StrengthPush.RoshanDesire(bot, desire)
+	if type(desire) ~= "number" or desire >= StrengthPush.ROSH_BOOST then
+		return desire
+	end
+	local state = states[GetTeam()]
+	local now = DotaTime()
+	if state == nil or not state.roshanFirstOn or now - state.lastTick > 2 * TICK_SECONDS + 1 then
+		return desire
+	end
+	if not Rules.ROSH_BOOSTABLE[bot._roshWhy or ""] then
+		return desire
+	end
+	if not bot:IsAlive() or bot:IsIllusion() or bot:GetLevel() < 6 or Fu.GetHP(bot) < MIN_HP then
+		return desire
+	end
+	local boost = StrengthPush.ROSH_BOOST
+	local retreat = bot._retreatFinalDesire
+	if retreat ~= nil and now - (retreat.t or -999) <= 1 and (retreat.d or 0) >= 0.2 then
+		boost = math.min(boost, retreat.d - 0.02)
+	end
+	if boost <= desire then
+		return desire
+	end
+	bot._strengthPushAt = now
+	if now >= (bot._strengthRoshLogAt or -999) and not Fu.IsMeepoClone(bot) then
+		bot._strengthRoshLogAt = now + 10
+		print(
+			string.format(
+				"[SHy-ROSH] t=%.0f %s strength-boost desire=%.2f was=%.2f why=%s",
+				now,
+				ShortName(bot),
+				boost,
+				desire,
+				tostring(bot._roshWhy)
+			)
+		)
+	end
+	return boost
 end
 
 -- For tests: the team tick.
