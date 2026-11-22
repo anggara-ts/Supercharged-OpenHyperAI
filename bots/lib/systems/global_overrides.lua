@@ -937,6 +937,8 @@ function VerifyLastSwap(self)
 	)
 end
 function CDOTA_Bot_Script:ActionImmediate_SwapItems(slotA, slotB)
+	-- Every swap order our code gives this bot (the swap probe, #218, tells our moves from the engine's by it).
+	self._swapCalls = (self._swapCalls or 0) + 1
 	local forced = self._swapDespiteEnemies
 	self._swapDespiteEnemies = nil
 	-- A swap that must not wait for the 11s gap (the banner at the enemy base).
