@@ -33,10 +33,18 @@ function DefendLaneRules.KeepLane(held, other, heldAge)
 	if DefendLaneRules.UNCAPPED[other.why or ""] then
 		return false, "urgent"
 	end
+	-- Both lanes end at the T4s or the Ancient (tier 4-5): one base defence, the lane label means nothing and the
+	-- defend Think goes to the creeps either way (game 068, 41:40: "Defend mid!" while bottom pushed, both tier 4).
+	local heldTier, otherTier = held.tier or 0, other.tier or 0
+	if heldTier >= 4 and otherTier >= 4 then
+		return true, "same-base"
+	end
 	if (other.heroes or 0) > (held.heroes or 0) then
 		return false, "more-heroes"
 	end
-	if (other.tier or 0) > (held.tier or 0) then
+	-- Tier 0 = no building read (it just died, game 068 t=2457: bottom read tier 0 and lost to mid's tier 4 with 5
+	-- enemy heroes and 10 creeps on bottom). Unknown, not shallower: no tier comparison then.
+	if heldTier > 0 and otherTier > heldTier then
 		return false, "deeper-tier"
 	end
 	local heldCreeps, otherCreeps = held.creeps or 0, other.creeps or 0
@@ -67,6 +75,75 @@ function DefendLaneRules.DefendTpBlock(now, lastLane, lastAt, lane, baseThreat, 
 		return "away-from-base"
 	end
 	return nil
+end
+
+-- Lane threat (#53, game 068 41:40): each enemy creep counts once, for one lane. Map-scale choices, not game data:
+--   BASE_RADIUS       a creep this close to our Ancient is at the base: every lane path ends there, so it belongs to no
+--                     lane (the old ReadBaseThreat radius, defend.lua BASE_CREEP_RADIUS)
+--   TOWER_RADIUS      reach of a T1 / T2 (the old lane-front radius)
+--   HIGH_GROUND_RADIUS reach of a T3 / barracks / T4: a wave walking up the ramp counts (Utils.HG_WAVE_RADIUS)
+DefendLaneRules.BASE_RADIUS = 1400
+DefendLaneRules.TOWER_RADIUS = 1600
+DefendLaneRules.HIGH_GROUND_RADIUS = 2600
+function DefendLaneRules.ThreatRadius(tier)
+	return (tier or 0) >= 3 and DefendLaneRules.HIGH_GROUND_RADIUS or DefendLaneRules.TOWER_RADIUS
+end
+-- The lane of a creep: "base" within BASE_RADIUS of our Ancient, else the lane whose path is nearest.
+--   distances   { [lane] = distance from the lane path (GetAmountAlongLane(lane, loc).distance) }
+--   lanes       the lane ids in order (ties go to the first)
+--   ancientDist the creep's distance to our Ancient (nil: unknown)
+function DefendLaneRules.CreepLane(distances, lanes, ancientDist)
+	if ancientDist ~= nil and ancientDist <= DefendLaneRules.BASE_RADIUS then
+		return "base"
+	end
+	local best, bestDist = nil, math.huge
+	for _, lane in ipairs(lanes) do
+		local d = distances[lane]
+		if d ~= nil and d < bestDist then
+			best, bestDist = lane, d
+		end
+	end
+	return best
+end
+-- Does a creep of creepLane, anchorDist from the lane's furthest building (tier), count as that lane's threat? Base
+-- creeps count for every lane whose furthest building is the T4s or the Ancient.
+function DefendLaneRules.CountsForLane(creepLane, lane, tier, anchorDist)
+	if creepLane == "base" then
+		return (tier or 0) >= 4
+	end
+	return creepLane == lane and anchorDist ~= nil and anchorDist <= DefendLaneRules.ThreatRadius(tier)
+end
+
+-- The high-ground defence (#53, game 068 41:40 and 52:30): once a lane is down to its T3 or deeper, the bots hold the
+-- rim (the T3 spot, remembered after the T3 falls) and meet the wave there with our creeps; they fall back to the
+-- Ancient only for enemy heroes there, or for an Ancient being hit with no wave to meet.
+--   s.heroesAtAncient  enemy heroes seen near our Ancient
+--   s.heroesAtRim      enemy heroes seen near the rim
+--   s.alliesAtRim      our heroes near the rim (this bot included)
+--   s.stronger         Fu.WeAreStronger around the bot
+--   s.waveNear         a wave creep within reach of the bot
+--   s.wave             wave creeps (near the rim or the Ancient)
+--   s.waveSafe         no enemy heroes by the wave creep the bot would walk to, or we can take them
+--   s.ancientHit       the Ancient lost HP in the last seconds
+-- Returns the step: ancient-heroes, hg-fight, hg-back, hg-near, hg-wave, ancient-hit, hg-spot.
+function DefendLaneRules.HighGroundStep(s)
+	if (s.heroesAtAncient or 0) > 0 then
+		return "ancient-heroes"
+	end
+	local heroesAtRim = s.heroesAtRim or 0
+	if heroesAtRim > 0 then
+		if s.stronger or (s.alliesAtRim or 0) >= heroesAtRim + 1 then
+			return "hg-fight"
+		end
+		return "hg-back"
+	end
+	if (s.wave or 0) > 0 and s.waveSafe then
+		return s.waveNear and "hg-near" or "hg-wave"
+	end
+	if s.ancientHit and (s.wave or 0) == 0 then
+		return "ancient-hit"
+	end
+	return "hg-spot"
 end
 
 return DefendLaneRules
