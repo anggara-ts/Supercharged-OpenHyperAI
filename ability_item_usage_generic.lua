@@ -1284,9 +1284,7 @@ function Usage.IsEnemyHeroAroundSecretShop()
 	end
 	return false
 end
--- When each item name was last seen in a backpack slot (6-8): an item moved from the backpack to the main inventory
--- is on the swap cooldown for 6s. Usage.UpdateBackpackSeenTime stamps it, Usage.WasInBackpackRecently reads it.
-local backpackSeenTime = {}
+local stashItemSeenTime = {}
 local castRangeBonus = 0
 local unusedCounter = 0
 local enemyHasMonkeyKing = false
@@ -1598,19 +1596,21 @@ function Usage.IsWithoutSpellShield(unit)
 		and not unit:HasModifier("modifier_item_lotus_orb_active")
 end
 local lastStashCleanTime = -90
+-- stashItemSeenTime: when each item name was last seen in a backpack slot (6-8): an item moved from the backpack to the main inventory
+-- is on the swap cooldown for 6s. Usage.UpdateBackpackSeenTime stamps it, Usage.WasInBackpackRecently reads it.
 function Usage.UpdateBackpackSeenTime()
 	local now = DotaTime()
 	for slot = 6, 8 do
 		local item = bot:GetItemInSlot(slot)
 		if item ~= nil then
-			backpackSeenTime[item:GetName()] = now
+			stashItemSeenTime[item:GetName()] = now
 		end
 	end
 	if now > lastStashCleanTime + 7.0 then
 		lastStashCleanTime = now
-		for itemName, seenTime in pairs(backpackSeenTime) do
+		for itemName, seenTime in pairs(stashItemSeenTime) do
 			if seenTime ~= nil and seenTime < now - 7.0 then
-				backpackSeenTime[itemName] = nil
+				stashItemSeenTime[itemName] = nil
 			end
 		end
 	end
@@ -1618,7 +1618,7 @@ end
 -- True while an item of that name was in a backpack slot within the last 6.05s (still in the backpack, or moved out
 -- of it and on the swap cooldown).
 function Usage.WasInBackpackRecently(itemName)
-	if backpackSeenTime[itemName] ~= nil and DotaTime() < backpackSeenTime[itemName] + 6.05 then
+	if stashItemSeenTime[itemName] ~= nil and DotaTime() < stashItemSeenTime[itemName] + 6.05 then
 		return true
 	end
 	return false
