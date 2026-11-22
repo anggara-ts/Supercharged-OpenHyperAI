@@ -466,14 +466,14 @@ function GetDesire()
 		bot._retreatDeadAt = now
 		bot._hardRetreatUntil = nil
 		bot._overEvasiveUntil = nil
-		-- A tower hold ends with the death too (tower-hold-clear why=death; game 068, t=812-848, Puck). The hold check
-		-- also compares the death count, for a death this think never saw.
-		if bot._towerChaseHold ~= nil then
-			Retreat.TowerChaseHoldRun()
-		end
 	end
 	if now - (bot._retreatDesireAt or -999) > 1.5 then
 		bot._retreatResumeAt = now
+	end
+	-- A tower hold ends with the death too (tower-hold-clear why=death; game 068, t=812-848, Puck). The hold check
+	-- also compares the death count, for a death this think never saw.
+	if not bot:IsAlive() and bot._towerChaseHold ~= nil then
+		Retreat.TowerChaseHoldRun()
 	end
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
