@@ -11099,6 +11099,7 @@ function CourierUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	require(GetScriptDirectory() .. "/FuncLib/systems/human_trace").Tick(bot) -- local diagnostic, Customize.Human_Trace
 	if bot.lastCourierFrameProcessTime == nil then
 		bot.lastCourierFrameProcessTime = DotaTime()
 	end
