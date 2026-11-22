@@ -1051,7 +1051,15 @@ do
 		end
 		-- Inside an enemy tower's range with an enemy hero near: out first (#71, game 071), before the creep-attack below
 		-- that would keep a hurt bot under the tower.
-		if TowerExit() then
+		local okExit, exited = pcall(TowerExit)
+		if not okExit and not bot._towerExitErr then
+			-- Once per bot: a broken step-out would silently leave every bot under the tower.
+			bot._towerExitErr = true
+			pcall(
+				print,
+				string.format("[OHA-LANE] t=%.0f %s tower-exit error=%s", DotaTime(), botName, tostring(exited))
+			)
+		elseif okExit and exited then
 			return
 		end
 		local enemyTowers = bot:GetNearbyTowers(1200, true)

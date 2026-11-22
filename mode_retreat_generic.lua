@@ -625,7 +625,24 @@ function GetDesireHelper()
 		return RetreatTag(142, BOT_MODE_DESIRE_NONE)
 	end
 	if activeMode == BOT_MODE_EVASIVE_MANEUVERS or bot._towerEscapeUntil ~= nil then
-		local towerEscape = TowerEscapeDesire()
+		local okEscape, towerEscape = pcall(TowerEscapeDesire)
+		if not okEscape then
+			if not bot._towerEscapeErr then
+				-- Once per bot: a broken rule must not take the retreat desire down with it.
+				bot._towerEscapeErr = true
+				pcall(
+					print,
+					string.format(
+						"[OHA-RETREAT] t=%.0f %s tower-escape error=%s",
+						DotaTime(),
+						HeroName(),
+						tostring(towerEscape)
+					)
+				)
+			end
+			bot._towerEscapeUntil = nil
+			towerEscape = 0
+		end
 		if towerEscape > 0 then
 			return RetreatTag(145, towerEscape)
 		end
