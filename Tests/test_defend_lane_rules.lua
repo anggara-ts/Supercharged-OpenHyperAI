@@ -106,3 +106,83 @@ T.test("high ground: hold the rim, meet the wave, back to the Ancient only for h
 	T.eq(R.HighGroundStep({ wave = 0, ancientHit = true }), "ancient-hit")
 	T.eq(R.HighGroundStep({}), "hg-spot", "nothing: hold the rim")
 end)
+
+T.test("base split: rim threat per lane, our creeps holding a wave is no threat", function()
+	local R = rules()
+	T.eq(R.RimThreat({ enemyAtRim = 2, enemyNear = 4, alliedNear = 6 }), "wave", "at the rim: a threat")
+	T.eq(R.RimThreat({ enemyAtRim = 0, enemyNear = 4, alliedNear = 5 }), nil, "our creeps hold it")
+	T.eq(R.RimThreat({ enemyAtRim = 0, enemyNear = 4, alliedNear = 1 }), "pushed", "our creeps pushed hard")
+	T.eq(R.RimThreat({ heroes = 1 }), "heroes")
+	T.eq(R.RimThreat({ ancientHit = true }), "ancient-hit")
+	T.eq(R.RimThreat({ enemyNear = 1 }), nil, "one stray creep")
+	-- Need: 1 per 5 creeps, +1 for a siege / mega creep, everyone for heroes.
+	T.eq(R.RimNeed("wave", 4, false), 1)
+	T.eq(R.RimNeed("wave", 4, true), 2, "siege")
+	T.eq(R.RimNeed("pushed", 10, false), 2)
+	T.eq(R.RimNeed("ancient-hit", 0, false), 1, "at least 1")
+	T.eq(R.RimNeed("heroes", 0, false), 5)
+	T.eq(R.RimNeed(nil, 8, true), 0, "no threat")
+end)
+
+local function bots(list)
+	local result = {}
+	for _, b in ipairs(list) do
+		result[#result + 1] = { id = b[1], dist = { top = b[2], bot = b[3] } }
+	end
+	return result
+end
+local function counted(assign, lane)
+	local n = 0
+	for _, l in pairs(assign) do
+		if l == lane then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+T.test("base split: two waves on two rims split by need, nearest first", function()
+	local R = rules()
+	local five =
+		bots({ { "a", 500, 6000 }, { "b", 900, 5500 }, { "c", 6000, 400 }, { "d", 5000, 800 }, { "e", 4000, 1500 } })
+	local rims = {
+		{ lane = "top", why = "wave", need = 2, alive = true },
+		{ lane = "bot", why = "pushed", need = 3, alive = true },
+	}
+	local assign, count = R.AssignRims(rims, five, {})
+	T.eq(count.top, 2)
+	T.eq(count.bot, 3)
+	T.eq(assign.a, "top")
+	T.eq(assign.c, "bot")
+	-- 1-1: two small waves, the other three stay out of the defence.
+	rims[1].need, rims[2].need = 1, 1
+	assign, count = R.AssignRims(rims, five, {})
+	T.eq(count.top, 1)
+	T.eq(count.bot, 1)
+	T.eq(assign.a, "top")
+	T.eq(assign.c, "bot")
+	T.eq(assign.b, nil, "not needed")
+end)
+
+T.test("base split: a bot keeps its rim mid-wave, a cleared rim frees its bots, heroes pull the group", function()
+	local R = rules()
+	local two = bots({ { "a", 4000, 500 }, { "b", 4500, 3000 } })
+	-- a was sent top; a new bottom wave appears next to him: he stays top while the top wave lives.
+	local rims = {
+		{ lane = "top", why = "wave", need = 1, alive = true },
+		{ lane = "bot", why = "wave", need = 1, alive = true },
+	}
+	local assign = R.AssignRims(rims, two, { a = "top" })
+	T.eq(assign.a, "top", "no rim-to-rim walk")
+	T.eq(assign.b, "bot")
+	-- The top wave is cleared: a is free, but bottom has b already: a leaves the defence.
+	rims[1] = { lane = "top", why = nil, need = 0, alive = false }
+	assign = R.AssignRims(rims, two, assign)
+	T.eq(assign.b, "bot", "b keeps bottom while its wave lives")
+	T.eq(assign.a, nil, "a leaves the defence")
+	-- Enemy heroes at the top rim: everyone goes there.
+	rims[1] = { lane = "top", why = "heroes", need = 5, alive = true, heroes = 2 }
+	assign = R.AssignRims(rims, two, assign)
+	T.eq(assign.a, "top")
+	T.eq(assign.b, "top")
+end)

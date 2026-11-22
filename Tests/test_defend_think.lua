@@ -186,30 +186,44 @@ T.test(
 	end
 )
 
-T.test("defend think: a base defence keeps one rim while the enemy fronts move", function()
+T.test("defend think: two waves on two rims: each bot meets its own rim's wave", function()
 	local g = setup()
-	-- Top and mid both down to the T4s (their T3s seen, then dead); bottom keeps its T3.
-	think(g)
+	think(g) -- the T3s seen standing
 	g.towers[g.Dota.Tower.Mid3]._alive = false
 	g.towers[g.Dota.Tower.Top3]._alive = false
 	local TOP_T3 = { x = -6600, y = -1800 }
-	local fronts = { [LANE_TOP] = Vector(-6400, -2500, 0), [LANE_MID] = Vector(-1000, -1000, 0) }
-	_G.GetLaneFrontLocation = function(_, lane)
-		return fronts[lane] or Vector(0, 0, 0)
+	-- Creeps north of y=-2600 walk the top lane, the rest mid.
+	_G.GetAmountAlongLane = function(lane, loc)
+		local creepLane = loc.y > -2600 and LANE_TOP or LANE_MID
+		return { amount = 0.3, distance = lane == creepLane and 100 or 3000 }
 	end
+	-- This bot by the mid rim, one ally by the top rim, the other three far away.
+	g.bot._loc = Vector(-4300, -3900, 0)
+	local radiant = Stub.teams[TEAM_RADIANT]
+	radiant[2]._loc = Vector(-6400, -2200, 0)
+	for i = 3, 5 do
+		radiant[i]._loc = Vector(3000, 3000, 0)
+	end
+	local topCreep = creep(g, TOP_T3.x + 300, TOP_T3.y + 300)
+	creep(g, TOP_T3.x + 400, TOP_T3.y + 300)
+	local midCreep = creep(g, MID_T3.x + 300, MID_T3.y + 300)
+	creep(g, MID_T3.x + 400, MID_T3.y + 300)
 	local order = think(g)
-	T.eq(lastStep(), "hg-spot")
-	T.ok(dist(order[2], TOP_T3) <= 1500, "the top rim (front nearest): " .. dist(order[2], TOP_T3))
-	-- The fronts swap: the spot stays at the top rim, no walk across the base.
-	fronts[LANE_TOP], fronts[LANE_MID] = Vector(-1000, 4000, 0), Vector(-4500, -4000, 0)
-	for _ = 1, 4 do
-		order = think(g)
-		T.ok(dist(order[2], TOP_T3) <= 1500, "still the top rim: " .. dist(order[2], TOP_T3))
+	T.ok(order[1] == "attack" and order[3] ~= topCreep, "attacks the mid wave, not the top one")
+	local lines = table.concat(Stub.printed, " | ")
+	T.ok(string.find(lines, "base-assign lane=top", 1, true) ~= nil, "top rim assigned")
+	T.ok(string.find(lines, "base-assign lane=mid", 1, true) ~= nil, "mid rim assigned")
+	-- The top wave grows and the top ally stays there; this bot keeps the mid rim while its wave lives.
+	for _ = 1, 3 do
+		creep(g, TOP_T3.x + 500, TOP_T3.y + 300)
 	end
-	-- A wave walks up mid: the spot goes to it.
-	creep(g, MID_T3.x + 400, MID_T3.y + 400)
 	order = think(g)
-	T.ok(lastStep() == "hg-wave" or lastStep() == "hg-near", "meets the mid wave: " .. tostring(lastStep()))
+	T.ok(order[3] ~= topCreep, "still the mid wave")
+	T.ok(midCreep:IsAlive(), "mid wave alive")
+	-- Desires: this bot reads at least 0.7 for mid and 0 for top; a bot no rim needs reads 0 on both.
+	T.ok(g.Defend.GetDefendDesire(g.bot, LANE_MID) >= 0.7, "assigned rim")
+	T.eq(g.Defend.GetDefendDesire(g.bot, LANE_TOP), 0, "the other rim")
+	T.eq(g.Defend.GetDefendDesire(radiant[4], LANE_MID), 0, "not needed")
 end)
 
 T.test("defend think: no Ancient, no buildings: still one order", function()
