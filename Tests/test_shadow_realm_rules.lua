@@ -164,3 +164,32 @@ T.test("dark willow: an escape realm starts the TP at once (game 067, 17:06)", f
 	local line = T.stub.printed[#T.stub.printed] or ""
 	T.ok(string.find(line, "why=retreat", 1, true) ~= nil and string.find(line, "tp=now", 1, true) ~= nil, line)
 end)
+
+-- Game 068: she died in a retreat realm and the end line printed at respawn with stale values (t=2274 held=51.10,
+-- died 2225). Now it ends as release=died at the last tick she was alive.
+T.test("dark willow: a realm she dies in ends as release=died at her last tick", function()
+	local bot, X = realmBot()
+	X.StartShadowRealm("retreat", nil)
+	T.stub.time = 101
+	X.ShadowRealmTick()
+	T.ok(bot._dwRealm ~= nil, "1s in: still in the realm")
+	-- Dead: no tick runs until she respawns 49s later.
+	T.stub.time = 151
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm, nil, "the realm is over")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "t=101 dark_willow shadow-realm why=retreat held=1.00 ended=1.00", 1, true) ~= nil, line)
+	T.ok(string.find(line, "release=stale", 1, true) ~= nil, "no death counted: stale " .. line)
+	-- A tick while she is dead (the realm was cast at 151).
+	X.StartShadowRealm("retreat", nil)
+	T.stub.time = 152
+	X.ShadowRealmTick()
+	bot._alive = false
+	T.stub.time = 153
+	X.ShadowRealmTick()
+	bot._alive = true
+	T.eq(bot._dwRealm, nil, "ended when dead")
+	line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "t=152 dark_willow shadow-realm why=retreat held=1.00", 1, true) ~= nil, line)
+	T.ok(string.find(line, "release=died", 1, true) ~= nil, line)
+end)

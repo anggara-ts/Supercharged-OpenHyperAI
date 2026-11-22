@@ -22,6 +22,7 @@ local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local TeamItems = require(GetScriptDirectory() .. "/FuncLib/systems/item_strategy")
 local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
+local EddaRules = require(GetScriptDirectory() .. "/FuncLib/systems/edda_rules")
 -- Observer stock is shared with the human. When a ward lands in the shop, leave it
 -- for 30s. Buy only what is still there after that.
 local OBS_HUMAN_WINDOW = 30
@@ -818,7 +819,9 @@ local function PromoteBackpackCounters()
 			)
 		)
 	end
-	pcall(LogMadstone, neutralName)
+	-- An innate's item in slot 16 (Winter Wyvern's Eldwurm's Edda, Witch Doctor's Gris-Gris) is not a neutral item:
+	-- game 070 printed first-neutral item=item_eldwurms_edda at t=0 (#47).
+	pcall(LogMadstone, EddaRules.IsInnateSlotItem(neutralName) and "none" or neutralName)
 	if DotaTime() < promoteNextCheck then
 		return
 	end
