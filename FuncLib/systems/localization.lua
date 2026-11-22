@@ -232,9 +232,9 @@ local strings = {
 		say_take_wisdom = { "Taking wisdom shrine.", "Grabbing the XP shrine.", "Wisdom shrine — covering it." },
 		say_debug_on = { "Verbose debug ON. Bots will chat more decisions.", "Debug mode enabled." },
 		say_debug_off = { "Verbose debug OFF.", "Debug mode disabled." },
-		-- `!pos` answer, one line per bot: "Pos 1 Carry" (#210). zh and ru use these English names.
+		-- `!pos` answer, one line per bot: "Pos 1 Safelane" (#210). zh and ru use these English names.
 		say_pos_prefix = "Pos",
-		pos_names = { "Carry", "Mid", "Offlane", "Offlane Support", "Hard Support" },
+		pos_names = { "Safelane", "Mid", "Offlane", "Offlane Support", "Hard Support" },
 		mode_laning = "laning",
 		mode_farming = "farming",
 		mode_pushing = "pushing",
@@ -991,7 +991,13 @@ local strings = {
 		say_debug_on = { "デバッグON。ボットが詳しく喋ります。", "Verbose debug 有効。" },
 		say_debug_off = { "デバッグOFF。", "Verbose debug 無効。" },
 		say_pos_prefix = "ポジション",
-		pos_names = { "キャリー", "ミッド", "オフレーン", "ソフトサポート", "ハードサポート" },
+		pos_names = {
+			"セーフレーン",
+			"ミッド",
+			"オフレーン",
+			"ソフトサポート",
+			"ハードサポート",
+		},
 	},
 }
 if CustomLoader and CustomLoader.Enable and strings[CustomLoader.Localization] then

@@ -222,6 +222,15 @@ local function CheckArdmHeroSwap()
 	end
 	return false
 end
+-- "I will play position 1 (Safelane)": the position name from the `!pos` list (#210, maintainer 2026-11-23).
+local function PlayPosLine(position)
+	local PosRules = require(GetScriptDirectory() .. "/FuncLib/systems/pos_command_rules")
+	return Localization.Get("say_play_pos")
+		.. tostring(position)
+		.. " ("
+		.. PosRules.Name(position, Localization.Get("pos_names"))
+		.. ")"
+end
 local function LevelUpAbilities()
 	if GetGameState() ~= GAME_STATE_PRE_GAME and GetGameState() ~= GAME_STATE_GAME_IN_PROGRESS then
 		return
@@ -239,7 +248,7 @@ local function LevelUpAbilities()
 			and bot.announcedRole ~= position
 		then
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				bot:ActionImmediate_Chat(PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
@@ -258,7 +267,7 @@ local function LevelUpAbilities()
 		bot.needPurchaseRebuild = true
 		if bot.isBear == nil and bot.announcedRole ~= position then
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				bot:ActionImmediate_Chat(PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
@@ -854,7 +863,7 @@ function Usage.SetTalkMessage()
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
 end
--- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Carry" ... "Pos 5 Hard Support".
+-- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Safelane" ... "Pos 5 Hard Support".
 -- hero_selection.lua (draft and pre-game) and the reply member's chat callback (in game) put the request on the
 -- shared Role table; each bot answers it from its own think, pos 1 first (FuncLib/systems/pos_command_rules.lua).
 do

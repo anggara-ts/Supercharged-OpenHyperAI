@@ -3,7 +3,7 @@
 local PosRules = {}
 
 -- English names. Localization.Get("pos_names") can give a translated list; a missing entry falls back to these.
-PosRules.Names = { "Carry", "Mid", "Offlane", "Offlane Support", "Hard Support" }
+PosRules.Names = { "Safelane", "Mid", "Offlane", "Offlane Support", "Hard Support" }
 
 -- Seconds a bot waits before it answers `!pos` again (a second callback or a repeated `!pos` inside the window is
 -- dropped), and the gap between the bots' lines (pos 1 speaks first, pos 5 last). 30s is the window of

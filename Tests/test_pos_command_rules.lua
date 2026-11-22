@@ -84,7 +84,7 @@ end)
 
 T.test("pos rules: position names and lines", function()
 	local PosRules = rules()
-	T.eq(PosRules.Line(1), "Pos 1 Carry")
+	T.eq(PosRules.Line(1), "Pos 1 Safelane")
 	T.eq(PosRules.Line(2), "Pos 2 Mid")
 	T.eq(PosRules.Line(3), "Pos 3 Offlane")
 	T.eq(PosRules.Line(4), "Pos 4 Offlane Support")
