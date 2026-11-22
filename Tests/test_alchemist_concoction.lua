@@ -1091,7 +1091,12 @@ T.test("alchemist: no engage brew on a hero allies kill with spells before the t
 		return c
 	end
 	-- An ally next to it hits it with spells: not its attack target (game 069: WasRecentlyDamagedByHero on an enemy
-	-- never reads true), so it counts as near while the target loses HP.
+	-- never reads true), so it counts as near while the target loses HP. The other allies far away.
+	for _, unit in ipairs(Stub.teams[GetTeam()]) do
+		if unit ~= bot then
+			unit._loc = bot._loc + Vector(-9000, 0, 0)
+		end
+	end
 	local ally = Stub.teams[GetTeam()][2]
 	-- Seen losing 400 HP per second while still out of the start distance.
 	enemy._loc = bot._loc + Vector(2000, 0, 0)
