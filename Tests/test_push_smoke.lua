@@ -73,3 +73,74 @@ T.test("push: a dead-enemies window near their fountain gathers below the high g
 	T.eq(on, false, "3 enemies dead: no Roshan first")
 	T.ok(type(why) == "string", "why")
 end)
+
+T.test("push: a glyphed enemy tower keeps the bot at it (glyph-wait), the end prints glyph-end", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich" })
+	T.stub.time = 1300
+	local Push = require(GetScriptDirectory() .. "/FuncLib/systems/push")
+	local bot = GetBot()
+	bot._level = 20
+	-- Game 074 t=1308: Dire's bottom T1 glyphed, this bot 500 from it, no creeps of ours, nobody else near.
+	local enemyTeam = GetOpposingTeam()
+	local ourTeam = T.stub.teams[GetTeam()]
+	for i = 1, #ourTeam do
+		if ourTeam[i] ~= bot then
+			ourTeam[i]._loc = Vector(-6000, -6000, 0)
+		end
+	end
+	for _, enemy in ipairs(T.stub.teams[enemyTeam]) do
+		enemy._loc = Vector(-6000, 6000, 0)
+	end
+	bot._loc = Vector(6000, -2700, 0)
+	local towerName = enemyTeam == TEAM_DIRE and "npc_dota_badguys_tower1_bot" or "npc_dota_goodguys_tower1_bot"
+	local tower = T.stub.newUnit({ name = towerName, team = enemyTeam, loc = Vector(6100, -2200, 0), hero = false })
+	local glyphed = true
+	tower.HasModifier = function(_, name)
+		return glyphed and name == "modifier_fountain_glyph"
+	end
+	tower.CanBeSeen = function()
+		return true
+	end
+	tower.IsTower = function()
+		return true
+	end
+	tower.IsBuilding = function()
+		return true
+	end
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { tower } or {}
+	end
+	local moved, attacked = nil, nil
+	bot.Action_MoveToLocation = function(_, location)
+		moved = location
+	end
+	bot.Action_AttackUnit = function(_, unit)
+		attacked = unit
+	end
+	local ok, err = pcall(function()
+		Push.PushThink(bot, 3)
+	end)
+	T.ok(ok, tostring(err))
+	T.ok(attacked == nil, "the glyphed tower is not attacked")
+	T.ok(moved ~= nil, "the bot got a move order")
+	T.ok(bot._glyphWait ~= nil and bot._glyphWait.mode == "edge", "no creeps of ours: waits at the edge")
+	local function printed(pattern)
+		for _, line in ipairs(T.stub.printed) do
+			if string.find(tostring(line), pattern, 1, true) then
+				return true
+			end
+		end
+		return false
+	end
+	T.ok(printed("glyph-wait lane=3"), "glyph-wait line")
+	T.ok(printed("why=no-creeps"), "why")
+	-- The Glyph ends: the next desire think closes the episode.
+	glyphed = false
+	T.stub.time = 1307
+	ok, err = pcall(function()
+		Push.GetPushDesire(bot, 3)
+	end)
+	T.ok(ok, tostring(err))
+	T.ok(bot._glyphWait == nil, "episode closed")
+	T.ok(printed("glyph-end why=ended lane=3"), "glyph-end line")
+end)

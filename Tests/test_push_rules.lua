@@ -437,11 +437,74 @@ T.test("finish hold: keeps a finishable tower through the gates, drops with a re
 		return reason
 	end
 	T.eq(dropWhy({ towerAlive = false }), "fell", "tower down")
-	T.eq(dropWhy({ glyphed = true }), "glyph", "Glyph")
 	T.eq(dropWhy({ allies = 1 }), "alone", "one left")
 	T.eq(dropWhy({ enemiesNear = 2 }), "enemies", "defenders came")
 	T.eq(dropWhy({ damage5s = 600 }), "slow", "damage no longer enough")
 	T.eq(dropWhy({ hp = 0.2 }), "low-hp", "low HP")
 	T.eq(dropWhy({ age = 16 }), "timeout", "15s cap")
 	T.eq(dropWhy({ baseThreat = true }), "base", "our base hit")
+end)
+
+-- Two return values as "a/b" (T.eq compares with ~=, so not tables).
+local function pair(a, b)
+	return tostring(a) .. "/" .. tostring(b)
+end
+
+T.test("finish hold: a Glyph pauses it instead of dropping it (game 074 t=1308-1325)", function()
+	local R = rules()
+	-- Game 074 t=1323: Alchemist, Largo (+1) at Dire's bottom T1, 106 HP, 3405 damage in 5s, no defender, Glyph on.
+	local s = { towerAlive = true, glyphed = true, allies = 3, enemiesNear = 0, damage5s = 3405, towerHp = 106, hp = 1 }
+	local keep, why = R.FinishHold(s)
+	T.ok(keep, "kept through the Glyph")
+	T.eq(why, "glyph", "why")
+	-- The damage and 15s checks wait for the Glyph to end.
+	s.damage5s, s.age = 0, 30
+	keep, why = R.FinishHold(s)
+	T.ok(keep and why == "glyph", "no slow / timeout drop while glyphed")
+	-- Outnumbered, alone or low HP still drop it.
+	s.enemiesNear = 3
+	T.eq(select(2, R.FinishHold(s)), "enemies", "defenders came")
+	s.enemiesNear, s.hp = 0, 0.2
+	T.eq(select(2, R.FinishHold(s)), "low-hp", "low HP")
+	s.hp, s.allies = 1, 1
+	T.eq(select(2, R.FinishHold(s)), "alone", "one left")
+end)
+
+T.test("glyph wait: stay at a tier 1 with our creeps, edge for multishot, back when outnumbered or low", function()
+	local R = rules()
+	-- The maintainer's case (game 074): a glyphed T1, our creeps under it, 3 of ours and no enemy hero.
+	local s = { tier = 1, hp = 1, allies = 3, enemies = 0, creeps = 3 }
+	T.eq(pair(R.GlyphWait(s)), "stay/creeps-tank", "T1 with creeps: stay")
+	s.creeps = 0
+	T.eq(pair(R.GlyphWait(s)), "edge/no-creeps", "T1 without creeps: just outside its range")
+	s.creeps, s.towerOnBot = 2, true
+	T.eq(pair(R.GlyphWait(s)), "stay/creeps-tank", "T1 on us, creeps there to take it back: stay")
+	s.towerHurts = true
+	T.eq(pair(R.GlyphWait(s)), "edge/tower-aggro", "T1 on us and it hurts: step to the edge")
+	s.towerOnBot, s.towerHurts, s.creeps = false, false, 3
+	s.tier = 2
+	T.eq(pair(R.GlyphWait(s)), "edge/multishot", "T2: multishot hits 5 more, creeps don't cover us")
+	s.tier, s.enemies = 1, 4
+	T.eq(pair(R.GlyphWait(s)), "back/outnumbered", "more enemy heroes than ours")
+	s.enemies = 3
+	T.eq(R.GlyphWait(s), "stay", "even numbers stay")
+	s.hp = 0.25
+	T.eq(pair(R.GlyphWait(s)), "back/low-hp", "low HP")
+end)
+
+T.test("glyph helpers: tower tier, time left, fight factor", function()
+	local R = rules()
+	T.eq(R.TowerTier("npc_dota_badguys_tower1_bot"), 1, "T1")
+	T.eq(R.TowerTier("npc_dota_goodguys_tower4"), 4, "T4")
+	T.eq(R.TowerTier("npc_dota_goodguys_melee_rax_mid"), nil, "not a tower")
+	T.eq(pair(R.GlyphLeft(4.5, 2)), "4.5/modifier", "modifier time read")
+	T.eq(pair(R.GlyphLeft(nil, 2)), "5/timer", "7s from first seen")
+	T.eq(pair(R.GlyphLeft(nil, 9)), "0/timer", "never negative")
+	-- 7.42 tooltip: no multishot for tier 1, so no multiplier (was 2).
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower1_bot", true, 3), 1, "T1 glyphed")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", false, 3), 1, "no Glyph")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 1), 1, "T2, one hero in reach: same damage")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower3_top", true, 3), 3, "T3, three heroes: each hit")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 9), 6, "at most 6 targets")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 0), 1, "at least 1")
 end)

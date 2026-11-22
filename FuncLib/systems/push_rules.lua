@@ -274,9 +274,12 @@ function PushRules.FrontWalk(s)
 end
 
 -- Finish hold (#12, game 072 10:11-10:38): once a tower can be finished (FinishTower: 2+ allies whose 5s damage beats
--- its HP), the push stays on it through the other gates while: the tower stands, our base is not hit, it is not
--- Glyphed (then the creeps are the target again), 2+ of ours are at it, fewer enemy heroes than ours are near it, our
--- 5s damage still beats its HP, the bot is above 30% HP, and for 15s at most. Returns keep, why.
+-- its HP), the push stays on it through the other gates while: the tower stands, our base is not hit, 2+ of ours are
+-- at it, fewer enemy heroes than ours are near it, the bot is above 30% HP, our 5s damage still beats its HP, and for
+-- 15s at most. A Glyph pauses it (game 074 21:48-22:06, maintainer live 2026-11-23): while the tower has the Glyph the
+-- hold is kept ("glyph": the bots wait at the tower, PushRules.GlyphWait) without the damage and 15s checks; the
+-- caller stops the 15s clock for the Glyph's duration (s.age excludes it). Was: a Glyph dropped the hold every think.
+-- Returns keep, why.
 function PushRules.FinishHold(s)
 	if not s.towerAlive then
 		return false, "fell"
@@ -284,25 +287,91 @@ function PushRules.FinishHold(s)
 	if s.baseThreat then
 		return false, "base"
 	end
-	if s.glyphed then
-		return false, "glyph"
-	end
 	if (s.allies or 0) < 2 then
 		return false, "alone"
 	end
 	if (s.enemiesNear or 0) >= (s.allies or 0) then
 		return false, "enemies"
 	end
-	if (s.damage5s or 0) < (s.towerHp or 0) then
-		return false, "slow"
-	end
 	if (s.hp or 1) < 0.3 then
 		return false, "low-hp"
+	end
+	if s.glyphed then
+		return true, "glyph"
+	end
+	if (s.damage5s or 0) < (s.towerHp or 0) then
+		return false, "slow"
 	end
 	if (s.age or 0) > 15 then
 		return false, "timeout"
 	end
 	return true, "ok"
+end
+
+-- Glyph of Fortification, 7.42 (abilities_english.txt in pak01_dir.vpk, DOTA_Tooltip_ability_fountain_glyph*):
+-- structures invulnerable for 7s, lane creeps for 3s, towers get multishot with 5 additional targets "excludes tier 1
+-- towers", 2 charges. Nothing in the game files changes the tower's damage per target (the 7.37 "+100% damage" note
+-- is Elder Titan's innate Tip the Scales, not the Glyph).
+PushRules.GLYPH_STRUCTURE_SECONDS = 7
+PushRules.GLYPH_MULTISHOT_TARGETS = 6
+
+-- Tier of a tower from its unit name (npc_dota_badguys_tower2_mid -> 2); nil for anything else.
+function PushRules.TowerTier(name)
+	return tonumber(string.match(name or "", "tower(%d)"))
+end
+
+-- Seconds of Glyph left on a building: the modifier's remaining time when the API gives one (`read`), else 7s from
+-- when the bot first saw it (`elapsed`). Returns seconds, source ("modifier" or "timer").
+function PushRules.GlyphLeft(read, elapsed)
+	if type(read) == "number" and read >= 0 then
+		return read, "modifier"
+	end
+	return math.max(0, PushRules.GLYPH_STRUCTURE_SECONDS - (elapsed or 0)), "timer"
+end
+
+-- What a pusher does while the enemy tower in front has the Glyph (#12, maintainer, live game 074 2026-11-23: "bots
+-- are running away from t1 when glyph is active. t1 only got shield and no multiple hits. creeps also only get shield
+-- for a few seconds (check online) so if we have nearby ally creep, no need to back off except when outnumbered by
+-- enemy hero"). The tower can't be hit for 7s, its creeps for 3s; the group stays and hits what it can:
+--   "back"  - leave as before (the lane-front step back): HP under 30%, or more enemy heroes than ours near the tower.
+--   "edge"  - wait just outside the tower's range, hitting creeps and heroes outside it: a tier 2+ tower (multishot hits
+--             5 more targets, so our creeps don't keep it off us), or a tier 1 tower on us with none of our creeps in
+--             its range or hurting us (s.towerHurts), or no creeps of ours in its range.
+--   "stay"  - a tier 1 tower (one target at a time) with our creeps in its range: stay and hit anything in reach.
+-- s: tier, hp, allies, enemies (heroes within 1200 of the tower), towerOnBot, towerHurts, creeps (ours in its range).
+-- Returns mode, why.
+function PushRules.GlyphWait(s)
+	if (s.hp or 1) < 0.3 then
+		return "back", "low-hp"
+	end
+	if (s.enemies or 0) > (s.allies or 0) then
+		return "back", "outnumbered"
+	end
+	if (s.tier or 1) >= 2 then
+		return "edge", "multishot"
+	end
+	if s.towerOnBot and ((s.creeps or 0) < 1 or s.towerHurts) then
+		return "edge", "tower-aggro"
+	end
+	if (s.creeps or 0) >= 1 then
+		return "stay", "creeps-tank"
+	end
+	return "edge", "no-creeps"
+end
+
+-- How much a tower counts in a fight estimate (Fu.WeAreStronger) while it has the Glyph: per target its damage is
+-- unchanged, so a tier 1 tower (no multishot) counts as usual (1). A tier 2+ tower hits up to 6 targets at once, so
+-- against a group it deals its damage to each hero of the group in its range (`heroesInRange`, at least 1, at most 6).
+-- Was a flat 2 for every glyphed tower.
+function PushRules.GlyphTowerFactor(towerName, glyphed, heroesInRange)
+	if not glyphed then
+		return 1
+	end
+	local tier = PushRules.TowerTier(towerName)
+	if tier == nil or tier < 2 then
+		return 1
+	end
+	return math.min(math.max(heroesInRange or 1, 1), PushRules.GLYPH_MULTISHOT_TARGETS)
 end
 
 -- When a lane-done episode ends (push.lua LaneDoneTick): the target fell, the bot died or stopped thinking for 3s+,

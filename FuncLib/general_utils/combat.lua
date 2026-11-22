@@ -1,5 +1,6 @@
 -- Shared helper: combat.
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
+local PushRules = require(GetScriptDirectory() .. "/FuncLib/systems/push_rules")
 local function installCombat(Fu)
 	function Fu.IsOtherAllyCanKillTarget(bot, target)
 		if not Fu.IsValid(target) then
@@ -687,24 +688,40 @@ local function installCombat(Fu)
 				end
 			end
 		end
+		-- A glyphed tower (#12, game 074): PushRules.GlyphTowerFactor - 1 for a tier 1 (no multishot, same damage per
+		-- target), the heroes of the other side in its reach (up to 6) for a tier 2+ with multishot. Was 2 for any
+		-- glyphed tower. Reach ~870 with hulls (games 069-074 wait-outside-tower range=852-868): 900.
+		local function glyphFactor(tower, heroes)
+			if not tower:HasModifier("modifier_fountain_glyph") then
+				return 1
+			end
+			local inReach = 0
+			for _, hero in ipairs(heroes) do
+				if GetUnitToUnitDistance(hero, tower) <= 900 then
+					inReach = inReach + 1
+				end
+			end
+			return PushRules.GlyphTowerFactor(tower:GetUnitName(), true, inReach)
+		end
 		local allyTowers = bot:GetNearbyTowers(600, false)
 		if Fu.IsValidBuilding(allyTowers[1]) then
-			if allyTowers[1]:HasModifier("modifier_fountain_glyph") then
-				local towerPower = #allyTowers
-					* math.sqrt(Max(0, allyTowers[1]:GetAttackDamage() * allyTowers[1]:GetAttackSpeed() * 5.0 * 2))
-				allyPower = allyPower + towerPower
-				allyRawPower = allyRawPower + towerPower
-			else
-				local towerPower = #allyTowers
-					* math.sqrt(Max(0, allyTowers[1]:GetAttackDamage() * allyTowers[1]:GetAttackSpeed() * 5.0))
-				allyPower = allyPower + towerPower
-				allyRawPower = allyRawPower + towerPower
-			end
+			local towerPower = #allyTowers
+				* math.sqrt(
+					Max(
+						0,
+						allyTowers[1]:GetAttackDamage()
+							* allyTowers[1]:GetAttackSpeed()
+							* 5.0
+							* glyphFactor(allyTowers[1], enemyHeroes)
+					)
+				)
+			allyPower = allyPower + towerPower
+			allyRawPower = allyRawPower + towerPower
 		end
 		-- Enemy towers count against us the same way ours count for us.
 		local enemyTowers = bot:GetNearbyTowers(600, true)
 		if Fu.IsValidBuilding(enemyTowers[1]) then
-			local glyphMultiplier = enemyTowers[1]:HasModifier("modifier_fountain_glyph") and 2 or 1
+			local glyphMultiplier = glyphFactor(enemyTowers[1], allyHeroes)
 			enemyRawPower = enemyRawPower
 				+ #enemyTowers
 					* math.sqrt(
