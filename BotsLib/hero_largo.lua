@@ -344,8 +344,24 @@ function X.AllyDispelModifier(allyHero, allyIsGoingOnSomeone, allyIsRetreating)
 	return nil
 end
 
-function X.ConsiderCatchLick()
-	if not Fu.CanCastAbility(catchyLickAbility) then
+-- Castable now, or (onceShown) castable once the song is off: game 071 showed Lick, Frogstomp and Croak hidden while
+-- he sings (rhapsody-on lickHidden=yes stompHidden=yes croakHidden=yes), so Fu.CanCastAbility says no then.
+function X.SpellReady(ability, onceShown)
+	if Fu.CanCastAbility(ability) then
+		return true
+	end
+	return onceShown == true
+		and ability ~= nil
+		and not ability:IsNull()
+		and ability:IsTrained()
+		and (
+			ability:IsFullyCastable()
+			or ability:GetCooldownTimeRemaining() <= 0 and bot:GetMana() >= ability:GetManaCost()
+		)
+end
+
+function X.ConsiderCatchLick(onceShown)
+	if not X.SpellReady(catchyLickAbility, onceShown) then
 		return BOT_ACTION_DESIRE_NONE, nil, nil
 	end
 	local castRange = catchyLickAbility:GetCastRange()
@@ -535,8 +551,8 @@ function X.ConsiderCatchLick()
 	return BOT_ACTION_DESIRE_NONE, nil, nil
 end
 
-function X.ConsiderFrogstomp()
-	if not Fu.CanCastAbility(frogstompAbility) then
+function X.ConsiderFrogstomp(onceShown)
+	if not X.SpellReady(frogstompAbility, onceShown) then
 		return BOT_ACTION_DESIRE_NONE, 0, nil, 0
 	end
 	local castRange = frogstompAbility:GetCastRange()
@@ -1099,6 +1115,31 @@ function X.CheckStrum(now, stacks)
 	rhapsody.pending = nil
 end
 
+-- The Lick or Frogstomp to end the song for, or nil: "lick" | "stomp", its target, the spell's reason.
+function X.SongBreakPlay()
+	local stacks = Fu.GetModifierCount(bot, GROOVIN_MODIFIER)
+	local alliesNear = 0
+	for _, allyHero in pairs(nearbyAllies) do
+		if
+			allyHero ~= bot
+			and Fu.IsValidHero(allyHero)
+			and not allyHero:IsIllusion()
+			and Fu.IsInRange(bot, allyHero, 900)
+		then
+			alliesNear = alliesNear + 1
+		end
+	end
+	local lickDesire, lickTarget, lickWhy = X.ConsiderCatchLick(true)
+	if lickDesire > 0 and LargoRules.BreakSongFor(lickWhy, stacks, 1, alliesNear) then
+		return "lick", lickTarget, lickWhy
+	end
+	local stompDesire, _, stompWhy, stompCount, stompTarget = X.ConsiderFrogstomp(true)
+	if stompDesire > 0 and LargoRules.BreakSongFor(stompWhy, stacks, stompCount, alliesNear) then
+		return "stomp", stompTarget, stompWhy
+	end
+	return nil, nil, nil
+end
+
 -- While the song is on: pick the songs, end the song when there is nothing to sing for, strum on the beat.
 -- Returns whether it gave an order.
 function X.RhapsodyThink(now)
@@ -1110,6 +1151,29 @@ function X.RhapsodyThink(now)
 			LogLargo("song", 2, "song-change song=%s second=%s why=%s", first, tostring(second), why)
 		end
 		rhapsody.first, rhapsody.second, rhapsody.why = first, second, why
+	end
+	-- A Catchy Lick or Frogstomp worth more than the song (game 071, maintainer): end the song for it. The spells show
+	-- again once the song is off and the normal rules cast them; the toggle-on rule starts the song again after.
+	if Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
+		local play, playTarget, playWhy = X.SongBreakPlay()
+		if play ~= nil then
+			rhapsody.toggleOrderAt = now
+			LogLargo(
+				"toggle",
+				1,
+				"rhapsody-toggle off why=%s target=%s play=%s held=%.1f stacks=%d strums=%d hits=%d mana=%d",
+				play,
+				ShortName(playTarget),
+				playWhy,
+				now - rhapsody.onAt,
+				Fu.GetModifierCount(bot, GROOVIN_MODIFIER),
+				rhapsody.strums,
+				rhapsody.hits,
+				bot:GetMana()
+			)
+			bot:Action_UseAbility(amphibianRhapsodyAbility)
+			return true
+		end
 	end
 	local firstSong = songByKey[rhapsody.first] or fightSongAbility
 	local offWhy = LargoRules.ToggleOffReason(

@@ -213,6 +213,30 @@ function LargoRules.LaneStompOk(o)
 	return true, nil
 end
 
+-- Whether a Catchy Lick or Frogstomp is worth ending the song for (game 071, maintainer: "he could turn off ulti and
+-- use lick when needed"). reason: the spell rule's why; stacks: Groovin' now (they linger stack_duration 5s after the
+-- song, and the toggle has a 1.5s cooldown); count: heroes a stomp catches; alliesNear: other ally heroes within 900.
+--   Always: a kill, an ally save, an ally dispel, a channel stopped, a stomp on 3+ heroes.
+--   Below BREAK_STACKS stacks only (little to lose): a stomp on 2 heroes, a pull of the enemy into our fight (Largo's
+--   chase lick with an ally near, or an engage lick).
+LargoRules.BREAK_STACKS = 3
+function LargoRules.BreakSongFor(reason, stacks, count, alliesNear)
+	if reason == nil then
+		return false
+	end
+	if reason == "kill" or reason == "ally-save" or reason == "channel" or string.find(reason, "^ally%-dispel") then
+		return true
+	end
+	local cheap = stacks < LargoRules.BREAK_STACKS
+	if reason == "fight-aoe" then
+		return (count or 0) >= 3 or (count or 0) >= 2 and cheap
+	end
+	if reason == "ally-engage" or reason == "chase" and (alliesNear or 0) >= 1 then
+		return cheap
+	end
+	return false
+end
+
 -- Catchy Lick pulls an ally pullDistance (375) toward Largo. A dispel lick on an ally that is fighting in range of its
 -- target would drag it out of range: only when the debuff already stops it fighting (sleep, stun) or it is not
 -- in range of its target anyway. distToTarget nil: no target.
