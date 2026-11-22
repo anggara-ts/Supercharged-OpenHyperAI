@@ -5,16 +5,16 @@ description: Put a clean, ready-to-upload copy of the OpenHyperAI bot scripts (o
 
 # Prepare a Workshop upload
 
-Tool: `Util/export-bots.js` (`--help`). Rules: `AGENTS.md` (Commits: version files; Things not to do).
+Tool: `tools/export-bots.js` (`--help`). Rules: `AGENTS.md` (Commits: version files; Things not to do).
 The Workshop Tools uploader publishes the contents of `vscripts/bots`, so that folder must hold only the bot
-scripts. Never upload the clone or a link to it: it has `.git`, `.env` (API tokens), `Util/match-logs/` (the
+scripts. Never upload the clone or a link to it: it has `.git`, `.env` (API tokens), `local/match-logs/` (the
 host's Steam ID and server IPs) and the local test lineup.
 
 1. **Ask first:** is a test game prepared or about to be played? The export replaces what Local Dev Script runs,
    so do this between games and run `/prepare-game` again afterwards.
 2. **What to publish:** a release tag (after `/release publish`, so the version files carry the release number
-   the Workshop copy shows: it has no `build_info.lua`, `[OHA-BUILD]` prints `commit=release`) or `origin/main`.
-   `git fetch origin --tags`, then `node Util/export-bots.js --dry-run [--ref vX.Y]`.
+   the Workshop copy shows: it has no `build_info.lua`, `[SHy-BUILD]` prints `commit=release`) or `origin/main`.
+   `git fetch origin --tags`, then `node tools/export-bots.js --dry-run [--ref vX.Y]`.
 3. **Check the dry run:**
    - the ref and commit are the ones to publish, `left out` lists the non-script folders, no `required files
      missing` error;
@@ -22,7 +22,7 @@ host's Steam ID and server IPs) and the local test lineup.
      `bots-dev`);
    - `has files this tool did not write`: show them to the maintainer; `--force` (deletes them) only after they
      agree.
-   - `is not a clean Workshop copy`: the committed `Customize/general.lua` of that ref has test settings (`TEST #N`
+   - `is not a clean Workshop copy`: the committed `bots/customize/general.lua` of that ref has test settings (`TEST #N`
      comments, forced picks in `Radiant_Heros` / `Dire_Heros` / `Debug_*_Heros`, `Weak_Hero_Cap` other than 1, a
      `Debug_* = true`). Never edit the copy by hand: put the release defaults back in `general.lua` in a PR, merge,
      and release / export that commit. The local, uncommitted lineup never reaches a Workshop copy (the export
@@ -32,21 +32,21 @@ host's Steam ID and server IPs) and the local test lineup.
    After writing, the tool checks that the folder holds exactly the copied files (nothing added or edited, no
    `build_info.lua`) and prints `READY TO UPLOAD: ... version <number> / <patch version>`. Only that line means
    the folder can be uploaded; any error stops it. Show the line to the maintainer.
-5. **Optional smoke test:** a Local Host lobby with Local Dev Script; `[OHA-BUILD]` shows `commit=release` and the
+5. **Optional smoke test:** a Local Host lobby with Local Dev Script; `[SHy-BUILD]` shows `commit=release` and the
    release number, the default lineup drafts.
 6. **Upload (the maintainer does it; publishing is outward-facing, never do it yourself):** Dota 2 Workshop Tools →
    Bot Scripting → create a new bot script or pick the existing one → title, description, preview image →
    submit. (From Valve's 22 July 2017 patch notes; the menu may have moved since.) The Steam account must not be a
    limited account.
-7. **After:** leave the copy, or `node Util/export-bots.js --remove`, then `/prepare-game` before the next test
+7. **After:** leave the copy, or `node tools/export-bots.js --remove`, then `/prepare-game` before the next test
    game.
 
-Not in the copy on purpose (maintainer's decision, #177): `Install-to-vscript/` and docs. The Workshop copy is
+Not in the copy on purpose (maintainer's decision, #177): `install/` and docs. The Workshop copy is
 the bot scripts plus `LICENSE` (the MIT notice has to ship with every copy, #215; `NOTICE_FILES` in
-`Util/export-bots.js`). After an upload, check once that the Workshop item kept `LICENSE` (the uploader may skip
+`tools/export-bots.js`). After an upload, check once that the Workshop item kept `LICENSE` (the uploader may skip
 files that are not `.lua`; unverified). Our Workshop item is 3843444501 (https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501): update it,
 not a new item.
 
-New Lua files: a committed file under the root, `BotsLib/`, `FuncLib/` or `Customize/` is in the copy
+New Lua files: a committed file under the root, `bots/heroes/`, `bots/lib/` or `bots/customize/` is in the copy
 automatically. A `.lua` file in any other new folder stops the export until the folder is added to
-`RUNTIME_DIRS` or `NOT_RUNTIME_DIRS` in `Util/export-bots.js`.
+`RUNTIME_DIRS` or `NOT_RUNTIME_DIRS` in `tools/export-bots.js`.
