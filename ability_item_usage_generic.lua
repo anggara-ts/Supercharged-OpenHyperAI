@@ -21,33 +21,41 @@ end
 local team = GetTeam()
 local alwaysTrue = 10 == 10
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
+local LastHitOverlay = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_overlay")
 -- Logs switched off once their feature works (the TP diag lines, game 029).
 local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/FuncLib/systems/utils")
 local BotBuild = dofile(GetScriptDirectory() .. "/BotsLib/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localization")
 local CustomLoader = require(GetScriptDirectory() .. "/FuncLib/systems/custom_loader")
+local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local TeamMemory = require(GetScriptDirectory() .. "/FuncLib/systems/team_memory")
 local ChargeTracker = require(GetScriptDirectory() .. "/FuncLib/systems/charge_tracker")
 local AbilityContext = require(GetScriptDirectory() .. "/FuncLib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
+local ForeignItems = require(GetScriptDirectory() .. "/FuncLib/systems/foreign_items")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
+-- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
+local pingLoggerId, pingLoggerAt = nil, -999
 local function LogHumanPing()
 	local myId = bot:GetPlayerID()
-	local loggerId = nil
-	-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review).
-	for slot = 1, #GetTeamPlayers(GetTeam()) do
-		local member = GetTeamMember(slot)
-		if member ~= nil and member:IsBot() and not member:IsIllusion() and member:IsAlive() then
-			local id = member:GetPlayerID()
-			if loggerId == nil or id < loggerId then
-				loggerId = id
+	if DotaTime() >= pingLoggerAt or DotaTime() < pingLoggerAt - 1 then
+		pingLoggerAt = DotaTime() + 1
+		pingLoggerId = nil
+		-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review).
+		for slot = 1, #GetTeamPlayers(GetTeam()) do
+			local member = GetTeamMember(slot)
+			if member ~= nil and member:IsBot() and not member:IsIllusion() and member:IsAlive() then
+				local id = member:GetPlayerID()
+				if pingLoggerId == nil or id < pingLoggerId then
+					pingLoggerId = id
+				end
 			end
 		end
 	end
-	if loggerId ~= myId then
+	if pingLoggerId ~= myId then
 		return
 	end
 	local human, ping = Utils.GetHumanPing()
@@ -1404,6 +1412,10 @@ local function ConsiderItems()
 	for forageSlot = 0, 5 do
 		local forage = bot:GetItemInSlot(forageSlot)
 		local forageName = forage ~= nil and not forage:IsNull() and forage:GetName() or nil
+		-- Another player's mushroom can't be eaten (#141): DropForeignItems drops it instead.
+		if ForeignItems.FORAGE[forageName] and ForeignItems.Check(bot, forage) then
+			forageName = nil
+		end
 		if
 			forageName == "item_foragers_stats"
 			or forageName == "item_foragers_health"
@@ -1451,6 +1463,10 @@ local function ConsiderItems()
 			ready = not (type(cooldown) == "number" and cooldown > 0)
 		end
 		if ready and itemName ~= nil and Usage.IsDoomed(bot) and DoomWastes(itemName) then
+			ready = false
+		end
+		-- Another player's item can't be used from this inventory (#141).
+		if ready and itemName ~= nil and ForeignItems.Check(bot, item) then
 			ready = false
 		end
 		if ready and itemName ~= nil then
@@ -1832,15 +1848,22 @@ Usage.ConsiderItemDesire["item_armlet"] = function(item)
 end
 -- [OHA-DODGE] (#134): a defensive item used against an incoming spell (Blink, Eul's / Wind Waker, BKB, Lotus Orb,
 -- Linken's), and 1.5s later whether the target was hit by a hero anyway, so a game shows if the dodge was in time.
--- projectile: from Fu.Find*ProjectileIncoming; caster / ability: from Fu.FindWillBeCast*Spell.
-function Usage.LogDodge(item, target, why, projectile, caster, ability)
+-- projectile: from Fu.Find*ProjectileIncoming or Fu.FindLinearProjectileIncoming; caster / ability: from
+-- Fu.FindWillBeCast*Spell. timing (#134): { kind = "tracking" | "linear", tti = seconds to impact, src = where the
+-- speed came from }; without it (a spell being cast) kind=cast tti=-1.
+function Usage.LogDodge(item, target, why, projectile, caster, ability, timing)
 	local itemName = item:GetName()
 	local now = DotaTime()
+	-- (#134) One dodge per target per think: the items after this one in the same think see it and keep their
+	-- charge (each item's order would replace the previous one anyway).
+	bot._dodgeChosen = { t = now, target = target }
 	bot._dodgeLogAt = bot._dodgeLogAt or {}
 	if now < (bot._dodgeLogAt[itemName] or -99) then
 		return
 	end
 	bot._dodgeLogAt[itemName] = now + 2
+	timing = timing or {}
+	local kind = timing.kind or (projectile ~= nil and "tracking" or "cast")
 	local spell, dist = "will-cast", -1
 	if projectile ~= nil then
 		spell = projectile.ability ~= nil and projectile.ability:GetName() or "?"
@@ -1855,21 +1878,130 @@ function Usage.LogDodge(item, target, why, projectile, caster, ability)
 	local targetName = target == bot and "self" or (string.gsub(target:GetUnitName(), "npc_dota_hero_", ""))
 	print(
 		string.format(
-			"[OHA-DODGE] t=%.0f %s item=%s target=%s spell=%s dist=%.0f why=%s",
+			"[OHA-DODGE] t=%.0f %s item=%s target=%s spell=%s dist=%.0f why=%s kind=%s tti=%.2f src=%s",
 			now,
 			(string.gsub(botName, "npc_dota_hero_", "")),
 			(string.gsub(itemName, "^item_", "")),
 			targetName,
 			spell,
 			dist,
-			why
+			why,
+			kind,
+			timing.tti or -1,
+			timing.src or "none"
 		)
 	)
 	bot._dodgePending = bot._dodgePending or {}
 	table.insert(
 		bot._dodgePending,
-		{ at = now, item = itemName, handle = item, target = target, targetName = targetName }
+		{ at = now, item = itemName, handle = item, target = target, targetName = targetName, kind = kind }
 	)
+end
+-- (#134) Did an earlier item in this think already dodge for this target?
+local function DodgeChosenThisThink(target)
+	local chosen = bot._dodgeChosen
+	return chosen ~= nil and chosen.t == DotaTime() and chosen.target == target
+end
+-- [OHA-ERROR] dodge: an error in the projectile readers (fields of GetLinearProjectiles are not verified), first 3
+-- distinct per bot, so a game without [OHA-DODGE] lines can tell "no skillshot" from "the reader throws".
+local function LogDodgeError(where, err)
+	bot._dodgeErrs = bot._dodgeErrs or {}
+	local key = where .. ": " .. tostring(err)
+	if bot._dodgeErrs[key] or (bot._dodgeErrCount or 0) >= 3 then
+		return
+	end
+	bot._dodgeErrs[key] = true
+	bot._dodgeErrCount = (bot._dodgeErrCount or 0) + 1
+	print(string.format("[OHA-ERROR] t=%.1f %s dodge %s", DotaTime(), botName, key))
+end
+Usage.LogDodgeError = LogDodgeError
+-- (#134) The reaction time of a dodge item starts with its cast point: 0 for Blink, Eul's, Wind Waker (7.42
+-- items.txt AbilityCastPoint "0.0"), BKB, Lotus Orb and Linken's (no AbilityCastPoint: the default 0). Read from
+-- the handle so a change in a patch is followed.
+local function DodgeCastPoint(item)
+	local ok, castPoint = pcall(item.GetCastPoint, item)
+	return ok and type(castPoint) == "number" and castPoint or 0
+end
+-- [OHA-DODGE] too-late: a projectile that will land before the item can work, so the item is kept. Only for a
+-- projectile seen for the first time in this think (one that was in the window before and passed up for another
+-- reason is not "too late"); at most once per 3s per item. (No "kind" word here, so the `[OHA-DODGE] linear` / `tracking` checks only see real dodges.)
+local function LogDodgeTooLate(item, target, spell, tti, src)
+	local itemName = item:GetName()
+	local now = DotaTime()
+	bot._dodgeLateAt = bot._dodgeLateAt or {}
+	if now < (bot._dodgeLateAt[itemName] or -99) then
+		return
+	end
+	bot._dodgeLateAt[itemName] = now + 3
+	print(
+		string.format(
+			"[OHA-DODGE] t=%.0f %s too-late item=%s target=%s spell=%s tti=%.2f src=%s",
+			now,
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			(string.gsub(itemName, "^item_", "")),
+			target == bot and "self" or (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
+			spell,
+			tti or -1,
+			src or "none"
+		)
+	)
+end
+-- (#134) A tracking projectile from `finder` (a Fu.Find*ProjectileIncoming) that this item should answer now: it
+-- lands within the item's reaction time plus DodgeRules.SLACK (time to impact = distance / closing speed). The
+-- old fixed ranges (350-1200) are only the search radius now. Returns projectile, timing (for LogDodge) or nil.
+function Usage.TimedTrackingProjectile(item, target, finder, searchRange)
+	if DodgeChosenThisThink(target) then
+		return nil
+	end
+	local castPoint = DodgeCastPoint(item)
+	local timing, late = nil, nil
+	local ok, found = pcall(finder, target, searchRange, function(projectile)
+		Fu.LogTrackingProjectileFields(projectile)
+		local window, tti, src, first = Fu.TrackingProjectileWindow(target, projectile, castPoint)
+		if window == "now" then
+			timing = { kind = "tracking", tti = tti, src = src }
+			return true
+		end
+		if window == "late" and first and late == nil then
+			late = { projectile = projectile, tti = tti, src = src }
+		end
+		return false
+	end)
+	if not ok then
+		LogDodgeError("tracking", found)
+		return nil
+	end
+	if found ~= nil then
+		return found, timing
+	end
+	if late ~= nil then
+		local spell = late.projectile.ability ~= nil and late.projectile.ability:GetName() or "?"
+		pcall(LogDodgeTooLate, item, target, spell, late.tti, late.src)
+	end
+	return nil
+end
+-- (#134) A dangerous linear skillshot (FuncLib/systems/dodge_rules.lua LINEAR) that will hit `target` and that
+-- this item ("blink" | "cyclone" | "bkb") answers, when it is time to react. Returns the threat
+-- (Fu.FindLinearProjectileIncoming) and the timing for LogDodge, or nil.
+function Usage.LinearThreat(item, target, tool)
+	if DodgeChosenThisThink(target) then
+		return nil
+	end
+	local ok, threat = pcall(Fu.FindLinearProjectileIncoming, target, DodgeCastPoint(item), tool)
+	if not ok then
+		LogDodgeError("linear", threat)
+		return nil
+	end
+	if threat == nil then
+		return nil
+	end
+	if threat.window == "late" and threat.first then
+		pcall(LogDodgeTooLate, item, target, threat.name, threat.tti, threat.src)
+	end
+	if threat.window ~= "now" then
+		return nil
+	end
+	return threat, { kind = "linear", tti = threat.tti, src = threat.src }
 end
 function Usage.WatchDodgeResults()
 	local pending = bot._dodgePending
@@ -1890,7 +2022,7 @@ function Usage.WatchDodgeResults()
 			local cast = handle ~= nil and not handle:IsNull() and handle:GetCooldownTimeRemaining() > 0
 			print(
 				string.format(
-					"[OHA-DODGE] t=%.0f %s result item=%s target=%s hit=%s cast=%s alive=%s after=%.1f",
+					"[OHA-DODGE] t=%.0f %s result item=%s target=%s hit=%s cast=%s alive=%s after=%.1f kind=%s",
 					now,
 					(string.gsub(botName, "npc_dota_hero_", "")),
 					(string.gsub(entry.item, "^item_", "")),
@@ -1898,7 +2030,8 @@ function Usage.WatchDodgeResults()
 					valid and tostring(hit) or "unknown",
 					tostring(cast),
 					tostring(alive),
-					now - entry.at
+					now - entry.at,
+					entry.kind or "?"
 				)
 			)
 		end
@@ -1916,6 +2049,20 @@ Usage.ConsiderItemDesire["item_black_king_bar"] = function(item)
 	local hEffectTarget = nil
 	local castReason = nil
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
+	-- (#134) A skillshot BKB blocks (DodgeRules.LINEAR bkb=true: Sacred Arrow, Earth Spike, Impale, Spear, ...)
+	-- about to hit: the caster may stand farther than the 1300 above (Sacred Arrow flies 3000).
+	if
+		not bot:IsMagicImmune()
+		and not bot:IsInvulnerable()
+		and (#enemyHeroes > 0 or Fu.IsGoingOnSomeone(bot) or Fu.IsRetreating(bot))
+	then
+		local threat, timing = Usage.LinearThreat(item, bot, "bkb")
+		if threat ~= nil then
+			pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
+			castReason = "防御弹道"
+			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+		end
+	end
 	if
 		#enemyHeroes > 0
 		and not bot:IsMagicImmune()
@@ -1939,10 +2086,15 @@ Usage.ConsiderItemDesire["item_black_king_bar"] = function(item)
 			castReason = "解沉默"
 			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
 		end
-		if Fu.IsNotAttackProjectileIncoming(bot, 350) and closeEnemyCount >= 1 then
-			pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindNotAttackProjectileIncoming(bot, 350))
-			castReason = "防御弹道"
-			return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+		-- (#134) by time to impact (was: any spell projectile within 350).
+		if closeEnemyCount >= 1 then
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, bot, Fu.FindNotAttackProjectileIncoming, 2000)
+			if projectile ~= nil then
+				pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+				castReason = "防御弹道"
+				return BOT_ACTION_DESIRE_HIGH, bot, castType, castReason
+			end
 		end
 		if Fu.IsWillBeCastUnitTargetSpell(bot, radius) and closeEnemyCount >= 1 then
 			pcall(Usage.LogDodge, item, bot, "will-cast", nil, Fu.FindWillBeCastUnitTargetSpell(bot, radius))
@@ -2101,13 +2253,35 @@ Usage.ConsiderItemDesire["item_blink"] = function(item)
 			end
 		end
 	end
-	if
-		Fu.IsProjectileIncoming(bot, 1200)
-		and (botTarget == nil or not botTarget:IsHero() or not Fu.IsInRange(bot, botTarget, bot:GetAttackRange() + 100))
-	then
-		pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindProjectileIncoming(bot, 1200))
-		local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, GetAncient(GetTeam()):GetLocation(), 1199)
-		return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
+	-- (#134) A dangerous skillshot about to hit: Blink to the side of its line (a Blink toward base can stay on the
+	-- line, the shot usually flies that way), on the side of our base, plus the part of the way home along it.
+	do
+		local threat, timing = Usage.LinearThreat(item, bot, "blink")
+		if threat ~= nil then
+			local DodgeRules = Fu.DodgeRules
+			local home = GetAncient(GetTeam()):GetLocation()
+			local here = bot:GetLocation()
+			local sideDist = math.min(castRange - 1, 500)
+			local x, y = DodgeRules.SideStep(threat.vx, threat.vy, here.x, here.y, sideDist, home.x, home.y, 600)
+			local blinkLocation = Vector(x, y, here.z)
+			if not IsLocationPassable(blinkLocation) then
+				x, y = DodgeRules.SideStep(threat.vx, threat.vy, here.x, here.y, -sideDist, home.x, home.y, 600)
+				blinkLocation = Vector(x, y, here.z)
+			end
+			if IsLocationPassable(blinkLocation) then
+				pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
+				return BOT_ACTION_DESIRE_HIGH, blinkLocation, "ground", nil
+			end
+		end
+	end
+	-- (#134) by time to impact (was: any dodgeable spell projectile within 1200).
+	if botTarget == nil or not botTarget:IsHero() or not Fu.IsInRange(bot, botTarget, bot:GetAttackRange() + 100) then
+		local projectile, timing = Usage.TimedTrackingProjectile(item, bot, Fu.FindProjectileIncoming, 2000)
+		if projectile ~= nil then
+			pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+			local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, GetAncient(GetTeam()):GetLocation(), 1199)
+			return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
+		end
 	end
 	if Fu.IsGoingOnSomeone(bot) then
 		if
@@ -2574,7 +2748,14 @@ Usage.ConsiderItemDesire["item_cyclone"] = function(item)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 		end
 	end
-	if Fu.CanCastOnNonMagicImmune(bot) and #nearbyEnemies > 0 then
+	-- Puck's own escapes first (Phase Shift, or Jaunt to an orb in flight): game 044, 38:47, she Eul'd herself
+	-- with the orb out, landed among 8 enemies and died (#15). hero_puck.lua sets bot._puckEscapeReady.
+	if bot._puckEscapeReady and #nearbyEnemies > 0 and not Usage.IsDoomed(bot) and not bot:IsRooted() then
+		if DotaTime() >= (bot._puckEulSkipLogAt or -999) then
+			bot._puckEulSkipLogAt = DotaTime() + 10
+			pcall(print, string.format("[OHA-PUCK] t=%.0f escape-order eul-skip why=own-escape-ready", DotaTime()))
+		end
+	elseif Fu.CanCastOnNonMagicImmune(bot) and #nearbyEnemies > 0 then
 		if Fu.GetHP(bot) < 0.2 and bot:WasRecentlyDamagedByAnyHero(3.0) then
 			hEffectTarget = bot
 			castReason = "撤退:" .. Fu.Chat.GetNormName(hEffectTarget)
@@ -2585,8 +2766,21 @@ Usage.ConsiderItemDesire["item_cyclone"] = function(item)
 			castReason = "解缠绕:" .. Fu.Chat.GetNormName(hEffectTarget)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 		end
-		if Fu.IsUnitTargetProjectileIncoming(bot, 800) then
-			pcall(Usage.LogDodge, item, bot, "projectile", Fu.FindUnitTargetProjectileIncoming(bot, 800))
+		-- (#134) by time to impact (was: any unit-target spell projectile within 800).
+		local projectile, timing = Usage.TimedTrackingProjectile(item, bot, Fu.FindUnitTargetProjectileIncoming, 2000)
+		if projectile ~= nil then
+			pcall(Usage.LogDodge, item, bot, "projectile", projectile, nil, nil, timing)
+			hEffectTarget = bot
+			castReason = "防御弹道:" .. Fu.Chat.GetNormName(hEffectTarget)
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+		end
+	end
+	-- (#134) A dangerous skillshot about to hit: the self-cyclone is invulnerable, the projectile passes. The
+	-- caster may stand outside the 1600 the block above needs (Sacred Arrow flies 3000).
+	if Fu.CanCastOnNonMagicImmune(bot) then
+		local threat, timing = Usage.LinearThreat(item, bot, "cyclone")
+		if threat ~= nil then
+			pcall(Usage.LogDodge, item, bot, threat.spec.why, threat.projectile, nil, nil, timing)
 			hEffectTarget = bot
 			castReason = "防御弹道:" .. Fu.Chat.GetNormName(hEffectTarget)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
@@ -3799,8 +3993,12 @@ Usage.ConsiderItemDesire["item_lotus_orb"] = function(item)
 			and not ally:HasModifier("modifier_item_lotus_orb_active")
 			and not ally:HasModifier("modifier_antimage_spell_shield")
 		then
-			if Fu.IsUnitTargetProjectileIncoming(ally, 800) then
-				pcall(Usage.LogDodge, item, ally, "projectile", Fu.FindUnitTargetProjectileIncoming(ally, 800))
+			-- (#134) by time to impact (was: any unit-target spell projectile within 800). Skillshots: Lotus
+			-- re-casts targeted spells only (Valve item text), so linear projectiles are not answered here.
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, ally, Fu.FindUnitTargetProjectileIncoming, 2000)
+			if projectile ~= nil then
+				pcall(Usage.LogDodge, item, ally, "projectile", projectile, nil, nil, timing)
 				hEffectTarget = ally
 				castReason = "反弹弹道"
 				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
@@ -4762,6 +4960,8 @@ Usage.ConsiderItemDesire["item_sphere"] = function(item)
 	local castReason = nil
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE)
+	-- (#134) Incoming projectiles by time to impact (was: any unit-target spell projectile within 800). Skillshots:
+	-- Linken's blocks targeted spells only (Valve item text), so linear projectiles are not answered here.
 	for _, ally in pairs(allyHeroes) do
 		if
 			Fu.IsValidHero(ally)
@@ -4771,21 +4971,22 @@ Usage.ConsiderItemDesire["item_sphere"] = function(item)
 			and not ally:IsIllusion()
 			and not ally:HasModifier("modifier_item_sphere_target")
 			and not ally:HasModifier("modifier_antimage_spell_shield")
-			and (
-				Fu.IsUnitTargetProjectileIncoming(ally, 800)
-				or Fu.IsWillBeCastUnitTargetSpell(ally, 1200)
-				or bot:GetHealth() < 150
-			)
 		then
-			local projectile = Fu.FindUnitTargetProjectileIncoming(ally, 800)
-			local caster, ability = Fu.FindWillBeCastUnitTargetSpell(ally, 1200)
-			if projectile ~= nil or caster ~= nil then
-				local why = projectile ~= nil and "projectile" or "will-cast"
-				pcall(Usage.LogDodge, item, ally, why, projectile, caster, ability)
+			local projectile, timing =
+				Usage.TimedTrackingProjectile(item, ally, Fu.FindUnitTargetProjectileIncoming, 2000)
+			local caster, ability = nil, nil
+			if projectile == nil then
+				caster, ability = Fu.FindWillBeCastUnitTargetSpell(ally, 1200)
 			end
-			hEffectTarget = ally
-			castReason = "帮助队友"
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+			if projectile ~= nil or caster ~= nil or bot:GetHealth() < 150 then
+				if projectile ~= nil or caster ~= nil then
+					local why = projectile ~= nil and "projectile" or "will-cast"
+					pcall(Usage.LogDodge, item, ally, why, projectile, caster, ability, timing)
+				end
+				hEffectTarget = ally
+				castReason = "帮助队友"
+				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+			end
 		end
 	end
 	if Fu.IsValidHero(botTarget) and Fu.IsInRange(bot, botTarget, 2400) and not Fu.IsInRange(bot, botTarget, 800) then
@@ -5434,9 +5635,27 @@ end
 if bot.ProphetTPLocation == nil then
 	bot.ProphetTPLocation = bot:GetLocation()
 end
-Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
-	if
-		botMode == BOT_MODE_RUNE
+-- Markers inside the TP rule (#52). Game 063: item_tpscroll still took 23.8s of [OHA-PERFSUM] detail time (24.5s
+-- in game 062) after the fountain check moved BaseUnderCreeps last, so the costly part is elsewhere.
+-- Usage.TpTimed(name, fn, ...) calls fn(...) and adds its time to tpParts[name] ("tp:" names), printed by the
+-- [OHA-TP] tp-throttle line below (not in detail=: PERFSUM lists only its top 10 there, and 16 more names would
+-- push out the ones other checks read). The parts sit inside the rule's own time (rule= on that line), so their
+-- sum is at most it; what is left is the rule's own code. Timing only: same calls, arguments and returns.
+local tpParts = {}
+local function TpTimedEnd(name, startedAt, ...)
+	tpParts[name] = (tpParts[name] or 0) + (RealTime() - startedAt)
+	return ...
+end
+function Usage.TpTimed(name, fn, ...)
+	if RealTime == nil then
+		return fn(...)
+	end
+	return TpTimedEnd(name, RealTime(), fn(...))
+end
+-- The TP rule's first gates (modifiers, rune mode, Roshan / Tormentor nearby), in one function so they are timed
+-- together as tp:gates.
+function Usage.TpGatesClosed()
+	return botMode == BOT_MODE_RUNE
 		or bot:IsRooted()
 		or bot:HasModifier("modifier_item_armlet_unholy_strength")
 		or bot:HasModifier("modifier_kunkka_x_marks_the_spot")
@@ -5455,7 +5674,9 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		or Fu.IsDoingRoshan(bot) and GetUnitToLocationDistance(bot, Fu.GetCurrentRoshanLocation()) <= 2800
 		or bot._roshDipActive and bot:IsAlive() and GetUnitToLocationDistance(bot, Fu.GetCurrentRoshanLocation()) <= 3000
 		or Fu.IsDoingTormentor(bot) and GetUnitToLocationDistance(bot, Fu.GetTormentorLocation(GetTeam())) <= 2800
-	then
+end
+Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
+	if Usage.TpTimed("tp:gates", Usage.TpGatesClosed) then
 		return BOT_ACTION_DESIRE_NONE
 	end
 	if bot:GetHealth() < 240 then
@@ -5481,34 +5702,24 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 	local botLocation = bot:GetLocation()
 	local hpRatio = Fu.GetHP(bot)
 	local mpRatio = Fu.GetMP(bot)
-	local nearbyEnemyCount = Usage.GetNumHeroWithinRange(1600)
-	local nearbyAllyCount = Fu.GetAllyCount(bot, 1600)
+	local nearbyEnemyCount = Usage.TpTimed("tp:enemies", Usage.GetNumHeroWithinRange, 1600)
+	local nearbyAllyCount = Usage.TpTimed("tp:allies", Fu.GetAllyCount, bot, 1600)
 	local flask = Fu.IsItemAvailable("item_flask")
 	if bot:GetLevel() > 12 and bot:DistanceFromFountain() < 600 then
 		tpDistance = tpDistance + 600
 	end
-	-- No TP out of the fountain while creeps are hitting our base: at 37:27 Tusk teleported
-	-- out to farm with 3 enemy creeps at our Ancient. Walk out and defend instead.
-	local baseCreeps = 0
-	local ourAncient = GetAncient(GetTeam())
-	if ourAncient ~= nil then
-		for _, creep in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS) or {}) do
-			if creep ~= nil and creep:IsAlive() and GetUnitToUnitDistance(creep, ourAncient) <= 1600 then
-				baseCreeps = baseCreeps + 1
-			end
-		end
-	end
-	local baseUnderCreeps = baseCreeps >= 2
-		or Fu.Utils.HighGroundCreepWaveNear ~= nil and Fu.Utils.HighGroundCreepWaveNear(bot, 30000) ~= nil
 	if
 		bot:DistanceFromFountain() < 1500
 		and hpRatio > 0.75
 		and nearbyEnemyCount == 0
 		and not bot:HasModifier("modifier_teleporting")
 		and DotaTime() > 15
-		and not baseUnderCreeps
 		-- An item waits to be sold (item_purchase_generic SellMarkedItems): reach the fountain first.
 		and not (bot._sellPending and bot:DistanceFromFountain() > 500)
+		-- No TP out of the fountain while creeps are hitting our base: at 37:27 Tusk teleported
+		-- out to farm with 3 enemy creeps at our Ancient. Walk out and defend instead. Asked last: it reads every
+		-- enemy creep up to 10 times, and ran on every item think anywhere on the map (#52).
+		and not Usage.TpTimed("tp:base-creeps", Fu.Utils.BaseUnderCreeps, bot)
 	then
 		local lane = Usage.GetLaneByPosition(bot)
 		if not Fu.IsInLaningPhase() and DotaTime() > 10 * 60 then
@@ -5594,7 +5805,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 	end
 	if activeMode == BOT_MODE_LANING and not Usage.JustTeleported() then
 		local shouldTp
-		hEffectTarget, shouldTp = Usage.GetLaningTPLocation(bot, tpDistance, botLocation)
+		hEffectTarget, shouldTp = Usage.TpTimed("tp:laning", Usage.GetLaningTPLocation, bot, tpDistance, botLocation)
 		castReason = "出去发育"
 		if shouldTp then
 			if botName == "npc_dota_hero_furion" then
@@ -5859,16 +6070,19 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		-- line at 45%, and with one of our towers within 2500 walk to it instead unless under 35%.
 		tpHpLine = math.min(tpHpLine, 0.45)
 		local ownTowerNear = false
-		for _, building in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
-			if
-				building ~= nil
-				and not building:IsNull()
-				and building:IsAlive()
-				and building:IsTower()
-				and GetUnitToUnitDistance(bot, building) < 2500
-			then
-				ownTowerNear = true
-				break
+		-- Only read where it changes the line (#52: every allied building on every retreat think).
+		if hpRatio >= 0.35 and hpRatio < tpHpLine then
+			for _, building in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
+				if
+					building ~= nil
+					and not building:IsNull()
+					and building:IsAlive()
+					and building:IsTower()
+					and GetUnitToUnitDistance(bot, building) < 2500
+				then
+					ownTowerNear = true
+					break
+				end
 			end
 		end
 		if ownTowerNear and hpRatio >= 0.35 and hpRatio < tpHpLine then
@@ -5958,7 +6172,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		and hpRatio > 0.9
 		and mpRatio > 0.8
 	then
-		local farmLane, farmLaneDesire = Fu.GetMostFarmLaneDesire(bot)
+		local farmLane, farmLaneDesire = Usage.TpTimed("tp:farm-lane", Fu.GetMostFarmLaneDesire, bot)
 		if farmLaneDesire > 0.1 then
 			local farmTpLoc = GetLaneFrontLocation(team, farmLane, 0)
 			local nearestTpSpot = Fu.GetNearbyLocationToTp(farmTpLoc)
@@ -5993,16 +6207,16 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		and activeMode ~= BOT_MODE_ROSHAN
 		and not Usage.IsBaseTowerDestroyed()
 		and Fu.GetAllyCount(bot, 1600) <= 2
-		and Fu.Role.ShouldTpToFarm()
+		and Usage.TpTimed("tp:should-farm", Fu.Role.ShouldTpToFarm)
 		and not Fu.Role.IsAllyHaveAegis()
 		and not Fu.Role.CanBeSupport(botName)
-		and not Fu.IsEnemyHeroAroundLocation(GetAncient(team):GetLocation(), 3300)
-		and Fu.Utils.CountEnemyHeroesOnHighGround(GetTeam()) < 1
+		and not Usage.TpTimed("tp:enemy-at-ancient", Fu.IsEnemyHeroAroundLocation, GetAncient(team):GetLocation(), 3300)
+		and Usage.TpTimed("tp:enemy-hg", Fu.Utils.CountEnemyHeroesOnHighGround, GetTeam()) < 1
 	then
 		local attackingAllies = Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_ATTACK)
 		local enemyHeroes = Fu.GetNearbyHeroes(bot, 1400, true, BOT_MODE_NONE)
 		local enemyCreeps = bot:GetNearbyCreeps(1600, true)
-		local farmLane, farmLaneDesire = Fu.GetMostFarmLaneDesire(bot)
+		local farmLane, farmLaneDesire = Usage.TpTimed("tp:farm-lane", Fu.GetMostFarmLaneDesire, bot)
 		local hasTravelBoots = false
 		if Fu.IsItemAvailable("item_travel_boots") or Fu.IsItemAvailable("item_travel_boots_2") then
 			hasTravelBoots = true
@@ -6060,8 +6274,10 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		and activeMode ~= BOT_MODE_ATTACK
 		and (botTarget == nil or not botTarget:IsHero())
 	then
-		local enemyHeroes = Fu.GetNearbyHeroes(bot, 1400, true, BOT_MODE_NONE)
-		local teamFightLocation = Fu.GetTeamFightLocation(bot)
+		local enemyHeroes = Usage.TpTimed("tp:nearby-enemies", Fu.GetNearbyHeroes, bot, 1400, true, BOT_MODE_NONE)
+		-- Looked up only with no enemy hero near, the only case that reads it (#52: it asks every ally's fight).
+		local teamFightLocation = #enemyHeroes == 0 and Usage.TpTimed("tp:teamfight", Fu.GetTeamFightLocation, bot)
+			or nil
 		local hasTravelBoots = false
 		if Fu.IsItemAvailable("item_travel_boots") or Fu.IsItemAvailable("item_travel_boots_2") then
 			hasTravelBoots = true
@@ -6112,7 +6328,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		if
 			bot:GetLevel() >= 15
 			and #enemyHeroes == 0
-			and Fu.Role.ShouldTpToFarm()
+			and Usage.TpTimed("tp:should-farm", Fu.Role.ShouldTpToFarm)
 			and bot:DistanceFromFountain() > 2000
 			and GetUnitToUnitDistance(bot, ancient) > tpDistance - 200
 			and Fu.GetAroundTargetAllyHeroCount(ancient, 1400) == 0
@@ -6220,7 +6436,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 		end
 	end
-	if Usage.IsFarmingAlways(bot) then
+	if Usage.TpTimed("tp:farming-always", Usage.IsFarmingAlways, bot) then
 		tpLocation = GetAncient(team):GetLocation()
 		castReason = "处理特殊情况一"
 		if botName == "npc_dota_hero_furion" then
@@ -6233,7 +6449,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		end
 		return BOT_ACTION_DESIRE_HIGH, tpLocation, castType, castReason
 	end
-	if Fu.IsStuck(bot) then
+	if Usage.TpTimed("tp:stuck", Fu.IsStuck, bot) then
 		tpLocation = GetAncient(team):GetLocation()
 		castReason = "处理特殊情况二"
 		if botName == "npc_dota_hero_furion" then
@@ -6246,7 +6462,7 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		end
 		return BOT_ACTION_DESIRE_HIGH, tpLocation, castType, castReason
 	end
-	if Fu.Role.ShouldTpToDefend() and bot:DistanceFromFountain() > 3800 then
+	if Usage.TpTimed("tp:should-defend", Fu.Role.ShouldTpToDefend) and bot:DistanceFromFountain() > 3800 then
 		tpLocation = GetAncient(team):GetLocation()
 		castReason = "立即TP守家"
 		return BOT_ACTION_DESIRE_HIGH, tpLocation, castType, castReason
@@ -6318,7 +6534,7 @@ do
 		if desire == nil or desire <= 0 or target == nil then
 			return desire, target, castType, castReason
 		end
-		local why, enemies, allies = TpHoldReason(target)
+		local why, enemies, allies = Usage.TpTimed("tp:hold", TpHoldReason, target)
 		if why == nil then
 			return desire, target, castType, castReason
 		end
@@ -6341,6 +6557,17 @@ do
 			)
 		end
 		return BOT_ACTION_DESIRE_NONE
+	end
+end
+-- A hero script's own escape comes first (Puck under Spirit Siphon, hero_puck.lua ConsiderSiphonEscape sets
+-- bot._noTpUntil). A wrapper, not a line in the TP rule, so it stays apart from the TP rule's own edits (#52).
+do
+	local tpRuleNoTp = Usage.ConsiderItemDesire["item_tpscroll"]
+	Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
+		if DotaTime() < (bot._noTpUntil or -999) then
+			return BOT_ACTION_DESIRE_NONE
+		end
+		return tpRuleNoTp(item)
 	end
 end
 Usage.ConsiderItemDesire["item_urn_of_shadows"] = function(item)
@@ -9277,10 +9504,16 @@ function Usage.LogStuck()
 	if moved < 300 and not attacking then
 		bot._stuckLogAt = now + 10
 		local loc = bot:GetLocation()
+		-- Why the mode can't act (#141; game 062, 44:57-49:30: Medusa idle and Nyx Assassin "use ability" stood
+		-- still through farm, team roam and defend). Fu.CanNotUseAction skips a mode's orders on any of these.
+		-- casting/channel are always false here (the check above returns first); kept so the line is complete.
+		local activeAbility = bot:GetCurrentActiveAbility()
+		local activeName = activeAbility ~= nil and not activeAbility:IsNull() and activeAbility:GetName() or "-"
 		pcall(
 			print,
 			string.format(
-				"[OHA-STUCK] t=%.0f %s mode=%s/%.2f action=%s moved=%d path=%d at=%.0f,%.0f hp=%.2f enemies=%d",
+				"[OHA-STUCK] t=%.0f %s mode=%s/%.2f action=%s moved=%d path=%d at=%.0f,%.0f hp=%.2f enemies=%d"
+					.. " queued=%d using=%s casting=%s channel=%s active=%s",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				StuckModeName(bot:GetActiveMode()),
@@ -9291,7 +9524,12 @@ function Usage.LogStuck()
 				loc.x,
 				loc.y,
 				Fu.GetHP(bot),
-				#(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {})
+				#(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}),
+				bot:NumQueuedActions(),
+				tostring(bot:IsUsingAbility()),
+				tostring(bot:IsCastingAbility()),
+				tostring(bot:IsChanneling()),
+				activeName
 			)
 		)
 	end
@@ -9584,6 +9822,11 @@ function Usage.EatForage()
 						pending.name
 					)
 				)
+				-- The 60s backoff alone kept the eat orders coming for the rest of the game (game 062: Medusa and
+				-- Nyx Assassin, Nature's Prophet's mushrooms, every 60s from 29:05). Treat the mushroom as another
+				-- player's: no more eats or swaps, and DropForeignItems drops it once. Its result line reads the
+				-- owner off the ground and clears the mark if the mushroom turns out to be this bot's (#141).
+				ForeignItems.MarkName(bot, pending.name, "unknown", "not-consumed")
 			end
 			bot._forageFail[pending.name] = fail
 		else
@@ -9600,6 +9843,7 @@ function Usage.EatForage()
 				and Fu.CanCastAbility(item)
 				and not backedOff
 				and bot._foragePending == nil
+				and not ForeignItems.Check(bot, item)
 			then
 				bot._foragePending =
 					{ name = name, slot = slot, charges = item:GetCurrentCharges() or 0, at = DotaTime() }
@@ -9628,20 +9872,111 @@ function Usage.EatForage()
 	end
 	return false
 end
+-- Another player's item in the inventory (#141; FuncLib/systems/foreign_items.lua says how it is known): drop it,
+-- once per item name, where it costs nothing (no enemy hero within 1600, not hit by a hero in 3s, not retreating
+-- or fighting, no spell going). Game 062: Medusa and Nyx Assassin carried Nature's Prophet's mushrooms for 15+
+-- minutes and stood still at the end (44:57-49:30) while the base was sieged. 1.5s later a result line says
+-- whether it left the bag and whose the ground says it is. Checks once per second.
+function Usage.DropForeignItems()
+	-- Heroes only: this runs before the item think's hero gate (a bear's player ID against its owner's is unverified).
+	if not bot:IsAlive() or not bot:IsHero() or bot:IsIllusion() then
+		bot._foreignDropPending = nil
+		return false
+	end
+	local now = DotaTime()
+	local heroName = (string.gsub(botName, "npc_dota_hero_", ""))
+	local pending = bot._foreignDropPending
+	if pending ~= nil and now >= pending.at + 1.5 then
+		bot._foreignDropPending = nil
+		local groundOwner = "-"
+		for _, drop in ipairs(ForeignItems.DropList()) do
+			if drop.name == pending.name and GetUnitToLocationDistance(bot, drop.location) <= 400 then
+				groundOwner = drop.ownerPid ~= nil and drop.ownerPid == bot:GetPlayerID() and "self" or drop.ownerName
+				break
+			end
+		end
+		-- The ground says it is ours (the not-consumed guess was wrong, or the list names whoever dropped it): eat
+		-- that name again. The dropped one stays where it is (own-drop pick-ups skip names dropped here).
+		if groundOwner == "self" and bot._foreignNames ~= nil then
+			bot._foreignNames[pending.name] = nil
+		end
+		pcall(
+			print,
+			string.format(
+				"[OHA-ITEM] t=%.0f %s drop-foreign-result item=%s inBag=%s ground=%s",
+				now,
+				heroName,
+				pending.name,
+				bot:FindItemSlot(pending.name) >= 0 and "yes" or "no",
+				groundOwner
+			)
+		)
+	end
+	if now < (bot._foreignScanAt or -999) then
+		return false
+	end
+	bot._foreignScanAt = now + 1
+	-- Refreshes the owner records of items on the ground.
+	ForeignItems.DropList()
+	bot._foreignDropped = bot._foreignDropped or {}
+	for slot = 0, 8 do
+		local item = bot:GetItemInSlot(slot)
+		if item ~= nil and not item:IsNull() and bot._foreignDropped[item:GetName()] == nil then
+			local foreign, owner, how = ForeignItems.Check(bot, item)
+			if foreign then
+				local mode = bot:GetActiveMode()
+				-- Not in rune or item mode: the order would replace the river hold or Valve's pick-up.
+				if mode == BOT_MODE_RUNE or mode == BOT_MODE_ITEM then
+					return false
+				end
+				local attackTarget = bot:GetAttackTarget()
+				local safe = ForeignItems.SafeToDrop(
+					#(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}),
+					bot:WasRecentlyDamagedByAnyHero(3.0),
+					mode == BOT_MODE_RETREAT or mode == BOT_MODE_EVASIVE_MANEUVERS,
+					mode == BOT_MODE_ATTACK
+						or (attackTarget ~= nil and not attackTarget:IsNull() and attackTarget:IsHero()),
+					bot:IsChanneling() or bot:IsCastingAbility() or bot:IsUsingAbility()
+				)
+				if not safe then
+					return false
+				end
+				local name = item:GetName()
+				bot._foreignDropped[name] = now
+				bot._foreignDropPending = { name = name, at = now }
+				pcall(
+					print,
+					string.format(
+						"[OHA-ITEM] t=%.0f %s drop-foreign item=%s owner=%s how=%s slot=%d mode=%s",
+						now,
+						heroName,
+						name,
+						tostring(owner),
+						tostring(how),
+						slot,
+						StuckModeName(mode)
+					)
+				)
+				bot:Action_DropItem(item, bot:GetLocation())
+				return true
+			end
+		end
+	end
+	return false
+end
 -- Dust ahead of the item think's busy gate (queued orders and the like), as for the mushrooms:
 -- the Dust rule decides, this only makes sure it can act. Dust is no-target (datafeed).
 function Usage.UseDustNow()
+	-- The Dust slot first (#52): most bots carry no Dust, and the state reads below ran on every item think for them.
+	local slot = bot:FindItemSlot("item_dust")
+	if slot < 0 or slot > 5 then
+		return false
+	end
 	if not bot:IsAlive() or bot:IsStunned() or bot:IsHexed() or bot:IsChanneling() or bot:IsCastingAbility() then
 		return false
 	end
-	local okM, muted = pcall(function()
-		return bot:IsMuted()
-	end)
+	local okM, muted = pcall(bot.IsMuted, bot)
 	if okM and muted then
-		return false
-	end
-	local slot = bot:FindItemSlot("item_dust")
-	if slot < 0 or slot > 5 then
 		return false
 	end
 	local dust = bot:GetItemInSlot(slot)
@@ -10187,7 +10522,22 @@ function ItemUsageThink()
 	if Usage.RunePickupLock() then
 		return
 	end
+	-- A hero file's own hold (Puck's Phase Shift, #36): an item order would end the channel. Game 050: a hero hit
+	-- her within 1s of the cast in 12 of 24 probes, and item orders were the one thing not held.
+	if bot._castHoldUntil ~= nil and DotaTime() < bot._castHoldUntil then
+		-- The hero script does not run during the hold either: its own tick keeps its log and release check going.
+		if BotBuild.CastHoldTick ~= nil then
+			pcall(BotBuild.CastHoldTick)
+		end
+		_perfDone()
+		return
+	end
 	do
+		local okX, dropped = pcall(Usage.DropForeignItems)
+		if okX and dropped then
+			_perfDone()
+			return
+		end
 		local okF, ate = pcall(Usage.EatForage)
 		if okF and ate then
 			_perfDone()
@@ -10212,12 +10562,25 @@ function ItemUsageThink()
 			return
 		end
 	end
+	-- Laning last hits every frame (#71): the attack on the right frame, the wind-up release / cancel. While it owns
+	-- the hit, no kiting step, item or spell order replaces it. It lets go while an enemy tower hits the bot, so the
+	-- tower-aggro step below still runs.
+	local okLastHit, timingLastHit = pcall(LastHitTiming.Tick, bot)
+	if not okLastHit and not bot._lhTimingErr then
+		-- Once per bot: a broken hook would silently drop every timed last hit.
+		bot._lhTimingErr = true
+		pcall(print, string.format("[OHA-LH] t=%.0f %s timing error=%s", DotaTime(), botName, tostring(timingLastHit)))
+	elseif okLastHit and timingLastHit then
+		_perfDone()
+		return
+	end
 	-- Tower aggro: one attack order on an allied lane creep under the tower, never a walk.
 	local okDeaggro, deaggroed = pcall(Usage.DeflectTowerAggro)
 	if okDeaggro and deaggroed then
 		return
 	end
-	-- Kiting for heroes on Valve's attack mode (the override attack mode kites from its own Think).
+	-- Kiting for ranged heroes in every mode: a step away from a melee hero, lane creep or neutral hitting them, between
+	-- attacks (#72; the override attack mode kites from its own Think).
 	local okKite, kited = pcall(SpecialUnits.TryKiteInAttack, bot)
 	if okKite and kited then
 		return
@@ -10260,6 +10623,14 @@ function ItemUsageThink()
 	if bot:HasModifier("modifier_watch_tower_capturing") then
 		_perfDone()
 		return
+	end
+	-- Team roam's last hit (snipe, or a hunt on a creep) without a mode change (#165). No return: items below may
+	-- still replace the order, as they could while team roam ran as a mode.
+	local okLH, errLH = pcall(LastHitOverlay.Think, bot)
+	if not okLH and not bot._lhOverlayErr then
+		-- Once per bot: a broken hook would silently remove every last hit.
+		bot._lhOverlayErr = true
+		pcall(print, string.format("[OHA-ROAM] t=%.0f %s overlay error=%s", DotaTime(), botName, tostring(errLH)))
 	end
 	-- Keep attack orders; only throttle expensive item/ability rescans when target is locked.
 	if ShouldThrottleHeavyThink() then
@@ -10538,6 +10909,77 @@ CourierUsageThink = OHA_Guard("CourierUsageThink", CourierUsageThink)
 AbilityLevelUpThink = OHA_Guard("AbilityLevelUpThink", AbilityLevelUpThink)
 Usage.AbilityUsageThink = AbilityUsageThink
 Usage.ItemUsageThink = ItemUsageThink
+-- TP rule throttle (#52, game 063: item_tpscroll 23.8s of detail time over the game, the biggest item rule).
+-- Placed after every wrapper of the rule (hold, worth, heal trip) so it covers all of them. A "no TP" answer is
+-- kept for TP_RECHECK seconds per bot: TP decisions do not need every think. The rule runs every think while
+-- the bot is in danger (hit by an enemy hero in the last 2s, HP under 40%, or Rupture on it), and a "TP"
+-- answer is never kept. [OHA-TP] tp-throttle prints how many calls were skipped, the rule's own time (rule=,
+-- ms since the last line) and its biggest timed parts (parts=, see Usage.TpTimed), once per 120s per bot.
+do
+	local TP_RECHECK = 0.3
+	local tpRule = Usage.ConsiderItemDesire["item_tpscroll"]
+	local nextRunAt, skipped, ran, dangerRuns, logAt, ruleSeconds = -999, 0, 0, 0, nil, 0
+	if tpRule ~= nil then
+		Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
+			local now = DotaTime()
+			local danger = Fu.GetHP(bot) < 0.4
+				or bot:WasRecentlyDamagedByAnyHero(2.0)
+				or bot:HasModifier("modifier_bloodseeker_rupture")
+			if not danger and now < nextRunAt then
+				skipped = skipped + 1
+				return BOT_ACTION_DESIRE_NONE
+			end
+			ran = ran + 1
+			if danger then
+				dangerRuns = dangerRuns + 1
+			end
+			logAt = logAt or now + 120
+			if now >= logAt then
+				logAt = now + 120
+				local list = {}
+				for name, seconds in pairs(tpParts) do
+					list[#list + 1] = { name, seconds }
+				end
+				table.sort(list, function(a, b)
+					return a[2] > b[2]
+				end)
+				local parts = {}
+				for i = 1, math.min(8, #list) do
+					parts[#parts + 1] = string.format("%s=%.0fms", list[i][1], list[i][2] * 1000)
+				end
+				pcall(
+					print,
+					string.format(
+						"[OHA-TP] t=%.0f %s tp-throttle skipped=%d ran=%d danger=%d recheck=%.2f rule=%.0fms parts=%s",
+						now,
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						skipped,
+						ran,
+						dangerRuns,
+						TP_RECHECK,
+						ruleSeconds * 1000,
+						#parts > 0 and table.concat(parts, ",") or "-"
+					)
+				)
+				skipped, ran, dangerRuns, ruleSeconds = 0, 0, 0, 0
+				for name in pairs(tpParts) do
+					tpParts[name] = nil
+				end
+			end
+			local startedAt = RealTime ~= nil and RealTime() or nil
+			local desire, target, castType, castReason = tpRule(item)
+			if startedAt ~= nil then
+				ruleSeconds = ruleSeconds + (RealTime() - startedAt)
+			end
+			if desire == nil or desire <= 0 then
+				nextRunAt = now + TP_RECHECK
+			else
+				nextRunAt = -999
+			end
+			return desire, target, castType, castReason
+		end
+	end
+end
 -- [OHA-PERF] timing (#52): FuncLib/systems/perf.lua
 do
 	local Perf = require(GetScriptDirectory() .. "/FuncLib/systems/perf")
@@ -10569,6 +11011,7 @@ do
 	Perf.WrapDetailIn(MatchTrace, "Tick", "MatchTrace.Tick")
 	Perf.WrapDetailIn(ChargeTracker, "Tick", "ChargeTracker.Tick")
 	Perf.WrapDetailIn(SpecialUnits, "TryKiteInAttack", "TryKiteInAttack")
+	Perf.WrapDetailIn(LastHitOverlay, "Think", "LastHitOverlay")
 	Perf.WrapDetailIn(AbilityContext, "IsCornered", "IsCornered")
 	Perf.WrapDetailIn(Dispel, "ShouldMantaDodge", "Dispel.Manta")
 	Perf.WrapDetailIn(Dispel, "ShouldUseSelfDispelItem", "Dispel.Self")

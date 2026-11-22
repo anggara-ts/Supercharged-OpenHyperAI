@@ -71,4 +71,39 @@ function RuneRules.PickupStep(try, now)
 	return due and "order" or "wait"
 end
 
+-- Spawn hold at a river spot (#32, game 064, 2:00): Puck was 475 from the top spot when the water rune spawned, the
+-- after-spawn walk desire (0.35) lost to laning (0.54-0.56) and she walked back to mid; the bounty walk-back brought
+-- her there 8s later (2:14). A bot of the water walk (spawns at 0:00, 2:00, 4:00) within SPAWN_HOLD_RADIUS of the
+-- spot from SPAWN_HOLD_BEFORE seconds before the spawn to SPAWN_HOLD_FOR after it keeps SPAWN_HOLD_DESIRE (above
+-- laning, as the 0.6 on-spot stay; below fights and retreat). sinceSpawn: seconds since the spawn (negative before).
+RuneRules.SPAWN_HOLD_RADIUS = 600
+RuneRules.SPAWN_HOLD_BEFORE = 2
+RuneRules.SPAWN_HOLD_FOR = 3
+RuneRules.SPAWN_HOLD_DESIRE = 0.6
+function RuneRules.SpawnHold(sinceSpawn, dist)
+	return sinceSpawn >= -RuneRules.SPAWN_HOLD_BEFORE
+		and sinceSpawn <= RuneRules.SPAWN_HOLD_FOR
+		and dist <= RuneRules.SPAWN_HOLD_RADIUS
+end
+
+-- Walk to a river spot for a water rune (#32, game 065): Puck (mid) walked to the top spot before the 2:00 and 4:00
+-- spawns at 0.53 (BOT_MODE_DESIRE_HIGH, `why=water-walk` t=112.7 and t=232.3, 1846-2188 from the spot) and laning
+-- (0.56) won, so she stayed in lane; after the spawn the walk was 0.35 (`river-item-walk`, 2211 away at t=120.3).
+-- Death Prophet took both top water runes. Maintainer (2026-11-21): raise it only for heroes near the spot (the mid
+-- laner or a support roaming to mid), by distance. So a bot whose distance to the spot is the smallest on its team
+-- (rank 1), or within RIVER_WALK_NEAR of it, walks at RIVER_WALK_DESIRE (above laning, as the spawn hold; below
+-- fights, retreat and Valve's item mode, which does the pickup); others keep oldDesire.
+-- rank: 1 + the number of living team heroes closer to the spot than the bot.
+RuneRules.RIVER_WALK_NEAR = 2000
+RuneRules.RIVER_WALK_DESIRE = 0.6
+function RuneRules.RiverWalkNear(dist, rank)
+	return rank == 1 or dist <= RuneRules.RIVER_WALK_NEAR
+end
+function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
+	if RuneRules.RiverWalkNear(dist, rank) then
+		return math.max(RuneRules.RIVER_WALK_DESIRE, oldDesire)
+	end
+	return oldDesire
+end
+
 return RuneRules

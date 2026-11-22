@@ -69,3 +69,68 @@ T.test("rune rules: pick-up retries capped at 3, 1s apart", function()
 		"fails 1s after the third order: " .. tostring(failedAt)
 	)
 end)
+
+T.test("rune rules: the spawn hold window at a river spot", function()
+	local R = load()
+	-- Game 064, 2:00: Puck 475 from the top spot at the spawn.
+	T.eq(R.SpawnHold(0.1, 475), true, "475 away at the spawn")
+	T.eq(R.SpawnHold(-2, 590), true, "2s before the spawn, 590 away")
+	T.eq(R.SpawnHold(-2.5, 300), false, "earlier: the normal walk desire")
+	T.eq(R.SpawnHold(3, 500), true, "3s after the spawn")
+	T.eq(R.SpawnHold(3.2, 500), false, "the hold ends 3s after the spawn")
+	T.eq(R.SpawnHold(1, 700), false, "farther than 600")
+	T.ok(R.SPAWN_HOLD_DESIRE > 0.56, "above laning's 0.54-0.56 in game 064")
+end)
+
+T.test("rune mode: a bot 475 from a river spot at the 2:00 spawn holds above laning (game 064)", function()
+	T.stub.reset({ hero = "npc_dota_hero_puck" })
+	local ok, err = T.stub.load("mode_rune_generic")
+	T.ok(ok, tostring(err))
+	local bot = GetBot()
+	local spot = bot:GetLocation() + Vector(475, 0, 0)
+	bot._waterWalk = { id = 0, loc = spot, t0 = 120 }
+	T.stub.time = 120.1
+	local desire = GetDesire()
+	T.near(desire, 0.6, 1e-9, "spawn hold desire")
+	local started, ended = nil, nil
+	T.stub.time = 121
+	bot._loc = spot + Vector(250, 0, 0)
+	GetDesire()
+	for _, line in ipairs(T.stub.printed) do
+		started = started or (string.find(line, "river%-spawn%-hold spot=0 dist=475 since=0%.1") and line)
+		ended = ended or (string.find(line, "river%-spawn%-hold%-end why=on%-spot spot=0 dist=250 held=0%.9") and line)
+	end
+	T.ok(started ~= nil, "start line")
+	T.ok(ended ~= nil, "end line: the on-spot stay takes over")
+end)
+
+T.test("rune rules: the water-rune walk desire by distance to the spot (game 065)", function()
+	local R = load()
+	-- Game 065, t=112.7: Puck 2188 from the top spot, the team's closest hero, walked at 0.53 and laning (0.56) won.
+	T.eq(R.RiverWalkDesire(2188, 1, 0.525), 0.6, "closest on the team: 0.6 at any distance")
+	T.eq(R.RiverWalkDesire(1846, 2, 0.525), 0.6, "within 2000: 0.6 even with an ally closer")
+	T.eq(R.RiverWalkDesire(2100, 2, 0.525), 0.525, "farther and not the closest: the old desire")
+	T.eq(R.RiverWalkDesire(2211, 1, 0.35), 0.6, "after the spawn (t=120.3, 2211 away): 0.6 too")
+	T.eq(R.RiverWalkDesire(500, 3, 0.75), 0.75, "never lowers a higher desire")
+	T.ok(R.RIVER_WALK_DESIRE > 0.56, "above laning's 0.56 in game 065")
+end)
+
+T.test("rune mode: the water walk before the spawn beats laning near the spot (game 065)", function()
+	T.stub.reset({ hero = "npc_dota_hero_puck" })
+	local ok, err = T.stub.load("mode_rune_generic")
+	T.ok(ok, tostring(err))
+	local bot = GetBot()
+	-- Every ally 1800-2000 from the spot (stub slots stand side by side): rank > 1, but within 2000.
+	local spot = bot:GetLocation() + Vector(1900, 0, 0)
+	bot._waterWalk = { id = 0, loc = spot, t0 = 120 }
+	T.stub.time = 113
+	T.near(GetDesire(), 0.6, 1e-9, "1900 away, 7s before the spawn")
+	local line
+	for _, printed in ipairs(T.stub.printed) do
+		line = line or (string.find(printed, "river%-walk%-near spot=0 dist=1900 rank=%d des=0%.60") and printed)
+	end
+	T.ok(line ~= nil, "river-walk-near line")
+	-- 2100 away with allies closer: the old pre-spawn desire.
+	bot._waterWalk = { id = 0, loc = bot:GetLocation() + Vector(2100, 0, 0), t0 = 120 }
+	T.ok(GetDesire() < 0.6, "2100 away, not the closest: below 0.6")
+end)
