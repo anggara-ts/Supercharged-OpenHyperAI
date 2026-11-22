@@ -26,6 +26,8 @@
 // paths in logs) become bots-relative (lib/x); every other path becomes repo-relative (bots/lib/x). Log tags
 // [OHA-X] become [SHy-X] (also Lua patterns %[OHA%- and bare "OHA-PERF"); the bot name suffix OHA-DEV stays.
 // A line containing "restructure:keep" is never rewritten and never reported (intentional legacy text).
+// The moves and rewrite rules are frozen once this is on main: --migrate-branch re-runs them on the last old-layout
+// main to get the merge base, which only works while they give what main got. Fix a missed path by hand instead.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -276,7 +278,7 @@ function findStylua(args) {
 function migrate(args) {
 	const dryRun = args.dryRun;
 	const log = [];
-	if (!args.allowDirty) {
+	if (!args.allowDirty && !dryRun) {
 		const dirty = git(["status", "--porcelain", "--untracked-files=no"]);
 		if (dirty) throw new Error(`tracked files have changes; commit or stash them first:\n${dirty}`);
 	}
