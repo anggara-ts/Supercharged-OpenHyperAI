@@ -286,8 +286,8 @@ T.test("rune rules: lotus stand time counts in the pluck ring only, keeps across
 	local gap = R.NewLotusStand(180, 0)
 	R.LotusStandStep(gap, 180, 0, 132, false)
 	local _, _, gapStood, gapHeld = standRun(R, gap, 185, 185, 0, 132, false)
-	T.eq(gapStood, 0, "a 5s gap is not standing")
-	T.eq(gapHeld, 0, "nor holding")
+	T.eq(gapStood, 0, "a 5s gap (another mode, a retreat pause) is not standing")
+	T.eq(gapHeld, 5, "held is wall time (the cap)")
 	-- Never in the ring: the cap ends it after 10s of thinks within 800.
 	local away = R.NewLotusStand(180, 0)
 	T.eq(standRun(R, away, 185, 186, 0, 1300, false), "wait", "walking, not near yet")
@@ -316,4 +316,32 @@ T.test("rune rules: the lotus hold gives way when retreat asks (game 074)", func
 	T.eq(R.LotusHoldYields(0.61), true, "0.61: yield")
 	T.eq(R.LotusHoldYields(0.18), false, "a healthy bot with an enemy near: hold")
 	T.eq(R.LotusHoldYields(nil), false, "no fresh retreat desire: hold")
+end)
+
+T.test("rune rules: the lotus hold pauses for retreat and resumes while the spawn is open (game 074)", function()
+	local R = load()
+	-- Game 074, Winter Wyvern at the bottom pool: retreat 0.30 at t=184, 0.34, then (assumed) back under the line,
+	-- 0.40 at t=193 and 0.61 at t=196.
+	local state = {}
+	T.eq(R.LotusYieldStep(state, 0.297, true, false), "yield-start", "t=184 retreat 0.30: pause the hold")
+	T.eq(R.LotusYieldStep(state, 0.34, true, false), "yield", "0.34: still paused")
+	T.eq(R.LotusYieldStep(state, 0.18, true, false), "resume", "retreat back under the line: hold again")
+	T.eq(R.LotusYieldStep(state, 0.18, true, false), "hold", "holding")
+	T.eq(R.LotusYieldStep(state, 0.40, true, false), "yield-start", "t=193 retreat 0.40: pause again")
+	T.eq(R.LotusYieldStep(state, 0.61, true, false), "yield", "t=196 retreat 0.61: paused")
+	T.eq(R.LotusYieldStep(state, 0.61, true, true), "drop", "the cap ran out while paused: the spawn is dropped")
+	local window = { yielding = true }
+	T.eq(R.LotusYieldStep(window, 0.5, false, false), "drop", "the window closed while paused: dropped")
+	T.eq(R.LotusYieldStep({}, 0.18, true, true), "hold", "cap while holding: the stand's own cap result ends it")
+	T.eq(R.LotusYieldStep({}, nil, true, false), "hold", "no fresh retreat desire: hold")
+
+	-- The ring clock pauses while yielding: 1s stood, a pause 181-184, back in the ring at 184: gone at 1.5s more.
+	local stand = R.NewLotusStand(180, 0)
+	standRun(R, stand, 180, 181, 0, 132, false)
+	stand.lastAt = nil -- the pause (map_objectives sets this on yield)
+	local res, at, stood, held = standRun(R, stand, 184, 190, 0, 132, false)
+	T.eq(res, "gone", "no lotus after the pause either: gone")
+	T.near(at, 185.5, 0.15, "the pause didn't count as standing")
+	T.near(stood, R.LOTUS_STAND_WAIT, 0.15, "stood= is ring time only")
+	T.near(held, 5.5, 0.15, "held= counts the pause (wall time for the cap)")
 end)

@@ -924,6 +924,55 @@ local function RetreatDesireNow(bot)
 	return last.d
 end
 
+-- [OHA-LOTUS] hold-yield / hold-resume: the pool hold paused for retreat, and back (at most every 2s per bot and kind).
+function MapObjectives.NoteLotusYield(bot, what, retreatDesire, dist, stand)
+	local key = what == "hold-yield" and "_lotusYieldLogAt" or "_lotusResumeLogAt"
+	local now = DotaTime()
+	if now < (bot[key] or -999) or IsMeepoCloneBot(bot) then
+		return
+	end
+	bot[key] = now + 2
+	pcall(
+		print,
+		string.format(
+			"[OHA-LOTUS] t=%.1f %s %s why=retreat retreat=%.2f hp=%.2f dist=%d stood=%.1f held=%.1f",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			what,
+			retreatDesire or -1,
+			bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
+			dist or -1,
+			stand ~= nil and stand.stood or 0,
+			stand ~= nil and RuneRules.LotusHeld(stand, now) or 0
+		)
+	)
+end
+-- [OHA-LOTUS] stand-end why=retreat: the spawn closed (end=window | cap) while the hold was paused for retreat. The spawn
+-- is skipped, but not "checked" for the team (LotusCheckedThisMark): nobody saw whether the lotus is there.
+function MapObjectives.LotusStandEnd(bot, ending, retreatDesire, mark)
+	bot._lotusSkipMark = mark
+	bot._lotusSkipPool = nil
+	local stand = bot._lotusStand
+	if stand ~= nil and stand.mark ~= mark then
+		stand = nil
+	end
+	local now = DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[OHA-LOTUS] t=%.1f %s stand-end why=retreat end=%s retreat=%.2f hp=%.2f stood=%.1f held=%.1f late=%.1f",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			ending,
+			retreatDesire or RetreatDesireNow(bot) or -1,
+			bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
+			stand ~= nil and stand.stood or 0,
+			stand ~= nil and RuneRules.LotusHeld(stand, now) or 0,
+			now - mark
+		)
+	)
+end
+
 -- Returns desire, location, kind ("lotus"|"wisdom"), eta. Desire 0 if none.
 -- [OHA-LOTUS] probe: can a bot read how many lotuses a pool holds (or whether a shrine is
 -- ready) when it is in vision? The count was never read because NumModifiers warns every think
@@ -1110,6 +1159,18 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 		local toNext = MapObjectives.SecondsToNextMark(lInterval)
 		local sinceLast = lInterval - toNext
 		local spawnOpen = DotaTime() >= lInterval - 1
+		-- A retreat pause (LotusYieldStep) whose spawn window closed: the spawn is dropped. Inside the window the step
+		-- below decides.
+		local yieldState = bot._lotusYield
+		if yieldState ~= nil then
+			local floorMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
+			if yieldState.mark ~= floorMark or sinceLast > 45 then
+				bot._lotusYield = nil
+				if yieldState.yielding then
+					MapObjectives.LotusStandEnd(bot, "window", nil, yieldState.mark)
+				end
+			end
+		end
 		-- Walk window is short. A lotus that nobody took is still in the pool well after that.
 		local nearSpawn = toNext <= 32 or (spawnOpen and sinceLast <= 45)
 		-- Passing by (user call; game 031, 32:28: Techies passed 1304 from the right-side pool
@@ -1161,33 +1222,44 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 			end
 			fightNow = fightNow or type(dist) == "number" and dist > 800 and DotaTime() < (bot._lotusFightUntil or -999)
 			local friends = bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}
-			local beside = dist <= 800 and spawnOpen and sinceLast >= 0 and sinceLast <= 45
-			-- Hit at the pool (#32, game 074 3:00-3:19): the hold gives way as soon as retreat asks for it
-			-- (RuneRules.LotusHoldYields), the same as a hit anywhere else, and the trip is over for this spawn.
-			-- Until then a hit doesn't end the hold: the bot fights from the pool area (ThinkObjective).
-			if beside then
-				local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
+			local window = spawnOpen and sinceLast >= 0 and sinceLast <= 45
+			-- Paused or resumed for retreat this spawn: the claim holds up to LOTUS_RESUME_DIST (retreat walks it off).
+			local paused = bot._lotusYield ~= nil
+			local beside = window and (dist <= 800 or paused and dist <= RuneRules.LOTUS_RESUME_DIST)
+			-- Hit at the pool (#32, game 074 3:00-3:19): the hold pauses while retreat asks for it (RuneRules.LotusYieldStep),
+			-- the same as a hit anywhere else, and comes back when retreat drops below the line while the spawn is still
+			-- open. Until then a hit doesn't end the hold: the bot fights from the pool area (ThinkObjective).
+			local yieldNow = false
+			local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
+			if (beside or paused) and bot._lotusSkipMark ~= spawnMark then
+				local stand = bot._lotusStand
+				if stand ~= nil and stand.mark ~= spawnMark then
+					stand = nil
+				end
+				local state = bot._lotusYield or { mark = spawnMark }
 				local retreatDesire = RetreatDesireNow(bot)
-				if bot._lotusSkipMark ~= spawnMark and RuneRules.LotusHoldYields(retreatDesire) then
-					bot._lotusSkipMark = spawnMark
-					-- Not "checked" for the team (LotusCheckedThisMark): nobody saw whether the lotus is there.
-					bot._lotusSkipPool = nil
+				local capped = stand ~= nil and RuneRules.LotusHeld(stand, DotaTime()) >= RuneRules.LOTUS_HOLD_CAP
+				local open = window and (stand == nil or stand.result == nil)
+				local step = RuneRules.LotusYieldStep(state, retreatDesire, open, capped)
+				if step == "drop" then
+					bot._lotusYield = nil
 					beside = false
-					local stand = bot._lotusStand
-					pcall(
-						print,
-						string.format(
-							"[OHA-LOTUS] t=%.1f %s stand-end why=retreat retreat=%.2f hp=%.2f stood=%.1f late=%.1f dist=%d foes=%d",
-							DotaTime(),
-							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-							retreatDesire,
-							bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
-							stand ~= nil and stand.mark == spawnMark and stand.stood or 0,
-							DotaTime() - spawnMark,
-							dist,
-							#foes
-						)
-					)
+					MapObjectives.LotusStandEnd(bot, capped and "cap" or "window", retreatDesire, spawnMark)
+				elseif step == "yield-start" or step == "yield" then
+					bot._lotusYield = state
+					beside = false
+					yieldNow = true
+					if stand ~= nil then
+						-- Pause the ring clock: the first think back counts from there.
+						stand.lastAt = nil
+					end
+					if step == "yield-start" then
+						MapObjectives.NoteLotusYield(bot, "hold-yield", retreatDesire, dist, stand)
+					end
+				elseif step == "resume" then
+					state.resumed = true
+					bot._lotusYield = state
+					MapObjectives.NoteLotusYield(bot, "hold-resume", retreatDesire, dist, stand)
 				end
 			end
 			local lostBeside = false
@@ -1316,8 +1388,13 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 					danger = danger and 1 or 0,
 				}
 			end
+			if yieldNow then
+				inLotus = false
+			end
 			local failWhy = "blocked"
-			if tripBlock ~= nil then
+			if yieldNow then
+				failWhy = "retreat-yield"
+			elseif tripBlock ~= nil then
 				failWhy = tripBlock
 			elseif not inLotus then
 				if count == 0 and type(etaL) == "number" and etaL < -1.5 then

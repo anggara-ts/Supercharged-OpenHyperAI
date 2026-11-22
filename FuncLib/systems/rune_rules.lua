@@ -278,25 +278,30 @@ end
 -- LOTUS_AREA: the bot fights and casts without walking back while within it (inside the 350 radius). Stand time counts
 -- only in the pluck ring (LOTUS_RING): the bot walks to 140 and a pickup is proven there (game 074: taken at 132; the
 -- old comment in map_objectives says the pool's lip never granted one), so a bot fighting at 250 doesn't read "gone" on
--- a lotus that may still be there. LOTUS_HOLD_CAP: backstop, seconds of thinks within LOTUS_NEAR after the spawn; it
--- also ends a stand whose lotus was taken but whose take step never ran.
+-- a lotus that may still be there. LOTUS_HOLD_CAP: backstop, wall seconds from the bot's first think within LOTUS_NEAR
+-- after the spawn (a pause for retreat counts too); it also ends a stand whose lotus was taken but whose take step never
+-- ran.
 RuneRules.LOTUS_AREA = 300
 RuneRules.LOTUS_RING = 150
 RuneRules.LOTUS_NEAR = 800
 RuneRules.LOTUS_STAND_WAIT = 2.5
 RuneRules.LOTUS_STAND_WAIT_CONTESTED = 3.5
 RuneRules.LOTUS_HOLD_CAP = 10
--- A think gap longer than this (the rune mode lost for a while) counts as no time at the pool.
+-- A think gap longer than this (the rune mode lost, e.g. paused for retreat) counts as no time stood in the ring.
 RuneRules.LOTUS_THINK_GAP = 0.5
 function RuneRules.NewLotusStand(mark, value)
-	return { mark = mark, base = value, stood = 0, held = 0 }
+	return { mark = mark, base = value, stood = 0 }
+end
+-- Wall seconds since the stand began (its first think within LOTUS_NEAR after the spawn), 0 before that.
+function RuneRules.LotusHeld(stand, now)
+	return stand.since ~= nil and now - stand.since or 0
 end
 -- One think of a stand. mark: the spawn this stand is for; dist: bot to pool; contested: an enemy hero in the pool.
--- stood (in the ring) and held (within LOTUS_NEAR) count think time only, so a stretch in another mode adds nothing.
+-- stood (in the ring) counts think time only, so a pause in another mode adds nothing; held is wall time (the cap).
 -- Returns "wait" | "taken" | "gone" | "cap", stood and held. gone / cap stay; taken can still become cap.
 function RuneRules.LotusStandStep(stand, now, value, dist, contested)
 	if stand.result == "gone" or stand.result == "cap" then
-		return stand.result, stand.stood, stand.held
+		return stand.result, stand.stood, RuneRules.LotusHeld(stand, now)
 	end
 	if now < stand.mark then
 		-- Waiting for the spawn: nothing to take yet.
@@ -318,18 +323,19 @@ function RuneRules.LotusStandStep(stand, now, value, dist, contested)
 		end
 	end
 	stand.lastAt = now
-	if dist <= RuneRules.LOTUS_NEAR then
-		stand.held = stand.held + dt
+	if stand.since == nil and dist <= RuneRules.LOTUS_NEAR then
+		stand.since = now
 	end
+	local held = RuneRules.LotusHeld(stand, now)
 	if stand.result == "taken" then
-		if stand.held >= RuneRules.LOTUS_HOLD_CAP then
+		if held >= RuneRules.LOTUS_HOLD_CAP then
 			stand.result = "cap"
 		end
-		return stand.result, stand.stood, stand.held
+		return stand.result, stand.stood, held
 	end
 	if value > stand.base then
 		stand.result = "taken"
-		return "taken", stand.stood, stand.held
+		return "taken", stand.stood, held
 	end
 	if value < stand.base then
 		-- Eaten or given away while standing: not a pickup, count from here.
@@ -341,17 +347,17 @@ function RuneRules.LotusStandStep(stand, now, value, dist, contested)
 	local wait = contested and RuneRules.LOTUS_STAND_WAIT_CONTESTED or RuneRules.LOTUS_STAND_WAIT
 	if stand.stood >= wait then
 		stand.result = "gone"
-	elseif stand.held >= RuneRules.LOTUS_HOLD_CAP then
+	elseif held >= RuneRules.LOTUS_HOLD_CAP then
 		stand.result = "cap"
 	end
-	return stand.result or "wait", stand.stood, stand.held
+	return stand.result or "wait", stand.stood, held
 end
 
 -- At the pool (#32, maintainer 2026-11-23: "being hit by hero/creep should apply same mechanism like being hit in
 -- outside the area but they will try to maintain it unless retreat mode is active"). The hold desire (0.75) used to
 -- beat retreat: game 074, 3:00-3:19, Winter Wyvern was hit 1v1 by Leshrac from 0.96 to 0.34 HP while retreat asked
--- 0.30-0.40 (0.61 at 0.42 HP) and lost to it. Now the hold gives way as soon as retreat asks LOTUS_RETREAT_YIELD or
--- more: about the laning mode's 0.30, the level at which retreat took over from laning in that game
+-- 0.30-0.40 (0.61 at 0.42 HP) and lost to it. Now the hold gives way while retreat asks LOTUS_RETREAT_YIELD or more:
+-- about the laning mode's 0.30, the level at which retreat took over from laning in that game
 -- (`[OHA-FLIP] ... retreat:0.30@184>laning:0.30@186`, printed with %.2f, so a little under 0.30). Retreat's base formula
 -- (mode_retreat_generic.lua, the line-533 return) stays well under that for a bot that isn't hit and isn't low: about
 -- 0.18 for a healthy bot with an enemy near, minus 0.175 in the laning phase when not hit, so no hit gate is needed.
@@ -359,6 +365,31 @@ end
 RuneRules.LOTUS_RETREAT_YIELD = 0.29
 function RuneRules.LotusHoldYields(retreatDesire)
 	return retreatDesire ~= nil and retreatDesire >= RuneRules.LOTUS_RETREAT_YIELD
+end
+-- A yielding bot pushed this far by retreat can still resume the hold (beside is 800 otherwise).
+RuneRules.LOTUS_RESUME_DIST = 1600
+-- The yield is a pause, not the end (coordinator, 2026-11-23): the hold returns 0 while retreat asks for it, and comes
+-- back when retreat drops below the line while the spawn is still open (in its window, no taken / gone / cap). The spawn
+-- is dropped only when it closes (window or cap) during a yield. state: { yielding } per bot and spawn. open: the
+-- spawn's window still runs and it has no result; capped: the stand's wall-time cap ran out.
+-- Returns "hold" | "yield-start" | "yield" | "resume" | "drop".
+function RuneRules.LotusYieldStep(state, retreatDesire, open, capped)
+	if state.yielding and (not open or capped) then
+		state.yielding = false
+		return "drop"
+	end
+	if RuneRules.LotusHoldYields(retreatDesire) then
+		if state.yielding then
+			return "yield"
+		end
+		state.yielding = true
+		return "yield-start"
+	end
+	if state.yielding then
+		state.yielding = false
+		return "resume"
+	end
+	return "hold"
 end
 
 return RuneRules
