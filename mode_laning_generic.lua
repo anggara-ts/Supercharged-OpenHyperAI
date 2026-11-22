@@ -5,6 +5,7 @@ local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localizat
 local LaneHarassRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_harass_rules")
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
 local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
+local TeamMemory = require(GetScriptDirectory() .. "/FuncLib/systems/team_memory")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -1424,11 +1425,46 @@ function PickOneAnnouncer()
 	bot.isAnnouncer = playerId == lowestBotId
 	hasPickedAnnouncer = true
 end
+-- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
+-- WELCOME_GAP seconds. The lines name only commands that work then: !pos / !Npos (pre-game only, hero_selection.lua),
+-- !sp (any time) and !debug (handled from the horn on, ability_item_usage_generic.lua). No URL: chat links are not
+-- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
+-- announcer) don't repeat it.
+local WELCOME_START = -80
+local WELCOME_GAP = 2
+local function SayWelcome()
+	if not bot.isAnnouncer or GetGameState() ~= GAME_STATE_PRE_GAME or DotaTime() < WELCOME_START then
+		return
+	end
+	local lines = Localization.Get("welcome")
+	local team = GetTeam()
+	local nextLine = TeamMemory.Get(team, "welcomeNext") or 1
+	if type(lines) ~= "table" or nextLine > #lines then
+		return
+	end
+	if DotaTime() < (TeamMemory.Get(team, "welcomeAt") or -999) + WELCOME_GAP then
+		return
+	end
+	TeamMemory.Set(team, "welcomeNext", nextLine + 1)
+	TeamMemory.Set(team, "welcomeAt", DotaTime())
+	bot:ActionImmediate_Chat(lines[nextLine], false)
+	if nextLine == #lines then
+		print(
+			string.format(
+				"[OHA-CHAT] t=%.0f %s welcome lines=%d locale=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				#lines,
+				tostring(Localization.GetLocale())
+			)
+		)
+	end
+end
 function AnnounceMessages()
-	-- Welcome + map version is sent during hero pick (hero_selection.lua), not here.
 	if DotaTime() > 60 then
 		return
 	end
+	pcall(SayWelcome)
 	if GetGameMode() ~= GAMEMODE_1V1MID and not hasAnnouncedPositions then
 		if DotaTime() >= 0 and humanCount > 0 and botCount > 0 then
 			bot:ActionImmediate_Chat(

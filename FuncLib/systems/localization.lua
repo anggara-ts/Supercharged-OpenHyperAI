@@ -9,17 +9,16 @@ end
 local defaultLocale = "en"
 local strings = {
 	en = {
-		welcome_msgs = {
-			"Welcome to Open Hyper AI (OHA-DEV): ",
-			"You can select the heroes for bots to pick, e.g. 10 same heroes or your dream teams, or change their names. Just customize bots in the Customize/general file.",
-			"If you feel bots are weak, try enabling the enhanced Fretbots mode to make the game a lot more challenging. Check Workshop page for details.",
-			"You can type `!pos X` to swap position with a bot. For example, type: `!pos 2` to go mid lane. Type `!3pos 5` to ask the 3rd bot on the team to play position 5.",
-			"You can type `!sp zh` for ally bots to 说中文, or `!sp en` for English, `!sp ru` for русский, `!sp ja` for 日本語. Not 100% translated, just be patient.",
-			"Type `!debug` in team chat to toggle verbose bot decision chat (ward coords, etc).",
-			"This is nonprofit project, if you like this script and have any feedback or want to contritute, or give any support or buy me a coffee, please check script's Workshop.",
-		},
 		say_play_pos = "I will play position ",
 		pos_select_closed = "Position selection closed.",
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
+		welcome = {
+			"Bot chat commands:",
+			"!pos 2 - take position 2, a bot swaps with you. !3pos 5 - the team's 3rd player plays pos 5. Before the horn.",
+			"!sp en / zh / ru / ja - the language of the bots' chat.",
+			"!debug - bots explain more of their decisions in chat (wards etc.); again to stop. After the horn.",
+			"Feedback and known limitations: see the bot script's Workshop page.",
+		},
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
 		say_will_lose_2 = "Our numbers say less than 1% to win. We accept the verdict of mathematics. Well played!",
 		say_will_win = "We estimate our chance to win a team fight is over 90%. Probability is on our side.",
@@ -123,7 +122,7 @@ local strings = {
 			},
 			{
 				"#D4AC0D",
-				"* Bot link for any feedback: https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501 . Kudos and thanks all for sharing your ideas.",
+				"* Feedback and known limitations: see the bot script's Workshop page. Kudos and thanks all for sharing your ideas.",
 			},
 			{
 				"#839192",
@@ -266,16 +265,16 @@ local strings = {
 		},
 	},
 	zh = {
-		welcome_msgs = {
-			"欢迎来到 Open Hyper AI (OHA-DEV)：",
-			"你可以自定义机器人要选择的英雄，例如 10 个相同的英雄或别的梦幻队伍，或者更改他们的名字。只需修改 Customize/general 文件",
-			"如果你觉得机器人太弱，可以尝试启用增强的 Fretbots 模式，让游戏更加具有挑战性。详情请查看创意工坊页面",
-			"你可以输入 `!pos X` 与机器人交换位置。例如，输入：`!pos 2` 来走中路。输入 `!3pos 5` 让队伍中的第3个机器人玩5号位。",
-			"你可以输入 `!sp zh` 让盟友机器人说中文，或者输入 `!sp en` 说英语，`!sp ru` 说俄语，`!sp ja` 说日语。并非100%完成翻译，请耐心等待。",
-			"这是一个非营利项目，如果您喜欢这个脚本，有任何反馈或想做贡献，或者给予任何支持或请我喝一杯咖啡，请查看脚本的工坊",
-		},
 		say_play_pos = "我将玩位置 ",
 		pos_select_closed = "位置选择已关闭",
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
+		welcome = {
+			"机器人聊天指令：",
+			"!pos 2 - 换到2号位，机器人与你交换。!3pos 5 - 让队伍第3个玩家打5号位。仅限号角响起前。",
+			"!sp en / zh / ru / ja - 机器人聊天所用的语言。",
+			"!debug - 机器人在聊天中说明更多决策（如眼位），再输入一次关闭。号角响起后可用。",
+			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
+		},
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
 		say_will_lose_2 = "我们估计胜率低于 1%。打得不错！",
 		say_will_win = "我们估计赢得团战的概率超过 90%",
@@ -357,7 +356,7 @@ local strings = {
 			},
 			{
 				"#D4AC0D",
-				"* 机器人反馈链接： https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501 。感谢大家分享你们的想法",
+				"* 反馈和已知限制：请查看机器人脚本的创意工坊页面。感谢大家分享你们的想法",
 			},
 			{
 				"#839192",
@@ -489,16 +488,16 @@ local strings = {
 		say_gg_win = { "ez", "简单", "太简单了", "下把加油", "gg ez", "轻松", "不过如此" },
 	},
 	ru = {
-		welcome_msgs = {
-			"Добро пожаловать в Open Hyper AI (OHA-DEV):",
-			"Вы можете выбрать героев для ботов, например, 10 одинаковых героев или свою команду мечты, или изменить их имена. Просто измените файл Customize/general.",
-			"Если вы считаете, что боты слишком слабые, попробуйте включить режим улучшенных Fretbots, чтобы игра стала более сложной. Подробности смотрите на странице Workshop.",
-			"Вы можете ввести `!pos X`, чтобы поменяться позицией с ботом. Например, введите: `!pos 2`, чтобы пойти на центральную линию. Введите `!3pos 5`, чтобы попросить 3-го бота в команде играть на позиции 5.",
-			"Вы можете ввести `!sp zh`, чтобы союзные боты говорили на китайском, или `!sp en` для английского, `!sp ru` для русского, `!sp ja` для японского. Перевод не завершён на 100%, проявите терпение.",
-			"Это некоммерческий проект. Если вам нравится этот скрипт и у вас есть отзывы или вы хотите внести вклад, оказать поддержку или угостить меня кофе, пожалуйста, посетите страницу скрипта в Мастерской.",
-		},
 		say_play_pos = "Я буду играть на позиции ",
 		pos_select_closed = "Выбор позиции закрыт.",
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
+		welcome = {
+			"Команды чата для ботов:",
+			"!pos 2 - взять позицию 2, бот поменяется с вами. !3pos 5 - 3-й игрок команды играет позицию 5. До горна.",
+			"!sp en / zh / ru / ja - язык чата ботов.",
+			"!debug - боты пишут в чат больше о своих решениях (варды и т.д.); ещё раз - выключить. После горна.",
+			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
+		},
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
 		say_will_lose_2 = "Мы оцениваем вероятность победы ниже 1%. Хорошая игра!",
 		say_will_win = "Мы оцениваем вероятность победы в командной битве более 90%",
@@ -585,7 +584,7 @@ local strings = {
 			},
 			{
 				"#D4AC0D",
-				"* Ссылка для обратной связи: https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501 . Спасибо всем за ваши идеи.",
+				"* Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской. Спасибо всем за ваши идеи.",
 			},
 			{
 				"#839192",
@@ -747,16 +746,16 @@ local strings = {
 		say_debug_off = { "Verbose debug ВЫКЛ.", "Режим отладки выключен." },
 	},
 	ja = {
-		welcome_msgs = {
-			"Open Hyper AI (OHA-DEV)へようこそ：",
-			"ボットが選ぶヒーローを選択したり（例: 10人の同じヒーローや夢のチーム）、名前を変更したりできます。Customize/general ファイルを編集するだけです。",
-			"もしボットが弱いと感じる場合は、強化された Fretbots モードを有効にして、より挑戦的なゲームをお楽しみください。詳細はワークショップページをご覧ください。",
-			"`!pos X` を入力してボットとポジションを交換できます。例えば、`!pos 2` を入力するとミッドレーンに行きます。`!3pos 5` を入力すると、チームの3番目のボットにポジション5をプレイさせます。",
-			"`!sp zh` を入力すると味方ボットが中国語を話し、`!sp en` で英語、`!sp ru` でロシア語、`!sp ja` で日本語を話します。翻訳は100％完成していないので、少しお待ちください。",
-			"これは非営利プロジェクトです。もしこのスクリプトが気に入ったら、フィードバックや貢献、サポート、または私にコーヒーをおごっていただける場合は、スクリプトのワークショップをご確認ください",
-		},
 		say_play_pos = "私はポジション ",
 		pos_select_closed = "ポジション選択は終了しました。",
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
+		welcome = {
+			"ボット用チャットコマンド：",
+			"!pos 2 - ポジション2に変更（ボットと交換）。!3pos 5 - チームの3番目のプレイヤーがポジション5。ホーン前のみ。",
+			"!sp en / zh / ru / ja - ボットのチャットの言語。",
+			"!debug - ボットが判断（ワードなど）をチャットで詳しく伝えます。もう一度で解除。ホーン後に使用可。",
+			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
+		},
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
 		say_will_lose_2 = "勝率が1％未満と推定されます。ナイスプレイ！",
 		say_will_win = "チーム戦の勝率が90％以上と推定されます",
@@ -843,7 +842,7 @@ local strings = {
 			},
 			{
 				"#D4AC0D",
-				"* フィードバック用リンク:  https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501 。アイデアを共有してくれた皆さん、感謝します。",
+				"* フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。アイデアを共有してくれた皆さん、感謝します。",
 			},
 			{
 				"#839192",
