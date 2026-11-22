@@ -121,12 +121,21 @@ RelocateRules.PARTNER_MIN_HP = 0.7
 -- The ganked ally must still be alive this long after the cast delay (it is what we are going for).
 RelocateRules.RESCUE_SURVIVE_MARGIN = 1.0
 
--- Is the gank worth a rescue? o.hp (ratio), o.dps (ratio lost per second), o.delay (cast delay), o.damaged (hit by
--- an enemy hero in the last 1.5s), o.enemies (enemy heroes seen near it), o.alliesThere (allied heroes near it,
--- not counting it). Returns ok, why ("go" | "no-gank" | "too-late" | "outnumbered"), ttd (nil when not losing HP).
+-- Every offensive Relocate (rescue and the far-teamfight join) lands only when our side after the landing (Io, the
+-- tethered partner, allied heroes near the landing point) + this margin >= the enemy heroes seen near it
+-- (maintainer, 2026-11-22: "not too outnumbered like 2v5"): 2v5 and 2v4 skip, 3v4, 2v3 and 1v1 go.
+RelocateRules.OUTNUMBER_MARGIN = 1
+
+function RelocateRules.NumbersOk(ours, enemies)
+	return ours + RelocateRules.OUTNUMBER_MARGIN >= enemies
+end
+
+-- Is the ally being ganked, and will it still be alive when Io lands? o.hp (ratio), o.dps (ratio lost per second),
+-- o.delay (cast delay), o.damaged (hit by an enemy hero in the last 1.5s), o.enemies (enemy heroes seen near it),
+-- o.alliesThere (allied heroes near it, not counting it). Returns ok, why ("go" | "no-gank" | "too-late"), ttd (nil
+-- when not losing HP). The numbers after the landing are NumbersOk's job.
 --   a gank: hit by a hero, 2+ enemy heroes, and they outnumber it and its allies there;
---   it lives through the delay + RESCUE_SURVIVE_MARGIN at the HP it is losing;
---   Io + the partner + it + the allies there >= the enemies.
+--   it lives through the delay + RESCUE_SURVIVE_MARGIN at the HP it is losing.
 function RelocateRules.RescueCheck(o)
 	local ttd = nil
 	if o.dps ~= nil and o.dps > 0 then
@@ -138,9 +147,6 @@ function RelocateRules.RescueCheck(o)
 	end
 	if ttd ~= nil and ttd < o.delay + RelocateRules.RESCUE_SURVIVE_MARGIN then
 		return false, "too-late", ttd
-	end
-	if 3 + alliesThere < o.enemies then
-		return false, "outnumbered", ttd
 	end
 	return true, "go", ttd
 end
