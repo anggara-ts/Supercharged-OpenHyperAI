@@ -143,7 +143,8 @@ end
 -- (TowerHoldPausedUntil), never later than HOLD_MAX_AGE after the stop (startTime): a frozen clock alone would keep a
 -- stale hold through a long push.
 DiveRules.HOLD_RESUME_MIN = 2
-DiveRules.HOLD_MAX_AGE = 30
+-- 20s: game 069, 48 holds, age at the end median 9.2s, p90 13.4s, longest 18.4s (the first cap, 30s, never bound).
+DiveRules.HOLD_MAX_AGE = 20
 -- At the pause: the time the hold keeps (left, floored once per hold). Returns remaining and the new floored flag.
 function DiveRules.TowerHoldPauseLeft(left, floored)
 	left = math.max(left or 0, 0)
@@ -166,12 +167,17 @@ end
 --                 t=848, 4s after her respawn, with left=-30.3 and why=invalid.
 --   s.invalidFor  seconds the tower handle has not read valid (not null, seen and alive), or nil
 --   s.fell        the handle is null or reads dead: the tower fell. After HOLD_INVALID_GRACE: "invalid".
---   s.expired     the 9s (paused time not counted) are over: "expire"
+--   s.age         seconds since the stop: past HOLD_MAX_AGE the hold ends whatever else ("cap")
+--   s.expired     the 9s (paused time not counted) are over ...
+--   s.outOfZone   ... and the bot is out of the zone by HOLD_EXPIRE_OUT: "expire". Game 069: 5 holds ran out with the
+--                 bot still inside the zone (Alchemist t=759 dist=848 of 900, Zeus t=761 dist=696, dead at t=763; Axe
+--                 t=842, Undying t=968, Alchemist t=919 1234 of 1300) and the next mode walked it back under the tower.
 --   s.insideZone  the bot is inside the hold zone (+ release)
 -- An unseen tower that still stands (out of vision: game 068, 5 of 7 why=invalid clears named a tower that stood for
 -- minutes, the bot 1860-3480 away) ends the hold only once the bot is outside the zone ("unseen"); inside it the hold
 -- goes on at the stored spot (a tower can be out of sight at night with the bot near it).
 DiveRules.HOLD_INVALID_GRACE = 2
+DiveRules.HOLD_EXPIRE_OUT = 100
 function DiveRules.TowerHoldEnd(s)
 	if s.died then
 		return "death"
@@ -180,13 +186,48 @@ function DiveRules.TowerHoldEnd(s)
 	if invalidLong and s.fell then
 		return "invalid"
 	end
-	if s.expired then
+	if s.age ~= nil and s.age > DiveRules.HOLD_MAX_AGE then
+		return "cap"
+	end
+	if s.expired and s.outOfZone then
 		return "expire"
 	end
 	if invalidLong and not s.insideZone then
 		return "unseen"
 	end
 	return nil
+end
+
+-- The chase into the enemy high ground while their T3 stands (game 069, 22:48-23:11: Alchemist and Axe chased
+-- Undying past Dire's mid T2 up to the T3 at 91-100% HP while the rest of the team went to Roshan; 4 Dire heroes were
+-- alive and near, both died under the T3 at t=1388-1391; no stop fired, the approach rule checks only HP). Before the
+-- T3's range, a bot going on someone stops when the enemies who can respond outnumber our heroes on the chase, unless
+-- an advantage window is open (2+ enemy heroes dead) or the target dies to our damage in the window first. Game 069,
+-- 33:30-33:42 must still go: after Dark Willow and Io died, Alchemist, Axe and Puck chased past the bottom T3 into
+-- the 3 Dire heroes left and killed Undying (19%) and Nyx (26%).
+--   s.highGround   the tower is an enemy T3 that stands (invulnerable counts: the T2 of its lane still stands)
+--   s.pushing      in a push mode (no decision)
+--   s.approaching  outside the T3's range, within range + APPROACH_MARGIN, going on someone toward it
+--   s.responders   enemy heroes alive and not seen far away in the last 5s (unknown ones count)
+--   s.chasers      our heroes on the chase: the bot and the allied heroes near it
+--   s.enemiesDead  enemy heroes dead now
+--   s.teamDamage, s.targetHealth   as in TowerChaseDecision (0 targetHealth: no hero target)
+-- Returns "leave", "outnumbered", or nil.
+DiveRules.ADVANTAGE_DEAD = 2
+function DiveRules.HighGroundChaseDecision(s)
+	if not s.highGround or s.pushing or not s.approaching then
+		return nil
+	end
+	if (s.responders or 0) <= (s.chasers or 1) then
+		return nil
+	end
+	if (s.enemiesDead or 0) >= DiveRules.ADVANTAGE_DEAD then
+		return nil
+	end
+	if (s.targetHealth or 0) > 0 and (s.teamDamage or 0) >= s.targetHealth then
+		return nil
+	end
+	return "leave", "outnumbered"
 end
 
 return DiveRules

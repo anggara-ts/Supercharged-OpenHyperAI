@@ -233,7 +233,66 @@ T.test("tower hold end: death, fell, expire, unseen (game 068)", function()
 	T.eq(R.TowerHoldEnd({ invalidFor = 2.5, fell = false, expired = false, insideZone = false }), "unseen", "Zeus 813")
 	-- Out of sight with the bot inside the zone (night): the hold goes on at the stored spot.
 	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = false, insideZone = true }), nil, "unseen inside")
-	-- Out of sight and the time is over: plain expire.
-	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = true, insideZone = true }), "expire", "expire")
+	-- Out of sight, the time over and the bot out of the zone: plain expire.
+	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = true, outOfZone = true }), "expire", "expire")
 	T.eq(R.TowerHoldEnd({ expired = false, insideZone = true }), nil, "valid tower, time left")
+end)
+
+T.test("tower hold end: the time alone doesn't end it inside the zone; the 20s cap does (game 069)", function()
+	local R = rules()
+	-- Alchemist t=759: 11.3s after the stop, left=-0.3, dist=848 of a 900 zone: the hold goes on.
+	T.eq(R.TowerHoldEnd({ age = 11.3, expired = true, outOfZone = false, insideZone = true }), nil, "Alchemist 759")
+	-- Zeus t=761: dist=696 (inside), dead 2s later: goes on.
+	T.eq(R.TowerHoldEnd({ age = 13.4, expired = true, outOfZone = false, insideZone = true }), nil, "Zeus 761")
+	-- Walked out past zone + HOLD_EXPIRE_OUT: expire.
+	T.eq(R.TowerHoldEnd({ age = 12, expired = true, outOfZone = true }), "expire", "out of the zone")
+	-- Still inside after the cap: it ends anyway (the longest game 069 hold was 18.4s).
+	T.eq(R.HOLD_MAX_AGE, 20, "cap 20s")
+	T.eq(R.TowerHoldEnd({ age = 20.5, expired = true, outOfZone = false, insideZone = true }), "cap", "cap")
+	T.eq(R.TowerHoldEnd({ age = 21, died = true }), "death", "death first")
+end)
+
+T.test("high-ground chase: stop outnumbered at a standing T3, keep the 33:30 chase (game 069)", function()
+	local R = rules()
+	-- 22:48-23:11: Alchemist and Axe after Undying past Dire's mid T2 toward the T3; 1 Dire hero dead, the 4 alive
+	-- near (Phantom Assassin, Io, Undying, Nyx), the rest of Radiant at Roshan. Undying's HP is not in the log: a
+	-- healthy target our 2s damage doesn't kill (illustrative numbers).
+	local early = {
+		highGround = true,
+		pushing = false,
+		approaching = true,
+		responders = 4,
+		chasers = 2,
+		enemiesDead = 1,
+		teamDamage = 600,
+		targetHealth = 1500,
+	}
+	local act, why = R.HighGroundChaseDecision(early)
+	T.eq(act, "leave", "22:48 stop")
+	T.eq(why, "outnumbered", "why")
+	-- 33:30-33:42: Dark Willow and Io dead, the 3 Dire heroes left near, Alchemist, Axe and Puck on the chase;
+	-- Undying and Nyx low (46% / 53% 3.5s before they died).
+	local late = {
+		highGround = true,
+		pushing = false,
+		approaching = true,
+		responders = 3,
+		chasers = 3,
+		enemiesDead = 2,
+		teamDamage = 600,
+		targetHealth = 900,
+	}
+	T.eq(R.HighGroundChaseDecision(late), nil, "33:30 goes")
+	-- Each allowance alone lets it go.
+	late.chasers, late.enemiesDead = 2, 2
+	T.eq(R.HighGroundChaseDecision(late), nil, "advantage window (2 dead) alone")
+	late.enemiesDead, late.chasers = 1, 3
+	T.eq(R.HighGroundChaseDecision(late), nil, "ours >= responders alone")
+	early.teamDamage = 1600
+	T.eq(R.HighGroundChaseDecision(early), nil, "the target dies first")
+	early.teamDamage = 600
+	early.pushing = true
+	T.eq(R.HighGroundChaseDecision(early), nil, "push mode: no decision")
+	early.pushing, early.highGround = false, false
+	T.eq(R.HighGroundChaseDecision(early), nil, "no standing T3")
 end)

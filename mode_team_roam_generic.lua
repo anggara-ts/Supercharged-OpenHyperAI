@@ -385,6 +385,12 @@ function GetDesireHelper()
 		local lastHitCreep = TeamRoam.GetLastHitCreep()
 		if Fu.IsValid(lastHitCreep) and Fu.CanBeAttacked(lastHitCreep) then
 			local why = TeamRoam.LastHitWithdrawWhy(lastHitCreep)
+			-- No snipe while a tower hold is on and not paused (mode_retreat_generic.lua TowerHoldCheck): game 069,
+			-- t=748-751, Alchemist's snipe (1.50) beat the hold's retreat (1.10) twice at Dire's mid T1.
+			local towerHold = bot._towerChaseHold
+			if why == nil and towerHold ~= nil and not towerHold.paused then
+				why = "tower-hold"
+			end
 			local path = nil
 			if why == nil then
 				local activeMode = bot:GetActiveMode()

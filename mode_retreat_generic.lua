@@ -1135,7 +1135,10 @@ local function TowerHoldCheck()
 		died = not bot:IsAlive() or (hold.deaths ~= nil and deathsNow ~= nil and deathsNow > hold.deaths),
 		invalidFor = hold.invalidSince ~= nil and now - hold.invalidSince or nil,
 		fell = towerNull or not towerAlive,
+		age = now - (hold.startTime or now),
 		expired = now > hold.untilTime,
+		-- The time alone doesn't end a hold with the bot still inside the zone (game 069: 5 did, see TowerHoldEnd).
+		outOfZone = dist > hold.range + (hold.margin or DiveRules.HOLD_MARGIN) + DiveRules.HOLD_EXPIRE_OUT,
 		insideZone = dist < hold.range + (hold.margin or DiveRules.HOLD_MARGIN) + DiveRules.HOLD_RELEASE,
 	})
 	if endWhy ~= nil then
@@ -1164,9 +1167,10 @@ local function TowerHoldCheck()
 		end
 	end
 	-- A push pauses the hold, it doesn't end it (DiveRules.TowerHoldState; game 064, 12:24-12:31, Alchemist).
+	-- The end is TowerHoldEnd's (above): a hold past its time with the bot still in the zone goes on here.
 	local state = DiveRules.TowerHoldState(
 		now,
-		hold.untilTime,
+		math.max(hold.untilTime, now),
 		true,
 		pushing,
 		hold.paused,
@@ -1198,14 +1202,21 @@ local function TowerHoldCheck()
 		bot._towerChaseHold = nil
 		return 0
 	end
-	-- tower-hold-pause / tower-hold-resume: once per change, each at most every 2s on its own clock (a push / attack
-	-- flip would repeat it; game 065: one shared clock hid most resume lines).
+	-- tower-hold-pause / tower-hold-resume: a pause line at most every 2s (a push / attack flip would repeat it); every
+	-- pause line that printed gets its resume line (or the clear line if the hold ends during the pause). Game 069: 19
+	-- pauses, 6 resume lines - the resume printed only when the hold ran again, on a 2s clock of its own.
 	local function logChange(what)
-		local logKey = what == "resume" and "_towerHoldResumeLogAt" or "_towerHoldChangeLogAt"
-		if now < (bot[logKey] or -999) then
+		if what == "pause" then
+			if now < (bot._towerHoldChangeLogAt or -999) then
+				return
+			end
+			bot._towerHoldChangeLogAt = now + 2
+			hold.pauseLogged = true
+		elseif not hold.pauseLogged then
 			return
+		else
+			hold.pauseLogged = nil
 		end
-		bot[logKey] = now + 2
 		pcall(
 			print,
 			string.format(
@@ -1235,14 +1246,13 @@ local function TowerHoldCheck()
 		return 0
 	end
 	hold.paused = nil
+	if state == "resume" then
+		logChange("resume")
+	end
 	local run
 	run, hold.inside = DiveRules.TowerHoldRun(dist, hold.range, hold.inside, hold.margin)
 	if not run then
 		return 0
-	end
-	if state == "resume" then
-		-- Only when the hold runs again: the push ended with the bot still near that tower.
-		logChange("resume")
 	end
 	if now >= (bot._towerHoldLogAt or -999) then
 		bot._towerHoldLogAt = now + 3
@@ -1275,10 +1285,156 @@ function Retreat.TowerChaseHoldRun()
 	bot._towerHoldCheckRun = TowerHoldCheck()
 	return bot._towerHoldCheckRun
 end
+-- After a stop: keep out of the tower's range + margin for HOLD_SECONDS (TowerHoldCheck).
+local function StartTowerHold(tower, towerRange, margin, why)
+	if bot._towerChaseHold ~= nil then
+		-- A hold on another tower is replaced (the same tower never gets here, see the callers).
+		pcall(
+			print,
+			string.format(
+				"[OHA-RETREAT] t=%.0f %s tower-hold-clear why=replaced stop=%s tower=%s new=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(bot._towerChaseHold.why),
+				tostring(bot._towerChaseHold.name),
+				tower:GetUnitName()
+			)
+		)
+	end
+	bot._towerChaseHold = {
+		tower = tower,
+		loc = tower:GetLocation(),
+		name = tower:GetUnitName(),
+		range = towerRange,
+		margin = margin,
+		untilTime = DotaTime() + DiveRules.HOLD_SECONDS,
+		inside = true,
+		why = why,
+		-- For the clear line and DiveRules.TowerHoldPausedUntil / TowerHoldEnd: when, in which mode, and the bot's death
+		-- count (a hold ends with the death).
+		startTime = DotaTime(),
+		stopMode = activeMode or -1,
+		deaths = GetHeroDeaths(bot:GetPlayerID()),
+	}
+end
+-- Enemy heroes seen in the last 5s farther than this from the T3 can't respond to a chase there.
+local HG_RESPOND_RADIUS = 3500
+-- The chase into the enemy high ground while their T3 stands (DiveRules.HighGroundChaseDecision; game 069, 22:48,
+-- Alchemist and Axe). Before the T3's range, going on someone toward it, outside a push. Returns the run time or 0.
+local function HighGroundChaseRun()
+	if Fu.IsPushing(bot) or not Fu.IsGoingOnSomeone(bot) then
+		return 0
+	end
+	local t3 = nil
+	for _, tower in pairs(bot:GetNearbyTowers(700 + DiveRules.APPROACH_MARGIN, true) or {}) do
+		-- Invulnerable counts (the T2 of its lane still stands): Fu.IsValidBuilding would skip it.
+		local ok, standing = pcall(function()
+			return not tower:IsNull() and tower:IsAlive() and string.find(tower:GetUnitName() or "", "tower3_", 1, true)
+		end)
+		if ok and standing then
+			t3 = tower
+			break
+		end
+	end
+	if t3 == nil or bot._towerChaseHold ~= nil and bot._towerChaseHold.name == t3:GetUnitName() then
+		return 0
+	end
+	local okRange, rawRange = pcall(function()
+		return t3:GetAttackRange()
+	end)
+	local towerRange = (okRange and type(rawRange) == "number" and rawRange > 0) and rawRange or 700
+	local towerDist = GetUnitToUnitDistance(bot, t3)
+	if towerDist <= towerRange or towerDist > towerRange + DiveRules.APPROACH_MARGIN then
+		return 0
+	end
+	local hasTarget = Fu.IsValidHero(botTarget)
+		and Fu.CanBeAttacked(botTarget)
+		and not Fu.IsSuspiciousIllusion(botTarget)
+	local approaching = hasTarget and GetUnitToUnitDistance(botTarget, t3) < towerDist
+		or GetUnitToLocationDistance(t3, bot:GetExtrapolatedLocation(0.5)) < towerDist - 50
+	if not approaching then
+		return 0
+	end
+	local t3Loc = t3:GetLocation()
+	local responders, enemiesDead = 0, 0
+	for _, playerId in pairs(GetTeamPlayers(GetOpposingTeam())) do
+		if IsHeroAlive(playerId) then
+			local info = GetHeroLastSeenInfo(playerId)
+			local seen = info ~= nil and info[1] or nil
+			local seenFar = seen ~= nil
+				and seen.time_since_seen < 5.0
+				and Fu.GetLocationToLocationDistance(seen.location, t3Loc) > HG_RESPOND_RADIUS
+			if not seenFar then
+				responders = responders + 1
+			end
+		else
+			enemiesDead = enemiesDead + 1
+		end
+	end
+	local chasers = 1
+	for _, ally in pairs(bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+			chasers = chasers + 1
+		end
+	end
+	-- The target dying first: our damage in 2s (about 2 tower shots) against its HP.
+	local teamDamage, targetHealth = 0, 0
+	if hasTarget then
+		targetHealth = botTarget:GetHealth()
+		teamDamage = bot:GetEstimatedDamageToTarget(true, botTarget, 2.0, DAMAGE_TYPE_ALL) or 0
+		for _, ally in pairs(bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}) do
+			if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+				teamDamage = teamDamage + (ally:GetEstimatedDamageToTarget(true, botTarget, 2.0, DAMAGE_TYPE_ALL) or 0)
+			end
+		end
+	end
+	local act, why = DiveRules.HighGroundChaseDecision({
+		highGround = true,
+		pushing = false,
+		approaching = true,
+		responders = responders,
+		chasers = chasers,
+		enemiesDead = enemiesDead,
+		teamDamage = teamDamage,
+		targetHealth = targetHealth,
+	})
+	if act ~= "leave" then
+		return 0
+	end
+	StartTowerHold(t3, towerRange, DiveRules.APPROACH_MARGIN, why)
+	if DotaTime() >= (bot._hgChaseLogAt or -999) then
+		bot._hgChaseLogAt = DotaTime() + 2
+		pcall(
+			print,
+			string.format(
+				"[OHA-RETREAT] t=%.0f %s tower-approach-stop why=%s tower=%s target=%s responders=%d chasers=%d enemiesDead=%d dmg=%d targetHp=%d mode=%d hold=%d dist=%d hpr=%.2f",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				why,
+				t3:GetUnitName(),
+				hasTarget and (string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "")) or "none",
+				responders,
+				chasers,
+				enemiesDead,
+				math.floor(teamDamage),
+				math.floor(targetHealth),
+				activeMode or -1,
+				DiveRules.HOLD_SECONDS,
+				math.floor(towerDist),
+				hpRatio
+			)
+		)
+	end
+	return 2.88
+end
 local function TowerChaseRun()
 	local holdRun = Retreat.TowerChaseHoldRun()
 	if holdRun > 0 then
 		return holdRun
+	end
+	local highGroundRun = HighGroundChaseRun()
+	if highGroundRun > 0 then
+		return highGroundRun
 	end
 	-- Range + APPROACH_MARGIN (700 + 600) for the check before the edge (DiveRules.TowerApproachDecision).
 	local tower = (bot:GetNearbyTowers(700 + DiveRules.APPROACH_MARGIN, true) or {})[1]
@@ -1389,36 +1545,8 @@ local function TowerChaseRun()
 		return 0
 	end
 	if act == "leave" then
-		if bot._towerChaseHold ~= nil then
-			-- A hold on another tower is replaced (the same tower never gets here, see above).
-			pcall(
-				print,
-				string.format(
-					"[OHA-RETREAT] t=%.0f %s tower-hold-clear why=replaced stop=%s tower=%s new=%s",
-					DotaTime(),
-					(string.gsub(botName, "npc_dota_hero_", "")),
-					tostring(bot._towerChaseHold.why),
-					tostring(bot._towerChaseHold.name),
-					tower:GetUnitName()
-				)
-			)
-		end
-		bot._towerChaseHold = {
-			tower = tower,
-			loc = tower:GetLocation(),
-			name = tower:GetUnitName(),
-			range = towerRange,
-			-- A stop before the edge keeps the bot out of range + APPROACH_MARGIN, not only range + HOLD_MARGIN.
-			margin = approaching and DiveRules.APPROACH_MARGIN or DiveRules.HOLD_MARGIN,
-			untilTime = DotaTime() + DiveRules.HOLD_SECONDS,
-			inside = true,
-			why = why,
-			-- For the clear line and DiveRules.TowerHoldPausedUntil / TowerHoldEnd: when, in which mode, and the
-			-- bot's death count (a hold ends with the death).
-			startTime = DotaTime(),
-			stopMode = activeMode or -1,
-			deaths = GetHeroDeaths(bot:GetPlayerID()),
-		}
+		-- A stop before the edge keeps the bot out of range + APPROACH_MARGIN, not only range + HOLD_MARGIN.
+		StartTowerHold(tower, towerRange, approaching and DiveRules.APPROACH_MARGIN or DiveRules.HOLD_MARGIN, why)
 	end
 	-- On a change of decision (at most every 2s), else every 5s. Lines before the tower shoots have their own
 	-- names (tower-entry-stop / tower-entry-go, tower-approach-stop before the edge), so the chase-stop / dive lines
