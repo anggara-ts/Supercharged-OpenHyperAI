@@ -113,7 +113,8 @@ end
 --   cap: s.maxPush (own HP, high ground, backdoor and the all-alive cap already folded in);
 --   alone-vs-2: one hero against 2+ near it, 0.2;
 --   fewer-than-alive: fewer allies near than enemies alive at a T2+ (T3+ for a joiner) within 6000 of their
---     Ancient, 0.4; not in an advantage window;
+--     Ancient, 0.4; not in an advantage window, not while gathering below their high ground (s.gathering); with
+--     their Ancient open and us ahead it counts the enemies seen near instead (PushRules.FewerThanAliveCount);
 --   group-hurt: s.groupHurt (2+ allies under 40%, average under 60%, near their base) while enemies can still
 --     punish it, 0.15; never with every enemy dead.
 -- Returns desire, the last cap that applied (nil when none), "advantage" / "join" when raised.
@@ -136,9 +137,10 @@ function PushRules.LockDesire(s)
 	end
 	if
 		s.advantage == nil
+		and not s.gathering
 		and s.nearAncient
 		and (s.tier or 1) >= (s.joinCap ~= nil and 3 or 2)
-		and alliesNear < enemiesAlive
+		and alliesNear < PushRules.FewerThanAliveCount(s.ancientOpen, s.ahead, enemiesAlive, s.enemiesNear)
 		and desire > 0.4
 	then
 		desire, cap = 0.4, "fewer-than-alive"
@@ -149,9 +151,123 @@ function PushRules.LockDesire(s)
 	return desire, cap, raised
 end
 
+-- The enemy count the fewer-than-alive cap compares our allies near with (#12, game 068 50:33-51:01: four Dire at
+-- Radiant's open Ancient, 18k ahead, no Radiant hero near, were capped at 0.40 because all five Radiant were alive at
+-- their fountain; farm then walked them home). With their Ancient open (both T4s down) and us ahead: the enemies seen
+-- near the bot. Otherwise: the enemies alive.
+function PushRules.FewerThanAliveCount(ancientOpen, ahead, enemiesAlive, enemiesNear)
+	if ancientOpen and ahead then
+		return enemiesNear or 0
+	end
+	return enemiesAlive or 5
+end
+
 -- HP under which a bot's push is capped at 0.25: 50%, or 30% with every enemy dead (the wipe push's own floor).
 function PushRules.OwnHpCapBelow(wipe)
 	return wipe and 0.3 or 0.5
+end
+
+-- The own-HP cap with its inputs (#12, game 068 2331-2376: in a dead-enemies window with no enemy hero near, bots
+-- at 0.50-0.52 flipped between `advantage-push desire=0.80` and `lock-capped desire=0.25` every few seconds).
+--   s.wipe: every enemy dead (0.3); s.deadWindow: an advantage window from dead enemies (not the Aegis alone) and
+--   s.enemiesNear == 0: 0.4; else 0.5. s.wasCapped: the cap held this bot last think: it lets go 0.05 higher, so
+--   HP ticking around the line doesn't flip the push.
+-- Returns the HP under which the cap applies.
+function PushRules.OwnHpCap(s)
+	local below = PushRules.OwnHpCapBelow(s.wipe)
+	if not s.wipe and s.deadWindow and (s.enemiesNear or 0) == 0 then
+		below = 0.4
+	end
+	if s.wasCapped then
+		below = below + 0.05
+	end
+	return below
+end
+
+-- The high-ground cap (#12): near the enemy fountain, with enemies alive, a push of fewer than s.need allies near the
+-- bot (3; 2 in a window of 2+ dead) is capped at 0.15. Game 068 52:33-54:00: the five-alive rule let 3 Dire join
+-- (`lock-capped why=cap desire=0.15 allies=1-2 alive=5/5 hg=true five=ahead joiners=3`), the cap cut each of them to
+-- 0.15 before the 3 could meet, and Undying went up alone and died. A bot of an allowed group push instead gathers
+-- at a spot below the high ground (out of tower range) at the push desire and goes up when s.need are there.
+--   s.nearEnemyFountain: the lane front is within 5000 of their fountain
+--   s.enemiesAlive, s.alliesAlive; s.alliesNear: allies within 1600 of the bot (itself included);
+--   s.atSpot: allies within 1600 of the gather spot (nil when there is no spot)
+--   s.groupAllowed: an advantage window, or a joiner of an all-alive push the later caps let up the high ground
+--   s.released: the group went up less than ~12s ago (latched, so walking up doesn't drop the count and turn back)
+--   s.gatherAge: seconds this bot has been gathering; s.coolDown: a gather that gave up less than 30s ago
+-- Returns "none" (no high-ground cap), "go" (enough allies: no cap, latch the release), "cap" (0.15) or "gather".
+function PushRules.HgGather(s)
+	if not s.nearEnemyFountain or (s.enemiesAlive or 5) == 0 then
+		return "none"
+	end
+	if (s.alliesAlive or 0) < (s.enemiesAlive or 5) then
+		return "cap"
+	end
+	local need = s.need or 3
+	if (s.alliesNear or 1) >= need or (s.atSpot or 0) >= need then
+		return "go"
+	end
+	if s.released then
+		return "go"
+	end
+	if not s.groupAllowed or s.atSpot == nil or s.coolDown then
+		return "cap"
+	end
+	if (s.gatherAge or 0) > 45 then
+		return "cap"
+	end
+	return "gather"
+end
+
+-- A lane our creeps press (#12, maintainer idea 2026-11-22): the lane's next target is their T3 or deeper (tier 3+:
+-- T1 and T2 down) and our lane front, with 2+ of our creeps, stands within 1500 of that target. Such a wave pulls
+-- their heroes home.
+function PushRules.LaneUnderPressure(tier, frontToTarget, creepsAtFront)
+	return (tier or 1) >= 3 and (frontToTarget or math.huge) <= 1500 and (creepsAtFront or 0) >= 2
+end
+
+-- Roshan desire bonus for creep pressure: +0.1 per pressed lane, at most +0.2.
+function PushRules.CreepPressureBonus(lanes)
+	return math.min(0.2, 0.1 * math.max(0, lanes or 0))
+end
+
+-- Aegis first (#12, maintainer decision 2026-11-22: "forcing a 5v5 on the enemy high ground with every enemy alive
+-- is a gamble; taking the Aegis first is safer"). Roshan comes before the high-ground push when:
+--   every enemy is alive (s.enemiesAlive >= s.enemyPlayers), their base is open (s.baseOpen: a lane's next target is
+--   a T3 or deeper), Roshan is (assumed) alive, we don't hold the Aegis, no advantage window is open (dead enemies
+--   still push first), our base is not threatened, 4+ of ours are alive, and we are ahead or our creeps press a lane
+--   (s.ahead / s.pressureLanes; an even game has no high-ground push to replace, and a 5v5 Roshan there is the same
+--   gamble).
+-- Returns on, why.
+function PushRules.RoshanFirst(s)
+	if s == nil then
+		return false, "none"
+	end
+	if s.baseThreat then
+		return false, "base-threat"
+	end
+	if s.advantage then
+		return false, "advantage"
+	end
+	if s.ourAegis then
+		return false, "have-aegis"
+	end
+	if not s.roshAlive then
+		return false, "rosh-dead"
+	end
+	if (s.enemiesAlive or 0) < (s.enemyPlayers or 5) then
+		return false, "enemy-dead"
+	end
+	if not s.baseOpen then
+		return false, "base-closed"
+	end
+	if (s.alliesAlive or 0) < 4 then
+		return false, "few-alive"
+	end
+	if not s.ahead and (s.pressureLanes or 0) < 1 then
+		return false, "even"
+	end
+	return true, s.ahead and "ahead" or "pressure"
 end
 
 return PushRules

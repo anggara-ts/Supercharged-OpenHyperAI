@@ -444,6 +444,28 @@ local function EnemyHalfWithdrawWhy()
 	local enemiesNear = #Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), 2500)
 	local alliesNear = #Fu.GetAlliesNearLoc(bot:GetLocation(), 1600)
 	if enemiesNear > alliesNear then
+		-- Not for a bot pushing within 3000 of their Ancient (#12, game 068 50:33-51:01: four Dire at Radiant's open
+		-- Ancient were walked home at 0.5 because the five Radiant last seen at their fountain counted as near).
+		-- Push and retreat keep their own enemy checks there.
+		local enemyAncient = GetAncient(GetOpposingTeam())
+		if
+			DotaTime() - (bot._pushActiveAt or -999) <= 2
+			and enemyAncient ~= nil
+			and GetUnitToUnitDistance(bot, enemyAncient) <= 3000
+		then
+			FarmLog(
+				"[OHA-FARM] t=%.0f %s withdraw-skip why=outnumbered-at-ancient push=%.2f enemies=%d allies=%d dist=%d",
+				DotaTime(),
+				ShortName(bot),
+				bot.pushDesire or 0,
+				enemiesNear,
+				alliesNear,
+				math.floor(GetUnitToUnitDistance(bot, enemyAncient))
+			)
+			-- A walk home already started would go on as why=finish.
+			bot._farmWithdrawTo = nil
+			return nil
+		end
 		return "outnumbered"
 	end
 	return nil

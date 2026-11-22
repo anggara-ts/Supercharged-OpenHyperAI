@@ -189,3 +189,122 @@ T.test("kill window: an enemy death uses the respawn time our own death at that 
 	end
 	T.ok(logged, "death line names the learned source")
 end)
+
+T.test("fewer-than-alive: an open Ancient and a lead count the enemies seen near (game 068 50:33)", function()
+	local R = rules()
+	-- Game 068 t=3033-3061: four Dire at Radiant's open Ancient, 18k ahead, no Radiant hero near, five alive.
+	local inputs = {
+		base = 0.55,
+		joinCap = 0.7,
+		maxPush = 0.7,
+		alliesNear = 4,
+		enemiesNear = 0,
+		enemiesAlive = 5,
+		tier = 4,
+		nearAncient = true,
+	}
+	local desire, cap = R.LockDesire(inputs)
+	T.eq(cap, "fewer-than-alive", "T4s up or even: still capped")
+	T.eq(desire, 0.4, "capped desire")
+	inputs.ancientOpen, inputs.ahead = true, true
+	desire, cap = R.LockDesire(inputs)
+	T.eq(cap, nil, "open Ancient + lead: no cap")
+	T.eq(desire, 0.7, "joiner desire")
+	-- Open Ancient but not ahead: the enemies alive count.
+	inputs.ahead = false
+	T.eq(select(2, R.LockDesire(inputs)), "fewer-than-alive", "open, not ahead")
+	-- Open and ahead, but 5 enemies seen near: capped.
+	inputs.ahead, inputs.enemiesNear = true, 5
+	T.eq(select(2, R.LockDesire(inputs)), "fewer-than-alive", "enemies seen near")
+	T.eq(R.FewerThanAliveCount(true, true, 5, 1), 1, "count: seen near")
+	T.eq(R.FewerThanAliveCount(true, false, 5, 1), 5, "count: alive")
+end)
+
+T.test("high-ground gather: an allowed group waits below the high ground, then goes up (game 068 52:33)", function()
+	local R = rules()
+	-- Game 068 t=3153: Undying, joiner 1 of 3, alone near Radiant's open base, 5v5 alive.
+	local s = {
+		nearEnemyFountain = true,
+		enemiesAlive = 5,
+		alliesAlive = 5,
+		alliesNear = 1,
+		atSpot = 1,
+		need = 3,
+		groupAllowed = true,
+	}
+	T.eq(R.HgGather(s), "gather", "joiner alone: gather")
+	s.atSpot = 3
+	T.eq(R.HgGather(s), "go", "3 at the spot: go")
+	s.atSpot, s.alliesNear = 1, 3
+	T.eq(R.HgGather(s), "go", "3 near the bot: go")
+	s.alliesNear, s.released = 1, true
+	T.eq(R.HgGather(s), "go", "latched release while walking up")
+	s.released = nil
+	s.groupAllowed = false
+	T.eq(R.HgGather(s), "cap", "not an allowed group: the 0.15 cap")
+	s.groupAllowed, s.gatherAge = true, 50
+	T.eq(R.HgGather(s), "cap", "gave up after 45s")
+	s.gatherAge, s.coolDown = 0, true
+	T.eq(R.HgGather(s), "cap", "cooling down")
+	s.coolDown, s.atSpot = nil, nil
+	T.eq(R.HgGather(s), "cap", "no spot found")
+	s.atSpot, s.alliesAlive = 1, 4
+	T.eq(R.HgGather(s), "cap", "fewer alive than them")
+	s.enemiesAlive = 0
+	T.eq(R.HgGather(s), "none", "every enemy dead: no high-ground cap")
+	T.eq(R.HgGather({ nearEnemyFountain = false }), "none", "not near their fountain")
+end)
+
+T.test("own-HP cap: 40% in a dead-enemies window with no enemy near, 5% hysteresis (game 068 2331-2376)", function()
+	local R = rules()
+	T.eq(R.OwnHpCap({}), 0.5, "normal")
+	T.eq(R.OwnHpCap({ wipe = true }), 0.3, "wipe")
+	T.eq(R.OwnHpCap({ deadWindow = true, enemiesNear = 0 }), 0.4, "dead window, nobody near")
+	T.eq(R.OwnHpCap({ deadWindow = true, enemiesNear = 1 }), 0.5, "dead window, an enemy near")
+	T.near(R.OwnHpCap({ wasCapped = true }), 0.55, 1e-9, "capped lets go at 55%")
+	T.near(R.OwnHpCap({ deadWindow = true, enemiesNear = 0, wasCapped = true }), 0.45, 1e-9, "dead window capped")
+end)
+
+T.test("creep pressure: tier 3+ lanes with our wave at the target, +0.1 per lane up to +0.2", function()
+	local R = rules()
+	T.ok(R.LaneUnderPressure(3, 900, 4), "wave at their T3")
+	T.ok(not R.LaneUnderPressure(2, 500, 4), "T2 still up")
+	T.ok(not R.LaneUnderPressure(3, 2500, 4), "wave far from the T3")
+	T.ok(not R.LaneUnderPressure(4, 800, 1), "one creep is no wave")
+	T.eq(R.CreepPressureBonus(0), 0, "no lane")
+	T.near(R.CreepPressureBonus(1), 0.1, 1e-9, "one lane")
+	T.near(R.CreepPressureBonus(3), 0.2, 1e-9, "capped at 0.2")
+end)
+
+T.test("Roshan first: every enemy alive, their base open, Roshan up, no window (maintainer 2026-11-22)", function()
+	local R = rules()
+	local s = {
+		enemiesAlive = 5,
+		enemyPlayers = 5,
+		alliesAlive = 5,
+		baseOpen = true,
+		roshAlive = true,
+		ahead = true,
+	}
+	local on, why = R.RoshanFirst(s)
+	T.ok(on, "game 068 52:50: Roshan first")
+	T.eq(why, "ahead", "why")
+	s.advantage = true
+	T.eq(select(2, R.RoshanFirst(s)), "advantage", "an open window still pushes first")
+	s.advantage, s.baseThreat = nil, true
+	T.eq(select(2, R.RoshanFirst(s)), "base-threat", "never with our base hit")
+	s.baseThreat, s.ourAegis = nil, true
+	T.eq(select(2, R.RoshanFirst(s)), "have-aegis", "Aegis taken: push")
+	s.ourAegis, s.roshAlive = nil, false
+	T.eq(select(2, R.RoshanFirst(s)), "rosh-dead", "Roshan down: push (hg-gather)")
+	s.roshAlive, s.enemiesAlive = true, 4
+	T.eq(select(2, R.RoshanFirst(s)), "enemy-dead", "an enemy dead")
+	s.enemiesAlive, s.baseOpen = 5, false
+	T.eq(select(2, R.RoshanFirst(s)), "base-closed", "base closed")
+	s.baseOpen, s.ahead = true, false
+	T.eq(select(2, R.RoshanFirst(s)), "even", "even, no pressure")
+	s.pressureLanes = 1
+	T.eq(select(2, R.RoshanFirst(s)), "pressure", "even with creep pressure")
+	s.alliesAlive = 3
+	T.eq(select(2, R.RoshanFirst(s)), "few-alive", "3 of ours alive")
+end)

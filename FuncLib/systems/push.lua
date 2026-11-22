@@ -260,6 +260,165 @@ local autoCleanupCache = Cache.autoCleanupCache
 local NativeOperators = require(GetScriptDirectory() .. "/FuncLib/lib/native_operators")
 local add = NativeOperators.add
 local CacheKeys = require(GetScriptDirectory() .. "/FuncLib/systems/cache_keys")
+-- The caps that lowered maxPushDesire in this GetPushDesireHelper call, for the lock-capped line (`src=`).
+local pushCapSrc = ""
+local function CapPush(value, src)
+	if value < maxPushDesire then
+		maxPushDesire = value
+		pushCapSrc = pushCapSrc == "" and src or (pushCapSrc .. "+" .. src)
+	end
+end
+-- Both enemy T4s down (their Ancient can be hit) and us ahead (2000+ net worth or 1+ average level, as in
+-- PushRules.FiveAliveCap). Per team, read at most every 1s.
+local ancientOpenByTeam = {}
+local function AncientOpenAndAhead(gameState)
+	local team = GetTeam()
+	local cached = ancientOpenByTeam[team]
+	if cached ~= nil and DotaTime() - cached.at < 1 then
+		return cached.open, cached.ahead
+	end
+	local enemyTeam = GetOpposingTeam()
+	local base1, base2 = GetTower(enemyTeam, Tower.Base1), GetTower(enemyTeam, Tower.Base2)
+	local open = (base1 == nil or not base1:IsAlive()) and (base2 == nil or not base2:IsAlive())
+	local ahead = (gameState.teamNetworth or 0) - (gameState.enemyNetworth or 0) >= 2000
+		or (gameState.averageLevel or 0) - Fu.GetAverageLevel(true) >= 1
+	ancientOpenByTeam[team] = { at = DotaTime(), open = open, ahead = ahead }
+	return open, ahead
+end
+-- A spot below the enemy high ground on `lane` (#12 hg-gather): back along our lane front until it is 5200+ from
+-- their fountain (the high-ground cap looks 5000 around it) and out of every live enemy T3 / T4's range + 300.
+-- Per team and lane, every 3s. nil when no point up to 4000 back qualifies.
+local gatherSpotCache = {}
+local function HgGatherSpot(team, lane, enemyFountain)
+	local key = team * 10 + lane
+	local cached = gatherSpotCache[key]
+	if cached ~= nil and DotaTime() - cached.at < 3 then
+		return cached.spot
+	end
+	local enemyTeam = GetOpposingTeam()
+	local towers = {}
+	for _, towerId in ipairs({ Tower.Top3, Tower.Mid3, Tower.Bot3, Tower.Base1, Tower.Base2 }) do
+		local tower = GetTower(enemyTeam, towerId)
+		if tower ~= nil and tower:IsAlive() then
+			towers[#towers + 1] = tower
+		end
+	end
+	local spot = nil
+	for back = 800, 4000, 400 do
+		local location = GetLaneFrontLocation(team, lane, -back)
+		if getLocationToLocationDistance(location, enemyFountain) >= 5200 then
+			local safe = true
+			for _, tower in ipairs(towers) do
+				if GetUnitToLocationDistance(tower, location) < (tower:GetAttackRange() or 700) + 300 then
+					safe = false
+					break
+				end
+			end
+			if safe then
+				spot = location
+				break
+			end
+		end
+	end
+	gatherSpotCache[key] = { at = DotaTime(), spot = spot }
+	return spot
+end
+-- The high-ground cap or a gather below it (PushRules.HgGather) for this bot on this lane, with the state it keeps
+-- (bot._hgGatherState: lane, since, lastAt, spot, releasedUntil, coolUntil; PushThink reads spot / lastAt).
+-- Returns "none", "go", "cap" or "gather". Lines: hg-gather (throttled), hg-gather-go, hg-gather-give-up.
+local function ReadHgGather(bot, lane, s)
+	local now = DotaTime()
+	local state = bot._hgGatherState
+	if state == nil or state.lane ~= lane then
+		if state ~= nil and now - (state.lastAt or -999) <= 1 then
+			-- Gathering for another lane this think: leave that one alone.
+			return "cap"
+		end
+		state = { lane = lane }
+		bot._hgGatherState = state
+	end
+	local spot = s.groupAllowed and HgGatherSpot(s.team, lane, s.enemyFountain) or nil
+	local atSpot = spot ~= nil and #getCachedAlliesNearLoc(spot, 1600) or nil
+	local mode = PushRules.HgGather({
+		nearEnemyFountain = true,
+		enemiesAlive = s.enemiesAlive,
+		alliesAlive = s.alliesAlive,
+		alliesNear = s.alliesNear,
+		atSpot = atSpot,
+		need = s.need,
+		groupAllowed = s.groupAllowed,
+		released = now < (state.releasedUntil or -999),
+		gatherAge = state.since ~= nil and now - state.since or 0,
+		coolDown = now < (state.coolUntil or -999),
+	})
+	local name = ShortHeroName(bot)
+	if mode == "go" then
+		if s.alliesNear >= s.need or (atSpot or 0) >= s.need then
+			if state.since ~= nil then
+				pcall(
+					print,
+					string.format(
+						"[OHA-PUSH] t=%.0f %s hg-gather-go lane=%s need=%d atSpot=%d allies=%d waited=%.0f why=%s",
+						now,
+						name,
+						tostring(lane),
+						s.need,
+						atSpot or 0,
+						s.alliesNear,
+						now - state.since,
+						tostring(s.why)
+					)
+				)
+			end
+			state.releasedUntil = now + 12
+		end
+		state.since = nil
+		state.lastAt = nil
+	elseif mode == "gather" then
+		state.since = state.since or now
+		state.lastAt = now
+		state.spot = spot
+		if now >= (state.logAt or -999) and not Fu.IsMeepoClone(bot) then
+			state.logAt = now + 6
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s hg-gather lane=%s need=%d atSpot=%d allies=%d dist=%d age=%.0f alive=%d/%d why=%s",
+					now,
+					name,
+					tostring(lane),
+					s.need,
+					atSpot or 0,
+					s.alliesNear,
+					math.floor(GetUnitToLocationDistance(bot, spot)),
+					now - state.since,
+					s.alliesAlive,
+					s.enemiesAlive,
+					tostring(s.why)
+				)
+			)
+		end
+	else
+		if state.since ~= nil and now - state.since > 45 then
+			state.coolUntil = now + 30
+			pcall(
+				print,
+				string.format(
+					"[OHA-PUSH] t=%.0f %s hg-gather-give-up lane=%s need=%d atSpot=%d waited=%.0f",
+					now,
+					name,
+					tostring(lane),
+					s.need,
+					atSpot or 0,
+					now - state.since
+				)
+			)
+		end
+		state.since = nil
+		state.lastAt = nil
+	end
+	return mode
+end
 function refreshThreatState(team)
 	local gameTime = GameTime()
 	if math.floor(gameTime * 10) == lastThreatTick then
@@ -363,6 +522,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		bot.laneToPush = lane
 	end
 	maxPushDesire = 0.525
+	pushCapSrc = ""
 	autoCleanupCache()
 	local gameState = getGlobalGameState()
 	local locationState = getGlobalLocationState()
@@ -493,25 +653,53 @@ function Push.GetPushDesireHelper(bot, lane)
 		if fiveJoiner then
 			maxPushDesire = math.max(maxPushDesire, fiveCap)
 		else
-			maxPushDesire = math.min(maxPushDesire, 0.41)
+			CapPush(0.41, "five")
 		end
 	end
 	local isNearEnemyFountain = getLocationToLocationDistance(laneFrontLocation, enemyFountainTpPoint) < 5000
+	-- Their Ancient open and us ahead (#12, game 068 50:33): the fewer-than-alive caps count the enemies seen near.
+	local ancientOpen, ahead = AncientOpenAndAhead(gameState)
 	-- Not when every enemy hero is dead (game 045, 28:18: 3 alive vs 0, push capped at 0.15, Dire left for Roshan).
 	-- In a window from enemy deaths, 2 allies at the high ground are enough (an Aegis window still needs 3).
+	-- A bot of an allowed group push gathers below their high ground instead of being cut to 0.15 (PushRules.HgGather,
+	-- game 068 52:33-54:00): an advantage window, or a joiner of an all-alive push whose group the fewer-than-alive cap
+	-- would let up (their Ancient open and us ahead).
 	local hgAllies = (advDesire ~= nil and (adv.dead or 0) >= 2) and 2 or 3
-	if
-		isNearEnemyFountain
-		and gameState.aliveEnemyCount > 0
-		and (#alliesNearBot < hgAllies or gameState.aliveAllyCount < gameState.aliveEnemyCount)
-	then
-		maxPushDesire = math.min(maxPushDesire, 0.15)
+	local hgMode = "none"
+	if isNearEnemyFountain and gameState.aliveEnemyCount > 0 then
+		hgMode = ReadHgGather(bot, lane, {
+			team = team,
+			enemyFountain = enemyFountainTpPoint,
+			enemiesAlive = gameState.aliveEnemyCount,
+			alliesAlive = gameState.aliveAllyCount,
+			alliesNear = #alliesNearBot,
+			need = hgAllies,
+			groupAllowed = advDesire ~= nil or fiveJoiner and hgAllies >= PushRules.FewerThanAliveCount(
+				ancientOpen,
+				ahead,
+				gameState.aliveEnemyCount,
+				#enemiesNearBot
+			),
+			why = advDesire ~= nil and ("adv:" .. tostring(adv.why)) or ("join:" .. fiveWhy),
+		})
+		if hgMode == "cap" then
+			CapPush(0.15, "hg")
+		end
 	end
 	-- With every enemy dead (wipe) the own-HP cap starts at 30% (game 067 t=1376: `lock-capped why=cap desire=0.25
-	-- alive=4/0` held the push of a bot at 30-50% HP while nobody could defend).
+	-- alive=4/0` held the push of a bot at 30-50% HP while nobody could defend). In a dead-enemies window with no enemy
+	-- hero near: 40%, and a capped bot lets go 5% higher (PushRules.OwnHpCap, game 068 2331-2376).
 	local wipeWindow = advDesire ~= nil and gameState.aliveEnemyCount == 0
-	if Fu.GetHP(bot) < PushRules.OwnHpCapBelow(wipeWindow) then
-		maxPushDesire = math.min(maxPushDesire, 0.25)
+	local ownHpCapped = Fu.GetHP(bot)
+		< PushRules.OwnHpCap({
+			wipe = wipeWindow,
+			deadWindow = advDesire ~= nil and (adv.dead or 0) >= 2,
+			enemiesNear = #enemiesNearBot,
+			wasCapped = bot._ownHpCapped == true,
+		})
+	bot._ownHpCapped = ownHpCapped
+	if ownHpCapped then
+		CapPush(0.25, "own-hp")
 	end
 	if Fu.IsDoingRoshan(bot) and #Fu.GetAlliesNearLoc(locationState.roshanLocation, 2800) >= 3 then
 		return BotModeDesire.None
@@ -593,7 +781,7 @@ function Push.GetPushDesireHelper(bot, lane)
 	-- Wait for creeps instead of fully dropping push when glyph/backdoor is up.
 	-- Not in a wipe: the group waits out the glyph at the tower instead of leaving it for farm.
 	if Fu.IsValidBuilding(attackTarget) and Push.HasBackdoorProtect(attackTarget) and not wipeWindow then
-		maxPushDesire = math.min(maxPushDesire, 0.25)
+		CapPush(0.25, "backdoor")
 	end
 	local anyLaneBarracksDown = not Fu.Utils.IsAnyBarracksOnLaneAlive(false, Lane.Top)
 		or not Fu.Utils.IsAnyBarracksOnLaneAlive(false, Lane.Mid)
@@ -781,6 +969,9 @@ function Push.GetPushDesireHelper(bot, lane)
 					tier = Push.GetLaneBuildingTier(lane),
 					nearAncient = enemyAncient ~= nil and GetUnitToUnitDistance(bot, enemyAncient) < 6000,
 					groupHurt = groupHurt,
+					gathering = hgMode == "gather",
+					ancientOpen = ancientOpen,
+					ahead = ahead,
 				})
 				if raisedWhy == "advantage" then
 					raisedWhy = "advantage:" .. tostring(adv.why)
@@ -792,7 +983,7 @@ function Push.GetPushDesireHelper(bot, lane)
 					pcall(
 						print,
 						string.format(
-							"[OHA-PUSH] t=%.0f %s lock-capped lane=%s why=%s desire=%.2f allies=%d enemies=%d alive=%d/%d hg=%s five=%s cap=%s joiners=%d rank=%d nwLead=%d lvlLead=%.1f tier=%d adv=%s",
+							"[OHA-PUSH] t=%.0f %s lock-capped lane=%s why=%s desire=%.2f allies=%d enemies=%d alive=%d/%d hg=%s five=%s cap=%s joiners=%d rank=%d nwLead=%d lvlLead=%.1f tier=%d adv=%s hp=%.2f src=%s hgMode=%s",
 							DotaTime(),
 							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 							tostring(lane),
@@ -810,7 +1001,10 @@ function Push.GetPushDesireHelper(bot, lane)
 							math.floor(fiveInputs.nwLead),
 							fiveInputs.levelLead,
 							fiveInputs.tier,
-							advDesire ~= nil and tostring(adv.why) or "-"
+							advDesire ~= nil and tostring(adv.why) or "-",
+							Fu.GetHP(bot),
+							pushCapSrc == "" and "-" or pushCapSrc,
+							hgMode
 						)
 					)
 				end
@@ -864,17 +1058,20 @@ function Push.GetPushDesireHelper(bot, lane)
 	if enemyHeroesOnHighGround >= 2 and DotaTime() - recentDefendTime < 10 then
 		return BotModeDesire.None
 	end
-	if enemyAncient and Push.GetLaneBuildingTier(lane) >= 2 then
+	-- Not while gathering below their high ground; with their Ancient open and us ahead, against the enemies seen near
+	-- (PushRules.FewerThanAliveCount, game 068 50:33).
+	if enemyAncient and Push.GetLaneBuildingTier(lane) >= 2 and hgMode ~= "gather" then
 		local distanceToEnemyAncient = GetUnitToUnitDistance(bot, enemyAncient)
+		local enemyCount = PushRules.FewerThanAliveCount(ancientOpen, ahead, aliveEnemyCount, #enemiesNearBot)
 		if
 			distanceToEnemyAncient < 6000
-			and #alliesNearBot + 1 < aliveEnemyCount
+			and #alliesNearBot + 1 < enemyCount
 			and hpRatio < 0.65
 			and not (killPush and #alliesNearBot >= 2 and #enemiesNearBot < #alliesNearBot)
 		then
 			return BotModeDesire.None
-		elseif distanceToEnemyAncient < 6000 and #alliesNearBot < aliveEnemyCount and advDesire == nil then
-			maxPushDesire = math.min(maxPushDesire, 0.4)
+		elseif distanceToEnemyAncient < 6000 and #alliesNearBot < enemyCount and advDesire == nil then
+			CapPush(0.4, "fewer-than-alive")
 		end
 	end
 	local pushDesire = math.min(math.max(laneDesire, 0), maxPushDesire)
@@ -1472,6 +1669,10 @@ function Push.GetPushDesire(bot, lane)
 		end
 	end
 	bot.pushDesire = desire
+	-- Read by farm's enemy-half withdraw (mode_farm_generic.lua): a bot pushing at their Ancient doesn't walk home.
+	if desire >= 0.3 then
+		bot._pushActiveAt = now
+	end
 	if desire >= 0.5 and (bot._lastPushChatDesire or 0) < 0.5 and FarmDefend.ClaimDecisionChat("late_push") then
 		local chatKey = lane == Lane.Top and "say_push_top" or (lane == Lane.Mid and "say_push_mid" or "say_push_bot")
 		local chatLine = getLocalizedLine(chatKey) or getLocalizedLine("say_leave_farm_push")
@@ -1638,6 +1839,29 @@ function Push.PushThink(bot, lane)
 			return
 		else
 			botUnit._fountainRetreatUntil = 0
+		end
+	end
+	-- Gathering below the enemy high ground (#12 hg-gather, set by Push.GetPushDesireHelper this think): walk to the
+	-- spot and wait there, hitting creeps in range, until enough allies are there. Before the walk to the lane front,
+	-- which at their T4s is inside their base.
+	do
+		local gather = bot._hgGatherState
+		if
+			gather ~= nil
+			and gather.lane == lane
+			and gather.spot ~= nil
+			and DotaTime() - (gather.lastAt or -999) <= 1
+			and not bot:WasRecentlyDamagedByAnyHero(1)
+		then
+			if GetUnitToLocationDistance(bot, gather.spot) > 350 then
+				bot:Action_MoveToLocation(gather.spot)
+				return
+			end
+			local creeps = bot:GetNearbyLaneCreeps(math.min(bot:GetAttackRange() + 150, 1600), true) or {}
+			if #creeps > 0 and Fu.IsValid(creeps[1]) and Fu.CanBeAttacked(creeps[1]) then
+				bot:Action_AttackUnit(creeps[1], true)
+			end
+			return
 		end
 	end
 	do
