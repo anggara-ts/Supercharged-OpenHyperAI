@@ -1638,7 +1638,110 @@ local function getLocalizedLine(key)
 	end
 	return nil
 end
+-- Lane-done episodes (#12, maintainer 2026-11-22: "stay on the target" first, with stats to choose between it and
+-- handing the push to the building's lane). An episode starts when PushThink keeps a bot on another lane's building
+-- (LaneDoneFrontDistance) and ends when the target falls, the bot leaves push mode for 2s+, stops thinking for 3s+
+-- (died), switches target, or after 20s. One line per episode:
+-- [OHA-PUSH] lane-done-result lane= target= held= hits= hpDrop= fell= modeFlips= end=
+--   held: seconds within attack range + 300 of the target; hits: its attacks on the target (GetLastAttackTime
+--   changes while it targets it); hpDrop: target HP lost while the bot was there; modeFlips: switches between two
+--   push_tower modes in the episode.
+local function IsPushMode(mode)
+	return mode == BotMode.PushTowerTop or mode == BotMode.PushTowerMid or mode == BotMode.PushTowerBot
+end
+local function LaneDoneEnd(bot, why)
+	local episode = bot._laneDoneEpisode
+	bot._laneDoneEpisode = nil
+	if episode == nil or Fu.IsMeepoClone(bot) then
+		return
+	end
+	local fell = not Fu.IsValidBuilding(episode.target) or not episode.target:IsAlive()
+	pcall(
+		print,
+		string.format(
+			"[OHA-PUSH] t=%.0f %s lane-done-result lane=%s target=%s held=%.0f hits=%d hpDrop=%d fell=%s modeFlips=%d age=%.0f end=%s",
+			DotaTime(),
+			ShortHeroName(bot),
+			tostring(episode.lane),
+			episode.name,
+			episode.held,
+			episode.hits,
+			math.floor(episode.hpDrop),
+			fell and "yes" or "no",
+			episode.modeFlips,
+			DotaTime() - episode.start,
+			why
+		)
+	)
+end
+local function LaneDoneStart(bot, lane, target)
+	local episode = bot._laneDoneEpisode
+	if episode ~= nil and episode.target == target then
+		return
+	end
+	if episode ~= nil then
+		LaneDoneEnd(bot, "retarget")
+	end
+	local now = DotaTime()
+	bot._laneDoneEpisode = {
+		lane = lane,
+		target = target,
+		name = tostring(target:GetUnitName()),
+		start = now,
+		tickAt = now,
+		held = 0,
+		hits = 0,
+		hpDrop = 0,
+		hp = target:GetHealth(),
+		modeFlips = 0,
+		mode = bot:GetActiveMode(),
+		lastAttackAt = bot:GetLastAttackTime(),
+		pushSeenAt = now,
+	}
+end
+-- Once per think (Push.GetPushDesire runs for each lane).
+local function LaneDoneTick(bot)
+	local episode = bot._laneDoneEpisode
+	local now = DotaTime()
+	if episode == nil or episode.tickAt == now then
+		return
+	end
+	local dt = now - episode.tickAt
+	episode.tickAt = now
+	local why = PushRules.LaneDoneEpisodeEnd({
+		targetAlive = Fu.IsValidBuilding(episode.target) and episode.target:IsAlive(),
+		botAlive = bot:IsAlive(),
+		gap = dt,
+		outOfPush = now - episode.pushSeenAt,
+		age = now - episode.start,
+	})
+	if why ~= nil then
+		LaneDoneEnd(bot, why)
+		return
+	end
+	local mode = bot:GetActiveMode()
+	if IsPushMode(mode) then
+		episode.pushSeenAt = now
+		if IsPushMode(episode.mode) and mode ~= episode.mode then
+			episode.modeFlips = episode.modeFlips + 1
+		end
+		episode.mode = mode
+	end
+	local hp = episode.target:GetHealth()
+	local near = GetUnitToUnitDistance(bot, episode.target) <= bot:GetAttackRange() + 300
+	if near then
+		episode.held = episode.held + dt
+		episode.hpDrop = episode.hpDrop + math.max(0, episode.hp - hp)
+	end
+	episode.hp = hp
+	local lastAttackAt = bot:GetLastAttackTime()
+	if lastAttackAt ~= episode.lastAttackAt and bot:GetAttackTarget() == episode.target then
+		episode.hits = episode.hits + 1
+	end
+	episode.lastAttackAt = lastAttackAt
+end
 function Push.GetPushDesire(bot, lane)
+	LaneDoneTick(bot)
 	if
 		bot:IsInvulnerable()
 		or not bot:IsHero()
@@ -1852,6 +1955,7 @@ local function LaneDoneFrontDistance(bot, lane, laneFront)
 	if walk ~= "lane-done" then
 		return distanceToFront
 	end
+	LaneDoneStart(bot, lane, target)
 	if DotaTime() >= (bot._laneDoneLogAt or -999) and not Fu.IsMeepoClone(bot) then
 		bot._laneDoneLogAt = DotaTime() + 10
 		pcall(

@@ -402,3 +402,17 @@ T.test("front walk: a lane with no building left stays on its target (game 071 4
 	T.eq(R.FrontWalk({ distanceToFront = 1500, laneTier = 4, hasTarget = true }), "stay", "near the front")
 	T.eq(R.FrontWalk({ distanceToFront = 2300, recentlyHit = true }), "stay", "hit by a hero")
 end)
+
+T.test("lane-done episode ends: target fell, died, left push, 20s cap", function()
+	local R = rules()
+	local s = { targetAlive = true, botAlive = true, gap = 0.1, outOfPush = 0, age = 5 }
+	T.eq(R.LaneDoneEpisodeEnd(s), nil, "running")
+	s.age = 20
+	T.eq(R.LaneDoneEpisodeEnd(s), "cap", "20s")
+	s.age, s.outOfPush = 5, 2.5
+	T.eq(R.LaneDoneEpisodeEnd(s), "left-push", "out of push 2s+")
+	s.outOfPush, s.gap = 0, 4
+	T.eq(R.LaneDoneEpisodeEnd(s), "died", "no think for 3s+")
+	s.gap, s.targetAlive = 0.1, false
+	T.eq(R.LaneDoneEpisodeEnd(s), "fell", "target dead")
+end)

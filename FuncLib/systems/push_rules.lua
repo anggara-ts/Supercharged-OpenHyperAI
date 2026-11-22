@@ -273,6 +273,24 @@ function PushRules.FrontWalk(s)
 	return "walk"
 end
 
+-- When a lane-done episode ends (push.lua LaneDoneTick): the target fell, the bot died or stopped thinking for 3s+,
+-- it was out of push mode for 2s+, or 20s passed. Returns the reason or nil.
+function PushRules.LaneDoneEpisodeEnd(s)
+	if not s.targetAlive then
+		return "fell"
+	end
+	if not s.botAlive or (s.gap or 0) > 3 then
+		return "died"
+	end
+	if (s.outOfPush or 0) > 2 then
+		return "left-push"
+	end
+	if (s.age or 0) >= 20 then
+		return "cap"
+	end
+	return nil
+end
+
 -- Distance from point (px, py) to the segment (ax, ay)-(bx, by).
 function PushRules.PointToSegment(px, py, ax, ay, bx, by)
 	local dx, dy = bx - ax, by - ay
