@@ -161,6 +161,9 @@ function X.TrackPhaseShift()
 		)
 	elseif not shifted and track ~= nil then
 		bot._phaseTrack = nil
+		-- For the 2s offensive Rift block after a shift (X.RiftAfterShiftBlocked).
+		bot._phaseEndAt = DotaTime()
+		bot._phaseEndEscape = bot._phaseCastEscape == true
 		pcall(
 			print,
 			string.format(
@@ -449,6 +452,7 @@ function X.ConsiderSiphonEscape()
 		local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
 		local point = X.EscapePoint(castRange)
 		bot._siphonOrbAt = DotaTime()
+		bot._orbCastAt = DotaTime()
 		bot._siphonEscapeFrom = siphoner
 		X.LogEscapeAction("orb", "siphon", point)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
@@ -476,9 +480,59 @@ function X.ReleasePhaseHold()
 end
 -- Inside the shift (only CastHoldTick runs then). Two ways out, each once per shift:
 -- 1. Spirit Siphon: the orb she threw before the shift is past the break distance from Death Prophet: Jaunt to it.
--- 2. The shift's last 0.2s with an enemy on her: Blink away first, before a projectile that waited for the shift's
+-- 2. An escape shift with an Orb out: Jaunt to it (X.EscapeShiftJaunt).
+-- 3. The shift's last 0.2s with an enemy on her: Blink away first, before a projectile that waited for the shift's
 --    end lands and renews Blink's damage block (game 064, 43:16: Death Coil landed as the shift ended, tti=0.04,
 --    and Blink read 3.0 for the rest of the fight).
+-- An escape shift (bot._phaseCastEscape) with an Orb out: Jaunt to it at the shift's end, or before the Orb ends
+-- (EscapeRules.ShiftJauntNow), so she is gone when the enemies waiting for the shift to end hit (game 068: 7 of 10
+-- deaths 1-3s after a shift in place). Only to an Orb 500+ away on the escape side. [OHA-PUCK] phase-exit
+-- skip=jaunt why=wrong-side|near dist= hp=, at most once per 3s; the Jaunt prints escape-action why=phase-end.
+function X.EscapeShiftJaunt(orderAt, since, duration)
+	if
+		bot._phaseCastEscape ~= true
+		or bot._phaseTrack == nil
+		or not etherealJauntAbility:IsFullyCastable()
+		or bot:IsRooted()
+	then
+		return false
+	end
+	local orbAt = X.OrbInFlight()
+	if orbAt == nil then
+		return false
+	end
+	local sinceOrb = bot._orbCastAt ~= nil and DotaTime() - bot._orbCastAt or nil
+	if not EscapeRules.ShiftJauntNow(since, duration, sinceOrb, X.OrbFlightTime()) then
+		return false
+	end
+	local here = bot:GetLocation()
+	local _, dirX, dirY = X.EscapePoint(1)
+	local dist = GetUnitToLocationDistance(bot, orbAt)
+	local escapeSide = EscapeRules.IsOnEscapeSide(here.x, here.y, orbAt.x, orbAt.y, dirX, dirY)
+	if dist >= 500 and escapeSide then
+		bot._phaseExitFor = orderAt
+		bot._phaseExitHow = "jaunt-orb"
+		X.LogEscapeAction("jaunt", "phase-end", orbAt)
+		X.ReleasePhaseHold()
+		bot:Action_UseAbility(etherealJauntAbility)
+		return true
+	end
+	if DotaTime() >= (bot._phaseExitSkipLogAt or -999) then
+		bot._phaseExitSkipLogAt = DotaTime() + 3
+		pcall(
+			print,
+			string.format(
+				"[OHA-PUCK] t=%.0f phase-exit skip=jaunt why=%s dist=%d since=%.2f hp=%.2f",
+				DotaTime(),
+				escapeSide and "near" or "wrong-side",
+				dist,
+				since,
+				Fu.GetHP(bot)
+			)
+		)
+	end
+	return false
+end
 function X.ShiftExit()
 	local orderAt = bot._phaseOrderAt
 	if orderAt == nil or bot._phaseExitFor == orderAt then
@@ -508,6 +562,10 @@ function X.ShiftExit()
 		end
 	end
 	local duration = phaseShiftAbility:GetSpecialValueFloat("duration")
+	local okJaunt, jaunted = pcall(X.EscapeShiftJaunt, orderAt, since, duration)
+	if okJaunt and jaunted then
+		return true
+	end
 	-- The shift must still be on (TrackPhaseShift keeps bot._phaseTrack while it is), and it must have been an escape
 	-- shift: after a dodge in a fight she is winning, Blink (her initiation item) stays unless she is under 35%.
 	local castWhy = tostring(bot._phaseCastWhy)
@@ -680,6 +738,86 @@ function X.LogPhaseDodge(want, result, how)
 		)
 	)
 end
+-- How long the Orb flies: max_distance / orb_speed (1950 / 750 = 2.6s, datafeed hero 13), read from the handle;
+-- nil when the values are missing.
+function X.OrbFlightTime()
+	local maxDistance = illusoryOrbAbility:GetSpecialValueInt("max_distance")
+	local speed = illusoryOrbAbility:GetSpecialValueInt("orb_speed")
+	if maxDistance == nil or speed == nil or maxDistance <= 0 or speed <= 0 then
+		return nil
+	end
+	return maxDistance / speed
+end
+-- The start of a Phase Shift's wait for the outpost hold. Fixes the why, the mode and whether it is an escape shift
+-- (EscapeRules.IsEscapeShift); for an escape shift it throws the Orb toward the escape point now, inside the wait
+-- (EscapeRules.PhaseOrbFirst), so X.ShiftExit can Jaunt to it as the shift ends (game 068, t=2326-2330: shift in
+-- place, Orb after it, dead). bot._phaseOrbFirstWhy: thrown | rooted | orb-out | orb-down | jaunt-down | - (not an
+-- escape shift), printed on the phase cast line. True: wait this think.
+function X.StartPhaseWant(outpostMode)
+	local now = DotaTime()
+	local mode = bot:GetActiveMode()
+	bot._phaseWantAt = now
+	bot._phaseWantMode = mode
+	bot._phaseWantWhy = X.phaseWhy
+	bot._phaseOrbFirstAt = nil
+	local retreating = isRetreating or mode == BOT_MODE_RETREAT or now < (bot._hardRetreatUntil or -1)
+	local escapeShift = EscapeRules.IsEscapeShift(X.phaseWhy, retreating, Fu.GetHP(bot))
+	bot._phaseWantEscape = escapeShift
+	local orbReady = illusoryOrbAbility:IsFullyCastable()
+	local jauntReady = etherealJauntAbility:IsFullyCastable()
+	local rooted = bot:IsRooted()
+	local orbOut = X.OrbInFlight() ~= nil
+	if EscapeRules.PhaseOrbFirst(escapeShift, orbReady, jauntReady, rooted, orbOut) then
+		local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
+		local point = X.EscapePoint(castRange)
+		bot._phaseOrbFirstAt = now
+		bot._phaseOrbFirstWhy = "thrown"
+		bot._orbCastAt = now
+		X.LogEscapeAction("orb", "phase-first", point)
+		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
+		return true
+	end
+	bot._phaseOrbFirstWhy = not escapeShift and "-"
+		or rooted and "rooted"
+		or orbOut and "orb-out"
+		or not orbReady and "orb-down"
+		or not jauntReady and "jaunt-down"
+		or "-"
+	return mode ~= outpostMode
+end
+-- No offensive Rift (why=group / target) for 2s after a shift ended: EscapeRules.RiftBlockedAfterShift (game 068,
+-- t=2329, 2456, 2788: a Rift into the enemies right after the shift, dead 1-3s later). [OHA-PUCK] rift-skip
+-- why=after-shift branch= since= escape= hp= enemies= allies=, at most once per 3s.
+function X.RiftAfterShiftBlocked(branch)
+	local endAt = bot._phaseEndAt
+	if endAt == nil then
+		return false
+	end
+	local here = bot:GetLocation()
+	local enemies = #Fu.GetEnemiesNearLoc(here, 1200)
+	local allies = #Fu.GetAlliesNearLoc(here, 1200)
+	local since = DotaTime() - endAt
+	if not EscapeRules.RiftBlockedAfterShift(since, bot._phaseEndEscape, Fu.GetHP(bot), enemies, allies) then
+		return false
+	end
+	if DotaTime() >= (bot._riftSkipLogAt or -999) then
+		bot._riftSkipLogAt = DotaTime() + 3
+		pcall(
+			print,
+			string.format(
+				"[OHA-PUCK] t=%.0f rift-skip why=after-shift branch=%s since=%.2f escape=%s hp=%.2f enemies=%d allies=%d",
+				DotaTime(),
+				tostring(branch),
+				since,
+				tostring(bot._phaseEndEscape),
+				Fu.GetHP(bot),
+				enemies,
+				allies
+			)
+		)
+	end
+	return true
+end
 function X.SkillsComplement()
 	pcall(X.SampleHp)
 	pcall(X.HoldTpInDanger)
@@ -745,14 +883,14 @@ function X.SkillsComplement()
 	-- 0.03-0.17s, in retreat or attack mode). For Puck both modes are Valve's own: our retreat file has no Think
 	-- and our attack mode only replaces Valve's for a few heroes, so neither can be paused by the cast hold, and
 	-- their Think replaced the cast order. The outpost mode's hold (desire 1.5, Think gives no order) is asked for
-	-- first; the cast goes out once it is the active mode, or after 0.2s at most.
+	-- first; the cast goes out once it is the active mode, or when the wait (EscapeRules.PhaseMaxWait) runs out.
 	local outpostMode = BOT_MODE_OUTPOST or 26
 	-- Game 064: two casts went out after the 0.2s wait in attack mode and broke at 0.1s; the outpost GetDesire had
 	-- last run 0.27-0.3s earlier (hold-left age=0.30/0.33, hold-desire=0.00), so the hold had not been asked yet.
-	-- A dodge can't wait (the disjoint on cast is the point); any other shift waits up to 0.4s for the hold.
-	-- Under 20% HP (low-hp-units) the units' next hits can't wait either.
-	local isDodge = string.sub(tostring(X.phaseWhy), 1, 5) == "dodge" or X.phaseWhy == "low-hp-units"
-	local maxWait = isDodge and 0.2 or 0.4
+	-- The wait is EscapeRules.PhaseMaxWait: a dodge can't wait (the disjoint on cast is the point, 0.2s); a low-HP
+	-- shift waits 0.2s only in Valve's retreat mode (game 068, t=3499: the 0.2s cast in defend mode broke at 0.13s);
+	-- any other shift waits up to 0.4s for the hold. The why and the mode are fixed when the wait starts
+	-- (X.StartPhaseWant), so a mode or why change inside the wait does not shorten it.
 	-- A dodge whose hit is closer than the wait: cast in this think (game 067, t=3039: Impale tti=0.20, the 0.2s
 	-- wait let the stun land first, canCast=false the next think; she died at 3041). Phase Shift's cast point is
 	-- 0.01 (datafeed hero 13). The cast hold below still starts with the order.
@@ -764,31 +902,63 @@ function X.SkillsComplement()
 		end
 	end
 	local castNow = EscapeRules.PhaseDodgeNow(dodgeTti)
-	if phaseShiftDesire > 0 and bot:GetActiveMode() ~= outpostMode and not castNow then
-		if bot._phaseWantAt == nil or DotaTime() - bot._phaseWantAt > maxWait + 0.3 then
-			bot._phaseWantAt = DotaTime()
-			bot._phaseWantMode = bot:GetActiveMode()
+	if phaseShiftDesire > 0 and not castNow then
+		local now = DotaTime()
+		if
+			bot._phaseWantAt == nil
+			or now - bot._phaseWantAt > (bot._phaseWantMaxWait or EscapeRules.PHASE_WAIT_HOLD) + 0.3
+		then
+			if X.StartPhaseWant(outpostMode) then
+				return
+			end
+		end
+		local activeMode = bot:GetActiveMode()
+		bot._phaseWantMaxWait = EscapeRules.PhaseMaxWait(
+			bot._phaseWantWhy,
+			bot._phaseWantMode == BOT_MODE_RETREAT and activeMode == BOT_MODE_RETREAT
+		)
+		-- The Orb thrown for this shift leaves first: a shift order inside its cast point (0.1s, datafeed hero 13)
+		-- would cancel it. Its cooldown starts once it is out.
+		if
+			bot._phaseOrbFirstAt ~= nil
+			and illusoryOrbAbility:GetCooldownTimeRemaining() <= 0
+			and now - bot._phaseOrbFirstAt < illusoryOrbAbility:GetCastPoint() + 0.1
+		then
 			return
 		end
-		if DotaTime() - bot._phaseWantAt < maxWait then
+		if activeMode ~= outpostMode and now - bot._phaseWantAt < bot._phaseWantMaxWait then
 			return
 		end
 	end
 	if phaseShiftDesire > 0 then
+		local activeMode = bot:GetActiveMode()
+		-- An escape shift (EscapeRules.IsEscapeShift) ends with a Jaunt to the Orb (X.ShiftExit) and blocks the
+		-- offensive Rift for 2s after it (X.RiftAfterShiftBlocked).
+		local escapeShift = bot._phaseWantEscape == true
+			or EscapeRules.IsEscapeShift(
+				X.phaseWhy,
+				isRetreating or activeMode == BOT_MODE_RETREAT or DotaTime() < (bot._hardRetreatUntil or -1),
+				Fu.GetHP(bot)
+			)
+		-- via=now (a close dodge), hold (the outpost hold is the active mode) or timeout (the wait ran out first).
 		pcall(
 			print,
 			string.format(
-				"[OHA-PUCK] t=%.0f phase cast hp=%.2f enemies=%d retreating=%s why=%s from-mode=%s mode=%d waited=%.2f outpost-age=%.2f",
+				"[OHA-PUCK] t=%.0f phase cast hp=%.2f enemies=%d retreating=%s why=%s from-mode=%s mode=%d waited=%.2f outpost-age=%.2f via=%s max-wait=%.2f escape=%s orb-first=%s",
 				DotaTime(),
 				Fu.GetHP(bot),
 				#Fu.GetEnemiesNearLoc(bot:GetLocation(), 1000),
 				tostring(isRetreating),
 				tostring(X.phaseWhy),
 				tostring(bot._phaseWantMode),
-				bot:GetActiveMode(),
+				activeMode,
 				bot._phaseWantAt ~= nil and DotaTime() - bot._phaseWantAt or -1,
 				-- How long ago the outpost GetDesire last ran to its end (what the hold had seen).
-				DotaTime() - (bot._outpostLastDesireAt or -99)
+				DotaTime() - (bot._outpostLastDesireAt or -99),
+				castNow and "now" or (activeMode == outpostMode and "hold" or "timeout"),
+				bot._phaseWantMaxWait or -1,
+				tostring(escapeShift),
+				tostring(bot._phaseOrbFirstWhy or "-")
 			)
 		)
 		if bot._phaseDodgeWant ~= nil then
@@ -796,6 +966,12 @@ function X.SkillsComplement()
 		end
 		bot._phaseWantAt = nil
 		bot._phaseWantMode = nil
+		bot._phaseWantWhy = nil
+		bot._phaseWantEscape = nil
+		bot._phaseWantMaxWait = nil
+		bot._phaseOrbFirstAt = nil
+		bot._phaseOrbFirstWhy = nil
+		bot._phaseCastEscape = escapeShift
 		bot._phaseProbeAt = DotaTime() + 0.3
 		bot._phaseOrderAt = DotaTime()
 		bot._phaseCastWhy = X.phaseWhy
@@ -808,11 +984,21 @@ function X.SkillsComplement()
 	local phaseDuration
 	phaseOrbDesire, phaseOrbLocation, phaseDuration = X.ConsiderPhaseOrb()
 	if phaseOrbDesire > 0 then
+		bot._orbCastAt = DotaTime()
+		-- An escape combo (ConsiderPhaseOrb): no offensive Rift right after its shift either.
+		bot._phaseCastEscape = true
 		bot:Action_ClearActions(false)
 		bot:ActionQueue_UseAbilityOnLocation(illusoryOrbAbility, phaseOrbLocation)
 		bot:ActionQueue_Delay(0.1)
 		bot:ActionQueue_UseAbility(phaseShiftAbility)
-		bot:ActionQueue_Delay(phaseDuration - 0.3)
+		-- The Jaunt goes before the Orb ends: it flies 2.6s (X.OrbFlightTime), less than a rank 4 shift (3.25s,
+		-- datafeed hero 13), and the old duration - 0.3 delay put the Jaunt 3.15s after the Orb.
+		local orbFlight = X.OrbFlightTime()
+		local jauntDelay = phaseDuration - 0.3
+		if orbFlight ~= nil then
+			jauntDelay = math.min(jauntDelay, orbFlight - 0.2 - EscapeRules.JAUNT_ORB_MARGIN)
+		end
+		bot:ActionQueue_Delay(math.max(0.1, jauntDelay))
 		bot:ActionQueue_UseAbility(etherealJauntAbility)
 		return
 	end
@@ -820,6 +1006,7 @@ function X.SkillsComplement()
 	if illusoryOrbDesire > 0 then
 		-- Bots can't make the orb fly straight: no alt-cast, and neither a full-range aim nor facing the point first
 		-- changed the curve (games 044-045, discussion #50). Aim at the target point.
+		bot._orbCastAt = DotaTime()
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, illusoryOrbLocation)
 		return
 	end
@@ -1101,7 +1288,12 @@ function X.ConsiderWaningRift()
 	-- point, max_distance 350): the best point for 2+ heroes within max_distance of Puck.
 	if (isGoingOnSomeone or Fu.IsInTeamFight(bot, 1200)) and mpRatio > 0.25 then
 		local aoe = bot:FindAoELocation(true, true, bot:GetLocation(), moveDistance, radius - 50, castPoint, 0)
-		if aoe ~= nil and aoe.count >= 2 and #Fu.GetEnemiesNearLoc(aoe.targetloc, radius - 50) >= 2 then
+		if
+			aoe ~= nil
+			and aoe.count >= 2
+			and #Fu.GetEnemiesNearLoc(aoe.targetloc, radius - 50) >= 2
+			and not X.RiftAfterShiftBlocked("group")
+		then
 			X.riftWhy = "group"
 			return BOT_ACTION_DESIRE_HIGH, aoe.targetloc
 		end
@@ -1129,7 +1321,12 @@ function X.ConsiderWaningRift()
 			and not botTarget:HasModifier("modifier_templar_assassin_refraction_absorb")
 		then
 			local targetAllies = Fu.GetNearbyHeroes(botTarget, 1200, false, BOT_MODE_NONE)
-			if nearbyAllies ~= nil and targetAllies ~= nil and #nearbyAllies >= #targetAllies then
+			if
+				nearbyAllies ~= nil
+				and targetAllies ~= nil
+				and #nearbyAllies >= #targetAllies
+				and not X.RiftAfterShiftBlocked("target")
+			then
 				return BOT_ACTION_DESIRE_HIGH, botTarget:GetExtrapolatedLocation(castPoint)
 			end
 		end
@@ -1285,23 +1482,25 @@ function X.ConsiderPhaseShift()
 		X.phaseWhy = "roshan"
 		return BOT_ACTION_DESIRE_HIGH
 	end
-	-- Under 20% HP and hit by units (zombies, creeps, summons): EscapeRules.LowHpUnitsPhase (game 067, 42:07-42:16).
-	-- The rules above react to heroes and projectiles only. After the shift the retreat walks her home, out of a
-	-- Tombstone's 1200 radius. [OHA-PUCK] phase why=low-hp-units hp= loss= creep-hit= attackers= tombstone=, once
-	-- per 3s.
+	-- Under 20% HP and being hit: EscapeRules.LowHpPhase (game 067, 42:07-42:16), why=low-hp-units (a creep hit or a
+	-- unit attacking her) or low-hp-hit (only her HP falling, a hero too: game 068, t=2656/2666). The rules above
+	-- react to heroes and projectiles only. After the shift the retreat walks her home, out of a Tombstone's 1200
+	-- radius. [OHA-PUCK] phase why=low-hp-units|low-hp-hit hp= loss= creep-hit= attackers= tombstone=, once per 3s.
 	local lowHp = Fu.GetHP(bot) < EscapeRules.LOW_HP_PHASE
 	local attackers = lowHp and X.UnitAttackers() or 0
 	local hpLoss = lowHp and X.HpLoss() or 0
 	local creepHit = lowHp and bot:WasRecentlyDamagedByCreep(1.0)
-	if lowHp and EscapeRules.LowHpUnitsPhase(Fu.GetHP(bot), hpLoss, creepHit, attackers) then
-		X.phaseWhy = "low-hp-units"
+	local lowHpWhy = lowHp and EscapeRules.LowHpPhase(Fu.GetHP(bot), hpLoss, creepHit, attackers) or nil
+	if lowHpWhy ~= nil then
+		X.phaseWhy = lowHpWhy
 		if DotaTime() >= (bot._lowHpPhaseLogAt or -999) then
 			bot._lowHpPhaseLogAt = DotaTime() + 3
 			pcall(
 				print,
 				string.format(
-					"[OHA-PUCK] t=%.0f phase why=low-hp-units hp=%.2f loss=%.2f creep-hit=%s attackers=%d hero-hit=%s tombstone=%d",
+					"[OHA-PUCK] t=%.0f phase why=%s hp=%.2f loss=%.2f creep-hit=%s attackers=%d hero-hit=%s tombstone=%d",
 					DotaTime(),
+					lowHpWhy,
 					Fu.GetHP(bot),
 					hpLoss,
 					tostring(creepHit),

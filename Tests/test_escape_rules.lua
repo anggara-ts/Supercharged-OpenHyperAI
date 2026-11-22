@@ -57,13 +57,58 @@ T.test("escape rules: no TP while siphoned or next to a hitter (game 067, 4:05)"
 	T.eq((R.HoldTp(false, nil)), false, "nobody hit her")
 end)
 
-T.test("escape rules: Phase Shift at low HP against units (game 067, 42:07)", function()
+T.test("escape rules: Phase Shift at low HP while hit (game 067, 42:07; game 068)", function()
 	local R = load()
-	T.eq(R.LowHpUnitsPhase(0.05, 0, false, 3), true, "zombies attacking her")
-	T.eq(R.LowHpUnitsPhase(0.05, 0, true, 0), true, "a creep hit")
-	T.eq(R.LowHpUnitsPhase(0.12, 0.04, false, 0), true, "HP falling")
-	T.eq(R.LowHpUnitsPhase(0.12, 0, false, 0), false, "low but nobody hits her")
-	T.eq(R.LowHpUnitsPhase(0.3, 0.1, true, 4), false, "over 20%")
+	T.eq(R.LowHpPhase(0.05, 0, false, 3), "low-hp-units", "zombies attacking her")
+	T.eq(R.LowHpPhase(0.05, 0, true, 0), "low-hp-units", "a creep hit")
+	T.eq(R.LowHpPhase(0.18, 0.03, true, 1), "low-hp-units", "game 068 t=810")
+	T.eq(R.LowHpPhase(0.10, 0.15, false, 0), "low-hp-hit", "game 068 t=2656: hero damage only")
+	T.eq(R.LowHpPhase(0.12, 0.14, false, 0), "low-hp-hit", "game 068 t=2666")
+	T.eq(R.LowHpPhase(0.12, 0, false, 0), nil, "low but nobody hits her")
+	T.eq(R.LowHpPhase(0.3, 0.1, true, 4), nil, "over 20%")
+	T.eq(R.IsLowHpWhy("low-hp-hit"), true, "low-hp-hit")
+	T.eq(R.IsLowHpWhy("hero"), false, "hero")
+end)
+
+T.test("escape rules: the wait for the hold (game 068, t=3499)", function()
+	local R = load()
+	T.eq(R.PhaseMaxWait("dodge-linear", false), 0.2, "a dodge")
+	T.eq(R.PhaseMaxWait("low-hp-units", true), 0.2, "game 068 t=810: retreat mode throughout")
+	T.eq(R.PhaseMaxWait("low-hp-units", false), 0.4, "game 068 t=3499: defend mode, take the hold first")
+	T.eq(R.PhaseMaxWait("low-hp-hit", false), 0.4, "low-hp-hit outside retreat")
+	T.eq(R.PhaseMaxWait("hero", true), 0.4, "a hero shift")
+	T.eq(R.PhaseMaxWait(nil, true), 0.4, "no why")
+end)
+
+T.test("escape rules: escape shifts throw the Orb first and Jaunt out (game 068)", function()
+	local R = load()
+	T.eq(R.IsEscapeShift("hero", true, 0.69), true, "game 068 t=2326: from retreat mode")
+	T.eq(R.IsEscapeShift("hero", false, 0.35), true, "game 068 t=2785: 35% HP")
+	T.eq(R.IsEscapeShift("hero", false, 0.94), false, "a fight at 94% HP")
+	T.eq(R.IsEscapeShift("dodge-linear", true, 0.2), false, "a dodge never waits for the Orb")
+	T.eq(R.IsEscapeShift("low-hp-units", false, 0.05), true, "low HP")
+	T.eq(R.IsEscapeShift("siphon", false, 0.8), true, "siphon")
+	T.eq(R.PhaseOrbFirst(true, true, true, false, false), true, "all ready")
+	T.eq(R.PhaseOrbFirst(true, true, true, true, false), false, "game 068 t=2074: rooted, Jaunt can't go")
+	T.eq(R.PhaseOrbFirst(true, false, true, false, false), false, "Orb down")
+	T.eq(R.PhaseOrbFirst(true, true, true, false, true), false, "an Orb is out already")
+	T.eq(R.PhaseOrbFirst(false, true, true, false, false), false, "not an escape")
+	-- Orb 1950 / 750 = 2.6s (datafeed hero 13); shift 2.5s at rank 3, 3.25s at rank 4.
+	T.eq(R.ShiftJauntNow(1.0, 2.5, 1.2, 2.6), false, "mid-shift, Orb flying")
+	T.eq(R.ShiftJauntNow(2.3, 2.5, 2.5, 2.6), true, "the shift's last 0.2s")
+	T.eq(R.ShiftJauntNow(2.2, 3.25, 2.35, 2.6), true, "rank 4: before the Orb ends")
+	T.eq(R.ShiftJauntNow(2.0, 3.25, nil, 2.6), false, "Orb time unknown: shift end only")
+	T.eq(R.ShiftJauntNow(3.1, 3.25, nil, nil), true, "unknown Orb, shift ending")
+end)
+
+T.test("escape rules: no offensive Rift right after a shift (game 068)", function()
+	local R = load()
+	T.eq(R.RiftBlockedAfterShift(0.5, true, 0.58, 3, 2), true, "game 068 t=2329: escape shift")
+	T.eq(R.RiftBlockedAfterShift(0.2, false, 0.88, 2, 1), true, "game 068 t=2456: dodge shift, 2 enemies vs her")
+	T.eq(R.RiftBlockedAfterShift(0.3, false, 0.26, 2, 3), true, "game 068 t=2788: 26% HP")
+	T.eq(R.RiftBlockedAfterShift(0.3, false, 0.9, 2, 3), false, "healthy, not outnumbered")
+	T.eq(R.RiftBlockedAfterShift(2.5, true, 0.3, 3, 1), false, "the block is over")
+	T.eq(R.RiftBlockedAfterShift(nil, true, 0.3, 3, 1), false, "no shift yet")
 end)
 
 T.test("escape rules: a close dodge Phase Shift goes out at once (game 067, t=3039)", function()
@@ -92,12 +137,18 @@ T.test("puck: the escape helpers run on the stub", function()
 		"UnitAttackers",
 		"TombstoneDistance",
 		"PhaseDodgeThreat",
+		"OrbFlightTime",
+		"RiftAfterShiftBlocked",
 		"CastHoldTick",
 		"SkillsComplement",
 	}) do
 		local okRun, err = pcall(X[name])
 		T.ok(okRun, name .. ": " .. tostring(err))
 	end
+	local okWant, errWant = pcall(X.StartPhaseWant, 26)
+	T.ok(okWant, "StartPhaseWant: " .. tostring(errWant))
+	local okExit, errExit = pcall(X.EscapeShiftJaunt, 0, 2.4, 2.5)
+	T.ok(okExit, "EscapeShiftJaunt: " .. tostring(errExit))
 	local point = X.EscapePoint(1150)
 	T.ok(point ~= nil and point.x ~= nil, "escape point")
 	local okLog, errLog = pcall(X.LogEscapeAction, "blink", "test", point)
