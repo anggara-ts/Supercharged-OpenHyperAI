@@ -370,6 +370,10 @@ end
 -- "before" the one about 4s earlier (what it was doing before it got caught).
 -- Game 033: the summary's death list came from kill_window, which logs only some enemy deaths,
 -- and showed 26 of the 125 on the scoreboard.
+-- [OHA-DANGER] death (#227): the team danger map at the bot's spot in the last snapshot (danger = enemies that could
+-- reach it within 5s, missing = enemies unseen 10s+), read when the snapshot is taken (the death line prints at the
+-- respawn). alone=yes: no ally within 1200, the [OHA-DEATH] allies=0 of game 073 (29 of 86 deaths).
+local dangerOk, DangerMap = pcall(require, GetScriptDirectory() .. "/FuncLib/systems/danger_map")
 local function DeathSnap(bot, now)
 	local enemies = bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {}
 	local names = {}
@@ -379,7 +383,15 @@ local function DeathSnap(bot, now)
 		end
 	end
 	local loc = bot:GetLocation()
+	local danger, missing = -1, -1
+	if dangerOk then
+		pcall(function()
+			danger, missing = DangerMap.Danger(loc), DangerMap.Missing()
+		end)
+	end
 	return {
+		danger = danger,
+		missing = missing,
 		t = now,
 		mode = bot:GetActiveMode(),
 		desire = bot:GetActiveModeDesire() or 0,
@@ -445,6 +457,21 @@ local function DeathWatch(bot)
 				SnapText(before, diedAt)
 			)
 		)
+		if last ~= nil then
+			pcall(
+				print,
+				string.format(
+					"[OHA-DANGER] t=%.0f %s death alone=%s allies=%d enemies=%d missing=%d danger=%d",
+					diedAt,
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					last.allies == 0 and "yes" or "no",
+					last.allies,
+					#last.enemies,
+					last.missing,
+					last.danger
+				)
+			)
+		end
 		watch.count = count
 		watch.snaps = {}
 	end

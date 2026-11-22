@@ -2,7 +2,9 @@
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 -- Kiting lives there now, shared with the per-think hook for heroes on Valve's attack mode.
 local SpecialUnits = require(GetScriptDirectory() .. "/FuncLib/hero/special_units")
+local DangerMap = require(GetScriptDirectory() .. "/FuncLib/systems/danger_map")
 local AttackHelpers = {}
+local isolatedLoggedId, isolatedLogAt = nil, -999
 local bot = GetBot()
 local attackTarget = { unit = nil, id = -1, location = nil, locationFuture = nil, hidden1 = false, hidden2 = false }
 local attackRange, hpRatio, botHealth, attackDamage, unused, botLocation, botName
@@ -92,6 +94,7 @@ function AttackMode.GetDesire()
 	local enemyTowers = bot:GetNearbyTowers(1600, true)
 	local bestTarget = nil
 	local bestScore = 0
+	local bestIsolated = false
 	for _, enemyHero in pairs(nearbyEnemyHeroes) do
 		if
 			Fu.IsValidHero(enemyHero)
@@ -166,6 +169,12 @@ function AttackMode.GetDesire()
 					weight = weight * 0.05
 				end
 			end
+			-- #227: an enemy with no other enemy hero able to be within 1500 of it (team danger map) is the safer
+			-- kill: a small bonus, so a much better kill elsewhere still wins.
+			local isolated = DangerMap.Isolated(enemyHero)
+			if isolated then
+				weight = weight * DangerMap.Rules.ISOLATED_BONUS
+			end
 			local alliesNearEnemy = Fu.GetAlliesNearLoc(enemyHero:GetLocation(), 1200)
 			local alliesDamage = Fu.GetTotalEstimatedDamageToTarget(alliesNearEnemy, enemyHero)
 			local damageRatio = Max(alliesDamage / Max(enemyHero:GetHealth(), 1), 1)
@@ -179,7 +188,27 @@ function AttackMode.GetDesire()
 			if score > bestScore then
 				bestTarget = enemyHero
 				bestScore = score
+				bestIsolated = isolated
 			end
+		end
+	end
+	-- [OHA-DANGER] isolated-pick: the chosen target got the isolated bonus (on a new target, 5s throttle).
+	if bestIsolated and Fu.IsValidHero(bestTarget) then
+		local targetId = bestTarget:GetPlayerID()
+		if targetId ~= isolatedLoggedId and DotaTime() >= isolatedLogAt then
+			isolatedLoggedId, isolatedLogAt = targetId, DotaTime() + 5
+			pcall(
+				print,
+				string.format(
+					"[OHA-DANGER] t=%.0f %s isolated-pick target=%s score=%.2f enemies=%d allies=%d",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					(string.gsub(bestTarget:GetUnitName(), "npc_dota_hero_", "")),
+					bestScore,
+					#nearbyEnemyHeroes,
+					#nearbyAllyHeroes
+				)
+			)
 		end
 	end
 	attackTarget.unit = bestTarget or AttackHelpers.GetWeakestNearbyHero(true, attackRange + 700)

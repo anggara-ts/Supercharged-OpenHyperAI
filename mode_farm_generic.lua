@@ -13,6 +13,7 @@ local CustomizeGeneral = require(GetScriptDirectory() .. "/Customize/general")
 local FarmDefend = require(GetScriptDirectory() .. "/FuncLib/systems/farm_defend")
 local MatchTrace = require(GetScriptDirectory() .. "/FuncLib/systems/match_trace")
 local FarmRules = require(GetScriptDirectory() .. "/FuncLib/systems/farm_rules")
+local DangerMap = require(GetScriptDirectory() .. "/FuncLib/systems/danger_map")
 local bot = GetBot()
 local FarmMode = {}
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
@@ -349,7 +350,7 @@ end
 -- The camp rules of this think (set by the desire, read again by Think when it re-picks a camp, so Think
 -- no longer picks from the unfiltered team table a camp the desire drops a moment later).
 local keepOwnSideNow, aliveEnemyCountNow = false, 5
-local function CampAllowed(camp)
+local function CampAllowedBySide(camp)
 	if not Fu.Site.IsEnemyCamp(camp) or Fu.IsInLaningPhase() then
 		return true
 	end
@@ -359,12 +360,112 @@ local function CampAllowed(camp)
 	-- With at most 2 enemies alive the enemy jungle is open anyway.
 	return aliveEnemyCountNow <= 2 or EnemyCampCovered(camp)
 end
-local function FilterCamps(camps)
-	local allowed = {}
-	for _, camp in ipairs(camps or {}) do
-		if CampAllowed(camp) then
-			allowed[#allowed + 1] = camp
+-- Team danger map (#227, FuncLib/systems/danger_map.lua): after the laning phase a farm spot (camp or lane front)
+-- is skipped when no ally is within 1500 of it and 3+ enemies could reach it within 5s, or it is on the far side
+-- (enemy camp, or nearer their living towers than ours) with 2+ enemies able to reach it or 3+ enemies missing.
+-- Game 073: 29 of 86 deaths with no ally near, 22 of them against 3-5 enemies. [OHA-DANGER] farm-skip names a spot
+-- when its skip reason changes (5s throttle per bot; a change held back prints later), with the camp or lane
+-- picked instead (alt=). dangerFallbackKey: the camp kept when every camp is skipped (no farm stall).
+local dangerLogged, dangerLogAt, dangerFallbackKey = {}, -999, nil
+local function SpotDangerWhy(loc, enemyCamp)
+	if loc == nil or Fu.IsInLaningPhase() then
+		return nil, 0, 0, 0
+	end
+	return DangerMap.FarmSkip(bot, loc, enemyCamp)
+end
+-- skips: { key =, why =, danger =, missing =, allies =, loc = } for spots skipped this call; clear: keys of spots
+-- that are not skipped (their logged state resets). alt: the spot farmed instead, as text.
+local function LogDangerSkips(skips, clear, alt)
+	for _, key in ipairs(clear or {}) do
+		dangerLogged[key] = nil
+	end
+	if DotaTime() < dangerLogAt then
+		return
+	end
+	local first, changed = nil, 0
+	for _, skip in ipairs(skips or {}) do
+		if dangerLogged[skip.key] ~= skip.why then
+			changed = changed + 1
+			first = first or skip
 		end
+	end
+	if first == nil then
+		return
+	end
+	dangerLogAt = DotaTime() + 5
+	for _, skip in ipairs(skips) do
+		dangerLogged[skip.key] = skip.why
+	end
+	pcall(
+		print,
+		string.format(
+			"[OHA-DANGER] t=%.0f %s farm-skip spot=%s why=%s danger=%d missing=%d allies=%d dist=%.0f alt=%s n=%d",
+			DotaTime(),
+			ShortName(bot),
+			first.key,
+			first.why,
+			first.danger,
+			first.missing,
+			first.allies,
+			GetUnitToLocationDistance(bot, first.loc),
+			type(alt) == "function" and alt() or tostring(alt),
+			changed
+		)
+	)
+end
+local function CampAllowed(camp)
+	if not CampAllowedBySide(camp) then
+		return false
+	end
+	return CampKey(camp) == dangerFallbackKey or SpotDangerWhy(CampLoc(camp), Fu.Site.IsEnemyCamp(camp)) == nil
+end
+local function FilterCamps(camps)
+	local allowed, skips, clear = {}, nil, {}
+	for _, camp in ipairs(camps or {}) do
+		if CampAllowedBySide(camp) then
+			local loc = CampLoc(camp)
+			local why, danger, missing, allies = SpotDangerWhy(loc, Fu.Site.IsEnemyCamp(camp))
+			if why == nil then
+				allowed[#allowed + 1] = camp
+				clear[#clear + 1] = CampKey(camp)
+			else
+				skips = skips or {}
+				skips[#skips + 1] = {
+					camp = camp,
+					key = CampKey(camp),
+					why = why,
+					danger = danger,
+					missing = missing,
+					allies = allies,
+					loc = loc,
+				}
+			end
+		end
+	end
+	dangerFallbackKey = nil
+	if skips ~= nil then
+		if #allowed == 0 then
+			-- Every camp is skipped: keep the least dangerous one, own side first, so the farm still has a target.
+			local fallback = nil
+			for _, skip in ipairs(skips) do
+				local ownSide = not Fu.Site.IsEnemyCamp(skip.camp)
+				if
+					fallback == nil
+					or ownSide and not fallback.ownSide
+					or ownSide == fallback.ownSide and skip.danger < fallback.danger
+				then
+					fallback = { camp = skip.camp, danger = skip.danger, ownSide = ownSide }
+				end
+			end
+			allowed[1] = fallback.camp
+			dangerFallbackKey = CampKey(fallback.camp)
+		end
+		LogDangerSkips(skips, clear, function()
+			local alt = Fu.Site.GetClosestNeutralSpwan(bot, allowed)
+			return (dangerFallbackKey ~= nil and "fallback:" or "") .. CampKey(alt)
+		end)
+	else
+		LogDangerSkips(nil, clear, nil)
 	end
 	return allowed
 end
@@ -1145,7 +1246,13 @@ function GetDesireHelper()
 					CampKey(preferredCamp)
 				)
 			end
-			PickCamp(availableCamps, keepOwnSide and "enemy-camp-drop" or "uncovered")
+			local dropWhy = "uncovered"
+			if keepOwnSide then
+				dropWhy = "enemy-camp-drop"
+			elseif CampAllowedBySide(preferredCamp) then
+				dropWhy = "danger"
+			end
+			PickCamp(availableCamps, dropWhy)
 		end
 	end
 	if isAlive and bot:HasModifier("modifier_arc_warden_tempest_double") then
@@ -1344,6 +1451,7 @@ function GetDesireHelper()
 			local enemyFountain = Fu.GetEnemyFountain()
 			local bestLane = nil
 			local bestScore = 0
+			local laneSkips, laneClear = nil, {}
 			for _, lane in pairs({ LANE_TOP, LANE_MID, LANE_BOT }) do
 				local laneFront = GetLaneFrontLocation(GetTeam(), lane, 0)
 				local frontDistance = GetUnitToLocationDistance(bot, laneFront)
@@ -1351,7 +1459,24 @@ function GetDesireHelper()
 				local distanceToEnemyFountain = Fu.GetDistance(laneFront, enemyFountain)
 				if distanceToOurFountain < distanceToEnemyFountain and frontDistance < 6000 then
 					local lastSeenEnemies = Fu.GetLastSeenEnemiesNearLoc(laneFront, 1600)
+					local dangerWhy, danger, missing, allies = nil, 0, 0, 0
 					if #lastSeenEnemies == 0 then
+						dangerWhy, danger, missing, allies = SpotDangerWhy(laneFront, false)
+						if dangerWhy ~= nil then
+							laneSkips = laneSkips or {}
+							laneSkips[#laneSkips + 1] = {
+								key = "lane" .. lane,
+								why = dangerWhy,
+								danger = danger,
+								missing = missing,
+								allies = allies,
+								loc = laneFront,
+							}
+						else
+							laneClear[#laneClear + 1] = "lane" .. lane
+						end
+					end
+					if #lastSeenEnemies == 0 and dangerWhy == nil then
 						local score = 1
 							/ math.max(1, frontDistance)
 							* distanceToEnemyFountain
@@ -1363,6 +1488,12 @@ function GetDesireHelper()
 					end
 				end
 			end
+			LogDangerSkips(laneSkips, laneClear, function()
+				if bestLane ~= nil then
+					return "lane" .. bestLane
+				end
+				return "camp:" .. CampKey(preferredCamp)
+			end)
 			if bestLane ~= nil then
 				local farmLaneLocation = GetLaneFrontLocation(GetTeam(), bestLane, 0)
 				if not IsLocationPassable(farmLaneLocation) then
