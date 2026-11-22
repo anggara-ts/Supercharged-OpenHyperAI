@@ -112,6 +112,56 @@ function RelocateRules.ReturnDecision(o)
 	return "keep", "healed"
 end
 
+-- Rescue Relocate (maintainer, 2026-11-22: tether a healthy, ready ally and Relocate onto a gank in another lane,
+-- like Nature's Prophet's save-teleport). wisp_tether AbilityCastRange 1600 (7.42 game file): the partner must be
+-- within it.
+RelocateRules.TETHER_CAST_RANGE = 1600
+RelocateRules.RESCUE_MIN_DIST = 3000
+RelocateRules.PARTNER_MIN_HP = 0.7
+-- The ganked ally must still be alive this long after the cast delay (it is what we are going for).
+RelocateRules.RESCUE_SURVIVE_MARGIN = 1.0
+
+-- Is the gank worth a rescue? o.hp (ratio), o.dps (ratio lost per second), o.delay (cast delay), o.damaged (hit by
+-- an enemy hero in the last 1.5s), o.enemies (enemy heroes seen near it), o.alliesThere (allied heroes near it,
+-- not counting it). Returns ok, why ("go" | "no-gank" | "too-late" | "outnumbered"), ttd (nil when not losing HP).
+--   a gank: hit by a hero, 2+ enemy heroes, and they outnumber it and its allies there;
+--   it lives through the delay + RESCUE_SURVIVE_MARGIN at the HP it is losing;
+--   Io + the partner + it + the allies there >= the enemies.
+function RelocateRules.RescueCheck(o)
+	local ttd = nil
+	if o.dps ~= nil and o.dps > 0 then
+		ttd = o.hp / o.dps
+	end
+	local alliesThere = o.alliesThere or 0
+	if not o.damaged or o.enemies < 2 or o.enemies <= alliesThere + 1 then
+		return false, "no-gank", ttd
+	end
+	if ttd ~= nil and ttd < o.delay + RelocateRules.RESCUE_SURVIVE_MARGIN then
+		return false, "too-late", ttd
+	end
+	if 3 + alliesThere < o.enemies then
+		return false, "outnumbered", ttd
+	end
+	return true, "go", ttd
+end
+
+-- A partner's fight power, or nil when it doesn't qualify. o.hp (ratio), o.dist (from Io), o.ultReady (its
+-- ultimate castable now, cooldown and mana), o.readySpells (non-passive, non-toggle damage / disable spells castable
+-- now, the ultimate included), o.channeling, o.inFight (enemy heroes near it or hit by one), o.laneUnderTower (its
+-- lane pushed under our tower). Needs HP >= PARTNER_MIN_HP and the ultimate or 2+ spells ready. Higher is better.
+function RelocateRules.PartnerScore(o)
+	if o.dist > RelocateRules.TETHER_CAST_RANGE or o.hp < RelocateRules.PARTNER_MIN_HP then
+		return nil
+	end
+	if o.channeling or o.inFight or o.laneUnderTower then
+		return nil
+	end
+	if not o.ultReady and (o.readySpells or 0) < 2 then
+		return nil
+	end
+	return (o.readySpells or 0) + (o.ultReady and 2 or 0) + o.hp
+end
+
 -- The relocated ally's own think: rec = { teleportAt, returnAt, released } from Io's cast. Holds TPs (and pulls the
 -- ally back to Io when farther than 700, so the tether holds for the return) from the teleport until the return,
 -- while the ally is at its fountain (distFountain under 2500: it really came along) and Io has not let it go

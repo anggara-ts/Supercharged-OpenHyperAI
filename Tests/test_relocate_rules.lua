@@ -107,3 +107,55 @@ T.test("relocate: the ally holds at the fountain until the return", function()
 	T.ok(not R.AllyHold(rec, 15, 300, 200), "Io broke the tether: free to go")
 	T.ok(not R.AllyHold(nil, 15, 300, 200), "no record")
 end)
+
+T.test("relocate: rescue a ganked ally", function()
+	local R = load()
+	local function check(over)
+		local o = { hp = 0.6, dps = 0.05, delay = 3.5, damaged = true, enemies = 3, alliesThere = 0 }
+		for k, v in pairs(over or {}) do
+			o[k] = v
+		end
+		return R.RescueCheck(o)
+	end
+	local ok, why, ttd = check()
+	T.ok(ok, "3 on 1, 12s of HP left: go")
+	T.eq(why, "go")
+	T.near(ttd, 12, 0.01)
+	T.eq(select(2, check({ damaged = false })), "no-gank", "not hit by a hero")
+	T.eq(select(2, check({ enemies = 1 })), "no-gank", "one enemy")
+	T.eq(select(2, check({ enemies = 2, alliesThere = 1 })), "no-gank", "2 on 2: not outnumbered")
+	-- 0.3 HP at 0.08/s: 3.75s left, under the 3.5s delay + 1s.
+	T.eq(select(2, check({ hp = 0.3, dps = 0.08 })), "too-late", "dies before Io lands")
+	T.eq(select(2, check({ enemies = 4 })), "outnumbered", "Io + partner + ally = 3 against 4")
+	T.ok(check({ enemies = 4, alliesThere = 1 }), "4 against 4 with an ally there")
+	T.ok(check({ dps = 0 }), "not losing HP yet")
+end)
+
+T.test("relocate: rescue partner", function()
+	local R = load()
+	local function score(over)
+		local o = {
+			hp = 0.9,
+			dist = 900,
+			ultReady = true,
+			readySpells = 1,
+			channeling = false,
+			inFight = false,
+			laneUnderTower = false,
+		}
+		for k, v in pairs(over or {}) do
+			o[k] = v
+		end
+		return R.PartnerScore(o)
+	end
+	T.ok(score() ~= nil, "healthy, ultimate ready")
+	T.ok(score({ ultReady = false, readySpells = 2 }) ~= nil, "two spells ready")
+	T.eq(score({ ultReady = false, readySpells = 1 }), nil, "one spell, no ultimate")
+	T.eq(score({ hp = 0.6 }), nil, "under 70% HP")
+	-- wisp_tether AbilityCastRange 1600.
+	T.eq(score({ dist = 1700 }), nil, "out of tether cast range")
+	T.eq(score({ channeling = true }), nil, "channeling")
+	T.eq(score({ inFight = true }), nil, "in its own fight")
+	T.eq(score({ laneUnderTower = true }), nil, "its lane is pushed under our tower")
+	T.ok(score({ readySpells = 3 }) > score({ readySpells = 1 }), "more fight power ranks higher")
+end)

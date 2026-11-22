@@ -231,8 +231,16 @@ end
 -- HP history for the damage rate: Io and the tethered ally, sampled every think before any early return.
 local selfSamples = {}
 local allySamples = { unit = nil, samples = {} }
+-- Every other allied hero by player ID: the rescue needs a far ally's loss rate.
+local allyHeroSamples = {}
 local function sampleHp()
 	local now = DotaTime()
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		if IsValidHero(hero) and hero ~= bot and not hero:IsIllusion() then
+			local id = hero:GetPlayerID()
+			allyHeroSamples[id] = RelocateRules.AddSample(allyHeroSamples[id] or {}, now, Fu.GetHP(hero))
+		end
+	end
 	if bot:IsAlive() then
 		RelocateRules.AddSample(selfSamples, now, Fu.GetHP(bot))
 	else
@@ -327,6 +335,177 @@ local function considerRelocate()
 		end
 	end
 	return nil
+end
+-- Rescue Relocate (maintainer, 2026-11-22, #47): an ally in another lane is ganked; tether a healthy nearby ally
+-- with its spells ready and Relocate both onto the gank, like Nature's Prophet's save-teleport. Pure rules:
+-- RelocateRules.RescueCheck / PartnerScore. Without a partner the solo "join" rule below stays as it was.
+local rescueState = nil
+local rescueSkipLog = { why = nil, at = -999 }
+local function logRescueSkip(why, allyName)
+	local now = DotaTime()
+	if why == rescueSkipLog.why and now - rescueSkipLog.at < 10 then
+		return
+	end
+	rescueSkipLog.why = why
+	rescueSkipLog.at = now
+	print(string.format("[OHA-WISP] t=%.0f wisp rescue-skip why=%s ally=%s", now, why, allyName))
+end
+-- Damage / disable spells castable now (cooldown and mana), and whether the ultimate is one of them.
+local function readyFightSpells(hero)
+	local count, ultReady = 0, false
+	for slot = 0, 5 do
+		local ability = hero:GetAbilityInSlot(slot)
+		if
+			ability ~= nil
+			and not ability:IsNull()
+			and ability:IsTrained()
+			and not ability:IsPassive()
+			and not ability:IsToggle()
+			and not ability:IsHidden()
+			and ability:IsFullyCastable()
+			and (
+				bit.band(DOTA_UNIT_TARGET_TEAM_ENEMY, ability:GetTargetTeam()) ~= 0
+				or (ability:GetAbilityDamage() or 0) > 0
+			)
+		then
+			count = count + 1
+			if ability:IsUltimate() then
+				ultReady = true
+			end
+		end
+	end
+	return count, ultReady
+end
+local function bestRescuePartner()
+	local best, bestScore, bestReady = nil, nil, 0
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		local dist = IsValidHero(hero) and GetUnitToUnitDistance(bot, hero) or math.huge
+		-- Already tethered: only the tethered ally can come (a new tether would wait for the break).
+		local tetherOk = not isTethered() or hero == bot.stateTetheredHero
+		if hero ~= bot and dist <= RelocateRules.TETHER_CAST_RANGE and tetherOk and not hero:IsIllusion() then
+			local readySpells, ultReady = readyFightSpells(hero)
+			local score = RelocateRules.PartnerScore({
+				hp = Fu.GetHP(hero),
+				dist = dist,
+				ultReady = ultReady,
+				readySpells = readySpells,
+				channeling = hero:IsChanneling(),
+				inFight = enemyHeroCount(hero, 1200) > 0 or hero:WasRecentlyDamagedByAnyHero(2),
+				laneUnderTower = #(hero:GetNearbyTowers(900, false) or {}) > 0
+					and #(hero:GetNearbyLaneCreeps(900, true) or {}) >= 3,
+			})
+			if score ~= nil and (bestScore == nil or score > bestScore) then
+				best, bestScore, bestReady = hero, score, readySpells
+			end
+		end
+	end
+	return best, bestReady
+end
+-- The ganked ally farthest in trouble: far from Io, hit by a hero, outnumbered. Returns the ally, its check
+-- result and the numbers, or nil when no ally is being ganked.
+local function findGank(delay)
+	local skipWhy, skipAlly = nil, nil
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		if
+			IsValidHero(hero)
+			and hero ~= bot
+			and not hero:IsIllusion()
+			and GetUnitToUnitDistance(bot, hero) > RelocateRules.RESCUE_MIN_DIST
+			and not nearOwnFountain(hero)
+			and not hero:HasModifier("modifier_teleporting")
+		then
+			local enemies = enemyHeroCount(hero, 1200)
+			local alliesThere = math.max(0, #(hero:GetNearbyHeroes(1200, false, BotMode.None) or {}) - 1)
+			local rate = RelocateRules.LossRate(allyHeroSamples[hero:GetPlayerID()] or {})
+			local ok, why, ttd = RelocateRules.RescueCheck({
+				hp = Fu.GetHP(hero),
+				dps = rate,
+				delay = delay,
+				damaged = hero:WasRecentlyDamagedByAnyHero(1.5),
+				enemies = enemies,
+				alliesThere = alliesThere,
+			})
+			if ok then
+				return { ally = hero, enemies = enemies, ttd = ttd }
+			end
+			if why ~= "no-gank" then
+				skipWhy, skipAlly = why, hero
+			end
+		end
+	end
+	if skipWhy ~= nil then
+		logRescueSkip(skipWhy, skipAlly:GetUnitName())
+	end
+	return nil
+end
+-- One rescue step: tether the partner first, then Relocate onto the gank (300 behind the ally, toward our side)
+-- once the tether is up and the partner close enough to come along. Returns "tether", partner | "relocate", plan |
+-- nil.
+local function considerRescue()
+	if not relocateAbility:IsFullyCastable() or #nearbyEnemies > 0 and enemyHeroCount(bot, 1200) > 0 then
+		rescueState = nil
+		return nil
+	end
+	local now = DotaTime()
+	if now < (bot._wispRescueScanAt or -999) then
+		return nil
+	end
+	bot._wispRescueScanAt = now + 0.3
+	local delay = relocateDelay()
+	local gank = findGank(delay)
+	if gank == nil then
+		rescueState = nil
+		return nil
+	end
+	local partner, ready
+	if rescueState ~= nil and rescueState.ally == gank.ally and IsValidHero(rescueState.partner) then
+		partner, ready = rescueState.partner, rescueState.ready
+	else
+		partner, ready = bestRescuePartner()
+		if partner == nil then
+			logRescueSkip("no-partner", gank.ally:GetUnitName())
+			return nil
+		end
+		rescueState = { ally = gank.ally, partner = partner, ready = ready, at = now }
+		print(
+			string.format(
+				"[OHA-WISP] t=%.0f wisp relocate-rescue ally=%s partner=%s enemies=%d ttd=%s partnerReady=%d",
+				now,
+				gank.ally:GetUnitName(),
+				partner:GetUnitName(),
+				gank.enemies,
+				gank.ttd ~= nil and string.format("%.1f", gank.ttd) or "-",
+				ready
+			)
+		)
+	end
+	if now - rescueState.at > 3 then
+		-- The tether never came up (or the partner never got close): drop it, the next gank starts fresh.
+		logRescueSkip("tether-failed", gank.ally:GetUnitName())
+		rescueState = nil
+		return nil
+	end
+	if not (isTethered() and bot.stateTetheredHero == partner) then
+		if tetherAbility:IsFullyCastable() and tetherBreakAbility:IsHidden() then
+			return "tether", partner
+		end
+		return nil
+	end
+	if GetUnitToUnitDistance(bot, partner) > RelocateRules.TETHER_SAFE then
+		return nil
+	end
+	rescueState = nil
+	return "relocate",
+		{
+			kind = "rescue",
+			why = "rescue",
+			ally = partner,
+			hp = Fu.GetHP(gank.ally),
+			dps = RelocateRules.LossRate(allyHeroSamples[gank.ally:GetPlayerID()] or {}) * gank.ally:GetMaxHealth(),
+			ttd = gank.ttd,
+			delay = delay,
+			target = Fu.AdjustLocationWithOffsetTowardsFountain(gank.ally:GetLocation(), 300),
+		}
 end
 local relocateState = nil
 local function unitName(unit)
@@ -503,7 +682,7 @@ local function relocateTick()
 	end
 	local left, leftSource = returnLeft(state, now)
 	if not state.decided then
-		if state.kind ~= "save" or state.ally == nil then
+		if (state.kind ~= "save" and state.kind ~= "rescue") or state.ally == nil then
 			state.decided = true
 		elseif left <= 1.0 then
 			state.decided = true
@@ -589,6 +768,17 @@ local function skillsComplement()
 	if savePlan ~= nil then
 		issueRelocate(savePlan)
 		return
+	end
+	if relocateState == nil then
+		local rescueStep, rescueTarget = considerRescue()
+		if rescueStep == "tether" then
+			bot:Action_UseAbilityOnEntity(tetherAbility, rescueTarget)
+			bot.stateTetheredHero = rescueTarget
+			return
+		elseif rescueStep == "relocate" then
+			issueRelocate(rescueTarget)
+			return
+		end
 	end
 	-- No new tether while the ally is being let go before the return (it would bring the ally back after all).
 	local releasing = relocateState ~= nil and relocateState.breakTether
