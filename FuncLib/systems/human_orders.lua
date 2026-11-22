@@ -415,7 +415,6 @@ end
 
 -- Starts an order. `found`: what Orders.ReadSpot found (target, buildings, camp), or the chat command's target.
 function Orders.Start(kind, via, human, loc, found, tickBot)
-	EndOrder("replaced")
 	state.nextId = state.nextId + 1
 	local lane = found.lane
 	local building, tier = found.building, found.tier
@@ -574,7 +573,9 @@ function Orders.Start(kind, via, human, loc, found, tickBot)
 	for _, id in ipairs(queue) do
 		Log("%s queue id=%d kind=%s why=in-fight", Short(unitById[id]), order.id, kind)
 	end
+	-- A refused request leaves the current order running; an accepted one replaces it.
 	if verdict ~= "refuse" then
+		EndOrder("replaced")
 		state.order = order
 	end
 	return order, verdict, why
