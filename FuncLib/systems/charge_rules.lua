@@ -14,7 +14,9 @@ local Rules = {}
 -- A target this close is the near rules' job (channel interrupt, engage, an ally's target at 600-1900).
 Rules.FAR_DIST = 1600
 -- Unverified: whether the charge ignores the 550 move speed cap. Capping makes the ETA longer (the safer side for
--- the save's "does the ally live until he lands" check). The [OHA-HUNT] start dist= / end lasted= lines measure it.
+-- the save's "does the ally live until he lands" check). The [OHA-SB] charge-land line (eta= vs took=) measures it.
+-- 7.42 hero file (pak01_dir.vpk npc_dota_hero_spirit_breaker.txt): the same values, a +50 charge speed talent
+-- (special_bonus_unique_spirit_breaker_increased_charge_speed, read with movement_speed) and ROOT_DISABLES.
 Rules.MAX_SPEED = 550
 -- A teamfight charge that lands later than this is likely too late (fights end; no duration estimate exists).
 Rules.MAX_FIGHT_ETA = 7
@@ -90,6 +92,14 @@ end
 --   allyHp, lossRate   (save) the ally's health and HP lost per second (LossRate; nil = no sample yet)
 --   tower       the target stands in a standing enemy tower's range
 function Rules.ChargeSkipWhy(s)
+	-- first: not a gank at all (the caller doesn't log this one: lane harass on any ally would flood the log)
+	if s.kind == "save" then
+		-- ganked: 2+ heroes on it, or 1+ hitting it while their side outnumbers ours there
+		local ganked = s.hitBy >= 2 or s.hitBy >= 1 and s.enemies > s.allies
+		if not ganked then
+			return "no-gank"
+		end
+	end
 	if s.selfHp < Rules.SELF_HP_MIN then
 		return "low-hp"
 	end
@@ -103,11 +113,6 @@ function Rules.ChargeSkipWhy(s)
 		return "near"
 	end
 	if s.kind == "save" then
-		-- ganked: 2+ heroes on it, or 1+ hitting it while their side outnumbers ours there
-		local ganked = s.hitBy >= 2 or s.hitBy >= 1 and s.enemies > s.allies
-		if not ganked then
-			return "no-gank"
-		end
 		if s.lossRate == nil then
 			return "no-sample"
 		end

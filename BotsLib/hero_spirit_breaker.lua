@@ -160,6 +160,7 @@ local isAttacking
 function X.SkillsComplement()
 	-- before every gate: the save charge needs each ally's HP history when the charge comes off cooldown
 	X.SampleAllyHp()
+	X.TraceFarCharge()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -404,6 +405,42 @@ local allyHpSamples = {}
 local lastHpSampleTime = -99
 local lastFarChargeLog = -99
 local lastFarSkipWhy, lastFarSkipLog = nil, -99
+-- the last long charge ordered: { kind, target, eta, dist, ordered, started } until its charge-land line
+local farChargeTrace = nil
+-- [OHA-SB] charge-land: once the charge modifier is gone, eta= (the estimate) against took= (order to end) and
+-- targetDist= (near 0: it reached the target), so the next game measures the speed cap / windup assumptions.
+function X.TraceFarCharge()
+	local trace = farChargeTrace
+	if trace == nil then
+		return
+	end
+	local charging = bot:HasModifier("modifier_spirit_breaker_charge_of_darkness")
+	if charging then
+		trace.started = true
+		return
+	end
+	if not trace.started and DotaTime() - trace.ordered < 1 then
+		return
+	end
+	farChargeTrace = nil
+	local target = trace.target
+	local targetDist = -1
+	if target ~= nil and not target:IsNull() and target:IsAlive() and target:CanBeSeen() then
+		targetDist = GetUnitToUnitDistance(bot, target)
+	end
+	print(
+		string.format(
+			"[OHA-SB] t=%.0f spirit_breaker charge-land why=%s started=%d eta=%.1f took=%.1f dist=%d targetDist=%d",
+			DotaTime(),
+			trace.kind,
+			trace.started and 1 or 0,
+			trace.eta,
+			DotaTime() - trace.ordered,
+			trace.dist,
+			targetDist
+		)
+	)
+end
 function X.SampleAllyHp()
 	local now = DotaTime()
 	if now - lastHpSampleTime < 0.2 then
@@ -466,9 +503,14 @@ end
 local function enemyCountNear(location, visible)
 	return math.max(#visible, #Fu.Utils.GetLastSeenEnemyIdsNearLocation(location, 1200))
 end
+-- On change (the same reason again after 30s), at most every 3s; "no-gank" (any ally taking lane harass) never.
 local function logFarSkip(why, kind, ally, target, s)
+	if why == "no-gank" then
+		return
+	end
 	local key = why .. kind .. shortName(ally)
-	if key == lastFarSkipWhy or DotaTime() - lastFarSkipLog < 3 then
+	local sinceLog = DotaTime() - lastFarSkipLog
+	if sinceLog < 3 or key == lastFarSkipWhy and sinceLog < 30 then
 		return
 	end
 	lastFarSkipWhy, lastFarSkipLog = key, DotaTime()
@@ -491,6 +533,7 @@ local function logFarCharge(kind, ally, target, s, ttd)
 		return
 	end
 	lastFarChargeLog = DotaTime()
+	farChargeTrace = { kind = kind, target = target, eta = s.eta, dist = s.dist, ordered = DotaTime() }
 	print(
 		string.format(
 			"[OHA-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d",
