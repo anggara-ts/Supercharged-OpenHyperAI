@@ -190,6 +190,15 @@ local NIMBUS_HELP_MIN_HP = 0.15
 -- How far from a fleeing ally a chaser is looked for.
 local NIMBUS_HELP_CHASER_RANGE = 1200
 local nimbusHelpCast = nil -- { why, ally, allyHp, deaths, chaser, chaserHp, at, castAt, stunnedAfter, stuns, wasStunned }
+-- Finish (#47, game 068 t=2785 and t=2899): Clinkz at 8-12% HP with 2-3 Radiant heroes hitting him got the cloud
+-- and died the same second, so the 45 s cooldown went for nothing. A target this low with an allied hero this close
+-- hitting it is left to the allies.
+local NIMBUS_ALLY_FINISH_HP = 0.15
+local NIMBUS_ALLY_FINISH_RANGE = 600
+-- The finish result line comes this long after the cast: the first bolt struck 2.5 s after a cast in game 068
+-- (t=2388, nimbus-result stunnedAfter=2.5; cloud_bolt_interval 2.5, datafeed hero_id=22), so 2 s would see none.
+local NIMBUS_FINISH_RESULT_AFTER = 3
+local nimbusFinishCast = nil -- { target, targetName, pid, deaths, hp, allies, at, castAt, stuns, stunnedAfter, diedAfter }
 local nextNimbusHelpCheckAt = -100
 local fleeingAllyCache = { at = -100, list = {} }
 local wrathDesire
@@ -200,6 +209,7 @@ local unusedTarget
 function X.SkillsComplement()
 	-- The nimbus-result line comes before every gate, so it prints while Zeus is busy too.
 	pcall(X.ThinkNimbusResult)
+	pcall(X.ThinkNimbusFinishResult)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
 		return
 	end
@@ -828,9 +838,14 @@ function X.ConsiderD()
 	local zeusInDanger = bot:WasRecentlyDamagedByAnyHero(2.0)
 		or #(Fu.GetNearbyHeroes(bot, 900, true, BOT_MODE_NONE) or {}) >= 1
 	if not zeusInDanger and not Fu.IsRetreating(bot) then
-		local finishTarget = X.NimbusFinishTarget()
+		local finishTarget, finishAllies = X.NimbusFinishTarget()
 		if finishTarget ~= nil then
-			return BOT_ACTION_DESIRE_HIGH, finishTarget:GetExtrapolatedLocation(1.0), "finish", finishTarget
+			X.RecordNimbusFinish(finishTarget, finishAllies)
+			return BOT_ACTION_DESIRE_HIGH,
+				finishTarget:GetExtrapolatedLocation(1.0),
+				"finish",
+				finishTarget,
+				string.format(" targetHp=%.2f allies=%d", Fu.GetHP(finishTarget), finishAllies)
 		end
 	end
 	-- An ally's fight last, and held while Zeus or a hurt ally there may soon need it to flee (NimbusFightHold).
@@ -892,10 +907,30 @@ function X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
 	end
 	return nil
 end
+-- Pure: allied heroes are finishing the target (it is under NIMBUS_ALLY_FINISH_HP and at least one allied hero
+-- within NIMBUS_ALLY_FINISH_RANGE hits it), so the cloud is not needed.
+function X.NimbusAllyFinishing(targetHp, alliesHitting)
+	return targetHp < NIMBUS_ALLY_FINISH_HP and (alliesHitting or 0) >= 1
+end
+-- Allied heroes within range of the enemy that attack it or hit it in the last second (Zeus not counted).
+local function NimbusAlliesHitting(enemy, range)
+	local count = 0
+	for _, ally in pairs(Fu.GetAlliesNearLoc(enemy:GetLocation(), range) or {}) do
+		if
+			ally ~= bot
+			and Fu.IsValidHero(ally)
+			and (ally:GetAttackTarget() == enemy or enemy:WasRecentlyDamagedByHero(ally, 1.0))
+		then
+			count = count + 1
+		end
+	end
+	return count
+end
 -- A visible enemy hero under 25% HP, or under 50% and fleeing from an allied hero that chases it (a walking
--- enemy alone is not worth a 275-mana, 45 s spell).
+-- enemy alone is not worth a 275-mana, 45 s spell); not one the allies are finishing (NimbusAllyFinishing).
+-- Returns the target and how many allied heroes near it hit it.
 function X.NimbusFinishTarget()
-	local best, bestHp = nil, math.huge
+	local best, bestHp, bestAllies = nil, math.huge, 0
 	for _, enemy in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES) or {}) do
 		if
 			Fu.IsValidHero(enemy)
@@ -918,11 +953,104 @@ function X.NimbusFinishTarget()
 				end
 			end
 			if (hp < 0.25 or fleeing) and hp < bestHp then
-				best, bestHp = enemy, hp
+				local allies = NimbusAlliesHitting(enemy, NIMBUS_ALLY_FINISH_RANGE)
+				if X.NimbusAllyFinishing(hp, allies) then
+					if DotaTime() >= (bot._zeusNimbusFinishSkipLogAt or -999) then
+						bot._zeusNimbusFinishSkipLogAt = DotaTime() + 5
+						pcall(
+							print,
+							string.format(
+								"[OHA-ZEUS] t=%.0f zuus nimbus-skip why=ally-finishing target=%s targetHp=%.2f allies=%d dist=%d",
+								DotaTime(),
+								enemy:GetUnitName(),
+								hp,
+								allies,
+								math.floor(GetUnitToUnitDistance(bot, enemy))
+							)
+						)
+					end
+				else
+					best, bestHp, bestAllies = enemy, hp, allies
+				end
 			end
 		end
 	end
-	return best
+	return best, bestAllies
+end
+-- Remembers a finish cast for the nimbus-result why=finish line (kept while an earlier order has not gone through).
+function X.RecordNimbusFinish(target, allies)
+	if nimbusFinishCast ~= nil and not nimbusAbility:IsCooldownReady() then
+		return
+	end
+	local pid = target:GetPlayerID()
+	local okDeaths, deaths = pcall(GetHeroDeaths, pid)
+	nimbusFinishCast = {
+		target = target,
+		targetName = target:GetUnitName(),
+		pid = pid,
+		deaths = okDeaths and deaths or nil,
+		hp = Fu.GetHP(target),
+		allies = allies or 0,
+		at = DotaTime(),
+		stuns = 0,
+	}
+end
+-- NIMBUS_FINISH_RESULT_AFTER seconds after a finish cast: did the target die, when (diedAfter, seconds after the
+-- cast; under the first bolt's 2.5 s means the allies killed it), and how often it was stunned after the cast
+-- (a bolt mini-stuns for 0.35 s, datafeed; another stun would count too). cast=false: the order never went out.
+function X.ThinkNimbusFinishResult()
+	local cast = nimbusFinishCast
+	if cast == nil then
+		return
+	end
+	if cast.castAt == nil and not nimbusAbility:IsCooldownReady() then
+		cast.castAt = DotaTime()
+	end
+	local dead = false
+	if cast.pid ~= nil then
+		local okAlive, alive = pcall(IsHeroAlive, cast.pid)
+		dead = okAlive and alive == false
+	end
+	if cast.castAt ~= nil then
+		if dead and cast.diedAfter == nil then
+			cast.diedAfter = DotaTime() - cast.castAt
+		end
+		if not dead and Fu.IsValid(cast.target) then
+			local stunned = cast.target:IsStunned()
+			if stunned and not cast.wasStunned then
+				cast.stuns = cast.stuns + 1
+				cast.stunnedAfter = cast.stunnedAfter or DotaTime() - cast.castAt
+			end
+			cast.wasStunned = stunned
+		end
+	end
+	if DotaTime() < (cast.castAt or cast.at) + NIMBUS_FINISH_RESULT_AFTER then
+		return
+	end
+	nimbusFinishCast = nil
+	local deathsNow = nil
+	if cast.pid ~= nil then
+		local okDeaths, deaths = pcall(GetHeroDeaths, cast.pid)
+		if okDeaths then
+			deathsNow = deaths
+		end
+	end
+	local died = X.NimbusAllyDied(cast.deaths, deathsNow, not dead)
+	print(
+		string.format(
+			"[OHA-ZEUS] t=%.0f zuus nimbus-result why=finish target=%s alive=%s targetHp=%.2f->%.2f allies=%d stuns=%d stunnedAfter=%.1f diedAfter=%.1f cast=%s",
+			DotaTime(),
+			cast.targetName or "none",
+			tostring(not died),
+			cast.hp,
+			(not died and Fu.IsValid(cast.target)) and Fu.GetHP(cast.target) or 0,
+			cast.allies,
+			cast.stuns,
+			cast.stunnedAfter or -1,
+			cast.diedAfter or -1,
+			tostring(cast.castAt ~= nil)
+		)
+	)
 end
 function X.ConsiderR()
 	if not wrathAbility:IsFullyCastable() then

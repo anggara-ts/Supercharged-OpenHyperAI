@@ -115,3 +115,22 @@ T.test("zeus: nimbus-result reads the ally's death from the player ID", function
 	T.eq(X.NimbusAllyDied(3, 3, true), false, "alive, no new death")
 	T.eq(X.NimbusAllyDied(3, nil, nil), false, "unknown: alive")
 end)
+
+T.test("zeus: no finishing Nimbus on a target the allies are killing (game 068)", function()
+	local X = zeus()
+	-- Game 068 t=2785 and t=2899: Clinkz at 8-12% HP with 2-3 Radiant heroes hitting him died the same second.
+	T.eq(X.NimbusAllyFinishing(0.10, 2), true, "10% HP, two allies hitting: leave it to them")
+	T.eq(X.NimbusAllyFinishing(0.14, 1), true, "one ally is enough")
+	T.eq(X.NimbusAllyFinishing(0.10, 0), false, "nobody near hitting it: Nimbus may finish it")
+	T.eq(X.NimbusAllyFinishing(0.20, 3), false, "20% HP: the allies may not finish it, cast")
+	T.eq(X.NimbusAllyFinishing(0.15, 2), false, "the edge (15%) casts")
+end)
+
+T.test("zeus: finish target and its result line run against the stub API", function()
+	local X = zeus()
+	local target, allies = X.NimbusFinishTarget()
+	T.eq(target, nil, "no enemy hero in the stub")
+	T.eq(allies, 0, "no allies counted")
+	X.ThinkNimbusFinishResult()
+	T.ok(true, "no stub missing call")
+end)
