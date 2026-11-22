@@ -1465,6 +1465,9 @@ local function ConsiderItems()
 		if ready and itemName ~= nil and Usage.IsDoomed(bot) and DoomWastes(itemName) then
 			ready = false
 		end
+		if itemName == "item_ancient_janggo" or itemName == "item_boots_of_bearing" then
+			Usage.LogDrumCharges(item, ready)
+		end
 		-- Another player's item can't be used from this inventory (#141).
 		if ready and itemName ~= nil and ForeignItems.Check(bot, item) then
 			ready = false
@@ -1633,6 +1636,28 @@ function Usage.WillBreakInvisible(unit)
 	end
 	return false
 end
+-- [OHA-ITEM] drum-charges (#9): once per game per bot and item, the first time the Drum / Boots of Bearing is off
+-- cooldown: what the API reads for its charges and whether it counts as castable (the 7.42 Drum has no charges; the
+-- old rule waited for one).
+function Usage.LogDrumCharges(item, castable)
+	local itemName = item:GetName()
+	bot._drumChargesLogged = bot._drumChargesLogged or {}
+	if bot._drumChargesLogged[itemName] or item:GetCooldownTimeRemaining() > 0 then
+		return
+	end
+	bot._drumChargesLogged[itemName] = true
+	pcall(
+		print,
+		string.format(
+			"[OHA-ITEM] t=%.0f %s drum-charges item=%s charges=%s castable=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			itemName,
+			tostring(item:GetCurrentCharges()),
+			tostring(castable)
+		)
+	)
+end
 Usage.ConsiderItemDesire = {}
 Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	-- Overwhelm is melee range (150) and pierces debuff immunity. A short
@@ -1675,30 +1700,86 @@ Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Drum of Endurance / Boots of Bearing active (#9). The old rule cast only when going on a hero within 680 and
+-- returned at 0 charges, but the 7.42 Drum has no charges (ItemRequiresCharges is commented out in the game file),
+-- so it was probably never cast: no log since game 006 shows the active buff. Now: escape > fight > chase > push
+-- (FuncLib/systems/drum_rules.lua). [OHA-ITEM] drum why= item= allies= target=, at most once per 3s per bot.
+local DrumRules = require(GetScriptDirectory() .. "/FuncLib/systems/drum_rules")
+-- An enemy tower, barracks or Ancient (the API has IsTower and IsFort, barracks go by name).
+local function IsEnemyBuilding(unit)
+	if unit == nil or unit:IsNull() or not unit:IsAlive() or unit:GetTeam() == team then
+		return false
+	end
+	return unit:IsTower() or unit:IsFort() or string.find(unit:GetUnitName(), "rax", 1, true) ~= nil
+end
 Usage.ConsiderItemDesire["item_ancient_janggo"] = function(item)
-	if item:GetCurrentCharges() <= 0 and item:GetName() == "item_ancient_janggo" then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	local castRange = 680
-	local castType = "none"
-	local hEffectTarget = nil
-	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
-	if bot:HasModifier("modifier_nyx_assassin_vendetta") then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	if Fu.IsGoingOnSomeone(bot) then
-		if
-			Fu.IsValidHero(botTarget)
-			and Fu.CanCastOnMagicImmune(botTarget)
-			and Fu.IsInRange(bot, botTarget, castRange)
-		then
-			hEffectTarget = botTarget
-			castReason = "进攻:" .. Fu.Chat.GetNormName(hEffectTarget)
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+	-- Riki's passive invisibility and Glimmer's fade are not broken by an item cast.
+	local invisible = bot:IsInvisible()
+		and botName ~= "npc_dota_hero_riki"
+		and not bot:HasModifier("modifier_item_glimmer_cape_fade")
+	local allies = Fu.GetAllyList(bot, DrumRules.RADIUS)
+	local alliesOnBuilding = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and IsEnemyBuilding(ally:GetAttackTarget()) then
+			alliesOnBuilding = alliesOnBuilding + 1
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE
+	local enemies = Fu.GetNearbyHeroes(bot, DrumRules.RADIUS, true, BOT_MODE_NONE)
+	local attackingAllies = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and (ally:GetActiveMode() == BOT_MODE_ATTACK or Fu.IsValidHero(ally:GetAttackTarget())) then
+			attackingAllies = attackingAllies + 1
+		end
+	end
+	local targetDist, targetMovingAway = nil, false
+	local goingOn = Fu.IsGoingOnSomeone(bot)
+	if goingOn and Fu.IsValidHero(botTarget) and botTarget:CanBeSeen() then
+		targetDist = GetUnitToUnitDistance(bot, botTarget)
+		local ahead = botTarget:GetExtrapolatedLocation(0.5)
+		targetMovingAway = ahead ~= nil and GetUnitToLocationDistance(bot, ahead) > targetDist + 30
+	end
+	local why = DrumRules.Why({
+		vendetta = bot:HasModifier("modifier_nyx_assassin_vendetta"),
+		invisible = invisible,
+		retreating = Fu.IsRetreating(bot) or bot:GetActiveMode() == BOT_MODE_RETREAT,
+		hitByHero = bot:WasRecentlyDamagedByAnyHero(DrumRules.HIT_WITHIN),
+		inFight = attackingAllies >= DrumRules.MIN_ALLIES and #enemies >= 1,
+		allies = #allies,
+		enemies = #enemies,
+		goingOn = goingOn,
+		targetDist = targetDist,
+		attackRange = bot:GetAttackRange(),
+		targetMovingAway = targetMovingAway,
+		alliesOnBuilding = alliesOnBuilding,
+	})
+	if why == nil then
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if DotaTime() >= (bot._drumLogAt or -999) then
+		bot._drumLogAt = DotaTime() + 3
+		local targetName = "-"
+		if why == "chase" or why == "fight" then
+			targetName = Fu.IsValidHero(botTarget) and string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "") or "-"
+		elseif why == "push" then
+			local buildingTarget = bot:GetAttackTarget()
+			targetName = IsEnemyBuilding(buildingTarget) and buildingTarget:GetUnitName() or "ally-building"
+		end
+		pcall(
+			print,
+			string.format(
+				"[OHA-ITEM] t=%.0f %s drum why=%s item=%s allies=%d enemies=%d target=%s dist=%.0f",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				why,
+				item:GetName(),
+				#allies,
+				#enemies,
+				targetName,
+				targetDist or -1
+			)
+		)
+	end
+	return BOT_ACTION_DESIRE_HIGH, bot, "none", "drum:" .. why
 end
 Usage.ConsiderItemDesire["item_arcane_boots"] = function(item)
 	if bot:DistanceFromFountain() < 800 then
