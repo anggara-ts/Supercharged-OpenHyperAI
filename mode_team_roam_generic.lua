@@ -25,6 +25,7 @@ local HuntTrace = require(GetScriptDirectory() .. "/FuncLib/systems/hunt_trace")
 local RoamRules = require(GetScriptDirectory() .. "/FuncLib/systems/team_roam_rules")
 local LastHitOverlay = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_overlay")
 local TeamRoam = {}
+TeamRoam.Difficulty = require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks")
 local team = GetTeam()
 local engageTarget = nil
 local isAttackingTowerCreep, towerCreepTarget = false, nil
@@ -228,6 +229,15 @@ function GetDesire()
 		end
 	end
 	local desire = GetDesireHelper()
+	-- Difficulty (#232): hero hunts off on Passive / Easy, careful on Medium; no help fights on Passive.
+	desire, roamWhy = TeamRoam.Difficulty.GateRoam(
+		bot,
+		desire,
+		roamWhy,
+		engageTarget,
+		alliesNear and #alliesNear or 0,
+		enemiesNear and #enemiesNear or 0
+	)
 	if offerUnit ~= nil then
 		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
 	end

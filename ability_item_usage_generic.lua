@@ -1,5 +1,8 @@
 -- Casts abilities and uses items while the bot is already in some other mode.
 local Usage = {}
+-- Difficulty levels (#232): dodge share, reaction delay, smoke gate, late last hits (a field: this chunk is near the
+-- 200-locals limit).
+Usage.Difficulty = require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks")
 local PerfParts = require(GetScriptDirectory() .. "/FuncLib/systems/perf")
 -- Perf.Part helpers for ItemUsageThink (#52).
 local function PartStart()
@@ -15,6 +18,8 @@ local botName = bot:GetUnitName()
 if bot == nil or bot:IsInvulnerable() or not bot:IsHero() or not string.find(botName, "hero") or bot:IsIllusion() then
 	return
 end
+-- [OHA-DIFF] start line (#232): the lobby difficulty this bot plays, read once.
+Usage.Difficulty.Get(bot)
 if not bot.frameProcessTime then
 	bot.frameProcessTime = 0.1
 end
@@ -1928,7 +1933,8 @@ Usage.LogDodgeError = LogDodgeError
 -- the handle so a change in a patch is followed.
 local function DodgeCastPoint(item)
 	local ok, castPoint = pcall(item.GetCastPoint, item)
-	return ok and type(castPoint) == "number" and castPoint or 0
+	-- Difficulty (#232): the cast order is held for the level's reaction delay (0 on Unfair), so decide that much earlier.
+	return (ok and type(castPoint) == "number" and castPoint or 0) + Usage.Difficulty.ReactionDelay(bot)
 end
 -- [OHA-DODGE] too-late: a projectile that will land before the item can work, so the item is kept. Only for a
 -- projectile seen for the first time in this think (one that was in the window before and passed up for another
@@ -1980,6 +1986,10 @@ function Usage.TimedTrackingProjectile(item, target, finder, searchRange)
 		return nil
 	end
 	if found ~= nil then
+		-- Difficulty (#232): Easy never reacts, Medium to half the threats ([OHA-DIFF] held kind=dodge-off).
+		if not Usage.Difficulty.DodgeAllowed(target, "item-tracking") then
+			return nil
+		end
 		return found, timing
 	end
 	if late ~= nil then
@@ -7958,6 +7968,9 @@ Usage.ConsiderItemDesire["item_smoke_of_deceit"] = function(item)
 	end
 	return desire, target, castType, reason
 end
+-- Difficulty (#232): no Smoke on Passive / Easy, only with 3 heroes together on Medium ([OHA-DIFF] held what=smoke).
+Usage.ConsiderItemDesire["item_smoke_of_deceit"] =
+	Usage.Difficulty.WrapSmoke(bot, Usage.ConsiderItemDesire["item_smoke_of_deceit"])
 local enemyPlayerIds = nil
 -- Dust only from a main slot (game 036: 308 "item can't be used from stash" refusals, bursts with the
 -- Dust loop on Ogre Magi). The rule below is unchanged otherwise.
@@ -10821,6 +10834,8 @@ function ItemUsageThink()
 	-- Laning last hits every frame (#71): the attack on the right frame, the wind-up release / cancel. While it owns
 	-- the hit, no kiting step, item or spell order replaces it. It lets go while an enemy tower hits the bot, so the
 	-- tower-aggro step below still runs.
+	-- Difficulty (#232): a last hit held for the level's timing error goes out on the frame its wait is over.
+	pcall(Usage.Difficulty.LastHitRetry, bot)
 	local okLastHit, timingLastHit = pcall(LastHitTiming.Tick, bot)
 	if not okLastHit and not bot._lhTimingErr then
 		-- Once per bot: a broken hook would silently drop every timed last hit.

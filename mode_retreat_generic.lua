@@ -1,5 +1,6 @@
 -- Retreat mode. Also pulls a bot off a wisdom-shrine walk that has become dangerous.
 local Retreat = {}
+Retreat.Difficulty = require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks")
 local Fu = require(GetScriptDirectory() .. "/FuncLib/func_utils")
 local RetreatRules = require(GetScriptDirectory() .. "/FuncLib/systems/retreat_rules")
 local bot = GetBot()
@@ -609,6 +610,11 @@ function GetDesireHelper()
 	local towerDiveRetreat = Retreat.RetreatWhenTowerTargetedDesire()
 	if towerDiveRetreat > 0 then
 		return RetreatTag(166, towerDiveRetreat)
+	end
+	-- Difficulty (#232): no hero chase under an enemy tower on Passive / Easy, careful on Medium (any game time).
+	local difficultyDive = Retreat.Difficulty.DiveRetreat(bot, botTarget)
+	if difficultyDive > 0 then
+		return RetreatTag(2320, difficultyDive)
 	end
 	-- Summons and illusions chewing on us: spiderlings, golems, eidolons, illusions whose next
 	-- 5s of damage is a big share of our HP. This check existed but nothing called it, so a

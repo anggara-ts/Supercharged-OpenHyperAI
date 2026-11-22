@@ -31,6 +31,17 @@ if AttackOverride ~= nil then
 		return AttackOverride.OnEnd()
 	end
 end
+-- Difficulty (#232): reads the lobby difficulty once at load ([OHA-DIFF] ... src=api|default). A Passive bot does not
+-- fight heroes: no attack mode at all (this replaces Valve's for it). Every other level keeps the lines above.
+if
+	not ShouldSkipBotThink(bot)
+	and not require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks").FightsHeroes(bot)
+then
+	function GetDesire()
+		return 0
+	end
+	function Think() end
+end
 if SafeCall then
 	local originalGetDesire = GetDesire
 	local originalThink = Think

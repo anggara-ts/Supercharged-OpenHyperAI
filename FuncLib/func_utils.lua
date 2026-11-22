@@ -24,4 +24,6 @@ require(GetScriptDirectory() .. "/FuncLib/general_utils/projectile")(Fu)
 require(GetScriptDirectory() .. "/FuncLib/general_utils/hero_info")(Fu)
 require(GetScriptDirectory() .. "/FuncLib/general_utils/special_units")(Fu)
 require(GetScriptDirectory() .. "/FuncLib/general_utils/init_debug")(Fu)
+-- Difficulty levels (#232): the projectile checks the hero files dodge with react to a share of threats below Hard.
+require(GetScriptDirectory() .. "/FuncLib/systems/difficulty_hooks").InstallFu(Fu)
 return Fu
