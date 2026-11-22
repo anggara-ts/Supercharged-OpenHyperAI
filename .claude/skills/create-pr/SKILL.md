@@ -10,7 +10,8 @@ Rules: `AGENTS.md` (Branches and pull requests, Commits, Checks, Logging). Check
 1. **Branch.** Start the issue with `node tools/issue-prs.js <N>` (branch + draft PR), reuse its existing PR branch, or
    make a new `<fix|feat|docs|chore>/<topic>`
    from `origin/main`. If `main` moved, `git merge origin/main` first (merge commits are allowed; never
-   force-push).
+   force-push). A branch from before the layout change of #221 (no `bots/` folder yet): `--migrate-branch` instead
+   (AGENTS.md, Branches and pull requests).
 2. **Code rules.** Readable names, no new globals, team slots not player IDs, guard nil handles, Dota facts from
    game data. Every new or uncertain behaviour gets a throttled `[SHy-<TAG>] t=%.0f <hero> ...` log.
 3. **Checks before committing:**
