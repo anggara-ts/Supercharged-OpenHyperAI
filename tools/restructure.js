@@ -353,8 +353,9 @@ function migrate(args) {
 	for (let i = 0; i < changed.length; i += 100) git(["add", "--", ...changed.slice(i, i + 100)]);
 	git(["add", "--", SELF_DEST]);
 	for (const l of log) console.log(l);
+	if (args.inBranch) return { changed }; // --migrate-branch commits, merges main and checks after
 	const left = check({ quiet: true });
-	console.log(left.length === 0 ? "check: no old paths or tags left" : `check: ${left.length} finding(s), run --check`);
+	console.log(left.length === 0 ? "check: no old paths or tags left" : `check: ${left.length} finding(s), run --check (on a branch: after merging the new main)`);
 	console.log("staged; review with `git status`, then commit");
 	return { changed };
 }
@@ -521,7 +522,7 @@ function migrateBranch(args) {
 			console.log(`merged the last old-layout main ${lastOld.slice(0, 10)}`);
 		}
 		// 2. The codemod on the branch, committed.
-		migrate({ ...args, allowDirty: false });
+		migrate({ ...args, allowDirty: false, inBranch: true });
 		commitWithHooks([
 			"chore: move to the new repo layout (tools/restructure.js, #221)",
 			"",
@@ -593,7 +594,7 @@ function codemodTree(ref, args) {
 		const quietLog = console.log;
 		console.log = () => {};
 		try {
-			migrate({ ...args, allowDirty: false });
+			migrate({ ...args, allowDirty: false, inBranch: true });
 		} finally {
 			console.log = quietLog;
 		}
