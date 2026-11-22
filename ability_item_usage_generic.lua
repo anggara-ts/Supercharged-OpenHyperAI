@@ -1458,15 +1458,15 @@ local function ConsiderItems()
 			itemName = nil
 		end
 		local ready = Fu.CanCastAbility(item)
+		if itemName == "item_ancient_janggo" or itemName == "item_boots_of_bearing" then
+			Usage.LogDrumCharges(item, ready)
+		end
 		if smokeFromBag and item ~= nil and not item:IsNull() then
 			local cooldown = item:GetCooldownTimeRemaining()
 			ready = not (type(cooldown) == "number" and cooldown > 0)
 		end
 		if ready and itemName ~= nil and Usage.IsDoomed(bot) and DoomWastes(itemName) then
 			ready = false
-		end
-		if itemName == "item_ancient_janggo" or itemName == "item_boots_of_bearing" then
-			Usage.LogDrumCharges(item, ready)
 		end
 		-- Another player's item can't be used from this inventory (#141).
 		if ready and itemName ~= nil and ForeignItems.Check(bot, item) then
