@@ -591,7 +591,7 @@ function X.ConsiderColdEmbrace()
 						and not Fu.IsSuspiciousIllusion(allyHero)
 						and not Fu.IsInEtherealForm(allyHero)
 						and not allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
-						and not allyHero:HasModifier("modifier_necrolyte_sadist_active")
+						and not allyHero:HasModifier("modifier_necrolyte_ghost_shroud_active")
 					then
 						return BOT_ACTION_DESIRE_HIGH, allyHero
 					end

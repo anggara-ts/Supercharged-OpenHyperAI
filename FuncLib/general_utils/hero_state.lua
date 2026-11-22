@@ -232,7 +232,7 @@ local function installHeroState(Fu)
 		return unit:HasModifier("modifier_ghost_state")
 			or unit:HasModifier("modifier_item_ethereal_blade_ethereal")
 			or unit:HasModifier("modifier_necrolyte_death_seeker")
-			or unit:HasModifier("modifier_necrolyte_sadist_active")
+			or unit:HasModifier("modifier_necrolyte_ghost_shroud_active")
 			or unit:HasModifier("modifier_pugna_decrepify")
 	end
 	function Fu.HasForbiddenModifier(unit)

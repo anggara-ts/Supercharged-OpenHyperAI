@@ -455,7 +455,7 @@ function X.ConsiderR()
 			if
 				target:HasModifier("modifier_item_ethereal_blade_ethereal")
 				or target:HasModifier("modifier_necrophos_death_seeker_ethereal")
-				or target:HasModifier("modifier_necrolyte_sadist_active")
+				or target:HasModifier("modifier_necrolyte_ghost_shroud_active")
 				or target:HasModifier("modifier_pugna_decrepify")
 				or target:HasModifier("modifier_ghost_state")
 			then
