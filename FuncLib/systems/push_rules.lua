@@ -219,6 +219,27 @@ function PushRules.HgGather(s)
 	return "gather"
 end
 
+-- A push's hero target behind an enemy tower (#12, game 068 16:52-16:58: push's hit-hero step walked Clinkz past
+-- Radiant's mid T2 toward Alchemist 1006 away; he died next to the tower). Skip a hero within the tower's range + 150
+-- that is farther from us than the tower, unless the tower is nearly dead (under 25%) or our creeps tank it and the
+-- fight reads as ours (more allies than enemies near).
+-- Returns skip, why.
+function PushRules.HitHeroBehindTower(s)
+	if (s.targetToTower or math.huge) > (s.towerRange or 700) + 150 then
+		return false, "clear"
+	end
+	if (s.botToTarget or 0) <= (s.botToTower or 0) then
+		return false, "in-front"
+	end
+	if (s.towerHp or 1) < 0.25 then
+		return false, "tower-low"
+	end
+	if s.creepsTanking and s.fightOurs then
+		return false, "creeps-tank"
+	end
+	return true, "behind-tower"
+end
+
 -- A lane our creeps press (#12, maintainer idea 2026-11-22): the lane's next target is their T3 or deeper (tier 3+:
 -- T1 and T2 down) and our lane front, with 2+ of our creeps, stands within 1500 of that target. Such a wave pulls
 -- their heroes home.

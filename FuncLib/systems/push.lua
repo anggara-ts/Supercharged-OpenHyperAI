@@ -1807,6 +1807,49 @@ local function getAllyLaneTower(team, lane)
 	end
 	return nil
 end
+-- A hero the enemy tower covers is not the push's hero target (#12, game 068 16:52-16:58: `step=hit-hero` walked
+-- Clinkz past Radiant's mid T2 toward Alchemist behind it; push is exempt from the tower stop rules, so only attack
+-- mode stopped him at 29% HP next to the tower and he died). PushRules.HitHeroBehindTower; [OHA-PUSH] hit-hero-skip.
+local function HeroCoveredByTower(bot, enemyHero, alliesNear, enemiesNear, lane)
+	local tower = (bot:GetNearbyTowers(1600, true) or {})[1]
+	if not Fu.IsValidBuilding(tower) or not tower:IsAlive() then
+		return false
+	end
+	local towerTarget = tower:GetAttackTarget()
+	local creepsTanking = towerTarget ~= nil
+		and towerTarget ~= bot
+		and not towerTarget:IsHero()
+		and #(tower:GetNearbyLaneCreeps(tower:GetAttackRange() + 100, true) or {}) >= 3
+	local skip, why = PushRules.HitHeroBehindTower({
+		targetToTower = GetUnitToUnitDistance(enemyHero, tower),
+		towerRange = tower:GetAttackRange(),
+		botToTarget = GetUnitToUnitDistance(bot, enemyHero),
+		botToTower = GetUnitToUnitDistance(bot, tower),
+		towerHp = tower:GetHealth() / math.max(1, tower:GetMaxHealth()),
+		creepsTanking = creepsTanking,
+		fightOurs = alliesNear >= enemiesNear + 1,
+	})
+	if skip and DotaTime() >= (bot._hitHeroSkipLogAt or -999) and not Fu.IsMeepoClone(bot) then
+		bot._hitHeroSkipLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[OHA-PUSH] t=%.0f %s hit-hero-skip why=%s target=%s tower=%s lane=%s targetToTower=%d botToTower=%d botToTarget=%d towerHp=%.2f",
+				DotaTime(),
+				ShortHeroName(bot),
+				why,
+				ShortHeroName(enemyHero),
+				tostring(tower:GetUnitName()),
+				tostring(lane),
+				math.floor(GetUnitToUnitDistance(enemyHero, tower)),
+				math.floor(GetUnitToUnitDistance(bot, tower)),
+				math.floor(GetUnitToUnitDistance(bot, enemyHero)),
+				tower:GetHealth() / math.max(1, tower:GetMaxHealth())
+			)
+		)
+	end
+	return skip
+end
 function Push.PushThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
 		return
@@ -2096,6 +2139,7 @@ function Push.PushThink(bot, lane)
 					Fu.IsValidHero(enemyHero)
 					and Fu.CanBeAttacked(enemyHero)
 					and not Fu.IsSuspiciousIllusion(enemyHero)
+					and not HeroCoveredByTower(bot, enemyHero, #alliesNearBot, #nearbyEnemies, lane)
 				then
 					local health = enemyHero:GetHealth()
 					if health < lowestHealth then

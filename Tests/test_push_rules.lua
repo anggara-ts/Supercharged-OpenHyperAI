@@ -308,3 +308,24 @@ T.test("Roshan first: every enemy alive, their base open, Roshan up, no window (
 	s.alliesAlive = 3
 	T.eq(select(2, R.RoshanFirst(s)), "few-alive", "3 of ours alive")
 end)
+
+T.test("hit-hero: a hero the enemy tower covers is skipped (game 068 16:52)", function()
+	local R = rules()
+	-- Game 068 t=1010-1012: Clinkz 323 from Radiant's mid T2, Alchemist behind it, 1006 from Clinkz.
+	local s = { targetToTower = 690, towerRange = 700, botToTarget = 1006, botToTower = 323, towerHp = 0.8 }
+	local skip, why = R.HitHeroBehindTower(s)
+	T.ok(skip, "behind the tower: skip")
+	T.eq(why, "behind-tower", "why")
+	s.botToTarget = 250
+	T.ok(not R.HitHeroBehindTower(s), "the hero is in front of the tower")
+	s.botToTarget, s.towerHp = 1006, 0.2
+	T.ok(not R.HitHeroBehindTower(s), "tower nearly dead")
+	s.towerHp, s.creepsTanking, s.fightOurs = 0.8, true, true
+	T.ok(not R.HitHeroBehindTower(s), "creeps tank it and the fight is ours")
+	s.fightOurs = false
+	T.ok(R.HitHeroBehindTower(s), "creeps tank it but the fight is even")
+	T.ok(
+		not R.HitHeroBehindTower({ targetToTower = 1200, towerRange = 700, botToTarget = 1500, botToTower = 300 }),
+		"far from the tower"
+	)
+end)
