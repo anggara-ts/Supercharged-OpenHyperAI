@@ -5,6 +5,7 @@ local Localization = require(GetScriptDirectory() .. "/FuncLib/systems/localizat
 local LaneHarassRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_harass_rules")
 local LastHitRules = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_rules")
 local LastHitTiming = require(GetScriptDirectory() .. "/FuncLib/systems/last_hit_timing")
+local LaneTowerRules = require(GetScriptDirectory() .. "/FuncLib/systems/lane_tower_rules")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -92,6 +93,135 @@ local function LogInEnemyTower()
 			return
 		end
 	end
+end
+-- [OHA-AGGRO] pull-result (#71, maintainer: "please add the result log, that would be helpful to see if it worked"):
+-- ~0.5s after a pull, how many of the enemy creeps that were within 500 of the bot at the order now attack it.
+-- before= those already on it at the order, gone= the ones dead or out of sight since. Once per pull.
+local function WatchAggroPull()
+	local pull = bot._aggroPull
+	if pull == nil or DotaTime() - pull.at < 0.5 then
+		return
+	end
+	bot._aggroPull = nil
+	local switched, gone = 0, 0
+	for _, creep in ipairs(pull.creeps) do
+		if Fu.IsValid(creep) then
+			if creep:GetAttackTarget() == bot then
+				switched = switched + 1
+			end
+		else
+			gone = gone + 1
+		end
+	end
+	pcall(
+		print,
+		string.format(
+			"[OHA-AGGRO] t=%.0f %s pull-result switched=%d creeps=%d before=%d gone=%d after=%.1f bait=%s bait-dist=%d near=%s alive=%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			switched,
+			#pull.creeps,
+			pull.before,
+			gone,
+			DotaTime() - pull.at,
+			pull.bait,
+			pull.baitDist,
+			tostring(pull.baitDist <= LaneTowerRules.BAIT_NEAR),
+			tostring(bot:IsAlive())
+		)
+	)
+end
+-- Step out of an enemy tower's range (#71, game 071 5:33-5:55: Largo laned inside Dire's top T1 range at 67% then 58%
+-- HP while Phantom Assassin punished, and died there; `in-enemy-tower` only logged it). A laning bot inside an enemy
+-- tower's reach + LaneTowerRules.EXIT_MARGIN with a visible enemy hero within 1200 walks out (no last hit, deny or
+-- harass from in there) unless the tower shoots a creep, its HP is 70%+ and no enemy hero is within his own attack
+-- range + 200 of it (LaneTowerRules.ExitReason). It walks to a spot past the margin, between "away from the tower" and
+-- "toward our fountain", and holds that walk for 1s; for 3s after, the wait spot and the tower hit don't walk it back in.
+-- [OHA-LANE] tower-exit why= hp= heroes= gap= (nearest enemy hero: distance minus his attack range), at most every 3s
+-- or when why= changes.
+local function TowerExit()
+	local now = DotaTime()
+	if bot._towerExitUntil ~= nil and now < bot._towerExitUntil and bot._towerExitTo ~= nil then
+		LastHitTiming.Clear(bot)
+		bot:Action_MoveToLocation(bot._towerExitTo)
+		return true
+	end
+	for _, tower in pairs(bot:GetNearbyTowers(1200, true) or {}) do
+		if Fu.IsValidBuilding(tower) and tower:IsAlive() then
+			local okRange, rawRange = pcall(function()
+				return tower:GetAttackRange()
+			end)
+			local reach =
+				LaneTowerRules.Reach(okRange and rawRange or nil, tower:GetBoundingRadius(), bot:GetBoundingRadius())
+			local dist = GetUnitToUnitDistance(bot, tower)
+			if LaneTowerRules.InZone(dist, reach) then
+				local heroes, reachGap = 0, nil
+				for _, enemyHero in pairs(nearbyEnemies or {}) do
+					if
+						Fu.IsValidHero(enemyHero)
+						and not Fu.IsSuspiciousIllusion(enemyHero)
+						and GetUnitToUnitDistance(bot, enemyHero) <= 1200
+					then
+						heroes = heroes + 1
+						local gap = GetUnitToUnitDistance(bot, enemyHero) - enemyHero:GetAttackRange()
+						if reachGap == nil or gap < reachGap then
+							reachGap = gap
+						end
+					end
+				end
+				local target = tower:GetAttackTarget()
+				local towerOnMe = target == bot
+				local towerOnCreep = Fu.IsValid(target) and target:IsCreep()
+				local why = LaneTowerRules.ExitReason(towerOnMe, towerOnCreep, Fu.GetHP(bot), reachGap)
+				if why == nil then
+					return false
+				end
+				local towerLoc = tower:GetLocation()
+				local away = (bot:GetLocation() - towerLoc):Normalized()
+				local home = (Fu.GetTeamFountain() - towerLoc):Normalized()
+				local dir = away + home
+				if dir:Length2D() < 0.3 then
+					dir = home
+				end
+				local exitTo = towerLoc
+					+ dir:Normalized() * (reach + LaneTowerRules.EXIT_MARGIN + LaneTowerRules.EXIT_STEP)
+				bot._towerExitUntil = now + 1
+				bot._towerExitTo = exitTo
+				bot._towerExitZone = { tower = tower, reach = reach, untilTime = now + 3, spot = exitTo }
+				if now >= (bot._towerExitLogAt or -999) or bot._towerExitWhy ~= why then
+					bot._towerExitLogAt = now + 3
+					bot._towerExitWhy = why
+					pcall(
+						print,
+						string.format(
+							"[OHA-LANE] t=%.0f %s tower-exit why=%s hp=%.2f heroes=%d gap=%d dist=%d reach=%d tower=%s",
+							now,
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							why,
+							Fu.GetHP(bot),
+							heroes,
+							math.floor(reachGap),
+							math.floor(dist),
+							math.floor(reach),
+							(string.gsub(tower:GetUnitName(), "npc_dota_", ""))
+						)
+					)
+				end
+				LastHitTiming.Clear(bot)
+				bot:Action_MoveToLocation(exitTo)
+				return true
+			end
+		end
+	end
+	return false
+end
+-- For 3s after a tower exit: is this spot back inside that tower's zone? Then the caller uses the exit spot instead.
+local function InTowerExitZone(location)
+	local zone = bot._towerExitZone
+	if zone == nil or DotaTime() > zone.untilTime or not Fu.IsValidBuilding(zone.tower) then
+		return false
+	end
+	return LaneTowerRules.InZone(GetUnitToLocationDistance(zone.tower, location), zone.reach)
 end
 -- Creep score (#71, maintainer game 050: "check all heroes' creep stats"). Last hits and denies every minute
 -- until 15:00, then every 5 minutes. (Finished games also have the engine's end-of-match numbers.)
@@ -274,6 +404,8 @@ local function OrderLastHit(creep, walk, backupCore)
 	}
 end
 function GetDesire()
+	-- Before the dead / invulnerable return, so a pull that ends in a death still prints its result.
+	pcall(WatchAggroPull)
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
 	end
@@ -917,6 +1049,11 @@ do
 			bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 500))
 			return
 		end
+		-- Inside an enemy tower's range with an enemy hero near: out first (#71, game 071), before the creep-attack below
+		-- that would keep a hurt bot under the tower.
+		if TowerExit() then
+			return
+		end
 		local enemyTowers = bot:GetNearbyTowers(1200, true)
 		if ShiftTowerAggro(allyLaneCreeps) then
 			return
@@ -939,6 +1076,9 @@ do
 		-- maintainer game 064: supports must still deny first); before, the deny order replaced it.
 		if bSupport then
 			local denyCreep = GetBestDenyCreep(allyLaneCreeps)
+			if Fu.IsValid(denyCreep) and InTowerExitZone(denyCreep:GetLocation()) then
+				denyCreep = nil
+			end
 			if Fu.IsValid(denyCreep) then
 				local timedCreep = LastHitTiming.TimedHit(bot)
 				local keepHit = Fu.IsValid(timedCreep)
@@ -1037,6 +1177,10 @@ do
 							end
 						end
 					end
+					-- Just walked out of an enemy tower's range (TowerExit): no walk back in for a last hit.
+					if why == nil and InTowerExitZone(spot) then
+						why, harasser = "tower-exit", bot._towerExitZone.tower
+					end
 					if why ~= nil then
 						LaneLog(
 							"[OHA-LANE] t=%.0f %s lasthit-skip why=%s creep=%s by=%s hp=%.2f walk=%d",
@@ -1103,7 +1247,7 @@ do
 		-- Cores deny after looking for a last hit. Supports already denied above.
 		if not bSupport then
 			local coreDenyCreep = GetBestDenyCreep(allyLaneCreeps)
-			if Fu.IsValid(coreDenyCreep) then
+			if Fu.IsValid(coreDenyCreep) and not InTowerExitZone(coreDenyCreep:GetLocation()) then
 				bot:SetTarget(coreDenyCreep)
 				bot:Action_AttackUnit(coreDenyCreep, true)
 				return
@@ -1128,6 +1272,7 @@ do
 			and Fu.CanBeAttacked(enemyTowers[1])
 			and Fu.IsValid(enemyTowers[1]:GetAttackTarget())
 			and enemyTowers[1]:GetAttackTarget():IsCreep()
+			and not InTowerExitZone(enemyTowers[1]:GetLocation())
 		then
 			if #allyLaneCreeps >= 3 then
 				bot:Action_AttackUnit(enemyTowers[1], true)
@@ -1332,30 +1477,52 @@ do
 				end
 			end
 			if close >= 2 and nearTower and heroesClose <= 1 then
-				local bait = nil
+				-- The bait (#71): the nearest visible enemy hero within 1000, else the first visible one anywhere (games 071-072:
+				-- the first in the list was 7000-16000 away in most pulls). pull-result shows whether a far bait works too.
+				local baits, baitDists = {}, {}
 				for _, enemyHero in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES) or {}) do
 					if
 						Fu.IsValidHero(enemyHero)
 						and enemyHero:CanBeSeen()
 						and not Fu.IsSuspiciousIllusion(enemyHero)
 					then
-						bait = enemyHero
-						break
+						baits[#baits + 1] = enemyHero
+						baitDists[#baitDists + 1] = GetUnitToUnitDistance(bot, enemyHero)
 					end
 				end
+				local baitIndex = LaneTowerRules.PickBait(baitDists)
+				local bait = baitIndex ~= nil and baits[baitIndex] or nil
 				if bait ~= nil then
 					bot._aggroNextAt = DotaTime() + 8
 					bot._aggroBackUntil = DotaTime() + 1.5
 					bot._aggroBackTo = Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 350)
+					local baitDist = baitDists[baitIndex]
+					local nearCreeps, before = {}, 0
+					for _, creep in pairs(enemyLaneCreeps or {}) do
+						if Fu.IsValid(creep) and GetUnitToUnitDistance(bot, creep) <= 500 then
+							nearCreeps[#nearCreeps + 1] = creep
+							if creep:GetAttackTarget() == bot then
+								before = before + 1
+							end
+						end
+					end
+					bot._aggroPull = {
+						at = DotaTime(),
+						creeps = nearCreeps,
+						before = before,
+						bait = (string.gsub(bait:GetUnitName(), "npc_dota_hero_", "")),
+						baitDist = baitDist,
+					}
 					pcall(
 						print,
 						string.format(
-							"[OHA-AGGRO] t=%.0f %s pull creeps=%d bait=%s dist=%d",
+							"[OHA-AGGRO] t=%.0f %s pull creeps=%d bait=%s bait-dist=%d near=%s",
 							DotaTime(),
 							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 							close,
 							(string.gsub(bait:GetUnitName(), "npc_dota_hero_", "")),
-							GetUnitToUnitDistance(bot, bait)
+							baitDist,
+							tostring(baitDist <= LaneTowerRules.BAIT_NEAR)
 						)
 					)
 					bot:Action_AttackUnit(bait, true)
@@ -1386,10 +1553,12 @@ do
 					bot:GetLocation(),
 					attackRange + soon:GetBoundingRadius() + 40
 				)
-				if GetUnitToLocationDistance(bot, spot) > 60 then
-					bot:Action_MoveDirectly(spot)
+				if not InTowerExitZone(spot) then
+					if GetUnitToLocationDistance(bot, spot) > 60 then
+						bot:Action_MoveDirectly(spot)
+					end
+					return
 				end
-				return
 			end
 		end
 		local allyFrontAmount = GetLaneFrontAmount(GetTeam(), botLane, false)
@@ -1398,6 +1567,9 @@ do
 		local waitLocation = GetLaneFrontLocation(GetTeam(), botLane, -standOff)
 		if enemyFrontAmount < allyFrontAmount then
 			waitLocation = GetLaneFrontLocation(GetOpposingTeam(), botLane, -standOff)
+		end
+		if InTowerExitZone(waitLocation) then
+			waitLocation = bot._towerExitZone.spot
 		end
 		if DotaTime() >= nextMoveTime then
 			bot:Action_MoveToLocation(waitLocation + RandomVector(100))
