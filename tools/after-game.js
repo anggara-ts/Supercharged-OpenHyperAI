@@ -22,9 +22,12 @@ const path = require("path");
 const cp = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const LOGS = path.join(__dirname, "match-logs");
-const TRACKER = path.join(__dirname, "verify", "tracker.json");
-const TEST_BUILD = path.join(__dirname, "verify", "test-build.json");
+const { LOCAL_DIR, normTags } = require("./shared.js");
+const LOGS = path.join(LOCAL_DIR, "match-logs");
+const TRACKER = path.join(LOCAL_DIR, "verify", "tracker.json");
+const TEST_BUILD = path.join(LOCAL_DIR, "verify", "test-build.json");
+// customize/version.lua before and after the layout change of #221 (old builds name their version there).
+const VERSION_FILES = ["bots/customize/version.lua", "Customize/version.lua"]; // restructure:keep
 const DEFAULT_DOTA = "C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota";
 const GH = process.env.GH || (process.platform === "win32" ? "C:\\Program Files\\GitHub CLI\\gh.exe" : "gh");
 // "attempt to" is case-sensitive: Lua errors are lower case, the engine's "Attempt to set 'item' in slot" is noise.
@@ -136,7 +139,7 @@ function buildSection(lines, summary) {
 		commit = full || null;
 		out.push(full ? `- commit: ${describe(full)}` : `- commit \`${sha}\` is not in this clone (git fetch?)`);
 	} else if (version) {
-		const hits = git(["log", "--all", "--format=%H", `-S"${version.replace(/\+dirty$/, "")}"`, "--", "bots/customize/version.lua"])
+		const hits = git(["log", "--all", "--format=%H", `-S"${version.replace(/\+dirty$/, "")}"`, "--", ...VERSION_FILES])
 			.split(/\r?\n/)
 			.filter(Boolean);
 		if (hits.length) {
@@ -146,7 +149,7 @@ function buildSection(lines, summary) {
 			else out.push("- not replaced yet: the build is this commit or a later one up to HEAD");
 			for (const h of hits.slice(0, -2)) out.push(`- also touches this version: ${describe(h)}`);
 		} else {
-			out.push(`- no commit sets version \`${version}\` in bots/customize/version.lua`);
+			out.push(`- no commit sets version \`${version}\` in ${VERSION_FILES.join(" or ")}`);
 		}
 	}
 	const tb = readJson(TEST_BUILD, null);
@@ -346,7 +349,8 @@ function main() {
 		process.exit(1);
 	}
 	const logFile = path.join(LOGS, game.file);
-	const lines = fs.readFileSync(logFile, "utf8").split(/\r?\n/);
+	// An old log prints [OHA-...]: read it in the new form (tools/shared.js normTags). // restructure:keep
+	const lines = normTags(fs.readFileSync(logFile, "utf8")).split(/\r?\n/);
 	const summaryFile = path.join(LOGS, game.summary || game.file.replace(/\.log$/, ".summary.txt"));
 	const summary = fs.existsSync(summaryFile) ? fs.readFileSync(summaryFile, "utf8") : "";
 	const rel = (f) => path.relative(ROOT, f).replace(/\\/g, "/");
