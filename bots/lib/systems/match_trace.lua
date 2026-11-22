@@ -1,0 +1,656 @@
+-- Match trace. [OHA-DEV] console print (+ optional file append).
+-- Files: C:/Users/ANGGARA/Documents/OpenHyperAI/match-trace-p<id>.log
+-- Toggle: Customize.MatchTrace = true/false
+-- Extra detail: Customize.MatchTraceVerbose = true
+-- File writes are disabled: Dota bot sandbox usually blocks io.open.
+local MatchTrace = {}
+
+local enabled = true
+local verbose = true
+local perfEnabled = false
+-- Keep WriteFile code, but do not attempt disk I/O (it does not work in-game).
+local WRITE_TO_FILE = false
+local settingsOk, settings = pcall(require, GetScriptDirectory() .. "/lib/systems/custom_loader")
+if settingsOk and type(settings) == "table" then
+	if settings.MatchTrace == false then
+		enabled = false
+	end
+	if settings.MatchTraceVerbose == false then
+		verbose = false
+	end
+	if settings.MatchTraceWriteFile == true then
+		WRITE_TO_FILE = true
+	end
+	-- Perf can run without full MatchTrace decision spam.
+	if settings.MatchTracePerf == true then
+		perfEnabled = true
+	end
+end
+
+local version = "unknown"
+local versionOk, versionMod = pcall(require, GetScriptDirectory() .. "/customize/version")
+if versionOk and type(versionMod) == "table" and versionMod.number then
+	version = versionMod.number
+end
+-- [SHy-BUILD] details (commit/branch come from bots/customize/build_info.lua; "release" when it is missing).
+local buildLine = string.format(
+	"version=%s commit=%s branch=%s dirty=%s",
+	tostring(version),
+	tostring(versionOk and type(versionMod) == "table" and versionMod.commit or "release"),
+	tostring(versionOk and type(versionMod) == "table" and versionMod.branch or "-"),
+	tostring(versionOk and type(versionMod) == "table" and versionMod.dirty == true)
+)
+
+local fileReady = {}
+local lastKindAt = {}
+local LOG_DIR = "C:/Users/ANGGARA/Documents/OpenHyperAI/"
+
+local function ModeName(mode)
+	local names = {}
+	local function put(key, name)
+		if key ~= nil then
+			names[key] = name
+		end
+	end
+	put(BOT_MODE_NONE, "none")
+	put(BOT_MODE_LANING, "laning")
+	put(BOT_MODE_ATTACK, "attack")
+	put(BOT_MODE_ROAM, "roam")
+	put(BOT_MODE_RETREAT, "retreat")
+	put(BOT_MODE_SECRET_SHOP, "secret_shop")
+	put(BOT_MODE_SIDE_SHOP, "side_shop")
+	put(BOT_MODE_PUSH_TOWER_TOP, "push_top")
+	put(BOT_MODE_PUSH_TOWER_MID, "push_mid")
+	put(BOT_MODE_PUSH_TOWER_BOT, "push_bot")
+	put(BOT_MODE_DEFEND_TOWER_TOP, "defend_top")
+	put(BOT_MODE_DEFEND_TOWER_MID, "defend_mid")
+	put(BOT_MODE_DEFEND_TOWER_BOT, "defend_bot")
+	put(BOT_MODE_ASSEMBLE, "assemble")
+	put(BOT_MODE_TEAM_ROAM, "team_roam")
+	put(BOT_MODE_FARM, "farm")
+	put(BOT_MODE_DEFEND_ALLY, "defend_ally")
+	put(BOT_MODE_EVASIVE_MANEUVERS, "evasive")
+	put(BOT_MODE_ROSHAN, "roshan")
+	put(BOT_MODE_ITEM, "item")
+	put(BOT_MODE_WARD, "ward")
+	put(BOT_MODE_RUNE, "rune")
+	if BOT_MODE_WATCHER ~= nil and mode == BOT_MODE_WATCHER then
+		return "watcher"
+	end
+	if BOT_MODE_WISDOM_SHRINE ~= nil and mode == BOT_MODE_WISDOM_SHRINE then
+		return "wisdom"
+	end
+	if BOT_MODE_LOTUS_POOL ~= nil and mode == BOT_MODE_LOTUS_POOL then
+		return "lotus"
+	end
+	return names[mode] or ("mode" .. tostring(mode))
+end
+
+local function ActionName(action)
+	if action == BOT_ACTION_TYPE_IDLE then
+		return "idle"
+	end
+	if action == BOT_ACTION_TYPE_MOVE_TO then
+		return "move"
+	end
+	if action == BOT_ACTION_TYPE_ATTACK then
+		return "attack"
+	end
+	if action == BOT_ACTION_TYPE_USE_ABILITY then
+		return "ability"
+	end
+	return tostring(action)
+end
+
+local function HeroTag(bot)
+	local name = bot:GetUnitName() or "unknown"
+	name = string.gsub(name, "npc_dota_hero_", "")
+	local team = GetTeam() == TEAM_RADIANT and "radiant" or "dire"
+	local pos = bot.theRole or bot.assignedRole or "?"
+	if bot.GetAssignedLane and type(GetPosition) ~= "function" then
+		-- keep role from bot fields
+	end
+	return string.format("%s %s pos=%s", name, team, tostring(pos))
+end
+
+function MatchTrace.LogPath(bot)
+	local id = bot and bot.GetPlayerID and bot:GetPlayerID() or "x"
+	return LOG_DIR .. "match-trace-p" .. tostring(id) .. ".log"
+end
+
+local function WriteFile(bot, line)
+	-- Disabled: file logging does not work under the bot sandbox.
+	if not WRITE_TO_FILE then
+		return "console-only"
+	end
+	if io == nil or io.open == nil then
+		return "console-only"
+	end
+	local id = bot:GetPlayerID()
+	local path = MatchTrace.LogPath(bot)
+	local mode = "a"
+	if not fileReady[id] then
+		fileReady[id] = true
+		if DotaTime() < 90 then
+			mode = "w"
+		end
+	end
+	local ok, file = pcall(io.open, path, mode)
+	if ok and file ~= nil then
+		file:write(line, "\n")
+		file:close()
+		return path
+	end
+	-- Fallback: script directory (works if not under Program Files).
+	local fallback = GetScriptDirectory() .. "/match-trace-p" .. tostring(id) .. ".log"
+	ok, file = pcall(io.open, fallback, mode)
+	if ok and file ~= nil then
+		file:write(line, "\n")
+		file:close()
+		return fallback
+	end
+	return "console-only"
+end
+
+function MatchTrace.Enabled()
+	return enabled
+end
+
+function MatchTrace.Verbose()
+	return verbose
+end
+
+function MatchTrace.PerfEnabled()
+	return perfEnabled
+end
+
+-- Lightweight RealTime() profiler. Enable: Customize.MatchTracePerf = true
+-- Logs spikes + periodic top-N averages to console ([SHy-PERF]).
+local perfStats = {}
+local perfNextReport = 0
+local PERF_SPIKE_MS = 2.5
+local PERF_REPORT_EVERY = 10.0
+
+function MatchTrace.PerfSample(label, elapsedSec)
+	if not perfEnabled or label == nil or elapsedSec == nil then
+		return
+	end
+	local ms = elapsedSec * 1000.0
+	local stats = perfStats[label]
+	if stats == nil then
+		stats = { n = 0, sum = 0, max = 0 }
+		perfStats[label] = stats
+	end
+	stats.n = stats.n + 1
+	stats.sum = stats.sum + ms
+	if ms > stats.max then
+		stats.max = ms
+	end
+	if ms >= PERF_SPIKE_MS then
+		print(string.format("[SHy-PERF spike] %s %.2fms t=%.1f", tostring(label), ms, DotaTime()))
+	end
+	local now = RealTime and RealTime() or DotaTime()
+	if now >= perfNextReport then
+		perfNextReport = now + PERF_REPORT_EVERY
+		local rows = {}
+		for name, stat in pairs(perfStats) do
+			if stat.n > 0 then
+				rows[#rows + 1] = {
+					name = name,
+					avg = stat.sum / stat.n,
+					max = stat.max,
+					n = stat.n,
+					sum = stat.sum,
+				}
+			end
+		end
+		table.sort(rows, function(rowA, rowB)
+			return rowA.sum > rowB.sum
+		end)
+		local parts = {}
+		for i = 1, math.min(8, #rows) do
+			local row = rows[i]
+			parts[#parts + 1] = string.format("%s avg=%.2f max=%.2f n=%d", row.name, row.avg, row.max, row.n)
+		end
+		if #parts > 0 then
+			print(string.format("[SHy-PERF top] t=%.1f %s", DotaTime(), table.concat(parts, " | ")))
+		end
+		-- Soft reset max so spikes stay meaningful; keep avg over window via sum/n reset.
+		for _, stat in pairs(perfStats) do
+			stat.n = 0
+			stat.sum = 0
+			stat.max = 0
+		end
+	end
+end
+
+function MatchTrace.PerfWrap(label, fn, fallback)
+	if not perfEnabled then
+		return fn
+	end
+	return function(...)
+		local startTime = RealTime and RealTime() or nil
+		local ok, result1, result2, result3 = pcall(fn, ...)
+		if startTime ~= nil then
+			MatchTrace.PerfSample(label, (RealTime() - startTime))
+		end
+		if ok then
+			return result1, result2, result3
+		end
+		print(string.format("[SHy-PERF err] %s %s", tostring(label), tostring(result1)))
+		return fallback
+	end
+end
+
+function MatchTrace.Event(bot, kind, detail)
+	if not enabled or bot == nil then
+		return
+	end
+	local line = string.format("[OHA-DEV %s] t=%.1f %s %s", kind, DotaTime(), HeroTag(bot), detail or "")
+	print(line)
+	WriteFile(bot, line)
+end
+
+-- Rate-limited decision log. Same kind+key within cooldownSeconds is skipped.
+function MatchTrace.Decide(bot, kind, key, detail, cooldownSeconds)
+	if not enabled or bot == nil then
+		return
+	end
+	cooldownSeconds = cooldownSeconds or 2.0
+	local id = bot:GetPlayerID()
+	lastKindAt[id] = lastKindAt[id] or {}
+	local stamp = tostring(kind) .. "|" .. tostring(key or "")
+	local now = DotaTime()
+	if lastKindAt[id][stamp] and now - lastKindAt[id][stamp] < cooldownSeconds then
+		return
+	end
+	lastKindAt[id][stamp] = now
+	MatchTrace.Event(bot, kind, detail)
+end
+
+function MatchTrace.Item(bot, itemName, reason, detail)
+	MatchTrace.Decide(
+		bot,
+		"item",
+		itemName .. ":" .. tostring(reason),
+		string.format("%s reason=%s %s", tostring(itemName), tostring(reason), detail or ""),
+		1.5
+	)
+end
+
+function MatchTrace.Buy(bot, itemName, detail)
+	MatchTrace.Decide(bot, "buy", itemName, string.format("%s %s", tostring(itemName), detail or ""), 0.5)
+end
+
+local function StandingStillOk(bot, mode)
+	if bot:IsChanneling() then
+		return true
+	end
+	if bot:DistanceFromFountain() < 1500 then
+		return true
+	end
+	return mode == BOT_MODE_SECRET_SHOP or mode == BOT_MODE_WARD or mode == BOT_MODE_RUNE or mode == BOT_MODE_ITEM
+end
+
+-- Game boundary lines for tools/split-console.js. Printed even when tracing is off.
+-- Module state is per script VM, so a team can print the same marker more than once.
+local markerSent = {}
+local nextEndCheck = 0
+
+local function TeamTag(team)
+	return team == TEAM_RADIANT and "radiant" or "dire"
+end
+
+local function Lineup(team)
+	local names = {}
+	for _, playerId in ipairs(GetTeamPlayers(team) or {}) do
+		local name = string.gsub(GetSelectedHeroName(playerId) or "", "npc_dota_hero_", "")
+		names[#names + 1] = name ~= "" and name or "?"
+	end
+	return table.concat(names, ",")
+end
+
+function MatchTrace.MatchMarker(phase, detail)
+	if markerSent[phase] then
+		return
+	end
+	markerSent[phase] = true
+	print(
+		string.format(
+			"[SHy-MATCH] %s team=%s t=%.1f version=%s %s",
+			phase,
+			TeamTag(GetTeam()),
+			DotaTime(),
+			version,
+			detail or ""
+		)
+	)
+	-- The build, once per game per team: hero selection prints "start" once per team, right as the game loads.
+	if phase == "start" then
+		print(string.format("[SHy-BUILD] %s team=%s", buildLine, TeamTag(GetTeam())))
+	end
+end
+
+local function AncientDead(team)
+	local ancient = GetAncient(team)
+	return ancient == nil or ancient:GetHealth() <= 0
+end
+
+function MatchTrace.Markers()
+	-- The lineup text only while the marker is unsent (#52): it was built on every item think of every bot (ten hero
+	-- names, ten string replacements) and then dropped. MatchTrace.Tick was 11.2s of game 059's detail= totals.
+	if not markerSent["game"] then
+		MatchTrace.MatchMarker("game", string.format("radiant=%s dire=%s", Lineup(TEAM_RADIANT), Lineup(TEAM_DIRE)))
+	end
+	if markerSent["end"] or DotaTime() < nextEndCheck then
+		return
+	end
+	nextEndCheck = DotaTime() + 1
+	local gameState = GetGameState()
+	if gameState ~= GAME_STATE_GAME_IN_PROGRESS and gameState ~= GAME_STATE_POST_GAME then
+		return
+	end
+	local radiantDead = AncientDead(TEAM_RADIANT)
+	local direDead = AncientDead(TEAM_DIRE)
+	if gameState ~= GAME_STATE_POST_GAME and not radiantDead and not direDead then
+		return
+	end
+	local winner = "unknown"
+	if radiantDead and not direDead then
+		winner = "dire"
+	elseif direDead and not radiantDead then
+		winner = "radiant"
+	end
+	MatchTrace.MatchMarker("end", "winner=" .. winner)
+end
+
+-- [SHy-DEATH]: one line per death of this bot, printed even when tracing is off. The death count
+-- comes from GetHeroDeaths, so a death is caught whether or not this tick runs while dead. The
+-- line shows the bot's state from the last snapshots before it died: "last" is the final one,
+-- "before" the one about 4s earlier (what it was doing before it got caught).
+-- Game 033: the summary's death list came from kill_window, which logs only some enemy deaths,
+-- and showed 26 of the 125 on the scoreboard.
+-- [SHy-DANGER] death (#227): the team danger map at the bot's spot in the last snapshot (danger = enemies that could
+-- reach it within 5s, missing = enemies unseen 10s+), read when the snapshot is taken (the death line prints at the
+-- respawn). alone=yes: no ally within 1200, the [SHy-DEATH] allies=0 of game 073 (29 of 86 deaths).
+local dangerOk, DangerMap = pcall(require, GetScriptDirectory() .. "/lib/systems/danger_map")
+local function DeathSnap(bot, now)
+	local enemies = bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {}
+	local names = {}
+	for _, enemy in ipairs(enemies) do
+		if enemy ~= nil and enemy:IsHero() and not enemy:IsIllusion() then
+			names[#names + 1] = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
+		end
+	end
+	local loc = bot:GetLocation()
+	local danger, missing = -1, -1
+	if dangerOk then
+		pcall(function()
+			danger, missing = DangerMap.Danger(loc), DangerMap.Missing()
+		end)
+	end
+	return {
+		danger = danger,
+		missing = missing,
+		t = now,
+		mode = bot:GetActiveMode(),
+		desire = bot:GetActiveModeDesire() or 0,
+		hp = bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
+		x = math.floor(loc.x),
+		y = math.floor(loc.y),
+		enemies = names,
+		allies = math.max(0, #(bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}) - 1),
+		fountain = math.floor(bot:DistanceFromFountain()),
+		hit = bot:WasRecentlyDamagedByAnyHero(1.0),
+	}
+end
+local function SnapText(snap, now)
+	if snap == nil then
+		return "-"
+	end
+	return string.format(
+		"%.1fs-ago mode=%s/%.2f hp=%.2f xy=%d,%d fountain=%d allies=%d enemies=%d(%s)%s",
+		now - snap.t,
+		ModeName(snap.mode),
+		snap.desire,
+		snap.hp,
+		snap.x,
+		snap.y,
+		snap.fountain,
+		snap.allies,
+		#snap.enemies,
+		table.concat(snap.enemies, ","),
+		snap.hit and " hit" or ""
+	)
+end
+local function DeathWatch(bot)
+	local now = DotaTime()
+	local watch = bot._deathWatch
+	if watch == nil then
+		watch = { count = GetHeroDeaths(bot:GetPlayerID()) or 0, snaps = {}, nextSnap = now }
+		bot._deathWatch = watch
+	end
+	local count = GetHeroDeaths(bot:GetPlayerID()) or 0
+	if count > watch.count then
+		local snaps = watch.snaps
+		local last = snaps[#snaps]
+		local before = nil
+		for i = #snaps, 1, -1 do
+			if last ~= nil and last.t - snaps[i].t >= 3.5 then
+				before = snaps[i]
+				break
+			end
+		end
+		-- The bot's think does not run while it is dead, so the count changes at respawn (game 034:
+		-- 12-18s late). t= is the last snapshot taken alive (within 0.5s of the death), and the
+		-- snapshot ages are counted from there.
+		local diedAt = last ~= nil and last.t or now
+		pcall(
+			print,
+			string.format(
+				"[SHy-DEATH] t=%.0f %s deaths=%d respawned=%.0f last: %s | before: %s",
+				diedAt,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				count,
+				now,
+				SnapText(last, diedAt),
+				SnapText(before, diedAt)
+			)
+		)
+		if last ~= nil then
+			pcall(
+				print,
+				string.format(
+					"[SHy-DANGER] t=%.0f %s death alone=%s allies=%d enemies=%d missing=%d danger=%d",
+					diedAt,
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					last.allies == 0 and "yes" or "no",
+					last.allies,
+					#last.enemies,
+					last.missing,
+					last.danger
+				)
+			)
+		end
+		watch.count = count
+		watch.snaps = {}
+	end
+	if bot:IsAlive() and now >= watch.nextSnap then
+		watch.nextSnap = now + 0.5
+		local snaps = watch.snaps
+		snaps[#snaps + 1] = DeathSnap(bot, now)
+		if #snaps > 12 then
+			table.remove(snaps, 1)
+		end
+	end
+end
+
+function MatchTrace.Tick(bot)
+	if bot ~= nil and bot:IsHero() then
+		MatchTrace.Markers()
+		if not bot:IsIllusion() then
+			pcall(DeathWatch, bot)
+		end
+	end
+	if not enabled or bot == nil or not bot:IsHero() then
+		return
+	end
+	local now = DotaTime()
+	local state = bot._trace
+	if state == nil then
+		state = {
+			loc = bot:GetLocation(),
+			locAt = now,
+			mode = bot:GetActiveMode(),
+			modeAt = now,
+			flips = {},
+			nextTick = now,
+			nextBeat = now + 5,
+			dead = not bot:IsAlive(),
+			started = false,
+		}
+		bot._trace = state
+	end
+	if now < state.nextTick then
+		return
+	end
+	state.nextTick = now + 0.5
+	if not state.started then
+		state.started = true
+		local path = MatchTrace.LogPath(bot)
+		MatchTrace.Event(bot, "start", string.format("version=%s verbose=%s file=%s", version, tostring(verbose), path))
+	end
+	-- Post-game end marker (once).
+	local gameState = GetGameState()
+	if gameState == GAME_STATE_POST_GAME and not state.ended then
+		state.ended = true
+		MatchTrace.Event(bot, "end", "game_over")
+		return
+	end
+	if not bot:IsAlive() then
+		if not state.dead then
+			state.dead = true
+			local loc = bot:GetLocation()
+			MatchTrace.Event(
+				bot,
+				"life",
+				string.format("died mode=%s xy=%d,%d", ModeName(state.mode), math.floor(loc.x), math.floor(loc.y))
+			)
+		end
+		return
+	end
+	if state.dead then
+		state.dead = false
+		state.loc = bot:GetLocation()
+		state.locAt = now
+		MatchTrace.Event(bot, "life", "respawned")
+	end
+	local loc = bot:GetLocation()
+	local mode = bot:GetActiveMode()
+	local desire = bot:GetActiveModeDesire() or 0
+	local moved = GetUnitToLocationDistance(bot, state.loc)
+	if mode ~= state.mode then
+		state.flips[#state.flips + 1] = { t = now, mode = mode }
+		MatchTrace.Event(
+			bot,
+			"mode",
+			string.format(
+				"%s -> %s desire=%.2f held=%.1fs",
+				ModeName(state.mode),
+				ModeName(mode),
+				desire,
+				now - state.modeAt
+			)
+		)
+		state.mode = mode
+		state.modeAt = now
+	end
+	local kept = {}
+	local flipNames = {}
+	for i = 1, #state.flips do
+		if now - state.flips[i].t <= 10 then
+			kept[#kept + 1] = state.flips[i]
+			flipNames[#flipNames + 1] = ModeName(state.flips[i].mode)
+		end
+	end
+	state.flips = kept
+	if #kept >= 6 and now >= (state.nextFlipLog or 0) then
+		state.nextFlipLog = now + 15
+		MatchTrace.Event(bot, "weird", string.format("mode-flip %dx/10s %s", #kept, table.concat(flipNames, ",")))
+	end
+	if moved > 200 then
+		state.loc = loc
+		state.locAt = now
+	end
+	local stillFor = now - state.locAt
+	local action = bot:GetCurrentActionType()
+	local passable = IsLocationPassable(loc)
+	if stillFor > 4 and action == BOT_ACTION_TYPE_MOVE_TO and not passable and now >= (state.nextStuckLog or 0) then
+		state.nextStuckLog = now + 15
+		MatchTrace.Event(
+			bot,
+			"stuck",
+			string.format(
+				"impassable mode=%s for=%.0fs xy=%d,%d",
+				ModeName(mode),
+				stillFor,
+				math.floor(loc.x),
+				math.floor(loc.y)
+			)
+		)
+	elseif stillFor > 15 and not StandingStillOk(bot, mode) and now >= (state.nextStuckLog or 0) then
+		state.nextStuckLog = now + 15
+		local target = bot:GetAttackTarget()
+		local targetName = "none"
+		if target ~= nil and target.GetUnitName ~= nil then
+			targetName = target:GetUnitName()
+		end
+		MatchTrace.Event(
+			bot,
+			"stuck",
+			string.format(
+				"still mode=%s for=%.0fs moved=%d act=%s tgt=%s xy=%d,%d",
+				ModeName(mode),
+				stillFor,
+				math.floor(moved),
+				ActionName(action),
+				targetName,
+				math.floor(loc.x),
+				math.floor(loc.y)
+			)
+		)
+	end
+	local beatEvery = verbose and 15 or 30
+	if now >= state.nextBeat then
+		state.nextBeat = now + beatEvery
+		local target = bot:GetAttackTarget()
+		local targetName = "none"
+		if target ~= nil and target.GetUnitName ~= nil then
+			targetName = target:GetUnitName()
+		end
+		local allies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE) or {}
+		local enemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE) or {}
+		MatchTrace.Event(
+			bot,
+			"beat",
+			string.format(
+				"mode=%s desire=%.2f held=%.0fs hp=%.2f mp=%.2f act=%s tgt=%s allies=%d enemies=%d gold=%d xy=%d,%d fountain=%d",
+				ModeName(mode),
+				desire,
+				now - state.modeAt,
+				bot:GetHealth() / math.max(1, bot:GetMaxHealth()),
+				bot:GetMana() / math.max(1, bot:GetMaxMana()),
+				ActionName(action),
+				targetName,
+				#allies,
+				#enemies,
+				bot:GetGold(),
+				math.floor(loc.x),
+				math.floor(loc.y),
+				math.floor(bot:DistanceFromFountain())
+			)
+		)
+	end
+end
+
+return MatchTrace

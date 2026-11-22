@@ -27,14 +27,14 @@ or object still gets its own sub-bullet with its own Before/Now.
 -
 
 ## How to verify in game
-<!-- One checkbox per [OHA-*] log line to look for in the next game, and what a good result looks like. When a
+<!-- One checkbox per [SHy-*] log line to look for in the next game, and what a good result looks like. When a
 machine can check an item, end it with an HTML comment holding "expect: seen>=1; key<=X" and/or "heroes: a,b".
-Util/verify.js ticks a box when its item passes (or is skipped) in a game; do not tick them by hand. -->
+tools/verify.js ticks a box when its item passes (or is skipped) in a game; do not tick them by hand. -->
 - [ ] 
 
 ## Checks
 - [ ] CI green: LuaJIT syntax, luacheck, StyLua, Tests
-- [ ] Build checked: the test game's `[OHA-BUILD]` commit contains this PR (its branch, or a `test/next` build with it; `Util/after-game.js` lists the PRs in the build)
-- [ ] No `Customize/general.lua` test lineup, no match logs committed
+- [ ] Build checked: the test game's `[SHy-BUILD]` commit contains this PR (its branch, or a `test/next` build with it; `tools/after-game.js` lists the PRs in the build)
+- [ ] No `bots/customize/general.lua` test lineup, no match logs committed
 - [ ] Dota mechanics checked against game data / datafeed (not memory)
 - [ ] Tested in a local game (game NNN) / not yet tested
