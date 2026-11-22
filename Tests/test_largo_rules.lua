@@ -151,7 +151,23 @@ T.test("largo: Croak of Genius on himself or an ally", function()
 	T.eq(pick({ level = 3, allyFighting = true }), "self/self-upkeep", "a physical core going in: himself")
 	T.eq(pick({ level = 1, allyFighting = true, selfWants = true }), "self/self-mana", "physical core, level 1")
 	T.eq(pick({ level = 2, hasShard = true, allyFighting = true }), "ally/shard-share", "Shard: Largo gets it too")
-	T.eq(pick({ level = 3, hasShard = true, alone = true }), "self/self-upkeep", "Shard, alone: himself")
+	T.eq(
+		pick({ level = 3, hasShard = true, alone = true, mpRatio = 0.8 }),
+		"self/shard-upkeep",
+		"Shard, alone: himself"
+	)
+	-- Level 3+ with the Shard: always, no fight needed (maintainer 2026-11-22).
+	T.eq(
+		pick({ level = 3, hasShard = true, magicAllyNear = true, mpRatio = 0.3 }),
+		"ally/shard-upkeep",
+		"a magic ally near"
+	)
+	T.eq(pick({ level = 4, hasShard = true, mpRatio = 0.6 }), "self/shard-upkeep", "no magic ally, 60% mana: himself")
+	T.eq(pick({ level = 4, hasShard = true, mpRatio = 0.5 }), "nil/nil", "no magic ally, 50% mana: wait")
+	T.eq(pick({ level = 4, hasShard = true, mpRatio = 0.5, selfWants = true }), "self/self-mana", "low mana, a song")
+	T.eq(pick({ level = 4, hasShard = true, mpRatio = 0.5, allyFighting = true }), "ally/shard-share", "a fight")
+	T.eq(pick({ level = 3, hasShard = true, mpRatio = 0.9, selfHasBuff = true }), "nil/nil", "already on him")
+	T.eq(pick({ level = 2, hasShard = true, magicAllyNear = true }), "nil/nil", "level 2: no upkeep yet")
 end)
 
 T.test("largo: a spell-damage ally, not a physical core", function()

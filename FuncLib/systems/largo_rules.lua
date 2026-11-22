@@ -231,8 +231,22 @@ end
 --   ally-nuker   a spell-damage ally going into a fight (never a physical core: the reverb skips attacks);
 --   self-upkeep  from level 3, on Largo whenever it is ready (his songs, Lick and Frogstomp are magical);
 --   self-mana    levels 1-2: on Largo when he sings, is about to, or starts a combo.
+-- Level 3+ with the Shard (maintainer 2026-11-22: "always cast on nearby magic hero or self when mana is high"),
+-- first, no fight needed: on a magic hero in cast range (magicAllyNear: MAGIC_KIT magical / pure spells), Largo gets it
+-- too; else on Largo with SHARD_UPKEEP_MP mana or more (the nearest ally gets it too). why=shard-upkeep. With less
+-- mana the upkeep waits; the fight and song casts below still go.
+-- o adds: magicAllyNear, mpRatio.
 LargoRules.CROAK_UPKEEP_LEVEL = 3
+LargoRules.SHARD_UPKEEP_MP = 0.6
+LargoRules.MAGIC_KIT = 2
 function LargoRules.CroakTarget(o)
+	local shardUpkeep = o.hasShard and (o.level or 0) >= LargoRules.CROAK_UPKEEP_LEVEL
+	if shardUpkeep and o.magicAllyNear then
+		return "ally", "shard-upkeep"
+	end
+	if shardUpkeep and not o.selfHasBuff and (o.mpRatio or 0) >= LargoRules.SHARD_UPKEEP_MP then
+		return "self", "shard-upkeep"
+	end
 	if o.hasShard and o.allyFighting then
 		return "ally", "shard-share"
 	end
@@ -242,7 +256,7 @@ function LargoRules.CroakTarget(o)
 	if o.selfHasBuff then
 		return nil, nil
 	end
-	if (o.level or 0) >= LargoRules.CROAK_UPKEEP_LEVEL then
+	if (o.level or 0) >= LargoRules.CROAK_UPKEEP_LEVEL and not shardUpkeep then
 		return "self", "self-upkeep"
 	end
 	if o.selfWants then

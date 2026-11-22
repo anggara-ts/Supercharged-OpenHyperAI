@@ -876,6 +876,25 @@ function X.ConsiderCroakOfGenius()
 		end
 	end
 	local hasShard = Fu.HasAghanimsShard(bot)
+	-- A magic hero in cast range with no buff (for the Shard upkeep, no fight needed): the most magical / pure spells.
+	local magicAlly, magicKit = nil, LargoRules.MAGIC_KIT - 1
+	if hasShard then
+		for _, allyHero in pairs(nearbyAllies) do
+			if
+				allyHero ~= bot
+				and Fu.IsValidHero(allyHero)
+				and not allyHero:IsIllusion()
+				and Fu.IsInRange(bot, allyHero, castRange)
+				and not allyHero:HasModifier("modifier_largo_croak_of_genius_buff")
+				and not allyHero:HasModifier("modifier_teleporting")
+			then
+				local kit = X.SpellKitCount(allyHero)
+				if kit > magicKit then
+					magicAlly, magicKit = allyHero, kit
+				end
+			end
+		end
+	end
 	local target, why = LargoRules.CroakTarget({
 		level = croakOfGeniusAbility:GetLevel(),
 		hasShard = hasShard,
@@ -884,7 +903,12 @@ function X.ConsiderCroakOfGenius()
 		selfHasBuff = bot:HasModifier("modifier_largo_croak_of_genius_buff"),
 		selfWants = X.CroakSelfWanted(),
 		alone = alone,
+		magicAllyNear = magicAlly ~= nil,
+		mpRatio = Fu.GetMP(bot),
 	})
+	if target == "ally" and why == "shard-upkeep" then
+		return BOT_ACTION_DESIRE_HIGH, magicAlly, 0, why, "magic-kit"
+	end
 	if target == "ally" then
 		if bestSpellAlly ~= nil then
 			return BOT_ACTION_DESIRE_HIGH, bestSpellAlly, bestSpellDamage, why, "magic"
