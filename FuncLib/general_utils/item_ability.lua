@@ -28,8 +28,8 @@ local function installItemAbility(Fu)
 	end
 	-- Ultimate window (Fu.RefresherUltWindow) and mana for the refresher plus one more cast of the ultimate
 	-- (FuncLib/systems/refresher_rules.lua, #47). Faceless Void's own rule uses this; the shared rule in
-	-- ability_item_usage_generic.lua adds the other spells (Fu.RefresherSpells). refresher: the item (found when nil).
-	-- Returns ok, then the mana it needs (for the log line).
+	-- ability_item_usage_generic.lua adds the 1s hold for ready spells and logs the optional ones (Fu.RefresherPlan).
+	-- refresher: the item (found when nil). Returns ok, then the mana it needs (for the log line).
 	function Fu.CanUseRefresherShard(bot, refresher)
 		local ultimate = Fu.GetUltimateAbility(bot)
 		if ultimate == nil or ultimate:IsPassive() then
