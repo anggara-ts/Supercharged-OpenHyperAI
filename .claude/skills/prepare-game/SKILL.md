@@ -21,8 +21,10 @@ Rules: `AGENTS.md` (workflow steps 4-6). Checklist:
    or switching branches in the clone during the game changes nothing in it. Check its output:
    - `NOT in the copy: ...` lists uncommitted bot scripts, edited or `(new)`, that the game will not run. Commit
      them in their PR and rebuild, or tell the maintainer.
-   - `.lua files in a folder the export does not know`: a PR added a new top-level Lua folder. Add it to
-     `RUNTIME_DIRS` or `NOT_RUNTIME_DIRS` in `tools/export-bots.js` (in that PR).
+   - `.lua files outside bots/ in a folder the export does not know`: a PR added Lua files outside `bots/` (the
+     game only gets `bots/`). Move them under `bots/`, or add a tooling folder to `NOT_RUNTIME_DIRS` in
+     `tools/export-bots.js` (in that PR). A PR branch from before the layout change (#221) shows up in
+     `test-build.js` as `NEEDS MIGRATION`: run `node tools/restructure.js --migrate-branch` on it (AGENTS.md, Repo map).
    - `is a link`: `vscripts/bots` is still the old dev link to the clone. Ask the maintainer before renaming it
      (e.g. to `bots-dev`); renaming changes what the game loads.
    - `has files this tool did not write`: list them to the maintainer. Use `--force` only after they agree.
