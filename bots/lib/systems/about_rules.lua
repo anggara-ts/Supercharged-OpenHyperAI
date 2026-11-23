@@ -80,7 +80,7 @@ end
 function AboutRules.Line(template, version)
 	local versionText = tostring(version or "unknown")
 	if type(template) ~= "string" or not template:find("%s", 1, true) then
-		return "Supercharged OpenHyperAI by dekampes, version " .. versionText .. "."
+		return "Supercharged OpenHyperAI, version " .. versionText .. "."
 	end
 	return (template:gsub("%%s", function()
 		return versionText

@@ -11,7 +11,7 @@ local strings = {
 	en = {
 		say_play_pos = "I will play position ",
 		-- `!about` answer (#215); %s is the version, the same text as the welcome's (chat_rules.lua WelcomeVersion). No URL: chat links are not clickable.
-		say_about = "Supercharged OpenHyperAI by dekampes, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
+		say_about = "Supercharged OpenHyperAI, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
 		pos_select_closed = "Position selection closed.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome). {version} and {date}:
 		-- bots/lib/systems/chat_rules.lua WelcomeVersion.
@@ -269,7 +269,7 @@ local strings = {
 	},
 	zh = {
 		say_play_pos = "我将玩位置 ",
-		say_about = "Supercharged OpenHyperAI，作者 dekampes，版本 %s。反馈、错误报告和已知限制：请查看脚本的创意工坊页面。",
+		say_about = "Supercharged OpenHyperAI，版本 %s。反馈、错误报告和已知限制：请查看脚本的创意工坊页面。",
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
@@ -493,7 +493,7 @@ local strings = {
 	},
 	ru = {
 		say_play_pos = "Я буду играть на позиции ",
-		say_about = "Supercharged OpenHyperAI от dekampes, версия %s. Отзывы, сообщения об ошибках и известные ограничения: подробнее на странице мастерской скрипта.",
+		say_about = "Supercharged OpenHyperAI, версия %s. Отзывы, сообщения об ошибках и известные ограничения: подробнее на странице мастерской скрипта.",
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
@@ -752,7 +752,7 @@ local strings = {
 	},
 	ja = {
 		say_play_pos = "私はポジション ",
-		say_about = "Supercharged OpenHyperAI（作者: dekampes）、バージョン %s。フィードバック、バグ報告、既知の制限については、スクリプトのワークショップページをご覧ください。",
+		say_about = "Supercharged OpenHyperAI、バージョン %s。フィードバック、バグ報告、既知の制限については、スクリプトのワークショップページをご覧ください。",
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {

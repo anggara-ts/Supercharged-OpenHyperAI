@@ -98,6 +98,7 @@ T.test("about: every language has one line with the version and no URL", functio
 	-- The same module name localization.lua uses when GetScriptDirectory() is "bots".
 	local CustomLoader = require("bots.lib.systems.custom_loader")
 	local saved = CustomLoader.Localization
+	local author = require(GetScriptDirectory() .. "/lib/systems/ping_streak").Signature()
 	for _, locale in ipairs({ "en", "zh", "ru", "ja" }) do
 		CustomLoader.Localization = locale
 		local template = Localization.Get("say_about")
@@ -107,8 +108,9 @@ T.test("about: every language has one line with the version and no URL", functio
 		T.ok(not template:find("http", 1, true), locale .. ": has a URL")
 		local line = About.Line(template, "2026.11.23-abc1234")
 		T.ok(line:find("2026.11.23-abc1234", 1, true) ~= nil, locale .. ": version missing")
-		T.ok(line:find("dekampes", 1, true) ~= nil, locale .. ": author missing")
+		T.ok(line:find("Supercharged OpenHyperAI", 1, true) ~= nil, locale .. ": script name missing")
+		T.ok(not line:find(author, 1, true), locale .. ": no author name in !about (maintainer, 2026-11-23)")
 	end
 	CustomLoader.Localization = saved
-	T.eq(About.Line(nil, "1.0"), "Supercharged OpenHyperAI by dekampes, version 1.0.", "fallback line")
+	T.eq(About.Line(nil, "1.0"), "Supercharged OpenHyperAI, version 1.0.", "fallback line")
 end)

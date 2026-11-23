@@ -973,6 +973,66 @@ function Usage.AnswerAboutRequest()
 		)
 	)
 end
+-- A human of the team pinging our fountain area PingStreak.COUNT times in a row (#215): the bot that reads the last
+-- ping says PingStreak.Line() in team chat, at most once per PingStreak.COOLDOWN seconds per team. Called from
+-- BuybackUsageThink before its 2s throttle (GetMostRecentPing keeps only the last ping), every 0.1s per bot; every
+-- bot of the team feeds the same streak (bots/lib/systems/ping_streak.lua).
+function Usage.WatchFountainPings()
+	local now = GameTime()
+	if
+		now < (bot._fountainPingAt or -1)
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or Fu.IsMeepoClone(bot)
+	then
+		return
+	end
+	bot._fountainPingAt = now + 0.1
+	-- Required here, not at the top: the require block is where most open PRs add lines.
+	local PingStreak = require(GetScriptDirectory() .. "/lib/systems/ping_streak")
+	local team = GetTeam()
+	local shared = PingStreak.Team(team)
+	if shared.slots == nil or now >= shared.slotsAt or now < shared.slotsAt - 5 then
+		-- The humans' team slots (GetTeamMember takes a slot 1-5), re-read every 5s.
+		shared.slots, shared.slotsAt = {}, now + 5
+		for slot, playerId in ipairs(GetTeamPlayers(team)) do
+			if not IsPlayerBot(playerId) then
+				shared.slots[#shared.slots + 1] = { slot = slot, id = playerId }
+			end
+		end
+	end
+	local fountain = Fu.GetTeamFountain()
+	for _, human in ipairs(shared.slots) do
+		local member = GetTeamMember(human.slot)
+		local ping = member ~= nil and not member:IsNull() and member:GetMostRecentPing() or nil
+		if ping ~= nil and ping.location ~= nil then
+			local state = shared.humans[human.id]
+			if state == nil then
+				state = { count = 0 }
+				shared.humans[human.id] = state
+			end
+			if PingStreak.Step(state, ping.time, ping.location.x, ping.location.y, fountain.x, fountain.y, now) then
+				local said = "throttled"
+				if PingStreak.Allow(shared, now) then
+					said = pcall(function()
+						bot:ActionImmediate_Chat(PingStreak.Line(), false)
+					end) and "yes" or "error"
+				end
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s egg team=%s human=%d said=%s",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						said
+					)
+				)
+			end
+		end
+	end
+end
 local function ConsiderBuyback()
 	if Fu.IsMeepoClone(bot) then
 		return
@@ -11111,6 +11171,7 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
 		bot.lastBuybackFrameProcessTime = DotaTime()
 	end
