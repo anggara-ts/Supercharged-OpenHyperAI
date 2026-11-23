@@ -194,8 +194,10 @@ local function BotState(member)
 	})
 end
 
--- A bot within this distance of the ordered lane's path stands "on" it (force near takes it). A map estimate.
+-- A bot within this distance of the ordered lane's path stands "on" it (force near takes it), outside both bases
+-- (every lane's path starts at the Ancients, so a bot in a base is near all three). Map estimates.
 local ON_LANE_DISTANCE = 1200
+local ON_LANE_MIN_AMOUNT, ON_LANE_MAX_AMOUNT = 0.15, 0.85
 
 local function Candidates(loc, laneName)
 	local list = {}
@@ -204,7 +206,11 @@ local function Candidates(loc, laneName)
 		local onLane = false
 		if alive and laneName ~= nil and LANE_OF[laneName] ~= nil then
 			local along = GetAmountAlongLane(LANE_OF[laneName], member:GetLocation())
-			onLane = along ~= nil and along.distance ~= nil and along.distance <= ON_LANE_DISTANCE
+			onLane = along ~= nil
+				and along.distance ~= nil
+				and along.distance <= ON_LANE_DISTANCE
+				and (along.amount or 0) >= ON_LANE_MIN_AMOUNT
+				and (along.amount or 1) <= ON_LANE_MAX_AMOUNT
 		end
 		list[#list + 1] = {
 			id = member:GetPlayerID(),
@@ -960,15 +966,8 @@ function Orders.Tick(bot)
 	end
 	SayPendingReply(bot)
 	local now = GameTime()
-	if now - state.tickAt < TICK_SECONDS and now >= state.tickAt then
-		return
-	end
-	state.tickAt = now
-	if state.chat ~= nil then
-		local chat = state.chat
-		state.chat = nil
-		StartChatOrder(chat, bot)
-	end
+	-- The ping is read on every bot's think, before the tick gate: only the newest ping is visible, so a fast burst
+	-- (3 clicks within 0.4s) read every TICK_SECONDS would count as 2. It only does work when a new ping arrives.
 	local human, ping = Orders.NewestHumanPing()
 	if
 		human ~= nil
@@ -979,6 +978,15 @@ function Orders.Tick(bot)
 	then
 		state.lastPingTime = ping.time
 		StartPingOrder(human, ping, bot)
+	end
+	if now - state.tickAt < TICK_SECONDS and now >= state.tickAt then
+		return
+	end
+	state.tickAt = now
+	if state.chat ~= nil then
+		local chat = state.chat
+		state.chat = nil
+		StartChatOrder(chat, bot)
 	end
 	KeepOrder()
 end
