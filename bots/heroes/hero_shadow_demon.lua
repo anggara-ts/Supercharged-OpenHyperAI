@@ -254,10 +254,12 @@ function X.ConsiderDisruption()
 			and not allyHero:HasModifier("modifier_obsidian_destroyer_astral_imprisonment_prison")
 		then
 			if
-				allyHero:HasModifier("modifier_enigma_black_hole_pull")
-				or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
-				or allyHero:HasModifier("modifier_legion_commander_duel")
-				or allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
+				(
+					allyHero:HasModifier("modifier_enigma_black_hole_pull")
+					or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
+					or allyHero:HasModifier("modifier_legion_commander_duel")
+					or allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
+				) and X.DisruptAllyOk(allyHero)
 			then
 				return BOT_ACTION_DESIRE_HIGH, allyHero
 			end
@@ -316,11 +318,13 @@ function X.ConsiderDisruption()
 		for _, allyHero in pairs(nearbyAllies) do
 			if Fu.IsValidHero(allyHero) and not allyHero:IsIllusion() then
 				if
-					allyHero:HasModifier("modifier_enigma_black_hole_pull")
-					or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
-					or allyHero:HasModifier("modifier_legion_commander_duel")
-					or allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
-					or Fu.GetHP(allyHero) < 0.33
+					(
+						allyHero:HasModifier("modifier_enigma_black_hole_pull")
+						or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
+						or allyHero:HasModifier("modifier_legion_commander_duel")
+						or allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
+						or Fu.GetHP(allyHero) < 0.33
+					) and X.DisruptAllyOk(allyHero)
 				then
 					return BOT_ACTION_DESIRE_HIGH, allyHero
 				end
@@ -380,6 +384,7 @@ function X.ConsiderDisruption()
 					and not allyHero:HasModifier("modifier_dazzle_shallow_grave")
 					and not allyHero:HasModifier("modifier_templar_assassin_refraction_absorb")
 					and not allyHero:HasModifier("modifier_obsidian_destroyer_astral_imprisonment_prison")
+					and X.DisruptAllyOk(allyHero)
 				then
 					return BOT_ACTION_DESIRE_HIGH, allyHero
 				end
@@ -387,6 +392,13 @@ function X.ConsiderDisruption()
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- Disruption banishes the ally (datafeed, hero 79: "Banishes the targeted unit from the battlefield"), which ends a
+-- channel such as a Town Portal (#47, the same gap as Winter Wyvern's Cold Embrace in game 077). On a channelling
+-- ally only when the enemies attacking it are expected to kill it first (Fu.ChannelSaveGate). [SHy-SD]
+-- disruption-save / disruption-skip why=channel.
+function X.DisruptAllyOk(allyHero)
+	return Fu.ChannelSaveGate(allyHero, disruptionAbility:GetCastPoint(), "SD", "disruption")
 end
 function X.ConsiderDisseminate()
 	if not disseminateAbility:IsFullyCastable() then

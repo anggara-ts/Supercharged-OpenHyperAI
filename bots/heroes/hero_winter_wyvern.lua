@@ -142,6 +142,39 @@ function X.IsAttackedByEnemyHero(ally)
 	end
 	return false
 end
+-- Cold Embrace freezes the ally, which ends a channel (game 077, 6:02: it cancelled Undying's Town Portal out of the
+-- bottom lane). On a channelling ally (a TP or a channelled spell) it goes only when the enemy heroes attacking it
+-- are expected to kill it before the channel ends (Fu.ChannelSaveCheck; maintainer: "if enemy guaranteed to kill
+-- ally using attack hit, it is plausible"); otherwise the channel is the save. Cast point 0.3 (datafeed, hero 112).
+-- Every ally-target embrace goes through here. Logs:
+--   [SHy-WYVERN] embrace-save why= ally= hp= channel=no|yes [kind= left= dmg= health= ratio= attackers=]
+--   [SHy-WYVERN] embrace-skip why=channel ally= kind= left= dmg= health= ratio= attackers=  (once per 5s)
+local EMBRACE_CAST_POINT = 0.3
+function X.EmbraceAlly(allyHero, why)
+	local channelling, allowed, info = Fu.ChannelSaveCheck(allyHero, EMBRACE_CAST_POINT)
+	local name = (string.gsub(allyHero:GetUnitName(), "npc_dota_hero_", ""))
+	if not channelling then
+		X.LogWyvern("embrace-save", "why=%s ally=%s hp=%.2f channel=no", why, name, Fu.GetHP(allyHero))
+		return true
+	end
+	local fields = string.format(
+		"ally=%s kind=%s left=%.1f src=%s dmg=%.0f health=%.0f ratio=%.2f attackers=%d",
+		name,
+		info.kind,
+		info.left,
+		info.src,
+		info.dmg,
+		info.hp,
+		info.ratio,
+		info.attackers
+	)
+	if allowed then
+		X.LogWyvern("embrace-save", "why=%s hp=%.2f channel=yes %s", why, Fu.GetHP(allyHero), fields)
+		return true
+	end
+	X.LogWyvern("embrace-skip", "why=channel save=%s %s", why, fields)
+	return false
+end
 local arcticBurnDesire
 local splinterBlastDesire, splinterBlastTarget
 local coldEmbraceDesire, coldEmbraceTarget
@@ -563,9 +596,11 @@ function X.ConsiderColdEmbrace()
 					and not Fu.IsSuspiciousIllusion(enemyHero)
 				then
 					if
-						allyHero:HasModifier("modifier_legion_commander_duel") and Fu.GetHP(allyHero) < 0.25
-						or allyHero:HasModifier("modifier_enigma_black_hole_pull")
-						or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
+						(
+							allyHero:HasModifier("modifier_legion_commander_duel") and Fu.GetHP(allyHero) < 0.25
+							or allyHero:HasModifier("modifier_enigma_black_hole_pull")
+							or allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
+						) and X.EmbraceAlly(allyHero, "disabled")
 					then
 						return BOT_ACTION_DESIRE_HIGH, allyHero
 					end
@@ -592,6 +627,7 @@ function X.ConsiderColdEmbrace()
 						and not Fu.IsInEtherealForm(allyHero)
 						and not allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
 						and not allyHero:HasModifier("modifier_necrolyte_sadist_active")
+						and X.EmbraceAlly(allyHero, "fight-core")
 					then
 						return BOT_ACTION_DESIRE_HIGH, allyHero
 					end
@@ -604,6 +640,7 @@ function X.ConsiderColdEmbrace()
 						and not Fu.IsSuspiciousIllusion(allyHero)
 						and not Fu.IsInEtherealForm(allyHero)
 						and not allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
+						and X.EmbraceAlly(allyHero, "fight-support")
 					then
 						return BOT_ACTION_DESIRE_HIGH, allyHero
 					end
@@ -649,8 +686,8 @@ function X.ConsiderColdEmbrace()
 			and not allyHero:HasModifier("modifier_fountain_aura_buff")
 			and allyHero:WasRecentlyDamagedByAnyHero(2.5)
 			and X.IsAttackedByEnemyHero(allyHero)
+			and X.EmbraceAlly(allyHero, "low-hp")
 		then
-			X.LogWyvern("embrace-save", "ally=%s hp=%.2f", allyHero:GetUnitName(), Fu.GetHP(allyHero))
 			return BOT_ACTION_DESIRE_HIGH, allyHero
 		end
 	end
@@ -669,6 +706,7 @@ function X.ConsiderColdEmbrace()
 					and not allyHero:HasModifier("modifier_dazzle_shallow_grave")
 					and not allyHero:HasModifier("modifier_templar_assassin_refraction_absorb")
 					and not allyHero:HasModifier("modifier_obsidian_destroyer_astral_imprisonment_prison")
+					and X.EmbraceAlly(allyHero, "tormentor")
 				then
 					return BOT_ACTION_DESIRE_HIGH, allyHero
 				end
