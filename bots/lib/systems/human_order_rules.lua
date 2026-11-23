@@ -13,8 +13,10 @@
 local Rules = {}
 
 -- The same spot (or the same target) pinged again within this many seconds, this close, is an insist: the next tier.
+-- A push or defend ping chains with the one before when it reads as the same kind on the same lane, wherever it lands
+-- (game 077: quick pings around our bottom tower landed 590-620 apart and never chained with a 300 radius).
 Rules.INSIST_SECONDS = 2 -- maintainer 2026-11-23: "narrow it to 2 pings in 2 seconds"
-Rules.INSIST_RADIUS = 300
+Rules.INSIST_RADIUS = 600
 -- A FORCE NEAR order takes every bot within this distance of the spot, or at the ordered lane (maintainer's "~4000").
 Rules.FORCE_NEAR_RADIUS = 4000
 -- A forced order still skips a bot under this HP (it joins once back at FORCE_REJOIN_HP), a dead bot (it joins when
@@ -108,13 +110,29 @@ function Rules.ParseChat(text)
 	return { kind = kind, all = all }
 end
 
--- Is `ping` the same ping as `prev` again (an insist)? Both: { time =, x =, y =, targetKey = }.
+-- Kinds whose repeated pings chain by lane (the order goes to that lane's front building wherever the ping lands).
+Rules.LANE_INSIST_KINDS = { push = true, defend = true }
+
+-- Is `ping` the same ping as `prev` again (an insist)? Both: { time =, x =, y =, targetKey =, kind =, lane =,
+-- normal = }. A push / defend ping on the same lane as the one before always is (any spot, any ping type); otherwise
+-- the ping type must match and the target or the spot (within INSIST_RADIUS) must be the same.
 function Rules.IsInsist(prev, ping)
 	if prev == nil or ping == nil or prev.time == nil or ping.time == nil or prev.time == ping.time then
 		return false
 	end
 	local age = ping.time - prev.time
 	if age <= 0 or age > Rules.INSIST_SECONDS then
+		return false
+	end
+	if
+		Rules.LANE_INSIST_KINDS[ping.kind]
+		and ping.lane ~= nil
+		and prev.kind == ping.kind
+		and prev.lane == ping.lane
+	then
+		return true
+	end
+	if prev.normal ~= ping.normal then
 		return false
 	end
 	if prev.targetKey ~= nil and prev.targetKey == ping.targetKey then
@@ -546,15 +564,15 @@ function Rules.RefusalAllowed(now, lastAt)
 end
 
 -- Who says what in team chat for an order (maintainer, 2026-11-23: "response 'on my way' only when acknowledging.
--- no reply for 'cant do'"): every bot that goes says "On my way!" (`index`: its place among them, so the lines vary)
--- unless it already said it for the same ping chain (`acked[id]`: it obeyed the ping before this one). Bots that
--- can't go and queued bots say nothing (a queued bot says "On my way!" when it joins: Orders' KeepOrder). Only when
--- nobody goes at all (verdict refuse) one bot says one short reason, if Rules.RefusalAllowed: the check's reason, or
--- with nobody free the nearest bot's own (`refuser`: { id =, key =, seconds = } or nil: "busy"). The reason waits
--- INSIST_SECONDS (`delay`) so a repeated ping that forces the order drops it. A danger ping, or an order everyone
--- joins later (verdict queue): no reply. `opts`: { acked =, now =, lastRefusalAt = }. Returns a list of { id =,
--- key =, index =, seconds =, delay = } in speaking order (said REPLY_GAP_SECONDS apart); id nil: the bot that read
--- the order says it.
+-- no reply for 'cant do'"): every bot that goes says what it does (`opts.ackKey`, Rules.AckKey: "Pushing bot",
+-- "Attacking Medusa", ...; default "on-my-way") unless it already said it for the same ping chain (`acked[id]`: it
+-- obeyed the ping before this one). Bots that can't go and queued bots say nothing (a queued bot says its line when it
+-- joins: Orders' KeepOrder). Only when nobody goes at all (verdict refuse) one bot says one short reason, if
+-- Rules.RefusalAllowed: the check's reason, or with nobody free the nearest bot's own (`refuser`: { id =, key =,
+-- seconds = } or nil: "busy"). The reason waits INSIST_SECONDS (`delay`) so a repeated ping that forces the order
+-- drops it. A danger ping, or an order everyone joins later (verdict queue): no reply. `opts`: { acked =, now =,
+-- lastRefusalAt =, ackKey = }. Returns a list of { id =, key =, seconds =, delay = } in speaking order (said
+-- REPLY_GAP_SECONDS apart); id nil: the bot that read the order says it.
 Rules.REPLY_GAP_SECONDS = 0.5
 function Rules.ReplyPlan(kind, verdict, why, obey, refuser, opts)
 	opts = opts or {}
@@ -576,29 +594,70 @@ function Rules.ReplyPlan(kind, verdict, why, obey, refuser, opts)
 		return plan
 	end
 	local acked = opts.acked or {}
-	local index = 0
+	local ackKey = opts.ackKey or "on-my-way"
 	for _, id in ipairs(obey or {}) do
 		if not acked[id] then
-			index = index + 1
-			plan[#plan + 1] = { id = id, key = "on-my-way", index = index }
+			plan[#plan + 1] = { id = id, key = ackKey }
 		end
 	end
 	return plan
 end
 
--- Reply keys that say why nobody goes (the team's REFUSAL_CHAT_SECONDS limit and the insist drop apply to them).
-function Rules.IsRefusalKey(key)
-	return key ~= "on-my-way" and key ~= "which_lane" and key ~= "cancelled"
+-- What a bot that goes says (maintainer, game 077: "instead of generic 'on my way', change to 'pushing bot', 'on my
+-- way' (when checking fog), 'attacking medusa'"): the reply key for an order of `kind` on `lane` ("top" / "mid" /
+-- "bot" or nil); `hasTarget`: the order is on an enemy hero. The lines are in bots/lib/data/human_order_lines.lua.
+Rules.ACK_KEYS = {
+	["on-my-way"] = true,
+	pushing = true,
+	defending = true,
+	attacking = true,
+	["clearing-camp"] = true,
+	["going-roshan"] = true,
+	grouping = true,
+}
+function Rules.AckKey(kind, lane, hasTarget)
+	if kind == "push" and lane ~= nil then
+		return "pushing"
+	elseif kind == "defend" and lane ~= nil then
+		return "defending"
+	elseif (kind == "gank" or kind == "focus" or kind == "chase") and hasTarget then
+		return "attacking"
+	elseif kind == "farm" then
+		return "clearing-camp"
+	elseif kind == "rosh" then
+		return "going-roshan"
+	elseif kind == "group" then
+		return "grouping"
+	end
+	return "on-my-way"
 end
 
--- Our own fountain area: pings there are not orders (they feed the fountain-ping credit line, #217).
+-- Reply keys that say why nobody goes (the team's REFUSAL_CHAT_SECONDS limit and the insist drop apply to them).
+function Rules.IsRefusalKey(key)
+	return not Rules.ACK_KEYS[key] and key ~= "which_lane" and key ~= "cancelled"
+end
+
+-- Our own fountain area: pings there are not orders (they feed the fountain-ping credit line, #217). `fountain` is
+-- Fu.GetTeamFountain() (the spawn area), `building` our fountain building (nil when not found yet): the building is
+-- about 1040 from the spawn point (game 077: a ping on it landed at -7518,-6870, the spawn point is -6619,-6336), so a
+-- ping on it was outside 900 of the spawn point. Returns true and which point counted ("spawn" / "building"), else
+-- false.
 Rules.OWN_FOUNTAIN_RADIUS = 900
-function Rules.InOwnFountainArea(loc, fountain)
-	if loc == nil or fountain == nil then
+function Rules.InOwnFountainArea(loc, fountain, building)
+	if loc == nil then
 		return false
 	end
-	local dx, dy = loc.x - fountain.x, loc.y - fountain.y
-	return dx * dx + dy * dy <= Rules.OWN_FOUNTAIN_RADIUS * Rules.OWN_FOUNTAIN_RADIUS
+	local r2 = Rules.OWN_FOUNTAIN_RADIUS * Rules.OWN_FOUNTAIN_RADIUS
+	for _, point in ipairs({ { fountain, "spawn" }, { building, "building" } }) do
+		local spot = point[1]
+		if spot ~= nil then
+			local dx, dy = loc.x - spot.x, loc.y - spot.y
+			if dx * dx + dy * dy <= r2 then
+				return true, point[2]
+			end
+		end
+	end
+	return false
 end
 
 return Rules

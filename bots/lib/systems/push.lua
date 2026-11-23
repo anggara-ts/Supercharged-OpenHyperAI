@@ -1228,6 +1228,10 @@ function Push.PushThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
+	-- A forced push order (#222): a far bot TPs first when that is clearly faster (game 077: they walked).
+	if HumanOrders.TravelThink(bot, "push", lane) then
+		return
+	end
 	if Fu.TryDropTowerAggro(bot) then
 		return
 	end

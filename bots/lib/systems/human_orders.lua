@@ -2,10 +2,12 @@
 --   * Ping tiers by count (maintainer, 2026-11-23: "1 ping = ask / 2 ping = force ally nearby ping / 3+ ping = force
 --     all ally accross map"): one ping is a request (ASK: the bots check it, bots/lib/systems/human_order_rules.lua,
 --     and may refuse); the same ping again within 2s is FORCE NEAR (every bot within 4000 or at that lane goes); a
---     third is FORCE ALL (every bot, by TP when the walk is long). `!push top` is FORCE NEAR, `!push top all` FORCE
---     ALL. A force still queues dead, channelling and very low bots; they join when back.
---   * Replies ("response 'on my way' only when acknowledging. no reply for 'cant do'"): every bot that goes says
---     "On my way!" (a queued bot when it joins); bots that can't go say nothing. Only when nobody goes does one bot
+--     third is FORCE ALL (every bot). Under a force a far bot TPs at once when that is clearly faster (TravelFar).
+--     `!push top` is FORCE NEAR, `!push top all` FORCE ALL. A force still queues dead, channelling and very low
+--     bots; they join when back.
+--   * Replies ("response 'on my way' only when acknowledging. no reply for 'cant do'"): every bot that goes says what
+--     it does once, "Pushing bot", "Attacking Medusa", "On my way" (game 077; Rules.AckKey), a queued bot when it
+--     joins; bots that can't go say nothing. Only when nobody goes does one bot
 --     say one short reason, at most once per 30s per team, after the 2s a repeated ping has to force the order.
 --   * What a ping means comes from what it is on, whatever the ping type: an enemy hero (focus in a fight, gank
 --     elsewhere), an enemy building or wave near their tower (push), our building or a wave coming to ours
@@ -20,7 +22,9 @@
 -- Logs: [SHy-PING] t= <hero> order kind= from= via=ping|insist|chat tier=ask|force-near|force-all count= lane=
 -- target= verdict=go|refuse|queue why= responders= queued= reply= replies= cands=<hero>:<answer>[/<state>]:<dist>,...
 -- (danger: affected=) once per order; per bot obey / queue why= / ignore why= / done why=, and <hero> said id= reply=
--- for every chat reply. A forced bot that goes by TP prints [SHy-TRAVEL] ... for=order.
+-- for every chat reply. A forced bot that goes by TP prints [SHy-TRAVEL] ... for=order; a far one that walks
+-- order-walk why=. A quick ping that did not chain: <human> insist-miss dist= age= kind= lane=. A ping at our
+-- fountain: skip why=own-fountain near=spawn|building; the fountain building once found: fountain-building at=.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/human_order_rules")
 local Lines = require(GetScriptDirectory() .. "/lib/data/human_order_lines")
@@ -61,6 +65,11 @@ local state = {
 	refusalAt = nil,
 	-- A danger ping's back-off runs beside the order (it does not replace it).
 	danger = nil,
+	-- GameTime() of the last insist-miss line (at most one per second).
+	insistMissLogAt = nil,
+	-- Our fountain building's location once found (OwnFountainBuilding), and when it was last looked for.
+	fountainBuilding = nil,
+	fountainLookAt = nil,
 }
 Orders.state = state
 
@@ -395,27 +404,43 @@ end
 
 -- Chat: every bot that answers an order says its own line, REPLY_GAP_SECONDS apart (maintainer, game 075); a line
 -- its bot hasn't said REPLY_FALLBACK_SECONDS after it is due (a dead bot does not think) is said by whichever bot
--- runs the next tick. The team's repeat filter (bots/lib/systems/chat_guard.lua) is skipped: "On my way!" answers a
--- new ping each time; the "On my way!" lines still vary per bot.
+-- runs the next tick. The team's repeat filter (bots/lib/systems/chat_guard.lua) is skipped: every bot that goes says
+-- the same short line for its order ("Pushing bot"; maintainer, game 077), and the filter would drop all but one.
 local function Say(bot, text)
 	local chat = ChatGuard.originalChat or bot.ActionImmediate_Chat
 	pcall(chat, bot, text, false)
 end
 
-local function ReplyText(key, human, seconds, index)
-	if key == "on-my-way" then
-		-- The assemble mode's lines (localization.lua say_assemble: "On my way!", "Coming!", ...), one per bot.
-		local lines = Localization.Get("say_assemble")
-		if type(lines) == "table" and #lines > 0 then
-			return lines[((index or 1) - 1) % #lines + 1]
-		end
-		return "On my way!"
+-- The enemy hero an order is on, by display name: its unit, or (a chase into the fog has only the player ID) the
+-- hero picked by that player; nil when the order is on no hero.
+local function TargetName(order)
+	if order.target ~= nil and not order.target:IsNull() then
+		return DisplayName(order.target)
 	end
-	return Lines.Get(Localization.GetLocale(), key, DisplayName(human), seconds)
+	if order.targetId == nil then
+		return nil
+	end
+	local ok, unitName = pcall(GetSelectedHeroName, order.targetId)
+	if not ok or type(unitName) ~= "string" or unitName == "" then
+		return nil
+	end
+	local names = HeroDisplayNames[Localization.GetLocale()] or HeroDisplayNames.en
+	return names[unitName] or HeroDisplayNames.en[unitName] or (string.gsub(unitName, "npc_dota_hero_", ""))
 end
 
--- `delay`: seconds to hold the line (a refusal waits for a repeated ping that would force the order).
-local function QueueReply(orderId, kind, speakerId, key, human, seconds, index, delay)
+-- The reply key and fill-ins for a bot's "what I do" line (Rules.AckKey): the order's lane and the enemy hero.
+local function AckLine(order)
+	local target = TargetName(order)
+	return Rules.AckKey(order.kind, order.lane, target ~= nil), { lane = order.lane, target = target }
+end
+
+local function ReplyText(key, human, seconds, extra)
+	return Lines.Get(Localization.GetLocale(), key, DisplayName(human), seconds, extra)
+end
+
+-- `delay`: seconds to hold the line (a refusal waits for a repeated ping that would force the order). `extra`: the
+-- fill-ins of a "what I do" line (AckLine), or nil.
+local function QueueReply(orderId, kind, speakerId, key, human, seconds, delay, extra)
 	local now = GameTime()
 	local at = math.max(now + (delay or 0), state.replyNextAt)
 	state.replyNextAt = at + REPLY_GAP_SECONDS
@@ -424,7 +449,7 @@ local function QueueReply(orderId, kind, speakerId, key, human, seconds, index, 
 		key = key,
 		orderId = orderId or 0,
 		kind = kind or "-",
-		text = ReplyText(key, human, seconds, index),
+		text = ReplyText(key, human, seconds, extra),
 		at = at,
 	}
 	if Rules.IsRefusalKey(key) then
@@ -568,7 +593,7 @@ end
 
 -- Starts an order. `found`: what Orders.ReadSpot found (target, buildings, camp), or the chat command's target.
 -- `tier`: "ask" (default) / "force-near" / "force-all"; `count`: pings in a row (1 for a chat command); `acked`:
--- bots that already said "On my way!" for this ping chain (they don't say it again).
+-- bots that already said their line for this ping chain (they don't say it again).
 function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 	tier = kind == "danger" and "ask" or (tier or "ask")
 	state.nextId = state.nextId + 1
@@ -664,25 +689,24 @@ function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 	for _, id in ipairs(queue) do
 		order.bots[id] = { state = "queue", unit = unitById[id], why = queueWhy[id] }
 	end
-	-- Replies (Rules.ReplyPlan): "On my way!" from every bot that goes (not again for the same ping chain); one
-	-- reason only when nobody goes.
+	-- Replies (Rules.ReplyPlan): what it does ("Pushing bot", Rules.AckKey) from every bot that goes (not again for
+	-- the same ping chain); one reason only when nobody goes.
 	local refuser = nil
 	if verdict == "refuse" and why == "nobody-free" and kind ~= "danger" then
 		refuser = NearestRefuser(decisions, unitById)
 	end
 	local replyKey, replies = "none", {}
 	local tickId = tickBot ~= nil and tickBot:GetPlayerID() or nil
-	local plan = Rules.ReplyPlan(
-		kind,
-		verdict,
-		why,
-		obey,
-		refuser,
-		{ acked = acked, now = DotaTime(), lastRefusalAt = state.refusalAt }
-	)
+	local ackKey, ackFill = AckLine(order)
+	local plan = Rules.ReplyPlan(kind, verdict, why, obey, refuser, {
+		acked = acked,
+		now = DotaTime(),
+		lastRefusalAt = state.refusalAt,
+		ackKey = ackKey,
+	})
 	for _, line in ipairs(plan) do
 		local speakerId = line.id or tickId
-		QueueReply(order.id, kind, speakerId, line.key, human, line.seconds, line.index, line.delay)
+		QueueReply(order.id, kind, speakerId, line.key, human, line.seconds, line.delay, ackFill)
 		if replyKey == "none" then
 			replyKey = line.key
 		end
@@ -832,6 +856,12 @@ local function StartPingOrder(human, ping, tickBot)
 	elseif found.enemyBuilding ~= nil or found.ourBuilding ~= nil then
 		targetKey = (found.enemyBuilding or found.ourBuilding):GetUnitName()
 	end
+	local lane = nil
+	if kind == "push" then
+		lane = found.enemyLane or found.waveLane
+	elseif kind == "defend" then
+		lane = found.ourLane or found.waveLane
+	end
 	local current = {
 		time = ping.time,
 		x = loc.x,
@@ -839,15 +869,39 @@ local function StartPingOrder(human, ping, tickBot)
 		targetKey = targetKey,
 		humanId = human:GetPlayerID(),
 		normal = ping.normal_ping,
+		kind = kind,
+		lane = lane,
 	}
-	-- Pings in a row on the same spot or target, each within 2s of the one before: 1 ask, 2 force near, 3+ force all.
+	-- Pings in a row on the same spot, target or (push / defend) lane, each within 2s of the one before: 1 ask, 2
+	-- force near, 3+ force all (Rules.IsInsist).
 	local prev = state.prevPing
-	local same = prev ~= nil and prev.humanId == current.humanId and prev.normal == current.normal
+	local same = prev ~= nil and prev.humanId == current.humanId
 	current.count = same and Rules.PingCount(prev, current) or 1
+	if same and current.count == 1 then
+		-- A quick ping that did not chain (game 077: pings 590-620 apart around one tower never reached count=3).
+		local age = current.time - prev.time
+		local now = GameTime()
+		if age > 0 and age <= Rules.INSIST_SECONDS + 1 and now >= (state.insistMissLogAt or -999) + 1 then
+			state.insistMissLogAt = now
+			local dx, dy = current.x - prev.x, current.y - prev.y
+			Log(
+				"%s insist-miss dist=%.0f age=%.1f kind=%s lane=%s prev=%s/%s normal=%s/%s",
+				Short(human),
+				math.sqrt(dx * dx + dy * dy),
+				age,
+				kind,
+				tostring(lane or "-"),
+				tostring(prev.kind or "-"),
+				tostring(prev.lane or "-"),
+				tostring(prev.normal),
+				tostring(current.normal)
+			)
+		end
+	end
 	local tier = kind == "danger" and "ask" or Rules.Tier(current.count)
 	local acked = nil
 	if current.count >= 2 then
-		-- The order is forced now: a reason not said yet is dropped, and the bots that already said "On my way!" for
+		-- The order is forced now: a reason not said yet is dropped, and the bots that already said their line for
 		-- this chain don't say it again.
 		DropRefusals()
 		acked = prev.acked
@@ -932,7 +986,7 @@ local function KeepOrder()
 			Log("%s retarget id=%d kind=%s target=%s", Short(enemy), order.id, order.kind, Short(enemy))
 		end
 	end
-	-- Queued bots join when they can, and say "On my way!" then (maintainer: "on my way" only when acknowledging).
+	-- Queued bots join when they can, and say their line then (maintainer: "on my way" only when acknowledging).
 	-- A request's queued bot (in a fight) leaves when it dies or retreats; a forced order's queued bot (dead,
 	-- channelling, very low) waits until it respawns, the channel ends or it is healed (Rules.ForceRejoin).
 	for id, entry in pairs(order.bots) do
@@ -953,10 +1007,49 @@ local function KeepOrder()
 			end
 			if join then
 				entry.state, entry.logged, entry.after = "obey", false, entry.why or "in-fight"
-				QueueReply(order.id, order.kind, id, "on-my-way", order.from, nil, (id % 5) + 1)
+				local ackKey, ackFill = AckLine(order)
+				QueueReply(order.id, order.kind, id, ackKey, order.from, nil, nil, ackFill)
 			end
 		end
 	end
+end
+
+-- Our fountain building ("dota_fountain" in the allied building list, as the game 070 unit survey showed), looked up
+-- at most every 5s until found, then kept; nil until then (the spawn point alone counts). Not hard-coded: the spawn
+-- point Fu.GetTeamFountain() is ~1040 from it.
+local function OwnFountainBuilding()
+	if state.fountainBuilding ~= nil then
+		return state.fountainBuilding
+	end
+	local now = GameTime()
+	if state.fountainLookAt ~= nil and now - state.fountainLookAt < 5 and now >= state.fountainLookAt then
+		return nil
+	end
+	state.fountainLookAt = now
+	-- The one nearest our spawn point, within 3000 of it (the survey listed only our own fountain; this keeps an
+	-- enemy one out should the list ever hold it).
+	local spawn = Fu.GetTeamFountain()
+	local best, bestDist = nil, 3000
+	for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
+		if unit ~= nil and not unit:IsNull() and unit:GetUnitName() == "dota_fountain" then
+			local loc = unit:GetLocation()
+			local dist = spawn ~= nil and Dist(loc, spawn) or 0
+			if dist <= bestDist then
+				best, bestDist = loc, dist
+			end
+		end
+	end
+	if best ~= nil then
+		state.fountainBuilding = best
+		Log(
+			"%s fountain-building at=%.0f,%.0f from-spawn=%.0f",
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			best.x,
+			best.y,
+			bestDist
+		)
+	end
+	return best
 end
 
 -- Run by every bot from mode_assemble_generic.lua's GetDesire; the team's work happens at most every TICK_SECONDS.
@@ -978,15 +1071,17 @@ function Orders.Tick(bot)
 	then
 		state.lastPingTime = ping.time
 		-- A ping in our own fountain area is never an order (maintainer 2026-11-23: five pings there are the
-		-- credit line in ping_streak.lua, #217); without this, 3+ quick pings there forced the team home.
-		local fountain = Fu.GetTeamFountain()
-		if fountain ~= nil and Rules.InOwnFountainArea(ping.location, fountain) then
+		-- credit line in ping_streak.lua, #217); without this, 3+ quick pings there forced the team home. Measured
+		-- from the spawn point and from the fountain building (game 077: a ping on the building was not skipped).
+		local inFountain, near = Rules.InOwnFountainArea(ping.location, Fu.GetTeamFountain(), OwnFountainBuilding())
+		if inFountain then
 			pcall(
 				print,
 				string.format(
-					"[SHy-PING] t=%.0f %s skip why=own-fountain at=%.0f,%.0f",
+					"[SHy-PING] t=%.0f %s skip why=own-fountain near=%s at=%.0f,%.0f",
 					DotaTime(),
 					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					tostring(near),
 					ping.location.x,
 					ping.location.y
 				)
@@ -1154,19 +1249,98 @@ function Orders.FarmCamp(bot)
 	return order.campObj, Desire(bot, order)
 end
 
--- A FORCE ALL order: a TP (or Twin Gate) toward loc when it is clearly faster than walking (objective_travel.lua; it
--- prints [SHy-TRAVEL] ... for=order). Push and defend orders TP through the TP rule of their modes
--- (ability_item_usage_generic.lua), Roshan through the Roshan rally. True when it gave the bot an action.
+-- A forced bot this far from the spot that walks logs why it did not TP (order-walk).
+local WALK_LOG_DIST = 4000
+local NEAR_WALK_DIST = 3000
+
+-- "ready" / "cooldown" / "none": the bot's TP scroll or Boots of Travel (the items objective_travel.lua uses).
+local function TpState(bot)
+	local held = false
+	for _, slot in ipairs({ 15, 0, 1, 2, 3, 4, 5 }) do
+		local ok, item = pcall(function()
+			return bot:GetItemInSlot(slot)
+		end)
+		if ok and item ~= nil then
+			local name = item:GetName()
+			if name == "item_tpscroll" or name == "item_travel_boots" or name == "item_travel_boots_2" then
+				if item:IsFullyCastable() then
+					return "ready"
+				end
+				held = true
+			end
+		end
+	end
+	return held and "cooldown" or "none"
+end
+
+-- A forced order (force near or force all, every kind): a TP (or Twin Gate) toward loc at once when it is clearly
+-- faster than walking (objective_travel.lua: 8s saved; it prints [SHy-TRAVEL] ... for=order). Game 077: under a
+-- force-all push Spirit Breaker (12857 away) walked 15s before the push mode's own TP rule fired, and Largo (10066)
+-- walked and was caught, so push and defend call this too (Orders.TravelThink), before their modes walk. No TP under
+-- Orders.LEAVE_HP or while hit by a hero (ObjectiveTravel.Go). A far bot that walks logs why, at most every 5s
+-- (`order-walk why=low-hp|danger|rooted|no-scroll|cooldown|eta`). True when it gave the bot an action.
 local function TravelFar(bot, order, loc)
-	if order.tier ~= "force-all" or loc == nil then
+	if order.tier == "ask" or loc == nil then
 		return false
 	end
-	return ObjectiveTravel.Go(bot, loc, "order") == true
+	-- Within NEAR_WALK_DIST a TP (3s channel + 1s) cannot save the 8s objective_travel.lua asks for; skip the work.
+	local dist = GetUnitToLocationDistance(bot, loc)
+	if dist <= NEAR_WALK_DIST and not bot:IsChanneling() then
+		return false
+	end
+	local hpOk = Fu.GetHP(bot) >= Orders.LEAVE_HP
+	if hpOk and ObjectiveTravel.Go(bot, loc, "order") == true then
+		return true
+	end
+	if dist > WALK_LOG_DIST and DotaTime() >= (bot._orderWalkLogAt or -999) then
+		bot._orderWalkLogAt = DotaTime() + 5
+		local why = "eta"
+		if not hpOk then
+			why = "low-hp"
+		elseif bot:WasRecentlyDamagedByAnyHero(2) then
+			why = "danger"
+		elseif bot:IsRooted() then
+			why = "rooted"
+		else
+			local tp = TpState(bot)
+			if tp == "none" then
+				why = "no-scroll"
+			elseif tp == "cooldown" then
+				why = "cooldown"
+			end
+		end
+		Log(
+			"%s order-walk id=%d kind=%s tier=%s why=%s dist=%.0f eta=%.0f",
+			Short(bot),
+			order.id,
+			order.kind,
+			order.tier,
+			why,
+			dist,
+			ObjectiveTravel.Eta(bot, loc)
+		)
+	end
+	return false
+end
+
+-- Push.PushThink / Defend.DefendThink: a bot carrying out a forced push / defend order on `lane` TPs toward the
+-- order's spot first when that is clearly faster (TravelFar). True when it gave the bot an action (the mode's own
+-- Think then waits).
+function Orders.TravelThink(bot, kind, lane)
+	local order = state.order
+	if order == nil or order.kind ~= kind or order.tier == "ask" or LANE_OF[order.lane] ~= lane then
+		return false
+	end
+	local entry = order.bots[bot:GetPlayerID()]
+	if entry == nil or entry.state ~= "obey" or entry.unit ~= bot then
+		return false
+	end
+	return TravelFar(bot, order, order.loc)
 end
 
 -- mode_farm_generic.lua Think: walk to the ordered camp first (farm's own camp code then clears it, with the
 -- hero's spells); without this the bot would stop for nearer lane creeps on the way (game 074 Alchemist).
--- A FORCE ALL order goes by TP when that is clearly faster (objective_travel.lua, as the Roshan rally does).
+-- A forced order goes by TP when that is clearly faster (TravelFar, objective_travel.lua, as the Roshan rally does).
 function Orders.FarmThink(bot)
 	local order = state.order
 	if order == nil or order.kind ~= "farm" or order.camp == nil then

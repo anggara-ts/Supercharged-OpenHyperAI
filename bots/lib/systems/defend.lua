@@ -2506,6 +2506,10 @@ function Defend.DefendThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
+	-- A forced defend order (#222): a far bot TPs first when that is clearly faster (game 077: they walked).
+	if HumanOrders.TravelThink(bot, "defend", lane) then
+		return
+	end
 	local now = DotaTime()
 	local offset = StableOffset(bot)
 	local ancient = GetAncient(ourTeam)

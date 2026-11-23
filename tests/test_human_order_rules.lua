@@ -61,9 +61,63 @@ T.test("human orders: the same ping again within 2s is an insist", function()
 	T.eq(R.IsInsist(first, { time = 101.5, x = 4900, y = -3700 }), true, "79 away, 1.5s later")
 	T.eq(R.IsInsist(first, { time = 103, x = 4900, y = -3700 }), false, "3s later: too slow for an insist")
 	T.eq(R.IsInsist(first, { time = 106, x = 4825, y = -3676 }), false, "6s later")
-	T.eq(R.IsInsist(first, { time = 101, x = 5300, y = -3676 }), false, "475 away")
+	T.eq(R.IsInsist(first, { time = 101, x = 5300, y = -3676 }), true, "475 away: within the 600 radius")
+	T.eq(R.IsInsist(first, { time = 101, x = 5525, y = -3676 }), false, "700 away")
 	local onHero = { time = 100, x = 0, y = 0, targetKey = "hero15" }
 	T.eq(R.IsInsist(onHero, { time = 101.8, x = 900, y = 0, targetKey = "hero15" }), true, "same hero, moved")
+	T.eq(
+		R.IsInsist({ time = 100, x = 0, y = 0, normal = true }, { time = 101, x = 100, y = 0, normal = false }),
+		false,
+		"a normal ping then an X-ping on the same spot"
+	)
+end)
+
+-- Game 077 (23:18-23:23): quick pings around our bottom tower landed 590-620 apart and only reached count=2.
+T.test("human orders: push / defend pings chain by kind and lane, wherever they land", function()
+	local R = rules()
+	local pings = {
+		{ time = 1398.1, x = -259, y = -5959 },
+		{ time = 1400.4, x = -196, y = -6578 },
+		{ time = 1401.9, x = -195, y = -6579 },
+		{ time = 1403.0, x = 295, y = -6239 },
+	}
+	local prev, counts = nil, {}
+	for i, ping in ipairs(pings) do
+		ping.kind, ping.lane, ping.normal = "defend", "bot", true
+		ping.count = R.PingCount(prev, ping)
+		counts[i] = ping.count
+		prev = ping
+	end
+	T.eq(counts[2], 1, "2.3s after the first: a new chain")
+	T.eq(counts[3], 2, "the same spot 1.5s later: force near")
+	T.eq(counts[4], 3, "590 away on the same lane 1.1s later: force all")
+	T.eq(R.Tier(counts[4]), "force-all", "the game 077 pings now force everyone")
+	local push = { time = 100, x = 0, y = 0, kind = "push", lane = "top", normal = false }
+	T.eq(
+		R.IsInsist(push, { time = 101, x = 1500, y = 0, kind = "push", lane = "top", normal = true }),
+		true,
+		"a push on the same lane 1500 away, X-ping then normal ping"
+	)
+	T.eq(
+		R.IsInsist(push, { time = 101, x = 1500, y = 0, kind = "push", lane = "mid", normal = false }),
+		false,
+		"another lane"
+	)
+	T.eq(
+		R.IsInsist(push, { time = 101, x = 1500, y = 0, kind = "defend", lane = "top", normal = false }),
+		false,
+		"another kind on the same lane"
+	)
+	T.eq(
+		R.IsInsist(push, { time = 103, x = 0, y = 0, kind = "push", lane = "top", normal = false }),
+		false,
+		"the same lane 3s later"
+	)
+	T.eq(
+		R.IsInsist({ time = 100, x = 0, y = 0, kind = "move" }, { time = 101, x = 1500, y = 0, kind = "move" }),
+		false,
+		"other kinds still need the spot"
+	)
 end)
 
 -- Maintainer 2026-11-23: "1 ping = ask / 2 ping = force ally nearby ping / 3+ ping = force all ally accross map".
@@ -275,18 +329,20 @@ T.test("human orders: replies - on my way from every bot that goes, a reason onl
 	local plan = R.ReplyPlan("push", "go", "forced", { 9, 7 }, { id = 3, key = "retreat" }, { now = 500 })
 	T.eq(#plan, 2, "two on my way, nothing else")
 	T.eq(plan[1].id, 9, "first responder")
-	T.eq(plan[1].key, "on-my-way", "on my way")
-	T.eq(plan[1].index, 1, "first line")
+	T.eq(plan[1].key, "on-my-way", "on my way (no ackKey given)")
 	T.eq(plan[2].id, 7, "second responder")
-	T.eq(plan[2].index, 2, "a different line")
 	for _, line in ipairs(plan) do
 		T.eq(line.key, "on-my-way", "no refusal line when a bot goes")
 	end
+	-- Game 077 (maintainer): each bot says what it does, the same line for every bot of the order.
+	plan = R.ReplyPlan("push", "go", "forced", { 9, 7 }, nil, { now = 500, ackKey = "pushing" })
+	T.eq(#plan, 2, "one line per bot that goes")
+	T.eq(plan[1].key, "pushing", "first: pushing")
+	T.eq(plan[2].key, "pushing", "second: pushing")
 	-- The same ping chain again: the bots that already said it stay quiet, a new one speaks.
 	plan = R.ReplyPlan("push", "go", "forced", { 9, 7, 5 }, nil, { now = 501, acked = { [9] = true, [7] = true } })
 	T.eq(#plan, 1, "only the new bot")
 	T.eq(plan[1].id, 5, "the bot that joined with the force")
-	T.eq(plan[1].index, 1, "its line")
 	-- Everyone joins later (fighting / dead): nothing now, each says "On my way!" when it joins.
 	T.eq(#R.ReplyPlan("push", "queue", "forced", {}, nil, { now = 500 }), 0, "queue: no reply")
 	-- Nobody goes: one short reason, said after the 2s a repeated ping has to force the order.
@@ -310,7 +366,32 @@ T.test("human orders: replies - on my way from every bot that goes, a reason onl
 	T.ok(R.RefusalAllowed(0, nil), "the first one")
 	T.ok(R.IsRefusalKey("too-early") and R.IsRefusalKey("busy"), "reasons")
 	T.ok(not R.IsRefusalKey("on-my-way") and not R.IsRefusalKey("which_lane"), "not reasons")
+	for key in pairs(R.ACK_KEYS) do
+		T.ok(not R.IsRefusalKey(key), key .. " is not a reason")
+	end
 	T.eq(R.REPLY_GAP_SECONDS, 0.5, "replies ~0.5s apart")
+end)
+
+-- Maintainer, game 077: "instead of generic 'on my way', change to 'pushing bot', 'on my way' (when checking fog),
+-- 'attacking medusa'".
+T.test("human orders: each order kind has its own reply line", function()
+	local R = rules()
+	T.eq(R.AckKey("push", "bot", false), "pushing", "push")
+	T.eq(R.AckKey("defend", "mid", false), "defending", "defend")
+	T.eq(R.AckKey("push", nil, false), "on-my-way", "push without a lane")
+	T.eq(R.AckKey("gank", nil, true), "attacking", "gank on a hero")
+	T.eq(R.AckKey("focus", nil, true), "attacking", "focus on a hero")
+	T.eq(R.AckKey("chase", nil, true), "attacking", "chase a hero")
+	T.eq(R.AckKey("chase", nil, false), "on-my-way", "chase without a target")
+	T.eq(R.AckKey("farm", nil, false), "clearing-camp", "camp")
+	T.eq(R.AckKey("rosh", nil, false), "going-roshan", "roshan")
+	T.eq(R.AckKey("group", nil, false), "grouping", "group")
+	T.eq(R.AckKey("fog", nil, false), "on-my-way", "fog")
+	T.eq(R.AckKey("move", nil, false), "on-my-way", "move")
+	T.eq(R.AckKey("scout", nil, false), "on-my-way", "anything else")
+	for _, kind in ipairs({ "push", "defend", "gank", "farm", "rosh", "group", "fog" }) do
+		T.ok(R.ACK_KEYS[R.AckKey(kind, "top", true)], kind .. " gives a known reply key")
+	end
 end)
 
 -- Maintainer 2026-11-23: 2 pings (or a chat command) = every bot within ~4000 or at that lane, whatever the checks
@@ -485,6 +566,24 @@ T.test("human orders: reply lines per language", function()
 			T.ok(Lines[locale][key] ~= nil, locale .. " has " .. key)
 		end
 	end
+	-- Game 077: what the bot does, not a generic "Coming!".
+	T.eq(Lines.Get("en", "pushing", "Meepo", nil, { lane = "bot" }), "Pushing bot", "pushing bot")
+	T.eq(Lines.Get("en", "defending", "Meepo", nil, { lane = "mid" }), "Defending mid", "defending mid")
+	T.eq(Lines.Get("en", "attacking", "Meepo", nil, { target = "Medusa" }), "Attacking Medusa", "attacking medusa")
+	T.eq(Lines.Get("en", "on-my-way", "Meepo"), "On my way", "on my way")
+	T.eq(Lines.Get("en", "clearing-camp", "Meepo"), "Clearing the camp", "camp")
+	T.eq(Lines.Get("en", "going-roshan", "Meepo"), "Going Roshan", "roshan")
+	T.eq(Lines.Get("en", "grouping", "Meepo"), "Grouping up", "group")
+	T.eq(Lines.Get("zh", "pushing", "Meepo", nil, { lane = "top" }), "去推上路", "the lane word of the language")
+	T.eq(Lines.Get("xx", "pushing", "Meepo", nil, { lane = "top" }), "Pushing top", "unknown locale: English")
+	T.eq(Lines.Get("en", "attacking", "Meepo", nil, { target = "100%" }), "Attacking 100", "a % in a name is dropped")
+	local R = rules()
+	for key in pairs(R.ACK_KEYS) do
+		T.ok(Lines.en[key] ~= nil, "a line for " .. key)
+	end
+	for _, line in pairs(Lines.en) do
+		T.ok(not line:find("Coming", 1, true), 'no "Coming!" line')
+	end
 end)
 
 T.test("human orders: the runtime loads and a tick without humans does nothing", function()
@@ -504,4 +603,14 @@ T.test("human orders: a ping in our own fountain area is not an order", function
 	T.eq(R.InOwnFountainArea({ x = -7000, y = -6500 }, fountain), true, "next to the fountain")
 	T.eq(R.InOwnFountainArea({ x = -6000, y = -6000 }, fountain), false, "1300 away")
 	T.eq(R.InOwnFountainArea(nil, fountain), false, "no location")
+	-- Game 077: a ping on the fountain building (-7518,-6870) is ~1040 from the spawn point (-6619,-6336).
+	local spawn, building = { x = -6619, y = -6336 }, { x = -7480, y = -6900 }
+	local onBuilding = { x = -7518, y = -6870 }
+	T.eq(R.InOwnFountainArea(onBuilding, spawn), false, "the spawn point alone misses the building")
+	local inside, near = R.InOwnFountainArea(onBuilding, spawn, building)
+	T.eq(inside, true, "on the fountain building")
+	T.eq(near, "building", "counted by the building")
+	T.eq(select(2, R.InOwnFountainArea({ x = -6700, y = -6300 }, spawn, building)), "spawn", "by the spawn point")
+	T.eq(R.InOwnFountainArea({ x = -5000, y = -5000 }, spawn, building), false, "far from both")
+	T.eq(R.InOwnFountainArea(onBuilding, nil, building), true, "the building without a spawn point")
 end)
