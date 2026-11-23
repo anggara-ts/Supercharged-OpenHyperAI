@@ -150,3 +150,70 @@ T.test("ping streak: the item think answers five fountain pings once, in team ch
 	PingTimes(5)
 	T.eq(#said, 2, "after the cooldown: a line again")
 end)
+
+-- Game 077: 6 pings on the fountain building (about -7518,-6870) counted nothing: it is ~1040 from the spawn point
+-- (-6619,-6336) that Fu.GetTeamFountain() gives. A ping within RADIUS of the building counts too.
+T.test("ping streak: a ping on the fountain building counts", function()
+	local Streak = Load()
+	local fx, fy, bx, by = -6619, -6336, -7480, -6900
+	T.eq(Streak.Near(-7518, -6870, fx, fy), false, "the spawn point alone misses the building")
+	T.eq(Streak.Near(-7518, -6870, fx, fy, bx, by), true, "on the building")
+	T.eq(Streak.Near(-7030, -6646, fx, fy, bx, by), true, "the ground in front of it (the streak that answered)")
+	T.eq(Streak.Near(-5000, -5000, fx, fy, bx, by), false, "far from both")
+	local state = { count = 0 }
+	for i = 1, 4 do
+		T.eq(Streak.Step(state, 100 + i, -7518, -6870, fx, fy, 100 + i, bx, by), false, "building ping " .. i)
+	end
+	T.eq(state.count, 4, "four counted on the building")
+	T.eq(Streak.Step(state, 105, -7518, -6870, fx, fy, 105, bx, by), true, "the fifth answers")
+	local old = { count = 0 }
+	Streak.Step(old, 100, -7518, -6870, fx, fy, 100)
+	T.eq(old.count, 0, "without the building the ping does not count")
+end)
+
+T.test("ping streak: the item think finds the fountain building and counts pings on it", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich", time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Streak = require(GetScriptDirectory() .. "/lib/systems/ping_streak")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local bot = GetBot()
+	local humanSlot = GetTeamMember(1) == bot and 2 or 1
+	local human = GetTeamMember(humanSlot)
+	local humanId = GetTeamPlayers(GetTeam())[humanSlot]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	local said = {}
+	bot.ActionImmediate_Chat = function(_, text)
+		said[#said + 1] = text
+	end
+	local fountain = Fu.GetTeamFountain()
+	-- The building ~1040 from the spawn point, as in game 077.
+	local buildingLoc = Vector(fountain.x - 900, fountain.y - 520, 0)
+	local building = T.stub.newUnit({ name = "dota_fountain", team = GetTeam(), loc = buildingLoc, hero = false })
+	GetUnitList = function(listType)
+		if listType == UNIT_LIST_ALLIED_BUILDINGS then
+			return { building }
+		end
+		return {}
+	end
+	local pingTime = -100
+	human.GetMostRecentPing = function()
+		return { time = pingTime, location = Vector(buildingLoc.x - 30, buildingLoc.y + 20, 0), normal_ping = false }
+	end
+	Usage.WatchFountainPings()
+	for _ = 1, 5 do
+		T.stub.time = T.stub.time + 1
+		pingTime = GameTime() - 0.2
+		Usage.WatchFountainPings()
+	end
+	T.eq(#said, 1, "five pings on the building: the line")
+	T.eq(said[1], Streak.Line(), "the credit line")
+	local found = false
+	for _, line in ipairs(T.stub.printed) do
+		if line:find("fountain-building team=", 1, true) then
+			found = true
+		end
+	end
+	T.ok(found, "the building is logged once found")
+end)

@@ -1038,6 +1038,36 @@ function Usage.WatchFountainPings()
 		end
 	end
 	local fountain = Fu.GetTeamFountain()
+	-- Our fountain building: `dota_fountain` in the allied building list (nearest the spawn point, within 3000),
+	-- looked up every 5s until found, then kept for the team. Game 077: Fu.GetTeamFountain() is the spawn point, ~1040
+	-- from the building, so 6 pings on the building itself counted nothing.
+	if shared.building == nil and (now >= (shared.buildingLookAt or -999) or now < shared.buildingLookAt - 5) then
+		shared.buildingLookAt = now + 5
+		local bestDist = 3000
+		for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
+			if unit ~= nil and not unit:IsNull() and unit:GetUnitName() == "dota_fountain" then
+				local loc = unit:GetLocation()
+				local dist = math.sqrt((loc.x - fountain.x) ^ 2 + (loc.y - fountain.y) ^ 2)
+				if dist <= bestDist then
+					shared.building, bestDist = loc, dist
+				end
+			end
+		end
+		if shared.building ~= nil then
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s fountain-building team=%s at=%.0f,%.0f from-spawn=%.0f",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					team == TEAM_RADIANT and "radiant" or "dire",
+					shared.building.x,
+					shared.building.y,
+					bestDist
+				)
+			)
+		end
+	end
+	local building = shared.building
 	for _, human in ipairs(shared.slots) do
 		local member = GetTeamMember(human.slot)
 		local ping = member ~= nil and not member:IsNull() and member:GetMostRecentPing() or nil
@@ -1047,7 +1077,19 @@ function Usage.WatchFountainPings()
 				state = { count = 0 }
 				shared.humans[human.id] = state
 			end
-			if PingStreak.Step(state, ping.time, ping.location.x, ping.location.y, fountain.x, fountain.y, now) then
+			if
+				PingStreak.Step(
+					state,
+					ping.time,
+					ping.location.x,
+					ping.location.y,
+					fountain.x,
+					fountain.y,
+					now,
+					building and building.x,
+					building and building.y
+				)
+			then
 				local said = "throttled"
 				if PingStreak.Allow(shared, now) then
 					said = pcall(function()

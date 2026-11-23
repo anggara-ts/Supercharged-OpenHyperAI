@@ -4,7 +4,7 @@
 -- pings by itself: the human-order code (#222) sees the same pings and does what it does with them.
 local PingStreak = {}
 
--- A ping this close to our fountain counts (the fountain area; a map estimate, not game data).
+-- A ping this close to our spawn point or our fountain building counts (a map estimate, not game data).
 PingStreak.RADIUS = 900
 -- Each ping within this many seconds of the one before; a ping older than this when first read starts nothing.
 PingStreak.GAP = 3
@@ -38,18 +38,33 @@ function PingStreak.Line()
 	return table.concat(out)
 end
 
+-- Is (x, y) within RADIUS of our spawn point (fx, fy: Fu.GetTeamFountain()) or of our fountain building (bx, by;
+-- nil while not found)? The building is ~1040 from the spawn point (game 077: a ping on it landed at -7518,-6870, the
+-- spawn point is -6619,-6336), so 6 pings on the building itself counted nothing.
+function PingStreak.Near(x, y, fx, fy, bx, by)
+	local r2 = PingStreak.RADIUS * PingStreak.RADIUS
+	local dx, dy = x - fx, y - fy
+	if dx * dx + dy * dy <= r2 then
+		return true
+	end
+	if bx == nil or by == nil then
+		return false
+	end
+	dx, dy = x - bx, y - by
+	return dx * dx + dy * dy <= r2
+end
+
 -- One human's most recent ping, read at `now` (GameTime()). `state`: that human's streak, kept by the caller
 -- ({ seen = the last ping time read, count =, at = the last counted ping's time }). `pingTime`, `x`, `y`: the ping
--- (GetMostRecentPing: time in GameTime(), location); `fx`, `fy`: our fountain. A ping is new when its time differs
--- from the last one read, so any bot's think can feed the same state. Returns true when this ping completes the
--- streak (it then starts over).
-function PingStreak.Step(state, pingTime, x, y, fx, fy, now)
+-- (GetMostRecentPing: time in GameTime(), location); `fx`, `fy`: our spawn point; `bx`, `by` (optional): our
+-- fountain building (PingStreak.Near). A ping is new when its time differs from the last one read, so any bot's think
+-- can feed the same state. Returns true when this ping completes the streak (it then starts over).
+function PingStreak.Step(state, pingTime, x, y, fx, fy, now, bx, by)
 	if pingTime == nil or pingTime <= 0 or pingTime == state.seen then
 		return false
 	end
 	state.seen = pingTime
-	local dx, dy = x - fx, y - fy
-	if now - pingTime > PingStreak.GAP or dx * dx + dy * dy > PingStreak.RADIUS * PingStreak.RADIUS then
+	if now - pingTime > PingStreak.GAP or not PingStreak.Near(x, y, fx, fy, bx, by) then
 		state.count, state.at = 0, nil
 		return false
 	end
