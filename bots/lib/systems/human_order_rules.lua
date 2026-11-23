@@ -591,4 +591,14 @@ function Rules.IsRefusalKey(key)
 	return key ~= "on-my-way" and key ~= "which_lane" and key ~= "cancelled"
 end
 
+-- Our own fountain area: pings there are not orders (they feed the fountain-ping credit line, #217).
+Rules.OWN_FOUNTAIN_RADIUS = 900
+function Rules.InOwnFountainArea(loc, fountain)
+	if loc == nil or fountain == nil then
+		return false
+	end
+	local dx, dy = loc.x - fountain.x, loc.y - fountain.y
+	return dx * dx + dy * dy <= Rules.OWN_FOUNTAIN_RADIUS * Rules.OWN_FOUNTAIN_RADIUS
+end
+
 return Rules

@@ -497,3 +497,11 @@ T.test("human orders: the runtime loads and a tick without humans does nothing",
 	T.eq(Orders.PushDesire(GetBot(), LANE_TOP), nil, "no push desire")
 	T.eq(Orders.FocusTarget(GetBot(), 600), nil, "no focus target")
 end)
+
+T.test("human orders: a ping in our own fountain area is not an order", function()
+	local R = rules()
+	local fountain = { x = -7172, y = -6652 }
+	T.eq(R.InOwnFountainArea({ x = -7000, y = -6500 }, fountain), true, "next to the fountain")
+	T.eq(R.InOwnFountainArea({ x = -6000, y = -6000 }, fountain), false, "1300 away")
+	T.eq(R.InOwnFountainArea(nil, fountain), false, "no location")
+end)

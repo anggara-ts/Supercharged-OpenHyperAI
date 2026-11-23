@@ -977,7 +977,23 @@ function Orders.Tick(bot)
 		and now - ping.time <= PING_FRESH_SECONDS
 	then
 		state.lastPingTime = ping.time
-		StartPingOrder(human, ping, bot)
+		-- A ping in our own fountain area is never an order (maintainer 2026-11-23: five pings there are the
+		-- credit line in ping_streak.lua, #217); without this, 3+ quick pings there forced the team home.
+		local fountain = Fu.GetTeamFountain()
+		if fountain ~= nil and Rules.InOwnFountainArea(ping.location, fountain) then
+			pcall(
+				print,
+				string.format(
+					"[SHy-PING] t=%.0f %s skip why=own-fountain at=%.0f,%.0f",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					ping.location.x,
+					ping.location.y
+				)
+			)
+		else
+			StartPingOrder(human, ping, bot)
+		end
 	end
 	if now - state.tickAt < TICK_SECONDS and now >= state.tickAt then
 		return
