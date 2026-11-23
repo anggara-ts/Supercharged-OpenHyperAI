@@ -142,8 +142,9 @@ T.test("human orders: ping tiers by count, each ping within 2s of the one before
 	T.eq(select(2, chain({ 100, 101.5, 104 })), "ask", "the third 2.5s late starts a new chain")
 	T.eq(select(2, chain({ 100, 102.5, 104 })), "force-near", "a late second ping, then 1.5s: force near")
 	-- The chain is per gap, not from the first ping: 3 pings 1.5s apart span 3s and still count.
-	T.eq(select(2, chain({ 100, 101.5, 103 }, { 0, 100, 200 })), "force-all", "small moves within 300")
-	T.eq(select(2, chain({ 100, 101.5 }, { 0, 400 })), "ask", "400 away: another spot")
+	T.eq(select(2, chain({ 100, 101.5, 103 }, { 0, 100, 200 })), "force-all", "small moves within 600")
+	T.eq(select(2, chain({ 100, 101.5 }, { 0, 400 })), "force-near", "400 away: within the 600 radius")
+	T.eq(select(2, chain({ 100, 101.5 }, { 0, 700 })), "ask", "700 away: another spot")
 	-- The same target moved: a hero ping follows the hero.
 	T.eq(select(2, chain({ 100, 101.5, 103 }, { 0, 900, 1800 }, "hero15")), "force-all", "same hero, moved")
 	T.eq(R.Tier(nil), "ask", "no count: ask")
