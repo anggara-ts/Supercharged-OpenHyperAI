@@ -2029,3 +2029,13 @@ do
 	GetDesire = Perf.Wrap("farm.GetDesire", GetDesire)
 	Think = Perf.Wrap("farm.Think", Think)
 end
+-- Strength push (#12, bots/lib/systems/strength_push.lua): a bot raised by a strength push window keeps farm at or
+-- under 0.70 for the second the mark is fresh, so it walks to the lane instead of the next camp (game 074 45:30-47:00:
+-- four bots farmed camps with Dire's mid high ground open). Log [SHy-FARM] yield-strength-push.
+do
+	local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	local farmGetDesire = GetDesire
+	GetDesire = function(...)
+		return StrengthPush.FarmCap(bot, farmGetDesire(...))
+	end
+end
