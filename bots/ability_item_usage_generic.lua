@@ -789,14 +789,21 @@ function Usage.SetTalkMessage()
 	local kills = GetHeroKills(playerId)
 	local deaths = GetHeroDeaths(playerId)
 	local turboGoldScale = GetGameMode() == GAMEMODE_TURBO and 2.0 or 1.0
-	if playerId == Fu.Role.GetReplyMemberID() and replyCount <= maxReplies then
+	-- The chat callback carries every chat command (!push, !debug, ...), so it does not depend on the reply count;
+	-- only the small-talk replies below stop after maxReplies (#222).
+	if playerId == Fu.Role.GetReplyMemberID() then
 		if not chatCallbackInstalled and GetGameState() == GAME_STATE_GAME_IN_PROGRESS then
 			chatCallbackInstalled = true
 			InstallChatCallback(function(chatEvent)
 				Usage.SetReplyHumanTime(chatEvent)
 			end)
 		end
-		if humanChatString ~= nil and humanChatTime ~= nil and DotaTime() > humanChatTime + chatReplyDelay then
+		if
+			replyCount <= maxReplies
+			and humanChatString ~= nil
+			and humanChatTime ~= nil
+			and DotaTime() > humanChatTime + chatReplyDelay
+		then
 			local replyString = Fu.Chat.GetReplyString(humanChatString, replyToAllChat)
 			if replyString ~= nil then
 				if replyCount == maxReplies then
@@ -893,6 +900,26 @@ end
 function Usage.SetReplyHumanTime(chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
+	-- [SHy-CHAT] heard: one line per `!` command that reached the team's chat callback (game 077: `!push` and
+	-- `!debug` were lost with no trace in the log), so a lost command shows by its missing line.
+	local commandWord = type(chatText) == "string" and chatText:match("^%s*(![^%s]*)") or nil
+	if commandWord ~= nil then
+		local nameOk, senderHero = pcall(GetSelectedHeroName, senderPlayerId)
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s heard cmd=%s from=%s team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				commandWord:lower(),
+				nameOk
+						and type(senderHero) == "string"
+						and senderHero ~= ""
+						and (string.gsub(senderHero, "npc_dota_hero_", ""))
+					or tostring(senderPlayerId),
+				tostring(chatEvent.team_only)
+			)
+		)
+	end
 	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!no` (bots/lib/systems/human_orders.lua).
 	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
 		return

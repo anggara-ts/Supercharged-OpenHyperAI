@@ -202,19 +202,19 @@ Role.GetReplyMemberID = function()
 	if Role.replyMemberID ~= nil then
 		return Role.replyMemberID
 	end
-	local teamPlayerIds = GetTeamPlayers(GetTeam())
-	local playerCount = #teamPlayerIds
-	local humanCount = 0
-	do
-		local i = 0
-		while i < #teamPlayerIds do
-			if not IsPlayerBot(teamPlayerIds[i + 1]) then
-				humanCount = humanCount + 1
-			end
-			i = i + 1
+	-- The team's bot that installs the chat callback (ability_item_usage_generic.lua Usage.SetTalkMessage), picked
+	-- among the bots only. It picked a slot after the human count, as if the humans held the first slots; with the
+	-- human in slot 5 (game 077) it could pick the human, and then no bot heard any chat command (!push, !debug).
+	local botIds = {}
+	for _, playerId in ipairs(GetTeamPlayers(GetTeam())) do
+		if IsPlayerBot(playerId) then
+			botIds[#botIds + 1] = playerId
 		end
 	end
-	Role.replyMemberID = teamPlayerIds[RandomInt(humanCount + 1, playerCount)]
+	if #botIds == 0 then
+		return nil
+	end
+	Role.replyMemberID = botIds[RandomInt(1, #botIds)]
 	return Role.replyMemberID
 end
 Role.memberIDIndexTable = nil
