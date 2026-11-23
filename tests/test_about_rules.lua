@@ -98,7 +98,8 @@ T.test("about: every language has one line with the version and no URL", functio
 	-- The same module name localization.lua uses when GetScriptDirectory() is "bots".
 	local CustomLoader = require("bots.lib.systems.custom_loader")
 	local saved = CustomLoader.Localization
-	local author = require(GetScriptDirectory() .. "/lib/systems/ping_streak").Signature()
+	local author = require(GetScriptDirectory() .. "/lib/systems/ping_streak").Line():match("^%S+ %S+ (%l+)%.")
+	T.eq(#(author or ""), 8, "the name from the ping streak line")
 	for _, locale in ipairs({ "en", "zh", "ru", "ja" }) do
 		CustomLoader.Localization = locale
 		local template = Localization.Get("say_about")

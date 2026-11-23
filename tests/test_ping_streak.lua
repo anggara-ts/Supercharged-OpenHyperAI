@@ -11,38 +11,47 @@ local function Ping(Streak, state, at, now, x)
 	return Streak.Step(state, at, x or 100, 100, 0, 0, now or at)
 end
 
-T.test("ping streak: the signature decodes to the expected text", function()
-	local Streak = Load()
-	local text = Streak.Signature()
-	T.eq(#text, 8, "length")
-	T.eq(text:sub(1, 1), "d", "first letter")
-	local sum, weighted = 0, 0
-	for i = 1, #text do
-		sum = sum + text:byte(i)
-		weighted = weighted + i * text:byte(i)
+-- The name in the line: its third word.
+local function NameIn(line)
+	return line:match("^%S+ %S+ (%l+)%.")
+end
+
+T.test("ping streak: the line decodes to the expected text", function()
+	local line = Load().Line()
+	T.eq(#line, 69, "length")
+	T.eq(line:sub(1, 1), "M", "first letter")
+	local sum, hash = 0, 0
+	for i = 1, #line do
+		sum = sum + line:byte(i)
+		hash = (hash * 31 + line:byte(i)) % 1000003
 	end
-	T.eq(sum, 842, "byte sum")
-	T.eq(weighted, 3855, "weighted byte sum")
-	T.ok(text:match("^%l+$") ~= nil, "lower-case letters only")
-	local line = Streak.Line()
-	T.ok(line:find(text, 1, true) ~= nil, "the line has it")
-	T.ok(line:find("forest0xia", 1, true) ~= nil, "the upstream credit")
+	T.eq(sum, 6374, "byte sum")
+	T.eq(hash, 656802, "rolling hash")
+	T.eq(#(NameIn(line) or ""), 8, "a name of 8 letters")
 	T.ok(not line:find("http", 1, true), "no link (links in chat are not clickable)")
 end)
 
-T.test("ping streak: the signature is not in any Lua source as plain text", function()
-	local text = Load().Signature()
-	local needles = { text, text:sub(1, 5), text:sub(3), text:reverse() }
+T.test("ping streak: the line is not in any Lua source as plain text", function()
+	local line = Load().Line()
+	local name = NameIn(line) or "?"
+	local needles = { name, name:sub(1, 5), name:sub(3), name:reverse() }
 	for _, path in ipairs(T.files("^bots/.*%.lua$")) do
 		local src = T.read(path):lower()
 		for _, needle in ipairs(needles) do
-			T.ok(not src:find(needle, 1, true), path .. " has a plain part of the signature")
+			T.ok(not src:find(needle, 1, true), path .. " has a plain part of the name")
 		end
 	end
 	for _, path in ipairs(T.files("^tests/.*%.lua$")) do
 		local src = T.read(path):lower()
 		for _, needle in ipairs(needles) do
-			T.ok(not src:find(needle, 1, true), path .. " has a plain part of the signature")
+			T.ok(not src:find(needle, 1, true), path .. " has a plain part of the name")
+		end
+	end
+	-- No word of the line sits in the file that decodes it.
+	local own = T.read("bots/lib/systems/ping_streak.lua"):lower()
+	for word in line:lower():gmatch("%w+") do
+		if #word >= 5 then
+			T.ok(not own:find(word, 1, true), "ping_streak.lua has a plain word of the line")
 		end
 	end
 end)

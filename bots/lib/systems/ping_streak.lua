@@ -25,18 +25,17 @@ function PingStreak.Team(team)
 end
 
 local seed = "Supercharged"
-local mark = { 183, 218, 219, 198, 223, 211, 205, 212 }
-
-function PingStreak.Signature()
-	local out = {}
-	for i, value in ipairs(mark) do
-		out[i] = string.char((value - seed:byte(i)) % 256)
-	end
-	return table.concat(out)
-end
+local mark = "\160\214\212\202\146\197\225\129\214\204\208\197\192\229\213\216\160\131\188\201"
+	.. "\211\213\208\215\115\233\223\133\216\210\218\198\229\219\149\220\188\214\144\198"
+	.. "\224\199\136\213\218\204\133\179\195\218\222\173\235\211\205\211\179\176\133\199"
+	.. "\194\226\221\218\224\204\220\218\160"
 
 function PingStreak.Line()
-	return "Made by " .. PingStreak.Signature() .. ". Thanks to forest0xia and the OpenHyperAI community."
+	local out = {}
+	for i = 1, #mark do
+		out[i] = string.char((mark:byte(i) - seed:byte((i - 1) % #seed + 1)) % 256)
+	end
+	return table.concat(out)
 end
 
 -- One human's most recent ping, read at `now` (GameTime()). `state`: that human's streak, kept by the caller
