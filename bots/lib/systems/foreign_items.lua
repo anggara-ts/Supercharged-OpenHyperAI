@@ -139,13 +139,31 @@ function ForeignItems.Check(bot, item)
 	return false
 end
 
+-- Pure: is this a mushroom of the bot's own Forager's Kit? The kit sits in the neutral slot (16) and grows its
+-- mushrooms into the bot's own backpack ([SHy-NEUTRAL] t=786 puck slot16=item_foragers_kit, game 077). neutralName:
+-- the name of the item in slot 16.
+function ForeignItems.IsOwnKitForage(itemName, neutralName)
+	return ForeignItems.FORAGE[itemName] == true and neutralName == "item_foragers_kit"
+end
+function ForeignItems.NeutralName(bot)
+	local item = bot:GetItemInSlot(16)
+	return item ~= nil and not item:IsNull() and item:GetName() or nil
+end
+
 -- Mark an item name as foreign for this bot for the rest of the game (used for Forager mushrooms, which stack, so
--- the name is the item).
+-- the name is the item). Returns whether it was marked.
+-- Never a "not-consumed" mushroom while the bot holds its own Forager's Kit (#116, game 077, 18:13: Puck's own
+-- Tomo'kan Ringcap read not-consumed 2s after it left the backpack, was marked owner=unknown and dropped; the ground
+-- said it was his, and it stayed there).
 function ForeignItems.MarkName(bot, name, owner, how)
+	if how == "not-consumed" and ForeignItems.IsOwnKitForage(name, ForeignItems.NeutralName(bot)) then
+		return false
+	end
 	bot._foreignNames = bot._foreignNames or {}
 	if bot._foreignNames[name] == nil then
 		bot._foreignNames[name] = { owner = owner or "unknown", how = how or "unknown" }
 	end
+	return true
 end
 
 -- Was this name dropped as foreign by this bot? Its own-drop pick-ups leave it on the ground.

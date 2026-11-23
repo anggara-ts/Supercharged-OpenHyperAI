@@ -1489,11 +1489,10 @@ local function ConsiderItems()
 						)
 					)
 				end
-			elseif forageName == "item_foragers_health" then
-				bot:Action_UseAbilityOnEntity(forage, bot)
-				return BOT_ACTION_DESIRE_NONE
 			else
-				bot:Action_UseAbility(forage)
+				-- Same order as Usage.EatForage (#116: the Ringcap and the Toadstool on self, the Nut no-target).
+				local fail = bot._forageFail ~= nil and bot._forageFail[forageName] or nil
+				Usage.ForageOrder(forage, Usage.ForageHow(forageName, fail ~= nil and fail.total or 0))
 				return BOT_ACTION_DESIRE_NONE
 			end
 		end
@@ -10079,12 +10078,71 @@ function Usage.WatchStillUnderHit()
 end
 -- Forager mushrooms in a main slot, eaten ahead of the item think's busy gate (queued orders,
 -- casting ...). Game 032, 13:14-19:07: Medusa swapped a Vital Toadstool into a main slot every
--- 16s and never ate it; it went back to the backpack each time. Targeting from the datafeed:
--- Vital Toadstool is unit-target (cast on self), Ironwood Nut and Tomo'kan Ringcap are no-target
--- (the Ringcap was being cast on a unit). Once per 0.5s.
-local FORAGE_NO_TARGET = { item_foragers_stats = true, item_foragers_mana = true }
+-- 16s and never ate it; it went back to the backpack each time.
+-- Targeting (7.42 items_all.txt, AbilityBehavior): Vital Toadstool (item_foragers_health) is UNIT_TARGET, friendly
+-- hero, range 250: cast on self. Tomo'kan Ringcap (item_foragers_mana) and Ironwood Nut (item_foragers_stats) are
+-- NO_TARGET | OPTIONAL_UNIT_TARGET, friendly hero (the Ringcap range 400). The Ringcap is cast on self (#116: the
+-- datafeed's "the target's max mana"); after a not-consumed result it tries the no-target order instead, and the
+-- result line says which order worked (how=). The Nut stays no-target.
+-- #116, game 077 (18:13): Puck's own Ringcap read not-consumed 2s after it reached a main slot. One order per 1s is
+-- held every time by a reaction delay that wants the same order repeated (the difficulty hooks of PR #234 hold a
+-- cast that is not repeated within 0.6s), and an item out of the backpack can't be used for 6s (the swap wrapper,
+-- global_overrides.lua). So the order is now repeated every 0.2s for 1.5s, and a try counts as failed only 6s
+-- after the mushroom reached the main slot.
+-- [SHy-FORAGE] eat <item> slot<N> how= / eat-result item= ok=yes|no how= orders= inMain= slot= (each at most every 10s).
+local FORAGE_TARGET_SELF = { item_foragers_health = true, item_foragers_mana = true }
+local FORAGE_NAMES = { item_foragers_health = true, item_foragers_mana = true, item_foragers_stats = true }
+local FORAGE_TRY_FOR = 1.5
+local FORAGE_REORDER_EVERY = 0.2
+local FORAGE_BACKPACK_LOCK = 6
+-- How to cast this mushroom: "self" (on the bot) or "none" (no target). fails: not-consumed results so far.
+function Usage.ForageHow(name, fails)
+	if not FORAGE_TARGET_SELF[name] then
+		return "none"
+	end
+	if name == "item_foragers_mana" and (fails or 0) % 2 == 1 then
+		return "none"
+	end
+	return "self"
+end
+function Usage.ForageOrder(item, how)
+	if how == "self" then
+		bot:Action_UseAbilityOnEntity(item, bot)
+	else
+		bot:Action_UseAbility(item)
+	end
+end
+local function ForageLog(key, fmt, ...)
+	bot._forageLogs = bot._forageLogs or {}
+	if DotaTime() < (bot._forageLogs[key] or -999) then
+		return
+	end
+	bot._forageLogs[key] = DotaTime() + 10
+	pcall(
+		print,
+		string.format("[SHy-FORAGE] t=%.0f %s " .. fmt, DotaTime(), (string.gsub(botName, "npc_dota_hero_", "")), ...)
+	)
+end
 function Usage.EatForage()
-	if not bot:IsAlive() or DotaTime() < (bot._forageEatAt or -999) then
+	if not bot:IsAlive() then
+		return false
+	end
+	local now = DotaTime()
+	-- When each mushroom name reached a main slot (the backpack lock runs from there). Read 4 times a second (#52:
+	-- this runs on every item think).
+	bot._forageInMain = bot._forageInMain or {}
+	if now >= (bot._forageScanAt or -999) then
+		bot._forageScanAt = now + 0.25
+		for name in pairs(FORAGE_NAMES) do
+			local slot = bot:FindItemSlot(name)
+			if slot >= 0 and slot <= 5 then
+				bot._forageInMain[name] = bot._forageInMain[name] or now
+			else
+				bot._forageInMain[name] = nil
+			end
+		end
+	end
+	if now < (bot._forageEatAt or -999) then
 		return false
 	end
 	if bot:IsStunned() or bot:IsHexed() or bot:IsChanneling() or bot:IsCastingAbility() or bot:IsInvulnerable() then
@@ -10096,77 +10154,95 @@ function Usage.EatForage()
 	if okM and muted then
 		return false
 	end
-	-- Did the last eat order consume anything? Game 039: Keeper ordered 306 eats of a Forager mushroom that was
-	-- never used up (most likely another hero's: items owned by another player can't be used). After two
-	-- orders that changed nothing, leave that item alone for 60s.
 	bot._forageFail = bot._forageFail or {}
 	local pending = bot._foragePending
-	if pending ~= nil and DotaTime() >= pending.at + 1.0 then
+	if pending ~= nil then
+		-- Anywhere in the bag: a mushroom swapped back to the backpack was not eaten.
+		local slotNow = bot:FindItemSlot(pending.name)
+		local item = slotNow >= 0 and bot:GetItemInSlot(slotNow) or nil
+		local stillThere = item ~= nil and not item:IsNull() and (item:GetCurrentCharges() or 0) >= pending.charges
+		if stillThere and slotNow <= 5 and now < pending.at + FORAGE_TRY_FOR then
+			-- Repeat the same order until it lands or the try ends.
+			if now >= pending.nextAt and Fu.CanCastAbility(item) then
+				pending.nextAt = now + FORAGE_REORDER_EVERY
+				pending.orders = pending.orders + 1
+				Usage.ForageOrder(item, pending.how)
+				return true
+			end
+			return false
+		end
 		bot._foragePending = nil
-		local item = bot:GetItemInSlot(pending.slot)
-		local stillThere = item ~= nil
-			and not item:IsNull()
-			and item:GetName() == pending.name
-			and (item:GetCurrentCharges() or 0) >= pending.charges
-		if stillThere then
-			local fail = bot._forageFail[pending.name] or { n = 0, untilAt = 0 }
+		local inMain = now - (bot._forageInMain[pending.name] or now)
+		ForageLog(
+			"result",
+			"eat-result item=%s ok=%s how=%s orders=%d inMain=%.1f slot=%d",
+			pending.name,
+			stillThere and "no" or "yes",
+			pending.how,
+			pending.orders,
+			inMain,
+			slotNow
+		)
+		if not stillThere then
+			bot._forageFail[pending.name] = nil
+		elseif pending.at - (bot._forageInMain[pending.name] or pending.at) >= FORAGE_BACKPACK_LOCK then
+			-- Did the eat orders consume anything? Game 039: Keeper ordered 306 eats of a Forager mushroom that was
+			-- never used up (most likely another hero's: items owned by another player can't be used). After two
+			-- tries that changed nothing, leave that item alone for 60s. Tries started inside the backpack lock
+			-- don't count.
+			local fail = bot._forageFail[pending.name] or { n = 0, total = 0, untilAt = 0 }
 			fail.n = fail.n + 1
+			fail.total = fail.total + 1
 			if fail.n >= 2 then
-				fail.untilAt = DotaTime() + 60
+				fail.untilAt = now + 60
 				fail.n = 0
+				local own = ForeignItems.IsOwnKitForage(pending.name, ForeignItems.NeutralName(bot))
 				pcall(
 					print,
 					string.format(
-						"[SHy-FORAGE] t=%.0f %s cannot-eat %s why=not-consumed backoff=60s",
-						DotaTime(),
+						"[SHy-FORAGE] t=%.0f %s cannot-eat %s why=not-consumed backoff=60s ownKit=%s",
+						now,
 						(string.gsub(botName, "npc_dota_hero_", "")),
-						pending.name
+						pending.name,
+						own and "yes" or "no"
 					)
 				)
 				-- The 60s backoff alone kept the eat orders coming for the rest of the game (game 062: Medusa and
 				-- Nyx Assassin, Nature's Prophet's mushrooms, every 60s from 29:05). Treat the mushroom as another
 				-- player's: no more eats or swaps, and DropForeignItems drops it once. Its result line reads the
 				-- owner off the ground and clears the mark if the mushroom turns out to be this bot's (#141).
+				-- Not one from the bot's own Forager's Kit (MarkName refuses it): that one is tried again later.
 				ForeignItems.MarkName(bot, pending.name, "unknown", "not-consumed")
 			end
 			bot._forageFail[pending.name] = fail
-		else
-			bot._forageFail[pending.name] = nil
 		end
+		bot._forageEatAt = now + 0.5
+		return false
 	end
 	for slot = 0, 5 do
 		local item = bot:GetItemInSlot(slot)
 		if item ~= nil and not item:IsNull() then
 			local name = item:GetName()
-			local backedOff = bot._forageFail[name] ~= nil and DotaTime() < bot._forageFail[name].untilAt
+			local fail = bot._forageFail[name]
+			local backedOff = fail ~= nil and now < fail.untilAt
 			if
-				(FORAGE_NO_TARGET[name] or name == "item_foragers_health")
+				FORAGE_NAMES[name]
 				and Fu.CanCastAbility(item)
 				and not backedOff
-				and bot._foragePending == nil
 				and not ForeignItems.Check(bot, item)
 			then
-				bot._foragePending =
-					{ name = name, slot = slot, charges = item:GetCurrentCharges() or 0, at = DotaTime() }
-				bot._forageEatAt = DotaTime() + 0.5
-				if DotaTime() >= (bot._forageLogAt or -999) then
-					bot._forageLogAt = DotaTime() + 10
-					pcall(
-						print,
-						string.format(
-							"[SHy-FORAGE] t=%.0f %s eat %s slot%d",
-							DotaTime(),
-							(string.gsub(botName, "npc_dota_hero_", "")),
-							name,
-							slot
-						)
-					)
-				end
-				if FORAGE_NO_TARGET[name] then
-					bot:Action_UseAbility(item)
-				else
-					bot:Action_UseAbilityOnEntity(item, bot)
-				end
+				local how = Usage.ForageHow(name, fail ~= nil and fail.total or 0)
+				bot._foragePending = {
+					name = name,
+					slot = slot,
+					charges = item:GetCurrentCharges() or 0,
+					at = now,
+					nextAt = now + FORAGE_REORDER_EVERY,
+					orders = 1,
+					how = how,
+				}
+				ForageLog("eat", "eat %s slot%d how=%s", name, slot, how)
+				Usage.ForageOrder(item, how)
 				return true
 			end
 		end

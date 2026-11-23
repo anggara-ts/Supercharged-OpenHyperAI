@@ -66,3 +66,26 @@ T.test("foreign items: the ground owner carries to the bag, and a marked name st
 	T.eq(why, "not-consumed", "how it was marked")
 	T.eq(F.WasDropped(bot, "item_foragers_health"), false, "not dropped yet")
 end)
+
+T.test(
+	"foreign items: a mushroom of the bot's own Forager's Kit is never marked not-consumed (#116, game 077)",
+	function()
+		local bot = T.stub.reset({ hero = "npc_dota_hero_puck" })
+		local F = load("foreign_items")
+		T.eq(F.IsOwnKitForage("item_foragers_mana", "item_foragers_kit"), true, "own kit, own mushroom")
+		T.eq(F.IsOwnKitForage("item_foragers_mana", nil), false, "no kit")
+		T.eq(F.IsOwnKitForage("item_flask", "item_foragers_kit"), false, "not a mushroom")
+		bot._items[16] = T.stub.newAbility("item_foragers_kit", bot, false)
+		T.eq(F.NeutralName(bot), "item_foragers_kit", "slot 16 read")
+		T.eq(F.MarkName(bot, "item_foragers_mana", "unknown", "not-consumed"), false, "refused")
+		local ringcap = T.stub.newAbility("item_foragers_mana", bot, false)
+		T.eq(F.Check(bot, ringcap), false, "still the bot's own")
+		T.eq(
+			F.MarkName(bot, "item_foragers_mana", "nature_prophet", "drop-list"),
+			true,
+			"a drop-list owner still marks it"
+		)
+		bot._items[16] = nil
+		T.eq(F.MarkName(bot, "item_foragers_health", "unknown", "not-consumed"), true, "no kit: marked as before")
+	end
+)

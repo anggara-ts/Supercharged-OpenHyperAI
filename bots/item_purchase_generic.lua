@@ -2276,6 +2276,27 @@ function ItemPurchaseThink()
 	end
 	-- Vital Toadstool, Ironwood Nut, Tomo'kan Ringcap. They land in the backpack, which cannot cast them.
 	-- Swap one into a main slot and eat it. A drop leaves it on the ground.
+	-- Where the swapped mushroom really is 0.5s later (#116, game 077: `swap ... ok-forced moved=item_foragers_mana`
+	-- read the slot in the same frame, and a second later the mushroom was back in slot 6). One line per swap:
+	--   [SHy-FORAGE] swap-result item= from= to= now=<slot, -1 = gone (eaten)> ok=yes|no
+	local swapCheck = bot._forageSwapCheck
+	if swapCheck ~= nil and now >= swapCheck.at + 0.5 then
+		bot._forageSwapCheck = nil
+		local slotNow = bot:FindItemSlot(swapCheck.name)
+		pcall(
+			print,
+			string.format(
+				"[SHy-FORAGE] t=%.0f %s swap-result item=%s from=%d to=%d now=%d ok=%s",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				swapCheck.name,
+				swapCheck.from,
+				swapCheck.to,
+				slotNow,
+				(slotNow < 0 or slotNow <= 5) and "yes" or "no"
+			)
+		)
+	end
 	local forageCalm = #(bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {}) == 0
 		and not bot:WasRecentlyDamagedByAnyHero(3.0)
 	if forageCalm and now > (bot._lastBackpackForage or -100) + 3.0 then
@@ -2316,32 +2337,27 @@ function ItemPurchaseThink()
 			end
 			if dest ~= nil then
 				ForceSwap(forageSlot, dest)
-				local moved = bot:GetItemInSlot(dest)
 				-- Game 031: Dazzle kept a Forager mushroom in the backpack for the rest of the game,
-				-- and this step never logged a use. Log each try (once per 15s).
-				if now >= (bot._forageLogAt or -999) then
-					bot._forageLogAt = now + 15
+				-- and this step never logged a use. Log each try (once per 15s; its own clock: it shared one with the
+				-- eat line, so no eat line printed after a swap in games 073-077), and the slot 0.5s later
+				-- (swap-result above). The eat itself is Usage.EatForage (ability_item_usage_generic.lua), which repeats
+				-- the order until it lands; an order in the same frame as the swap came out of the backpack lock.
+				if now >= (bot._forageSwapLogAt or -999) then
+					bot._forageSwapLogAt = now + 15
 					pcall(
 						print,
 						string.format(
-							"[SHy-FORAGE] t=%.0f %s swap %s slot%d->%d moved=%s",
+							"[SHy-FORAGE] t=%.0f %s swap %s slot%d->%d",
 							now,
 							(string.gsub(botName, "npc_dota_hero_", "")),
 							forageName,
 							forageSlot,
-							dest,
-							moved ~= nil and not moved:IsNull() and moved:GetName() or "-"
+							dest
 						)
 					)
 				end
-				if moved ~= nil and not moved:IsNull() and moved:GetName() == forageName then
-					MatchTrace.Buy(bot, forageName, "backpack forage swap and use")
-					if forageName == "item_foragers_stats" or forageName == "item_foragers_mana" then
-						bot:Action_UseAbility(moved)
-					else
-						bot:Action_UseAbilityOnEntity(moved, bot)
-					end
-				end
+				bot._forageSwapCheck = { name = forageName, from = forageSlot, to = dest, at = now }
+				MatchTrace.Buy(bot, forageName, "backpack forage swap")
 				return
 			end
 		end
