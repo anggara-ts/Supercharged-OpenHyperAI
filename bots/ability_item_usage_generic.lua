@@ -35,6 +35,7 @@ local ChargeTracker = require(GetScriptDirectory() .. "/lib/systems/charge_track
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/lib/systems/foreign_items")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -230,6 +231,38 @@ local function LevelUpAbilities()
 		return
 	end
 	local position = Fu.GetPosition(bot)
+	-- The first "I will play position N" waits until the team's welcome has said the version line (maintainer,
+	-- 2026-11-23: "print the bot version at the beginning of the game before ally bot state their position"), at most
+	-- ChatRules.WELCOME_FIRST_WAIT seconds after the welcome's start. A swap while it waits still reloads the build.
+	if
+		lastPosition == nil
+		and bot.announcedRole == nil
+		and bot.isBear == nil
+		and GetGameMode() ~= GAMEMODE_1V1MID
+		and GetGameState() == GAME_STATE_PRE_GAME
+	then
+		local now = DotaTime()
+		bot._playPosWait = bot._playPosWait or { at = now, position = position }
+		local versionSaid = (TeamMemory.Get(GetTeam(), "welcomeNext") or 1) > 1
+		local waits, by = ChatRules.PositionLineWaits(versionSaid, bot._playPosWait.at, ChatRules.WELCOME_START, now)
+		if waits then
+			goto positionLineDone
+		end
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s welcome-first waited=%.0f by=%s pos=%s",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				now - bot._playPosWait.at,
+				by,
+				tostring(position)
+			)
+		)
+		if bot._playPosWait.position ~= position then
+			-- The position changed while the line waited: the swap branch below reloads the build and says it.
+			lastPosition = bot._playPosWait.position
+		end
+	end
 	if lastPosition == nil then
 		lastPosition = position
 		if
@@ -255,6 +288,7 @@ local function LevelUpAbilities()
 			end)
 		end
 	end
+	::positionLineDone::
 	if bot:GetLevel() >= 30 and botName == "npc_dota_hero_bloodseeker" then
 		return
 	end
