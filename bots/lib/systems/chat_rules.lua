@@ -44,6 +44,27 @@ function ChatRules.SayDecision(bot, text, key)
 	return on
 end
 
+-- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game (game 075: t=-80, about
+-- 9s after the bots' first "I will play position N" lines).
+ChatRules.WELCOME_START = -80
+-- The first position line waits at most this many seconds for the team's welcome version line, counted from the
+-- welcome's start (or from the bot's first try, when that is later), so a missing welcome never blocks it.
+ChatRules.WELCOME_FIRST_WAIT = 5
+
+-- Does a bot's first "I will play position N" still wait for the welcome? "print the bot version at the beginning of
+-- the game before ally bot state their position" (maintainer, 2026-11-23). versionSaid: the team's welcome version
+-- line was said; firstTryAt: when the bot first wanted to say its line; welcomeStart and now: DotaTime(). Returns
+-- true while it waits, else false and why it stopped waiting: "welcome" or "timeout".
+function ChatRules.PositionLineWaits(versionSaid, firstTryAt, welcomeStart, now)
+	if versionSaid then
+		return false, "welcome"
+	end
+	if now >= math.max(welcomeStart, firstTryAt) + ChatRules.WELCOME_FIRST_WAIT then
+		return false, "timeout"
+	end
+	return true, nil
+end
+
 local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
 
 -- "2026.11.22", "2026.11.22-222" or "2026.11.23-f82a8ea+dirty" -> "22 Nov 2026"; nil without a date.

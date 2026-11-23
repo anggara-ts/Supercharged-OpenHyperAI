@@ -59,6 +59,31 @@ T.test("chat rules: the welcome line gets the version and the date", function()
 	T.ok(first:find("{version}", 1, true) and first:find("{date}", 1, true), "the first welcome line has no version")
 end)
 
+T.test("chat rules: the first position line waits for the welcome's version line, not for ever", function()
+	local R = load()
+	local start, wait = R.WELCOME_START, R.WELCOME_FIRST_WAIT
+	T.ok(wait > 0 and wait <= 10, "a short wait")
+	-- Game 075: the bots tried at t=-89, the version line came at t=-80.
+	T.eq(R.PositionLineWaits(false, -89, start, -89), true, "before the welcome starts")
+	T.eq(R.PositionLineWaits(false, -89, start, start + wait - 0.1), true, "the welcome is late, still in the wait")
+	local waits, by = R.PositionLineWaits(true, -89, start, start)
+	T.eq(waits, false, "the version line was said")
+	T.eq(by, "welcome")
+	waits, by = R.PositionLineWaits(false, -89, start, start + wait)
+	T.eq(waits, false, "no welcome: the line goes after the wait")
+	T.eq(by, "timeout")
+	-- A bot that loads after the welcome's start (e.g. at t=-30) waits from its own first try.
+	T.eq(R.PositionLineWaits(false, -30, start, -30 + wait - 0.1), true, "late load, still in the wait")
+	T.eq(R.PositionLineWaits(false, -30, start, -30 + wait), false, "late load, timed out")
+	-- The welcome and the bots read the same constant and the same team note.
+	local laning = T.read("bots/mode_laning_generic.lua")
+	T.ok(laning:find("local WELCOME_START = ChatRules.WELCOME_START", 1, true) ~= nil, "the welcome has its own start")
+	T.ok(laning:find('TeamMemory.Set(team, "welcomeNext"', 1, true) ~= nil, "the welcome no longer sets welcomeNext")
+	local usage = T.read("bots/ability_item_usage_generic.lua")
+	T.ok(usage:find('TeamMemory.Get(GetTeam(), "welcomeNext")', 1, true) ~= nil, "the position line reads welcomeNext")
+	T.ok(usage:find("welcome-first waited=", 1, true) ~= nil, "no [SHy-CHAT] welcome-first log")
+end)
+
 T.test("chat rules: decision lines only while !debug is on", function()
 	local R = load()
 	local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
