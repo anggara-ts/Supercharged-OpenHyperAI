@@ -27,6 +27,7 @@ local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local BotBuild = dofile(GetScriptDirectory() .. "/heroes/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local CurseLog = require(GetScriptDirectory() .. "/lib/systems/curse_log")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
@@ -230,6 +231,40 @@ local function LevelUpAbilities()
 		return
 	end
 	local position = Fu.GetPosition(bot)
+	-- The first "I will play position N" waits until the team's welcome has said the version line (maintainer,
+	-- 2026-11-23: "print the bot version at the beginning of the game before ally bot state their position"), at most
+	-- ChatRules.WELCOME_FIRST_WAIT seconds after the welcome's start. A swap while it waits still reloads the build.
+	if
+		lastPosition == nil
+		and bot.announcedRole == nil
+		and bot.isBear == nil
+		and GetGameMode() ~= GAMEMODE_1V1MID
+		and GetGameState() == GAME_STATE_PRE_GAME
+	then
+		-- Required here, not at the top: the require block is where most open PRs add lines.
+		local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+		local now = DotaTime()
+		bot._playPosWait = bot._playPosWait or { at = now, position = position }
+		local versionSaid = (TeamMemory.Get(GetTeam(), "welcomeNext") or 1) > 1
+		local waits, by = ChatRules.PositionLineWaits(versionSaid, bot._playPosWait.at, ChatRules.WELCOME_START, now)
+		if waits then
+			goto positionLineDone
+		end
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s welcome-first waited=%.0f by=%s pos=%s",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				now - bot._playPosWait.at,
+				by,
+				tostring(position)
+			)
+		)
+		if bot._playPosWait.position ~= position then
+			-- The position changed while the line waited: the swap branch below reloads the build and says it.
+			lastPosition = bot._playPosWait.position
+		end
+	end
 	if lastPosition == nil then
 		lastPosition = position
 		if
@@ -255,6 +290,7 @@ local function LevelUpAbilities()
 			end)
 		end
 	end
+	::positionLineDone::
 	if bot:GetLevel() >= 30 and botName == "npc_dota_hero_bloodseeker" then
 		return
 	end
@@ -739,6 +775,7 @@ local chatReplyDelay = RandomInt(19, 56) / 10
 local killStreakEndedTime = -999
 local lastGold = 9999
 local lastKills = 999
+local saidFirstBloodAt = nil
 local lastDeaths = 0
 local killStreak = 0
 local replyCount = 0
@@ -794,8 +831,16 @@ function Usage.SetTalkMessage()
 		then
 			local chatLine = Localization.Get("got_first_blood")[RandomInt(1, #Localization.Get("got_first_blood"))]
 			bot:ActionImmediate_Chat(chatLine, true)
+			saidFirstBloodAt = kills
 		end
-		if bot:IsAlive() and gold > lastGold + 300 * turboGoldScale and kills > lastKills then
+		-- One chat line per kill: first blood's bonus gold also passed the kill-gold check below, so the first blood got
+		-- two lines (maintainer, 2026-11-23).
+		if
+			bot:IsAlive()
+			and gold > lastGold + 300 * turboGoldScale
+			and kills > lastKills
+			and saidFirstBloodAt ~= kills
+		then
 			local chatLine = "?"
 			if Fu.Customize.Trash_Talk_Level and Fu.Customize.Trash_Talk_Level >= 2 then
 				-- A normal kill: one of our lines 3 times in 4, "?" once in 4 (#90; it was 2 in 9).
@@ -10764,6 +10809,8 @@ function ItemUsageThink()
 	pcall(Usage.DumpBotApi)
 	pcall(Usage.DumpHeroAbilities)
 	pcall(Usage.ProbeHiddenItems)
+	-- [SHy-CURSE]: right-clicks on enemies under Winter's Curse (log only).
+	pcall(CurseLog.Watch, bot)
 	pcall(Usage.LogHomeWalk)
 	pcall(Usage.WatchDodgeResults)
 	PartEnd("watchers", tWatch)

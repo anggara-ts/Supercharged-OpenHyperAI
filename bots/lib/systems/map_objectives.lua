@@ -1511,8 +1511,8 @@ local function AnnounceObjective(bot, kind)
 			msg = lines
 		end
 	end
-	-- false = team chat
-	bot:ActionImmediate_Chat(msg, false)
+	-- Team chat, only with `!debug`.
+	require(GetScriptDirectory() .. "/lib/systems/chat_rules").SayDecision(bot, msg, key)
 end
 
 -- Cover the gather/pluck ring. kind: "lotus" | "wisdom"
