@@ -2,15 +2,31 @@
 -- bots agree with a ping, and which bots answer it. No bot API calls here, so tests/test_human_order_rules.lua can
 -- run them with plain numbers; bots/lib/systems/human_orders.lua reads the world and acts on the results.
 --
--- The maintainer's design (2026-11-23, issue #222): a ping is a REQUEST (the bots check it and may refuse with a
--- reason); the same ping again within 2s is INSIST (they go even if they disagree); a chat command (`!push top`)
--- is an ORDER. A ping is read by what is under it, whatever its type (game 075: a ping clicked on a tower or a hero
--- arrives as a non-normal ping); only a non-normal ping on empty ground or fog is the X-ping "danger, back off".
+-- The maintainer's design (2026-11-23, issue #222), ping tiers by count: "refine ping response: 1 ping = ask / 2 ping
+-- = force ally nearby ping / 3+ ping = force all ally accross map / response 'on my way' only when acknowledging. no
+-- reply for 'cant do'". One ping is a request (ASK: the bots check it and may refuse); the same ping again within 2s
+-- is FORCE NEAR (every bot within FORCE_NEAR_RADIUS or at that lane goes, whatever the checks say); a third is FORCE
+-- ALL (every bot on the team goes, by TP when the walk is long). A chat command (`!push top`) is FORCE NEAR,
+-- `!push top all` FORCE ALL. A ping is read by what is under it, whatever its type (game 075: a ping clicked on a
+-- tower or a hero arrives as a non-normal ping); only a non-normal ping on empty ground or fog is the X-ping
+-- "danger, back off" (never forced).
 local Rules = {}
 
--- The same spot (or the same target) pinged again within this many seconds, this close, is an insist.
+-- The same spot (or the same target) pinged again within this many seconds, this close, is an insist: the next tier.
 Rules.INSIST_SECONDS = 2 -- maintainer 2026-11-23: "narrow it to 2 pings in 2 seconds"
 Rules.INSIST_RADIUS = 300
+-- A FORCE NEAR order takes every bot within this distance of the spot, or at the ordered lane (maintainer's "~4000").
+Rules.FORCE_NEAR_RADIUS = 4000
+-- A forced order still skips a bot under this HP (it joins once back at FORCE_REJOIN_HP), a dead bot (it joins when
+-- it respawns) and a channelling one (a TP in progress: it joins when the channel ends).
+Rules.FORCE_MIN_HP = 0.2
+Rules.FORCE_REJOIN_HP = 0.5
+-- A forced order lasts long enough for the farthest bot to get there (ETA + FORCE_SLACK_SECONDS), within
+-- ORDER_SECONDS..FORCE_MAX_SECONDS.
+Rules.FORCE_SLACK_SECONDS = 15
+Rules.FORCE_MAX_SECONDS = 60
+-- When nobody goes, one bot says why, at most this often per team (maintainer: "no reply for 'cant do'").
+Rules.REFUSAL_CHAT_SECONDS = 30
 -- How long an order lasts when nothing ends it earlier (design: "~20-30s or until done").
 Rules.ORDER_SECONDS = 25
 Rules.DANGER_SECONDS = 6
@@ -61,8 +77,9 @@ local LANE_WORDS = {
 	bottom = "bot",
 }
 
--- "!push top" -> { kind = "push", lane = "top" }; "!push" -> { kind = "push" } (no lane: the bots ask which);
--- any other text -> nil.
+-- "!push top" -> { kind = "push", lane = "top", all = false }; "!push top all" -> the same with all = true (FORCE
+-- ALL; without it FORCE NEAR); "!push" -> { kind = "push" } (no lane: the bots ask which); "!rosh all",
+-- "!group all", "!def mid all" likewise; "!no" takes no words. Any other text -> nil.
 function Rules.ParseChat(text)
 	if type(text) ~= "string" then
 		return nil
@@ -73,14 +90,22 @@ function Rules.ParseChat(text)
 	if kind == nil then
 		return nil
 	end
-	if kind == "push" or kind == "defend" then
-		local lane = LANE_WORDS[rest]
-		return { kind = kind, lane = lane }
+	local all, words = false, {}
+	for token in rest:gmatch("%S+") do
+		if token == "all" and kind ~= "no" then
+			all = true
+		else
+			words[#words + 1] = token
+		end
 	end
-	if rest ~= "" then
+	if kind == "push" or kind == "defend" then
+		local lane = #words == 1 and LANE_WORDS[words[1]] or nil
+		return { kind = kind, lane = lane, all = all }
+	end
+	if #words > 0 then
 		return nil
 	end
-	return { kind = kind }
+	return { kind = kind, all = all }
 end
 
 -- Is `ping` the same ping as `prev` again (an insist)? Both: { time =, x =, y =, targetKey = }.
@@ -97,6 +122,25 @@ function Rules.IsInsist(prev, ping)
 	end
 	local dx, dy = (ping.x or 0) - (prev.x or 0), (ping.y or 0) - (prev.y or 0)
 	return dx * dx + dy * dy <= Rules.INSIST_RADIUS * Rules.INSIST_RADIUS
+end
+
+-- How many pings in a row `ping` is: the previous ping's count + 1 when it is the same ping again (Rules.IsInsist:
+-- each within INSIST_SECONDS of the one before), else 1. `prev.count` nil counts as 1.
+function Rules.PingCount(prev, ping)
+	if Rules.IsInsist(prev, ping) then
+		return (prev.count or 1) + 1
+	end
+	return 1
+end
+
+-- The tier for a ping count: 1 "ask", 2 "force-near", 3+ "force-all".
+function Rules.Tier(count)
+	if (count or 1) >= 3 then
+		return "force-all"
+	elseif (count or 1) == 2 then
+		return "force-near"
+	end
+	return "ask"
 end
 
 -- A building's lane and tier from its unit name ("npc_dota_badguys_tower2_top", "..._melee_rax_bot",
@@ -187,7 +231,8 @@ function Rules.Classify(f)
 	return "move"
 end
 
--- Does the team agree with a request? `via`: "ping" (a request), "insist" or "chat" (orders). `f`:
+-- Does the team agree with a request? `tier`: "ask" (a single ping: checked) or "force-near" / "force-all" (a ping
+-- repeated, or a chat command: the checks below are skipped). `f`:
 --   now             DotaTime()
 --   aliveAllies     our heroes alive (the human too)
 --   available       our bots that could go (alive, not retreating / low / holding the base)
@@ -197,15 +242,15 @@ end
 --   ourCreepsNear   our wave is near the target building (push)
 --   roshanAlive     (rosh)
 -- Returns "go" or "refuse", and the reason.
-function Rules.Check(kind, via, f)
+function Rules.Check(kind, tier, f)
 	if kind == "rosh" and f.roshanAlive == false then
 		return "refuse", "roshan-dead"
 	end
 	if (f.available or 0) == 0 and kind ~= "danger" then
 		return "refuse", "nobody-free"
 	end
-	if via ~= "ping" then
-		return "go", via
+	if tier ~= "ask" then
+		return "go", "forced"
 	end
 	if kind == "push" or kind == "gank" or kind == "rosh" or kind == "farm" then
 		if f.baseUnderAttack then
@@ -298,23 +343,63 @@ function Rules.Answer(kind, state, atLane)
 	return "ignore"
 end
 
--- Picks the responders. `cands`: list of { id =, dist =, state =, core =, lane = } (lane: the bot's own lane,
--- "top" / "mid" / "bot"). `ctx` (optional): { lane = the ordered lane, now = DotaTime() }.
--- Order of preference: for a lane order (push / defend with a lane), bots at that lane first (its own laners in the
--- laning stage, or within LANE_NEAR of the target); then nearest first (a core first for a camp: a core within
--- CORE_FIRST_SLACK farther than the nearest support still gets it), up to `need`. Bots beyond MaxDistance, and in
--- the laning stage a support off the lane farther than FAR_SUPPORT from a push, are not asked ("far").
+-- What a bot does with a forced order: "obey", or "queue" and why (it joins later): dead (on respawn), channel (a
+-- TP in progress: when it ends) or low-hp (under FORCE_MIN_HP: once back at FORCE_REJOIN_HP). A fight, a retreat or
+-- holding the base does not stop a forced bot. `c`: { state =, hp =, channeling = }.
+function Rules.ForceAnswer(c)
+	if c.state == "dead" then
+		return "queue", "dead"
+	end
+	if c.channeling then
+		return "queue", "channel"
+	end
+	if (c.hp or 1) < Rules.FORCE_MIN_HP then
+		return "queue", "low-hp"
+	end
+	return "obey"
+end
+
+-- May a bot queued for a forced order (`why`: dead / channel / low-hp) join it now? `c`: { state =, hp =,
+-- channeling = } now.
+function Rules.ForceRejoin(why, c)
+	if Rules.ForceAnswer(c) ~= "obey" then
+		return false
+	end
+	return why ~= "low-hp" or (c.hp or 1) >= Rules.FORCE_REJOIN_HP
+end
+
+-- Picks the responders. `cands`: list of { id =, dist =, state =, core =, lane =, hp =, channeling =, onLane = }
+-- (lane: the bot's own lane, "top" / "mid" / "bot"; onLane: the bot stands on the ordered lane). `ctx` (optional):
+-- { lane = the ordered lane, now = DotaTime(), tier = "ask" (default) / "force-near" / "force-all" }.
+-- Ask: for a lane order (push / defend with a lane), bots at that lane first (its own laners in the laning stage, or
+-- within LANE_NEAR of the target); then nearest first (a core first for a camp: a core within CORE_FIRST_SLACK
+-- farther than the nearest support still gets it), up to `need`. Bots beyond MaxDistance, and in the laning stage a
+-- support off the lane farther than FAR_SUPPORT from a push, are not asked ("far").
+-- Force near: every bot within FORCE_NEAR_RADIUS or at / on the ordered lane; force all: every bot. Both ignore
+-- `need` (a camp still takes one bot), MaxDistance and the far-support rule, and the bot's state (Rules.ForceAnswer:
+-- only dead, channelling and very low bots queue). A dead bot is not near anything: force near leaves it out.
 -- Returns obey (list of ids), queue (ids), ignore (list of { id =, why = }) and every candidate's answer in the
 -- order of preference: { id =, state =, dist =, answer = obey | queue | ignore | far | spare (free, not needed) |
--- wait (fighting, not needed) }.
+-- wait (fighting, not needed), why = (queue: why it waits) }.
 Rules.CORE_FIRST_SLACK = 2500
 function Rules.PickResponders(kind, cands, need, ctx)
 	ctx = ctx or {}
+	local tier = ctx.tier or "ask"
+	local forced = tier ~= "ask" and kind ~= "danger"
 	local maxDist = Rules.MaxDistance(kind)
 	local laneOrder = (kind == "push" or kind == "defend") and ctx.lane ~= nil
 	local laning = ctx.now ~= nil and ctx.now < Rules.LANING_SECONDS
+	if forced and kind ~= "farm" then
+		need = math.huge
+	end
 	local function atLane(c)
 		return laneOrder and ((laning and c.lane == ctx.lane) or c.dist <= Rules.LANE_NEAR)
+	end
+	local function forcedIn(c)
+		if tier == "force-all" then
+			return true
+		end
+		return c.dist <= Rules.FORCE_NEAR_RADIUS or atLane(c) or (laneOrder and c.onLane == true)
 	end
 	local sorted = {}
 	for _, c in ipairs(cands or {}) do
@@ -341,13 +426,33 @@ function Rules.PickResponders(kind, cands, need, ctx)
 	local obey, queue, ignore, waiting, decisions = {}, {}, {}, {}, {}
 	for _, c in ipairs(sorted) do
 		local here = atLane(c)
-		local answer = Rules.Answer(kind, c.state, here)
-		if c.dist > maxDist then
-			answer = "far"
-		elseif kind == "push" and laneOrder and laning and not here and not c.core and c.dist > Rules.FAR_SUPPORT then
-			answer = "far"
+		local answer, why = nil, nil
+		if forced then
+			if c.state == "dead" and tier ~= "force-all" then
+				answer = "far"
+			elseif forcedIn(c) then
+				answer, why = Rules.ForceAnswer(c)
+			else
+				answer = "far"
+			end
+		else
+			answer = Rules.Answer(kind, c.state, here)
+			if c.dist > maxDist then
+				answer = "far"
+			elseif
+				kind == "push"
+				and laneOrder
+				and laning
+				and not here
+				and not c.core
+				and c.dist > Rules.FAR_SUPPORT
+			then
+				answer = "far"
+			elseif answer == "queue" then
+				why = "in-fight"
+			end
 		end
-		local decision = { id = c.id, state = c.state, dist = c.dist, answer = answer }
+		local decision = { id = c.id, state = c.state, dist = c.dist, answer = answer, why = why }
 		decisions[#decisions + 1] = decision
 		if answer == "obey" then
 			if #obey < need then
@@ -382,14 +487,18 @@ function Rules.Available(decisions)
 	return count
 end
 
--- The candidates for the order line: "alchemist:obey/fight:900,largo:far/ok:14016" (a dead bot's distance is "-").
--- `nameOf(id)` gives the hero's short name.
+-- The candidates for the order line: "alchemist:obey/fight:900,largo:far/ok:14016,zeus:queue/channel:3000" (a dead
+-- bot's distance is "-"; a queued bot shows why it waits). `nameOf(id)` gives the hero's short name.
 function Rules.CandsText(decisions, nameOf)
 	local parts = {}
 	for _, d in ipairs(decisions or {}) do
 		local answer = d.answer
-		if d.state ~= "ok" then
-			answer = answer .. "/" .. tostring(d.state)
+		local note = d.state
+		if d.answer == "queue" and d.why ~= nil then
+			note = d.why
+		end
+		if note ~= "ok" then
+			answer = answer .. "/" .. tostring(note)
 		end
 		local dist = (d.dist == nil or d.dist == math.huge) and "-" or string.format("%.0f", d.dist)
 		parts[#parts + 1] = string.format("%s:%s:%s", tostring(nameOf(d.id)), answer, dist)
@@ -398,8 +507,8 @@ function Rules.CandsText(decisions, nameOf)
 end
 
 -- The order's verdict from the check and the pick: refuse (the check said no), queue (everyone who would go is
--- still fighting), or go. A danger ping is a warning: it goes even with nobody near it (game 075 printed
--- `refuse why=nobody-free` for X-pings).
+-- still fighting, dead or channelling), or go. A danger ping is a warning: it goes even with nobody near it (game
+-- 075 printed `refuse why=nobody-free` for X-pings).
 function Rules.Verdict(checkVerdict, obeyCount, queueCount, kind)
 	if checkVerdict ~= "go" then
 		return "refuse"
@@ -416,33 +525,70 @@ function Rules.Verdict(checkVerdict, obeyCount, queueCount, kind)
 	return "go"
 end
 
--- Who says what in team chat for an order (maintainer, game 075: "all responder should response"): every bot that
--- goes says "On my way!" (`index`: its place, so the lines vary), every queued bot its queue line, and the nearest
--- bot that can't go (`refuser`: { id =, key =, seconds = } or nil) says why, once. A refused request: one line
--- with the reason (id nil: the bot that read the order says it). A danger ping: no reply. Returns a list of
--- { id =, key =, index =, seconds = } in speaking order (said REPLY_GAP_SECONDS apart).
+-- How long an order lasts: ORDER_SECONDS for a request; a forced order until its farthest bot can be there
+-- (`maxEta`: seconds, the slowest responder's travel or respawn + travel) plus FORCE_SLACK_SECONDS, within
+-- ORDER_SECONDS..FORCE_MAX_SECONDS. A danger ping: DANGER_SECONDS.
+function Rules.OrderSeconds(kind, tier, maxEta)
+	if kind == "danger" then
+		return Rules.DANGER_SECONDS
+	end
+	if tier == nil or tier == "ask" then
+		return Rules.ORDER_SECONDS
+	end
+	local seconds = (maxEta or 0) + Rules.FORCE_SLACK_SECONDS
+	return math.max(Rules.ORDER_SECONDS, math.min(Rules.FORCE_MAX_SECONDS, seconds))
+end
+
+-- May a bot say why nobody goes? At most once per REFUSAL_CHAT_SECONDS per team (`lastAt`: the last such line, nil:
+-- none yet).
+function Rules.RefusalAllowed(now, lastAt)
+	return lastAt == nil or (now or 0) - lastAt >= Rules.REFUSAL_CHAT_SECONDS
+end
+
+-- Who says what in team chat for an order (maintainer, 2026-11-23: "response 'on my way' only when acknowledging.
+-- no reply for 'cant do'"): every bot that goes says "On my way!" (`index`: its place among them, so the lines vary)
+-- unless it already said it for the same ping chain (`acked[id]`: it obeyed the ping before this one). Bots that
+-- can't go and queued bots say nothing (a queued bot says "On my way!" when it joins: Orders' KeepOrder). Only when
+-- nobody goes at all (verdict refuse) one bot says one short reason, if Rules.RefusalAllowed: the check's reason, or
+-- with nobody free the nearest bot's own (`refuser`: { id =, key =, seconds = } or nil: "busy"). The reason waits
+-- INSIST_SECONDS (`delay`) so a repeated ping that forces the order drops it. A danger ping, or an order everyone
+-- joins later (verdict queue): no reply. `opts`: { acked =, now =, lastRefusalAt = }. Returns a list of { id =,
+-- key =, index =, seconds =, delay = } in speaking order (said REPLY_GAP_SECONDS apart); id nil: the bot that read
+-- the order says it.
 Rules.REPLY_GAP_SECONDS = 0.5
-function Rules.ReplyPlan(kind, verdict, why, obey, queue, refuser)
+function Rules.ReplyPlan(kind, verdict, why, obey, refuser, opts)
+	opts = opts or {}
 	local plan = {}
 	if kind == "danger" then
 		return plan
 	end
-	if verdict == "refuse" and why ~= "nobody-free" then
-		plan[1] = { key = why }
+	if verdict == "refuse" then
+		if not Rules.RefusalAllowed(opts.now, opts.lastRefusalAt) then
+			return plan
+		end
+		if why ~= "nobody-free" then
+			plan[1] = { key = why, delay = Rules.INSIST_SECONDS }
+		elseif refuser ~= nil then
+			plan[1] = { id = refuser.id, key = refuser.key, seconds = refuser.seconds, delay = Rules.INSIST_SECONDS }
+		else
+			plan[1] = { key = "busy", delay = Rules.INSIST_SECONDS }
+		end
 		return plan
 	end
-	for i, id in ipairs(obey or {}) do
-		plan[#plan + 1] = { id = id, key = "on-my-way", index = i }
-	end
-	for _, id in ipairs(queue or {}) do
-		plan[#plan + 1] = { id = id, key = "queue" }
-	end
-	if refuser ~= nil then
-		plan[#plan + 1] = { id = refuser.id, key = refuser.key, seconds = refuser.seconds }
-	elseif verdict == "refuse" then
-		plan[#plan + 1] = { key = "busy" }
+	local acked = opts.acked or {}
+	local index = 0
+	for _, id in ipairs(obey or {}) do
+		if not acked[id] then
+			index = index + 1
+			plan[#plan + 1] = { id = id, key = "on-my-way", index = index }
+		end
 	end
 	return plan
+end
+
+-- Reply keys that say why nobody goes (the team's REFUSAL_CHAT_SECONDS limit and the insist drop apply to them).
+function Rules.IsRefusalKey(key)
+	return key ~= "on-my-way" and key ~= "which_lane" and key ~= "cancelled"
 end
 
 return Rules
