@@ -491,15 +491,66 @@ end
 -- so the item mode takes over as soon as it wants the rune.
 local WATER_AT = { 0, 120, 240 }
 local RIVER_HOLD_DESIRE = 0.35
+-- #32, game 077 (1:58-2:15): Io stood on the bottom spot with the 2:00 water rune (type 7) up for about 11s, and
+-- Valve's item mode never started (itemMode=false); at the horn it did take the top river gold (mode 21 at 0.90,
+-- t=7.2), and Puck (hp 0.51) took the 2:00 rune 20s later through the item mode. Io was at full HP; whether the item
+-- mode skips a water rune for a full hero, or skips a bot already on the spot, is unverified. For every water-walk
+-- and river-bounty-return, note when the bot first stood on the spot and whether the item mode ever became active,
+-- and print it at the end with the bot's HP / mana and the rune type:
+--   [SHy-RUNE] water-walk-end|river-return-end why= spot= ... type= hp= mp= onSpot=before|after|never itemMode=
+function RuneMode.NoteRiverWait(wait, dist, now)
+	if wait.onSpotAt == nil and dist <= 200 then
+		wait.onSpotAt = now
+	end
+	if bot:GetActiveMode() == BOT_MODE_ITEM then
+		wait.itemMode = true
+	end
+end
+function RuneMode.RiverWaitFields(wait, spawnAt)
+	local okT, runeType = pcall(GetRuneType, wait.id)
+	local onSpot = "never"
+	if wait.onSpotAt ~= nil then
+		onSpot = wait.onSpotAt < spawnAt and "before" or "after"
+	end
+	return string.format(
+		"type=%s hp=%.2f mp=%.2f onSpot=%s itemMode=%s",
+		tostring(okT and runeType),
+		Fu.GetHP(bot),
+		Fu.GetMP(bot),
+		onSpot,
+		wait.itemMode and "yes" or "no"
+	)
+end
+function RuneMode.LogRiverWait(what, why, wait, dist)
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s %s why=%s spot=%d dist=%d status=%s %s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			what,
+			why,
+			wait.id,
+			dist,
+			StatusTag(RawGetRuneStatus(wait.id)),
+			RuneMode.RiverWaitFields(wait, wait.t0)
+		)
+	)
+end
 function RuneMode.WaterWalk()
 	local now = DotaTime()
 	local waterWalk = bot._waterWalk
 	if waterWalk ~= nil then
+		local walkDist = GetUnitToLocationDistance(bot, waterWalk.loc)
+		RuneMode.NoteRiverWait(waterWalk, walkDist, now)
 		if not bot:IsAlive() or now > waterWalk.t0 + 8 then
 			bot._waterWalk = nil
+			if now >= waterWalk.t0 then
+				RuneMode.LogRiverWait("water-walk-end", bot:IsAlive() and "time" or "dead", waterWalk, walkDist)
+			end
 			return nil
 		end
-		if GetUnitToLocationDistance(bot, waterWalk.loc) <= 200 then
+		if walkDist <= 200 then
 			return now < waterWalk.t0 and "hold" or "near"
 		end
 		return "walk"
@@ -681,14 +732,15 @@ local function EndRiverReturn(why)
 	pcall(
 		print,
 		string.format(
-			"[SHy-RUNE] t=%.0f %s river-return-end why=%s spot=%d dist=%d took=%.0fs status=%s",
+			"[SHy-RUNE] t=%.0f %s river-return-end why=%s spot=%d dist=%d took=%.0fs status=%s %s",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			why,
 			riverReturn.id,
 			GetUnitToLocationDistance(bot, riverReturn.loc),
 			DotaTime() - riverReturn.t0,
-			StatusTag(GetRuneStatus(riverReturn.id))
+			StatusTag(GetRuneStatus(riverReturn.id)),
+			RuneMode.RiverWaitFields(riverReturn, riverReturn.t0)
 		)
 	)
 end
@@ -698,6 +750,7 @@ function RuneMode.RiverBountyReturn()
 	local riverReturn = bot._riverReturn
 	if riverReturn ~= nil then
 		local dist = GetUnitToLocationDistance(bot, riverReturn.loc)
+		RuneMode.NoteRiverWait(riverReturn, dist, now)
 		if not bot:IsAlive() then
 			EndRiverReturn("dead")
 		elseif GetRuneStatus(riverReturn.id) ~= RUNE_STATUS_AVAILABLE then
@@ -1941,6 +1994,16 @@ function Think()
 			if RuneMode.BackUpPicker(runeInfo.location) then
 				return
 			end
+			-- Skipped: leave it now, from any distance (game 016: Medusa went back to a skipped spot every 3s, the
+			-- target rune was kept after the skip). This check used to come after the walk-on below, so it only ran
+			-- within 130: game 077, 2:15-2:29, Io looped `skipped` (walk to the lane) / `move-on` (walk back) every
+			-- 0.2s about 130 from the bottom river rune for 14s (`[SHy-STUCK] t=146 wisp mode=rune/0.77`).
+			if RuneMode.RuneSkipped(runeInfo.location) then
+				local laneBackNow = GetLaneFrontLocation(GetTeam(), assignedLane or bot:GetAssignedLane(), -600)
+				bot:Action_MoveToLocation(laneBackNow)
+				doing("skipped")
+				return
+			end
 			-- Pickup from the bank does not collect a river rune. Walk onto the point.
 			-- If that walk makes no progress, leave so the lane is not abandoned.
 			if liveDist > 130 then
@@ -1984,13 +2047,6 @@ function Think()
 			bot._runeReach = nil
 			local now0 = DotaTime()
 			local laneBack = GetLaneFrontLocation(GetTeam(), assignedLane or bot:GetAssignedLane(), -600)
-			-- Skipped: leave it now (game 016: Medusa went back to a skipped spot every 3s, the
-			-- target rune was kept after the skip).
-			if RuneMode.RuneSkipped(runeInfo.location) then
-				bot:Action_MoveToLocation(laneBack)
-				doing("skipped")
-				return
-			end
 			-- The status says up but nothing is there (GetRuneType -1, game 016 at the horn on both
 			-- power spots): skip it at once.
 			local rType = GetRuneType and GetRuneType(runeInfo.location) or nil
@@ -3057,6 +3113,7 @@ function RuneMode.GetLaningRuneDesire(laningRuneRange)
 			and RuneMode.ShouldCheckRuneStatus(bountyRune)
 			and not RuneMode.IsHumanDangerPingedRune(bountyRune)
 			and not RuneMode.SkipSecondLaningRune(bountyRune)
+			and not RuneMode.RuneSkipped(bountyRune)
 		then
 			local distance = GetUnitToLocationDistance(bot, GetRuneSpawnLocation(bountyRune))
 			if distance < laningRuneRange then
@@ -3077,9 +3134,12 @@ function RuneMode.GetLaningRuneDesire(laningRuneRange)
 	local bestRune = nil
 	local bestDistance = laningRuneRange
 	local allRunes = { RUNE_BOUNTY_1, RUNE_BOUNTY_2, RUNE_POWERUP_1, RUNE_POWERUP_2 }
+	-- Not a skipped rune (game 077, 2:15-2:29: this loop kept Io's rune desire at 0.70 `why=laning` for the bottom
+	-- river rune after the river-bounty-return gave up on it, and the rune Think walked him to the lane and back).
 	for _, runeId in pairs(allRunes) do
 		if
 			RuneMode.ShouldCheckRuneStatus(runeId)
+			and not RuneMode.RuneSkipped(runeId)
 			and not RuneMode.IsHumanDangerPingedRune(runeId)
 			and not RuneMode.IsAllyWithBottleCloser(runeId)
 		then
