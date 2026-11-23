@@ -20,7 +20,7 @@ and skill builds for every hero.
    - Bot Settings: choose the subscribed script for both Radiant and Dire.
 3. Join a team. The slot you take is your role: 1 carry (safe lane), 2 mid, 3 offlane, 4 soft support, 5 hard
    support. The bots fill the other roles.
-4. Start the game. When the script loaded, the bots' names end with **`.OHA-DEV`**.
+4. Start the game. When the script loaded, the bots' names end with **`.SHy`**.
 
 If the bots play with Valve's default names, the script didn't load: see
 [Run from this repository](#run-from-this-repository), or link the Workshop folder the same way (step 2 there,
