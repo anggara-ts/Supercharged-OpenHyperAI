@@ -842,13 +842,18 @@ end
 -- one of those happened.
 -- 0.92: above the item mode's 0.90 (game 031 log); ended early by a hero hit or an enemy hero at the spot.
 -- Stops for the rest of the game after its first worked=no (game 063: worked=no in all 4 tries, 0:01-4:19), so the
--- probe doesn't keep the item mode off the spot for 1.5s every spawn.
+-- probe doesn't keep the item mode off the spot for 1.5s every spawn. Per rune type (#32, game 077): the order takes
+-- water runes (games 070-077: worked=yes type=7 in 7 of 10 tries, 2 unsure, 1 no; Sniper and Puck) but never a river
+-- bounty (type 5, worked=no at every horn), and the horn bounty's worked=no stopped the 2:00 water try too. Io then
+-- stood on the bottom spot with the water rune up and no pick-up order, and Valve's item mode didn't take it either.
 local RIVER_PICKUP_TRY_DESIRE = 0.92
 function RuneMode.RiverPickupTry(id, spawn)
 	bot._riverPickupTried = bot._riverPickupTried or {}
 	local key = spawn .. ":" .. id
+	local okT, runeType = pcall(GetRuneType, id)
+	local typeKey = tostring(okT and runeType)
 	if
-		bot._riverPickupNo
+		bot._riverPickupNo ~= nil and bot._riverPickupNo[typeKey]
 		or bot._riverPickupTried[key]
 		or bot._riverPickup ~= nil
 		or GetRuneStatus(id) ~= RUNE_STATUS_AVAILABLE
@@ -856,7 +861,6 @@ function RuneMode.RiverPickupTry(id, spawn)
 		return false
 	end
 	bot._riverPickupTried[key] = true
-	local okT, runeType = pcall(GetRuneType, id)
 	bot._riverPickup = {
 		id = id,
 		at = DotaTime(),
@@ -902,7 +906,8 @@ function RuneMode.RiverPickupCheck()
 	local gone = RawGetRuneStatus(pickup.id) ~= RUNE_STATUS_AVAILABLE
 	local worked = not gone and "no" or (pickup.itemMode or pickup.others) and "unsure" or "yes"
 	if worked == "no" then
-		bot._riverPickupNo = true
+		bot._riverPickupNo = bot._riverPickupNo or {}
+		bot._riverPickupNo[tostring(pickup.type)] = true
 	end
 	pcall(
 		print,
