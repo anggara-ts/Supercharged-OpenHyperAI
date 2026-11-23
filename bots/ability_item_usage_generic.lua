@@ -934,8 +934,8 @@ local function BuybackSkipLog(why, ancientHp, remaining)
 	bot._buybackSkipLogAt = DotaTime()
 	BuybackLog("skip", why, ancientHp, remaining)
 end
--- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version ([SHy-BUILD]'s,
--- from bots/customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
+-- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version (the welcome's
+-- text: AboutRules.VersionOf, from bots/customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
 -- think, which also runs while the hero is dead; bots/lib/systems/about_rules.lua has the rules.
 function Usage.AnswerAboutRequest()
 	if
@@ -969,7 +969,7 @@ function Usage.AnswerAboutRequest()
 			result,
 			request.allChat and "all" or "team",
 			said,
-			version
+			(string.gsub(version, " ", "_"))
 		)
 	)
 end

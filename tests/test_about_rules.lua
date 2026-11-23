@@ -76,18 +76,19 @@ T.test("about: the first bot of the team answers", function()
 	T.eq(About.FirstBotId({ 7 }, isBot), nil, "no bot")
 end)
 
-T.test("about: version is build_info's when present, else the release number", function()
+T.test("about: the same version text as the welcome (release, or dev <number> in a git build)", function()
 	local About = Rules()
 	local source = T.read("bots/customize/version.lua")
-	local releaseNumber = source:match('number%s*=%s*"([^"]+)"')
-	T.ok(releaseNumber ~= nil, "no release number in bots/customize/version.lua")
-	T.eq(About.VersionOf(LoadVersion(nil)), releaseNumber, "Workshop copy")
-	T.eq(About.VersionOf(LoadVersion({ version = "2026.11.23-abc1234", dirty = false })), "2026.11.23-abc1234", "clone")
-	T.eq(
-		About.VersionOf(LoadVersion({ version = "2026.11.23-abc1234", dirty = true })),
-		"2026.11.23-abc1234+dirty",
-		"dirty"
-	)
+	local release = source:match('release%s*=%s*"([^"]+)"')
+	T.ok(release ~= nil, "no release in bots/customize/version.lua")
+	T.eq(About.VersionOf(LoadVersion(nil)), release, "Workshop copy")
+	local clone = { version = "2026.11.23-abc1234", commit = "abc1234def", dirty = false }
+	T.eq(About.VersionOf(LoadVersion(clone)), "dev 2026.11.23-abc1234", "clone")
+	local dirty = { version = "2026.11.23-abc1234", commit = "abc1234def", dirty = true }
+	T.eq(About.VersionOf(LoadVersion(dirty)), "dev 2026.11.23-abc1234+dirty", "dirty")
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local versionModule = LoadVersion(clone)
+	T.eq(About.VersionOf(versionModule), (ChatRules.WelcomeVersion(versionModule)), "same as the welcome")
 	T.eq(About.VersionOf(nil), "unknown", "no version module")
 end)
 
@@ -106,8 +107,8 @@ T.test("about: every language has one line with the version and no URL", functio
 		T.ok(not template:find("http", 1, true), locale .. ": has a URL")
 		local line = About.Line(template, "2026.11.23-abc1234")
 		T.ok(line:find("2026.11.23-abc1234", 1, true) ~= nil, locale .. ": version missing")
-		T.ok(line:find("anggara-ts", 1, true) ~= nil, locale .. ": author missing")
+		T.ok(line:find("dekampes", 1, true) ~= nil, locale .. ": author missing")
 	end
 	CustomLoader.Localization = saved
-	T.eq(About.Line(nil, "1.0"), "Supercharged OpenHyperAI by anggara-ts, version 1.0.", "fallback line")
+	T.eq(About.Line(nil, "1.0"), "Supercharged OpenHyperAI by dekampes, version 1.0.", "fallback line")
 end)

@@ -3,6 +3,8 @@
 -- Flow: a chat callback (hero_selection.lua before the horn, the team's reply bot in ability_item_usage_generic.lua
 -- after it) calls Note() with the shared Role table; the team's first bot (GetTeamPlayers order) calls Decide()
 -- from its buyback think, which also runs while the hero is dead, and says Line().
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+
 local AboutRules = {}
 
 -- At most one answer per team in this many seconds. ChatGuard (bots/lib/systems/chat_guard.lua) drops the same chat
@@ -64,20 +66,21 @@ function AboutRules.Decide(shared, now)
 	return "answer", request
 end
 
--- The version the game prints in [SHy-BUILD]: bots/customize/version.lua's number, which is build_info.lua's
--- "<commit date>-<sha>[+dirty]" in a git clone and the static release number in a Workshop copy.
+-- The same version text as the start-of-game welcome (bots/lib/systems/chat_rules.lua WelcomeVersion), from the
+-- bots/customize/version.lua table: "dev <commit date>-<sha>[+dirty]" in a git build, the release ("v0.4") in a
+-- Workshop copy. Before, `!about` showed the raw number ("2026.11.22-222") while the welcome said "v0.4".
 function AboutRules.VersionOf(versionModule)
-	if type(versionModule) == "table" and versionModule.number ~= nil then
-		return tostring(versionModule.number)
+	if type(versionModule) ~= "table" then
+		return "unknown"
 	end
-	return "unknown"
+	return (ChatRules.WelcomeVersion(versionModule))
 end
 
 -- The chat line: the localized template with "%s" for the version.
 function AboutRules.Line(template, version)
 	local versionText = tostring(version or "unknown")
 	if type(template) ~= "string" or not template:find("%s", 1, true) then
-		return "Supercharged OpenHyperAI by anggara-ts, version " .. versionText .. "."
+		return "Supercharged OpenHyperAI by dekampes, version " .. versionText .. "."
 	end
 	return (template:gsub("%%s", function()
 		return versionText
