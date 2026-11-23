@@ -627,9 +627,10 @@ function X.ConsiderColdEmbrace()
 						and not Fu.IsInEtherealForm(allyHero)
 						and not allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
 						and not allyHero:HasModifier("modifier_necrolyte_sadist_active")
-						and X.EmbraceAlly(allyHero, "fight-core")
 					then
-						return BOT_ACTION_DESIRE_HIGH, allyHero
+						if X.EmbraceAlly(allyHero, "fight-core") then
+							return BOT_ACTION_DESIRE_HIGH, allyHero
+						end
 					end
 				end
 				for _, allyHero in pairs(nearbyAllies) do
