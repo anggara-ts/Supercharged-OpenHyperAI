@@ -10084,12 +10084,14 @@ end
 -- NO_TARGET | OPTIONAL_UNIT_TARGET, friendly hero (the Ringcap range 400). The Ringcap is cast on self (#116: the
 -- datafeed's "the target's max mana"); after a not-consumed result it tries the no-target order instead, and the
 -- result line says which order worked (how=). The Nut stays no-target.
--- #116, game 077 (18:13): Puck's own Ringcap read not-consumed 2s after it reached a main slot. One order per 1s is
--- held every time by a reaction delay that wants the same order repeated (the difficulty hooks of PR #234 hold a
--- cast that is not repeated within 0.6s), and an item out of the backpack can't be used for 6s (the swap wrapper,
--- global_overrides.lua). So the order is now repeated every 0.2s for 1.5s, and a try counts as failed only 6s
--- after the mushroom reached the main slot.
--- [SHy-FORAGE] eat <item> slot<N> how= / eat-result item= ok=yes|no how= orders= inMain= slot= (each at most every 10s).
+-- #116, game 077 (18:13): Puck's own Ringcap read not-consumed 2s after it reached a main slot: two no-target orders
+-- went out (no [SHy-DIFF] hold printed for them) and consumed nothing. An item out of the backpack can't be used for
+-- 6s (the swap wrapper's note, global_overrides.lua); whether IsFullyCastable shows that lock is unverified (the
+-- orders passed Fu.CanCastAbility). So a try counts as failed only when it started 6s or more after the mushroom
+-- reached the main slot, the Ringcap alternates its order type, and the order is repeated every 0.2s for 1.5s (a
+-- reaction delay that wants a cast repeated within 0.6s, PR #234, held the single order a swap gave at 20:56).
+-- [SHy-FORAGE] eat <item> slot<N> how= / eat-result item= ok=yes|no how= orders= inMain= slot= cd= fully=
+-- (eat-result ok=yes and ok=no each at most every 10s).
 local FORAGE_TARGET_SELF = { item_foragers_health = true, item_foragers_mana = true }
 local FORAGE_NAMES = { item_foragers_health = true, item_foragers_mana = true, item_foragers_stats = true }
 local FORAGE_TRY_FOR = 1.5
@@ -10174,14 +10176,16 @@ function Usage.EatForage()
 		bot._foragePending = nil
 		local inMain = now - (bot._forageInMain[pending.name] or now)
 		ForageLog(
-			"result",
-			"eat-result item=%s ok=%s how=%s orders=%d inMain=%.1f slot=%d",
+			stillThere and "result-no" or "result-yes",
+			"eat-result item=%s ok=%s how=%s orders=%d inMain=%.1f slot=%d cd=%.1f fully=%s",
 			pending.name,
 			stillThere and "no" or "yes",
 			pending.how,
 			pending.orders,
 			inMain,
-			slotNow
+			slotNow,
+			stillThere and item:GetCooldownTimeRemaining() or -1,
+			stillThere and tostring(item:IsFullyCastable()) or "-"
 		)
 		if not stillThere then
 			bot._forageFail[pending.name] = nil
