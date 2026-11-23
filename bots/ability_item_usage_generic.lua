@@ -35,7 +35,6 @@ local ChargeTracker = require(GetScriptDirectory() .. "/lib/systems/charge_track
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/lib/systems/foreign_items")
-local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -241,6 +240,8 @@ local function LevelUpAbilities()
 		and GetGameMode() ~= GAMEMODE_1V1MID
 		and GetGameState() == GAME_STATE_PRE_GAME
 	then
+		-- Required here, not at the top: the require block is where most open PRs add lines.
+		local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 		local now = DotaTime()
 		bot._playPosWait = bot._playPosWait or { at = now, position = position }
 		local versionSaid = (TeamMemory.Get(GetTeam(), "welcomeNext") or 1) > 1
