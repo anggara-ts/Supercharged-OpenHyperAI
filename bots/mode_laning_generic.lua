@@ -1428,11 +1428,12 @@ function PickOneAnnouncer()
 end
 -- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
 -- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (update: 22 Nov
--- 2026)", maintainer 2026-11-23), the others only commands that work then: !pos / !Npos (pre-game only,
--- hero_selection.lua) and !sp (any time). No !debug hint (maintainer, 2026-11-23). No URL: chat links are not
+-- 2026)", maintainer 2026-11-23), the second points to the Workshop page. No command hints ("no need to hint !pos and
+-- !Xpos Y, or language change in welcome message", no !debug hint; maintainer 2026-11-23). No URL: chat links are not
 -- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
--- announcer) don't repeat it.
-local WELCOME_START = -80
+-- announcer) don't repeat it; welcomeNext > 1 means the version line was said, and the bots' first "I will play
+-- position N" waits for it (ability_item_usage_generic.lua LevelUpAbilities, ChatRules.PositionLineWaits).
+local WELCOME_START = ChatRules.WELCOME_START
 local WELCOME_GAP = 2
 local function SayWelcome()
 	if not bot.isAnnouncer or GetGameState() ~= GAME_STATE_PRE_GAME or DotaTime() < WELCOME_START then

@@ -41,12 +41,16 @@ T.test("chat: every locale has the welcome lines, short and without links", func
 			T.ok(charCount(line) <= 120, "welcome line too long: " .. line)
 			T.ok(not line:find("http", 1, true), "chat links are not clickable: " .. line)
 			T.ok(not line:find("!debug", 1, true), "no !debug hint in the welcome (maintainer, 2026-11-23): " .. line)
+			-- "no need to hint !pos and !Xpos Y, or language change in welcome message" (maintainer, 2026-11-23).
+			T.ok(not line:find("pos", 1, true), "no !pos / !Xpos Y hint in the welcome: " .. line)
+			T.ok(not line:find("!sp", 1, true), "no language (!sp) hint in the welcome: " .. line)
 		end
 		T.ok(block:find("{version}", 1, true) and block:find("{date}", 1, true), "a welcome without the version line")
 		lineCount = lineCount or count
 		T.eq(count, lineCount, "every locale has the same number of welcome lines")
 	end
 	T.eq(blocks, 4, "welcome lines in en, zh, ru and ja")
+	T.eq(lineCount, 2, "the welcome is the version line and the Workshop-page line")
 	T.ok(not src:find("welcome_msgs", 1, true), "the old, never printed welcome_msgs are back")
 	T.ok(not src:find("http", 1, true), "a link in chat text (links in chat are not clickable)")
 end)
