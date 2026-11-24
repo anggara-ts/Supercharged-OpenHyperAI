@@ -358,13 +358,13 @@ function PushRules.GlyphWait(s)
 end
 
 -- The edge wait's arc (#12, game 078): the waiting bots stay within this many radians either side of the line from
--- the tower to our fountain (no walk around the tower to its far side), and about this far from each other, so one
+-- the tower back along the lane toward our side (no walk around the tower to its far side), and about this far from each other, so one
 -- AoE disable can't catch the group.
 PushRules.GLYPH_EDGE_ARC = 0.8
 PushRules.GLYPH_SPREAD = 300
 
 -- A point `radius` from the tower (tx, ty) in the direction of (px, py), kept within `maxAngle` radians of (bx, by),
--- the unit vector from the tower toward our fountain. Returns x, y.
+-- the unit vector from the tower toward our side (back along the lane). Returns x, y.
 function PushRules.GlyphEdgePoint(tx, ty, px, py, bx, by, radius, maxAngle)
 	local dx, dy = px - tx, py - ty
 	local length = math.sqrt(dx * dx + dy * dy)
@@ -396,11 +396,12 @@ function PushRules.NearestDistance(x, y, points)
 end
 
 -- The next side-step of a bot waiting at a glyphed tower's edge with nothing to hit (#12, game 078: no standing
--- still). s: tx, ty (tower), x, y (bot), bx, by (unit vector tower -> our fountain), radius (the edge), step (distance
+-- still). s: tx, ty (tower), x, y (bot), bx, by (unit vector tower -> our side), radius (the edge), step (distance
 -- of one step), side (1 or -1: the way it goes this time; the caller flips it after every step), maxAngle (the arc),
--- allies ({ x =, y = } of the other waiting allies or where they are walking to), minGap (spread). Candidates: `side`
--- then the other way, one step then two, each put on the edge arc; a candidate that lands within a third of a step of
--- the bot (the arc's end) is no move and is skipped. The first one minGap+ from every ally wins, else the one farthest
+-- allies ({ x =, y = } of the other waiting allies or where they are walking to), minGap (spread), passable (optional
+-- function(x, y) -> bool). Candidates: `side` then the other way, one step then two, each put on the edge arc; a
+-- candidate that lands within a third of a step of the bot (the arc's end) is no move, and one that is not passable
+-- (trees, cliffs) would leave the bot standing: both are skipped. The first one minGap+ from every ally wins, else the one farthest
 -- from its nearest ally. Returns x, y, the side taken, the nearest ally's distance there (nil: no ally).
 function PushRules.GlyphSideStep(s)
 	local tx, ty, x, y = s.tx, s.ty, s.x, s.y
@@ -428,7 +429,7 @@ function PushRules.GlyphSideStep(s)
 			s.radius,
 			s.maxAngle or PushRules.GLYPH_EDGE_ARC
 		)
-		if math.sqrt((cx - x) ^ 2 + (cy - y) ^ 2) >= step / 3 then
+		if math.sqrt((cx - x) ^ 2 + (cy - y) ^ 2) >= step / 3 and (s.passable == nil or s.passable(cx, cy)) then
 			local gap = PushRules.NearestDistance(cx, cy, s.allies)
 			if gap == nil or gap >= minGap then
 				return cx, cy, try[1], gap
@@ -439,7 +440,7 @@ function PushRules.GlyphSideStep(s)
 		end
 	end
 	if best == nil then
-		-- Every candidate was no move (cannot happen on an arc wider than two steps): go back onto the edge.
+		-- Every candidate was skipped (blocked all around): go back onto the edge.
 		local cx, cy =
 			PushRules.GlyphEdgePoint(tx, ty, x, y, s.bx, s.by, s.radius, s.maxAngle or PushRules.GLYPH_EDGE_ARC)
 		return cx, cy, -side, PushRules.NearestDistance(cx, cy, s.allies)

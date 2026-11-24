@@ -523,20 +523,27 @@ T.test("glyph wait: side-steps alternate along the edge and keep 300 from waitin
 	-- An ally waiting where the step would go: the bot steps the other way.
 	s.x, s.y, s.side = 0, -1000, 1
 	s.allies = { { x = 250, y = -970 } }
-	x, _, side, gap = R.GlyphSideStep(s)
+	x, y, side, gap = R.GlyphSideStep(s)
 	T.ok(x < 0 and side == -1, "away from the ally: " .. x)
 	T.ok(gap >= 300, "300+ from it: " .. gap)
 	-- At the arc's end the step that way is no move: it goes back along the arc.
 	s.allies = nil
 	s.x, s.y = 1000 * math.sin(0.8), -1000 * math.cos(0.8)
 	s.side = 1
-	x, _, side = R.GlyphSideStep(s)
+	x, y, side = R.GlyphSideStep(s)
 	T.ok(x < s.x - 100 and side == -1, "turns at the arc's end: " .. x)
 	-- Crowded on both sides: the candidate farthest from its nearest ally.
 	s.x, s.y, s.side = 0, -1000, 1
 	s.allies = { { x = 0, y = -1000 } }
-	x, _, _, gap = R.GlyphSideStep(s)
+	x, y, side, gap = R.GlyphSideStep(s)
 	T.ok(gap ~= nil and gap >= 300 and math.abs(x) > 300, "two steps out when one is too close: " .. x)
+	-- Ground that can't be walked (trees, a cliff) is skipped: the step goes the other way.
+	s.allies = nil
+	s.passable = function(px)
+		return px <= 0
+	end
+	x, y, side = R.GlyphSideStep(s)
+	T.ok(x < 0 and side == -1, "around the blocked side: " .. x .. "," .. y)
 end)
 
 T.test("glyph helpers: tower tier, time left, fight factor", function()
