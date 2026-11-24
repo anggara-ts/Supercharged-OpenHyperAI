@@ -809,6 +809,9 @@ function RuneMode.RiverBountyReturn()
 			and RiverRuneSeenUp(id)
 			and not RiverSpotContested(loc)
 			and not RiverReturnClaimed(id, spawn, loc)
+			-- After a release (RuneMode.RiverReleaseDesire) not while still on the spot (game 080, 0:09: Io's return
+			-- started at dist 0 and held him there 7s more); walked off, the return may bring the bot back onto it.
+			and not (RuneMode.Released(id, spawn) and dist <= RuneRules.RELEASE_RADIUS)
 		then
 			-- The nearest of the free allies (a fighting one closer to it doesn't count).
 			local nearest = true
