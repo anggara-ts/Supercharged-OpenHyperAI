@@ -119,4 +119,23 @@ function ShadowRealmRules.EarlyDrop(released, since, duration)
 	return released == nil and since < (duration or ShadowRealmRules.DURATION) - 0.3
 end
 
+-- The cast order (#203, game 079 t=356: the cast line and order 14 times in one second, then release=stale; game
+-- 077 t=1345: 41 orders over 1.3s). Shadow Realm has cast point 0 (datafeed hero 119, re-read 2026-11-24), so a cast
+-- that went out shows the cooldown (or the modifier) by the next think. One order; if it has not taken after
+-- RESEND_AFTER, one more, up to MAX_ORDERS; give up at CAST_GIVE_UP (release=no-cast with what blocked it).
+-- since: seconds since the first order; sinceOrder: since the last; orders: orders sent so far.
+-- Returns "wait" | "resend" | "give-up".
+ShadowRealmRules.RESEND_AFTER = 0.3
+ShadowRealmRules.MAX_ORDERS = 3
+ShadowRealmRules.CAST_GIVE_UP = 1.0
+function ShadowRealmRules.CastStep(since, sinceOrder, orders)
+	if since >= ShadowRealmRules.CAST_GIVE_UP then
+		return "give-up"
+	end
+	if sinceOrder >= ShadowRealmRules.RESEND_AFTER and orders < ShadowRealmRules.MAX_ORDERS then
+		return "resend"
+	end
+	return "wait"
+end
+
 return ShadowRealmRules

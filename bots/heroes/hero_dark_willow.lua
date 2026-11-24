@@ -381,7 +381,26 @@ function X.StartShadowRealm(why, target, rule)
 		deaths = GetHeroDeaths(bot:GetPlayerID()) or 0,
 		-- Her last attack time at the cast: a change means her own attack ended the realm (the early-drop line).
 		lastAttack = bot:GetLastAttackTime(),
+		-- The cast order (#203, game 079 t=356: re-sent 14 times in one second, every think): one order, then
+		-- ShadowRealmRules.CastStep checks it took; orders= and took= go on the end line.
+		orders = 1,
+		orderAt = 0,
 	}
+	-- An escape realm holds her other orders (#203 item 1, game 073: 4 rule=hit realms in push / defend ended by
+	-- her own attack, drop-act=4 attacked=yes): the outpost mode takes her and gives no order
+	-- (mode_outpost_generic.lua reads bot._dwEscapeHoldUntil), the item think runs only X.CastHoldTick (no last-hit,
+	-- tower-aggro or item order), and the realm tick walks her home. Cleared when the realm ends.
+	if why == "retreat" then
+		local holdUntil = DotaTime() + duration + 0.3
+		bot._dwRealm.hold = true
+		bot._dwEscapeHoldUntil = holdUntil
+		bot._castHoldUntil = holdUntil
+	else
+		-- Any realm: until the cast takes, the same item-think hold, which also skips the wrapped mode Thinks
+		-- (global_overrides.lua OhaCastGuard), so no other order replaces the cast. Cleared once it took.
+		bot._dwRealm.castHold = true
+		bot._castHoldUntil = math.max(bot._castHoldUntil or -999, DotaTime() + ShadowRealmRules.CAST_GIVE_UP + 0.1)
+	end
 	local enemies, ourHeroes = X.FightCounts()
 	pcall(
 		print,
@@ -410,6 +429,10 @@ end
 -- last attack time changed since the cast: her own attack ended it).
 function X.EndShadowRealm(realm, since, endedAt)
 	bot._dwRealm = nil
+	if realm.hold or realm.castHold then
+		bot._dwEscapeHoldUntil = nil
+		bot._castHoldUntil = nil
+	end
 	local target = realm.target
 	local dist = -1
 	if target ~= nil and not target:IsNull() and target:IsAlive() and target:CanBeSeen() then
@@ -418,7 +441,7 @@ function X.EndShadowRealm(realm, since, endedAt)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s",
+			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s",
 			endedAt or DotaTime(),
 			realm.why,
 			realm.releasedAt or since,
@@ -428,7 +451,10 @@ function X.EndShadowRealm(realm, since, endedAt)
 			target ~= nil and not target:IsNull() and (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")) or "-",
 			dist,
 			realm.modSeen ~= nil and string.format("%.2f", realm.modSeen) or "no",
-			tostring(realm.invuln == true)
+			tostring(realm.invuln == true),
+			realm.orders or 1,
+			realm.tookAt ~= nil and string.format("%.2f", realm.tookAt) or "no",
+			realm.hold and "yes" or "no"
 		) .. (realm.drop or "")
 	)
 end
@@ -546,10 +572,35 @@ function X.ShadowRealmTick()
 	end
 	-- The cast went out: the modifier is on, or the ability went on cooldown (in case the modifier name is wrong).
 	local castDone = inRealm or shadowRealmAbility:GetCooldownTimeRemaining() > 0
-	if since > 0.5 and not castDone then
-		realm.released = realm.released or "no-cast"
-		X.EndShadowRealm(realm, since)
-		return false
+	if castDone and realm.tookAt == nil then
+		realm.tookAt = since
+		if realm.castHold then
+			realm.castHold = nil
+			bot._castHoldUntil = nil
+		end
+	end
+	if not castDone then
+		-- Waiting for the one cast order to take (ShadowRealmRules.CastStep): no new order every think, at most a
+		-- spaced re-send, and the cast line is printed only once (X.StartShadowRealm). True: nothing else may
+		-- replace the order this think (the spells below, the attack mode through bot._attackHold).
+		local step = ShadowRealmRules.CastStep(since, since - (realm.orderAt or 0), realm.orders or 1)
+		if step == "give-up" then
+			realm.released = realm.released or "no-cast"
+			realm.drop = string.format(
+				" block=%s act=%d mode=%d",
+				X.CastBlocker(),
+				bot:GetCurrentActionType() or -1,
+				bot:GetActiveMode()
+			)
+			X.EndShadowRealm(realm, since)
+			return false
+		end
+		if step == "resend" and not Fu.CanNotUseAbility(bot) then
+			realm.orders = (realm.orders or 1) + 1
+			realm.orderAt = since
+			bot:Action_UseAbility(shadowRealmAbility)
+		end
+		return true
 	end
 	if since > realm.duration + 0.2 or realm.modSeen ~= nil and not inRealm then
 		if
@@ -579,7 +630,16 @@ function X.ShadowRealmTick()
 		return false
 	end
 	if realm.why == "retreat" then
-		return X.ShadowRealmTeleport(realm, since, castDone)
+		if X.ShadowRealmTeleport(realm, since, castDone) then
+			return true
+		end
+		-- Move-only while the escape realm runs (#203 item 1): one move home every think, so neither her idle
+		-- auto-attack nor a mode's attack order ends the realm. Not while a TP order is going out (a move would
+		-- cancel it; the channel itself returned above). False: a spell may still go out after the move.
+		if realm.hold and realm.tp ~= "ordered" then
+			bot:Action_MoveToLocation(Fu.GetTeamFountain())
+		end
+		return false
 	end
 	if realm.why ~= "attack" or realm.released ~= nil or not castDone then
 		return false
@@ -676,6 +736,35 @@ bot._attackHold = function()
 	end
 	realm = bot._dwRealm
 	return realm ~= nil and realm.released == nil
+end
+-- The escape realm's hold (bot._castHoldUntil): the item think calls this in place of its own steps, so only the
+-- realm tick and her spells run (X.SkillsComplement starts with the tick).
+function X.CastHoldTick()
+	X.SkillsComplement()
+end
+-- Why a realm cast never took, for the no-cast end line: stunned | silenced | hexed | channel | casting:<ability> |
+-- not-castable | -.
+function X.CastBlocker()
+	if bot:IsStunned() then
+		return "stunned"
+	end
+	if bot:IsSilenced() then
+		return "silenced"
+	end
+	if bot:IsHexed() then
+		return "hexed"
+	end
+	if bot:IsChanneling() then
+		return "channel"
+	end
+	local active = bot:GetCurrentActiveAbility()
+	if active ~= nil and not active:IsNull() then
+		return "casting:" .. tostring(active:GetName())
+	end
+	if not shadowRealmAbility:IsFullyCastable() then
+		return "not-castable"
+	end
+	return "-"
 end
 -- A Lua error in the realm tick (both callers pcall it): [SHy-ERROR] once per distinct message, at most 3, and the
 -- realm state is dropped so a broken hold never keeps her from attacking.

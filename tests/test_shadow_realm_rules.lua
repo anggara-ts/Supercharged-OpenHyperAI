@@ -334,3 +334,119 @@ T.test("dark willow: an early realm drop says what she was doing", function()
 	T.ok(string.find(line, "drop-mode=" .. BOT_MODE_RETREAT .. ">" .. BOT_MODE_RETREAT, 1, true) ~= nil, line)
 	T.ok(string.find(line, "attacked=yes", 1, true) ~= nil, line)
 end)
+
+T.test("shadow realm: one cast order, a spaced re-send, then give up (#203, game 079 t=356)", function()
+	local R = load()
+	T.eq(R.CastStep(0.03, 0.03, 1), "wait", "the next think: no new order")
+	T.eq(R.CastStep(0.31, 0.31, 1), "resend", "not taken after 0.3s: one more")
+	T.eq(R.CastStep(0.5, 0.19, 2), "wait", "the re-send is spaced")
+	T.eq(R.CastStep(0.95, 0.35, 3), "wait", "at most 3 orders")
+	T.eq(R.CastStep(1.0, 0.4, 3), "give-up", "1s: give up")
+end)
+
+-- Game 079 t=356: the cast line and the order 14 times in one second (the realm record restarted every think, so
+-- the no-cast check never fired), then release=stale.
+T.test("dark willow: a pending realm cast is ordered once and logged once", function()
+	local bot = T.stub.reset({ hero = "npc_dota_hero_dark_willow", slot = 4, time = 100 })
+	local ok, X = T.stub.load("bots/heroes/hero_dark_willow")
+	T.ok(ok, "hero_dark_willow loads: " .. tostring(X))
+	local realm = bot:GetAbilityByName("dark_willow_shadow_realm")
+	local cooldown = 0
+	realm.GetCooldownTimeRemaining = function()
+		return cooldown
+	end
+	realm.IsFullyCastable = function()
+		return cooldown <= 0
+	end
+	local uses = 0
+	bot.Action_UseAbility = function()
+		uses = uses + 1
+	end
+	bot.Action_MoveToLocation = function() end
+	local function castLines()
+		local count = 0
+		for _, line in ipairs(T.stub.printed) do
+			if string.find(line, "shadow-realm-cast", 1, true) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+	X.StartShadowRealm("attack", nil, "attack")
+	local at = bot._dwRealm.at
+	T.ok(bot._castHoldUntil ~= nil and bot._castHoldUntil > 100, "the cast hold is up while the cast is pending")
+	for _, t in ipairs({ 100.03, 100.06, 100.1 }) do
+		T.stub.time = t
+		X.SkillsComplement()
+	end
+	T.eq(bot._dwRealm.at, at, "the same realm record (not restarted every think)")
+	T.eq(castLines(), 1, "one cast line")
+	T.eq(uses, 0, "no new order in the first 0.3s")
+	T.stub.time = 100.35
+	X.SkillsComplement()
+	T.eq(uses, 1, "one re-send after 0.3s")
+	T.eq(bot._dwRealm.orders, 2, "orders=2")
+	cooldown = 15
+	T.stub.time = 100.4
+	X.ShadowRealmTick()
+	T.near(bot._dwRealm.tookAt, 0.4, 0.001, "took at 0.4")
+	T.eq(bot._castHoldUntil, nil, "the cast hold ends once it took")
+	-- A cast that never takes ends as release=no-cast with what blocked it.
+	cooldown = 0
+	bot._dwRealm = nil
+	X.StartShadowRealm("attack", nil, "attack")
+	for _, t in ipairs({ 100.5, 100.85, 101.2, 101.55 }) do
+		T.stub.time = t
+		X.ShadowRealmTick()
+	end
+	T.eq(bot._dwRealm, nil, "given up")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "release=no-cast", 1, true) ~= nil, line)
+	T.ok(string.find(line, "orders=3 took=no", 1, true) ~= nil, line)
+	T.ok(string.find(line, "block=", 1, true) ~= nil, line)
+	T.eq(bot._castHoldUntil, nil, "no hold left")
+end)
+
+-- Game 073: 4 rule=hit realms in push / defend ended by her own attack (drop-act=4 attacked=yes).
+T.test("dark willow: an escape realm holds the modes and walks her home (#203 item 1)", function()
+	local bot, X, orders = realmBot()
+	bot.GetActiveMode = function()
+		return BOT_MODE_PUSH_TOWER_MID
+	end
+	bot.HasModifier = function(_, name)
+		return name == "modifier_dark_willow_shadow_realm_buff"
+	end
+	X.StartShadowRealm("retreat", nil, "hit")
+	T.ok(bot._dwEscapeHoldUntil ~= nil and bot._dwEscapeHoldUntil > 105, "outpost hold until the realm ends")
+	T.ok(bot._castHoldUntil ~= nil and bot._castHoldUntil > 105, "item-think hold until the realm ends")
+	T.eq(type(X.CastHoldTick), "function", "the item think's hold tick")
+	T.stub.time = 101
+	T.eq(X.ShadowRealmTick(), false, "a move, spells may still go out")
+	T.eq(orders[#orders], "move", "move-only")
+	T.stub.time = 103
+	local before = #orders
+	X.CastHoldTick()
+	T.eq(orders[before + 1], "move", "still walking home")
+	T.stub.time = 105.5
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm, nil, "the realm is over")
+	T.eq(bot._dwEscapeHoldUntil, nil, "outpost hold cleared")
+	T.eq(bot._castHoldUntil, nil, "item-think hold cleared")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "hold=yes", 1, true) ~= nil, line)
+end)
+
+T.test("dark willow: the outpost mode takes her during an escape realm (#203 item 1)", function()
+	local bot = T.stub.reset({ hero = "npc_dota_hero_dark_willow", slot = 4, time = 300 })
+	local ok, err = T.stub.load("mode_outpost_generic")
+	T.ok(ok, tostring(err))
+	bot._dwEscapeHoldUntil = 305
+	local okD, desire = pcall(GetDesire)
+	T.ok(okD, "GetDesire: " .. tostring(desire))
+	T.near(desire, BOT_DESIRE_OVERRIDE * 1.5, 1e-9, "the hold desire, above retreat")
+	T.ok(bot._outpostHoldUntil ~= nil and bot._outpostHoldUntil > 300, "Think gives no order")
+	bot._dwEscapeHoldUntil = nil
+	bot._outpostHoldUntil = nil
+	local okN, after = pcall(GetDesire)
+	T.ok(okN and after < BOT_DESIRE_OVERRIDE * 1.5, "no hold without a realm: " .. tostring(after))
+end)
