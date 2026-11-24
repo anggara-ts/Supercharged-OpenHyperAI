@@ -785,6 +785,63 @@ local chatCallbackInstalled = false
 local humanChatTime = nil
 local humanChatString = nil
 local replyToAllChat = false
+-- Seconds between two heard-any lines of one sender.
+local HEARD_ANY_GAP = 0.5
+-- [SHy-CHAT] heard-any: every chat event from a human (maintainer, 2026-11-24: does an alt-clicked item, "Smoke of
+-- Deceit is ready", reach the chat callback at all?), at most one line per HEARD_ANY_GAP per sender (an event with no
+-- player_id prints from=?); and the chat event's key names once per distinct set of keys, in case an item alert has
+-- another shape. Only in the local match log.
+local function LogHeardAny(chatEvent)
+	local keys = {}
+	for key, value in pairs(chatEvent) do
+		keys[#keys + 1] = tostring(key) .. ":" .. type(value)
+	end
+	table.sort(keys)
+	local keySet = table.concat(keys, ",")
+	Usage._chatKeySets = Usage._chatKeySets or {}
+	if not Usage._chatKeySets[keySet] then
+		Usage._chatKeySets[keySet] = true
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s chat-event keys=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				keySet
+			)
+		)
+	end
+	local senderId = chatEvent.player_id
+	if senderId ~= nil and IsPlayerBot(senderId) then
+		return
+	end
+	local throttleKey = senderId ~= nil and senderId or "?"
+	Usage._heardAnyAt = Usage._heardAnyAt or {}
+	local now = GameTime()
+	if now < (Usage._heardAnyAt[throttleKey] or -999) + HEARD_ANY_GAP then
+		return
+	end
+	Usage._heardAnyAt[throttleKey] = now
+	local text = type(chatEvent.string) == "string" and chatEvent.string or tostring(chatEvent.string)
+	local nameOk, senderHero = false, nil
+	if senderId ~= nil then
+		nameOk, senderHero = pcall(GetSelectedHeroName, senderId)
+	end
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s heard-any from=%s team_only=%s len=%d text=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			nameOk
+					and type(senderHero) == "string"
+					and senderHero ~= ""
+					and (string.gsub(senderHero, "npc_dota_hero_", ""))
+				or (senderId ~= nil and tostring(senderId) or "?"),
+			tostring(chatEvent.team_only),
+			#text,
+			(string.gsub(text, "%c+", " ")):sub(1, 60)
+		)
+	)
+end
 -- A chat line asked for inside the chat callback, said from this bot's next think instead: an ActionImmediate_Chat
 -- from the callback itself says nothing (game 078: `!debug` switched the mode at t=700 but its "Verbose debug ON"
 -- never reached the chat). { text =, allChat =, what = the log word }, or nil.
@@ -933,63 +990,6 @@ function Usage.SetTalkMessage()
 	lastKills = GetHeroKills(playerId)
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
-end
--- Seconds between two heard-any lines of one sender.
-local HEARD_ANY_GAP = 0.5
--- [SHy-CHAT] heard-any: every chat event from a human (maintainer, 2026-11-24: does an alt-clicked item, "Smoke of
--- Deceit is ready", reach the chat callback at all?), at most one line per HEARD_ANY_GAP per sender (an event with no
--- player_id prints from=?); and the chat event's key names once per distinct set of keys, in case an item alert has
--- another shape. Only in the local match log.
-local function LogHeardAny(chatEvent)
-	local keys = {}
-	for key, value in pairs(chatEvent) do
-		keys[#keys + 1] = tostring(key) .. ":" .. type(value)
-	end
-	table.sort(keys)
-	local keySet = table.concat(keys, ",")
-	Usage._chatKeySets = Usage._chatKeySets or {}
-	if not Usage._chatKeySets[keySet] then
-		Usage._chatKeySets[keySet] = true
-		print(
-			string.format(
-				"[SHy-CHAT] t=%.0f %s chat-event keys=%s",
-				DotaTime(),
-				(string.gsub(botName, "npc_dota_hero_", "")),
-				keySet
-			)
-		)
-	end
-	local senderId = chatEvent.player_id
-	if senderId ~= nil and IsPlayerBot(senderId) then
-		return
-	end
-	local throttleKey = senderId ~= nil and senderId or "?"
-	Usage._heardAnyAt = Usage._heardAnyAt or {}
-	local now = GameTime()
-	if now < (Usage._heardAnyAt[throttleKey] or -999) + HEARD_ANY_GAP then
-		return
-	end
-	Usage._heardAnyAt[throttleKey] = now
-	local text = type(chatEvent.string) == "string" and chatEvent.string or tostring(chatEvent.string)
-	local nameOk, senderHero = false, nil
-	if senderId ~= nil then
-		nameOk, senderHero = pcall(GetSelectedHeroName, senderId)
-	end
-	print(
-		string.format(
-			"[SHy-CHAT] t=%.0f %s heard-any from=%s team_only=%s len=%d text=%s",
-			DotaTime(),
-			(string.gsub(botName, "npc_dota_hero_", "")),
-			nameOk
-					and type(senderHero) == "string"
-					and senderHero ~= ""
-					and (string.gsub(senderHero, "npc_dota_hero_", ""))
-				or (senderId ~= nil and tostring(senderId) or "?"),
-			tostring(chatEvent.team_only),
-			#text,
-			(string.gsub(text, "%c+", " ")):sub(1, 60)
-		)
-	)
 end
 function Usage.SetReplyHumanTime(chatEvent)
 	pcall(LogHeardAny, chatEvent)
