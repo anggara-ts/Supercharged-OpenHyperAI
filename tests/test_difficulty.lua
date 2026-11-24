@@ -132,6 +132,85 @@ T.test("difficulty: a skipped decision is held, then decided again", function()
 	T.eq(D.CastStep(state, 2.65, easy, roll), true, "goes out")
 end)
 
+-- Game 080 (Hard): Largo ordered Amphibian Rhapsody once a second; every order was a new decision and held again.
+T.test("difficulty: a spell ordered once a second goes out on its second order", function()
+	local _, D = load()
+	local never = function()
+		return 0.99
+	end
+	for _, name in ipairs({ "hard", "medium", "easy" }) do
+		local profile = D.PROFILES[name]
+		local state = {}
+		local ok, why = D.CastStep(state, 100, profile, never)
+		T.eq(ok, false, name .. ": first order held")
+		T.eq(why, "reaction", name .. ": reaction")
+		T.eq(D.CastStep(state, 101, profile, never), true, name .. ": second order 1s later goes out")
+		-- Two orders a second later: a missed re-order still keeps the held decision open.
+		state = {}
+		D.CastStep(state, 200, profile, never)
+		T.eq(D.CastStep(state, 202.1, profile, never), true, name .. ": next order 2.1s later goes out")
+		-- Once sent, a gap over DECISION_GAP starts a new decision (held again).
+		T.eq(D.CastStep(state, 203.1, profile, never), false, name .. ": a new decision after a sent one is held")
+	end
+end)
+
+T.test("difficulty: a spell ordered every frame still waits the reaction delay", function()
+	local _, D = load()
+	local never = function()
+		return 0.99
+	end
+	local frame = 1 / 30
+	for _, name in ipairs({ "hard", "medium", "easy" }) do
+		local profile = D.PROFILES[name]
+		local state = {}
+		local firstAt = nil
+		for i = 0, 60 do
+			local now = 50 + i * frame
+			if D.CastStep(state, now, profile, never) and firstAt == nil then
+				firstAt = now - 50
+			end
+		end
+		T.ok(firstAt ~= nil, name .. ": goes out")
+		T.ok(firstAt >= profile.reactionDelay - 1e-9, name .. ": not before the delay " .. tostring(firstAt))
+		T.ok(firstAt < profile.reactionDelay + frame + 1e-9, name .. ": on the first frame after it")
+	end
+end)
+
+T.test("difficulty: a held decision left for 3s starts fresh", function()
+	local _, D = load()
+	local never = function()
+		return 0.99
+	end
+	for _, name in ipairs({ "hard", "easy" }) do
+		local profile = D.PROFILES[name]
+		local state = {}
+		T.eq(D.CastStep(state, 10, profile, never), false, name .. ": held")
+		local ok, why = D.CastStep(state, 13, profile, never)
+		T.eq(ok, false, name .. ": 3s later: a new decision, held again")
+		T.eq(why, "reaction", name .. ": reaction")
+		T.eq(state.startAt, 13, name .. ": restarted")
+		T.eq(D.CastStep(state, 13 + profile.reactionDelay + 0.05, profile, never), true, name .. ": then goes out")
+	end
+end)
+
+T.test("difficulty: a skip at one order a second holds the skip time, then decides again", function()
+	local _, D = load()
+	local easy = D.PROFILES.easy
+	local rolls = { 0.1, 0.9 }
+	local i = 0
+	local roll = function()
+		i = i + 1
+		return rolls[i]
+	end
+	local state = {}
+	T.eq(select(2, D.CastStep(state, 0, easy, roll)), "skip", "0: skipped")
+	T.eq(select(2, D.CastStep(state, 1, easy, roll)), "skip", "1: still skipped (0.8 + 1.0 not over)")
+	T.eq(i, 1, "no re-roll at 1")
+	T.eq(select(2, D.CastStep(state, 2, easy, roll)), "reaction", "2: decided again, passed, waits")
+	T.eq(D.CastStep(state, 3, easy, roll), true, "3: goes out")
+	T.eq(i, 2, "two rolls")
+end)
+
 T.test("difficulty: dodge share latched per window, last-hit wait once per creep", function()
 	local _, D = load()
 	local medium = D.PROFILES.medium
@@ -370,6 +449,22 @@ T.test("difficulty hooks: Easy holds a cast for the reaction delay and logs it",
 	local release = Stub.newAbility("ancient_apparition_ice_blast_release", bot, false)
 	bot:Action_UseAbility(release)
 	T.eq(printed("ice_blast_release"), 0, "a release is never held")
+end)
+
+T.test("difficulty hooks: Hard sends a spell ordered once a second on its second order", function()
+	local bot = load(3)
+	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbility")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	math.random = function()
+		return 0.9
+	end
+	local song = Stub.newAbility("largo_amphibian_rhapsody", bot, false)
+	bot:Action_UseAbility(song)
+	T.eq(#castCalls, 0, "first order held")
+	T.eq(printed("held kind=reaction level=hard ability=largo_amphibian_rhapsody"), 1, "held line")
+	Stub.time = 601
+	bot:Action_UseAbility(song)
+	T.eq(#castCalls, 1, "1s later: sent")
 end)
 
 T.test("difficulty hooks: Easy last hit goes out late, Passive never hits or targets a hero", function()

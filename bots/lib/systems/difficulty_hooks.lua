@@ -161,7 +161,7 @@ function H.CastAllowed(unit, kind, ability, target)
 		return true
 	end
 	-- Items go out at once unless aimed at an enemy hero (maintainer, 2026-11-24). The hold below needs the same
-	-- order again within DECISION_GAP, and many item orders are given only once (an eat right after a backpack swap,
+	-- order again after the reaction delay (within D.PENDING_GAP), and many item orders are given only once (an eat right after a backpack swap,
 	-- a TP, a ward), so a held one never went out (game 077 20:56: Puck's Vital Toadstool). Items on an enemy hero
 	-- (Hex, Orchid, Dagon, Abyssal) keep the hold and the skip, so a lower level still reacts slower in fights.
 	if string.sub(name, 1, 5) == "item_" and not aimsAtEnemyHero(bot, kind, target) then

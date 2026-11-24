@@ -13,7 +13,8 @@ D.NAMES = { [0] = "passive", [1] = "easy", [2] = "medium", [3] = "hard", [4] = "
 D.DEFAULT = "unfair"
 
 -- Knobs per level. Estimates for a human-like player, not game data; the [SHy-DIFF] held lines show their effect.
---   reactionDelay   s a cast decision must stay true before the order goes out (per ability). Valve's datafeed has
+--   reactionDelay   s a cast decision must stay true before the order goes out (per ability): the decision's
+--                   first order is held, its first order this long or later goes out. Valve's datafeed has
 --                   no reaction time; human reaction to a visual cue is ~0.2-0.3s, a casual player's spell use is
 --                   slower than that, so Easy 0.8 / Medium 0.4 / Hard 0.15.
 --   castSkipChance  chance a new cast decision is dropped (the ability is held SKIP_HOLD s, then decided again).
@@ -81,9 +82,17 @@ D.PROFILES = {
 	},
 }
 
--- A cast decision whose last request is older than this has ended; the next request starts a new decision. Longer
--- than the slowest caller: mode Thinks run about 3 times a second (game 063 [SHy-PERF]).
+-- A cast decision that went out ends when its last request is older than this; the next request starts a new
+-- decision. Longer than a mode Think's period: mode Thinks run about 3 times a second (game 063 [SHy-PERF]).
 D.DECISION_GAP = 0.6
+-- A decision still held (not sent yet) stays open this long after its last request, so a hero file that orders a
+-- spell only once a second gets it out on its next order after the reaction delay. With DECISION_GAP alone every
+-- such order was a new decision and was held again: game 080 (Hard), Largo ordered Amphibian Rhapsody once a second
+-- (hero_largo.lua toggleOrderAt: at most one order per 1s) from t=1699 to 1712 at 18% HP and the song never started
+-- ([SHy-DIFF] held kind=reaction ability=largo_amphibian_rhapsody since=0.00 at t=1699 and 1709). 2.5s covers one
+-- missed 1s re-order plus think jitter. Kept short because the next order within it goes out with no new delay, even
+-- when the hero decided again (another target); a decision left alone for longer starts over.
+D.PENDING_GAP = 2.5
 -- A skipped decision is held this long after its reaction delay, then decided again (a new roll).
 D.SKIP_HOLD = 1.0
 -- A dodge roll holds for this long per target (a projectile flies well under 2s), so the per-frame dodge checks
@@ -120,13 +129,18 @@ end
 
 -- Cast hold (reaction delay and skip) for one ability. state: a table kept per unit and ability; roll(): a number
 -- in [0, 1), called only for a new decision of a profile with a skip chance. Returns allowed, why.
+-- A decision stays open while its requests come within DECISION_GAP once it went out (state.sent), PENDING_GAP
+-- while it is still held (reaction or skip). A skipped decision is decided again SKIP_HOLD s after its reaction
+-- delay, for every caller (a caller slower than DECISION_GAP no longer re-rolls on each order).
 function D.CastStep(state, now, profile, roll)
-	local fresh = state.lastAt == nil or now - state.lastAt > D.DECISION_GAP
+	local gap = state.sent and D.DECISION_GAP or D.PENDING_GAP
+	local fresh = state.lastAt == nil or now - state.lastAt > gap
 	if not fresh and state.skip and now - state.startAt >= profile.reactionDelay + D.SKIP_HOLD then
 		fresh = true
 	end
 	if fresh then
 		state.startAt = now
+		state.sent = false
 		state.skip = profile.castSkipChance > 0 and roll() < profile.castSkipChance
 	end
 	state.lastAt = now
@@ -136,6 +150,7 @@ function D.CastStep(state, now, profile, roll)
 	if now - state.startAt < profile.reactionDelay then
 		return false, "reaction"
 	end
+	state.sent = true
 	return true, nil
 end
 
