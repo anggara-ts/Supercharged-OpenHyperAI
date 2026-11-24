@@ -933,7 +933,58 @@ function Usage.SetTalkMessage()
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
 end
+-- Seconds between two heard-any lines of one sender.
+local HEARD_ANY_GAP = 0.5
+-- [SHy-CHAT] heard-any: every chat event from a human (maintainer, 2026-11-24: does an alt-clicked item, "Smoke of
+-- Deceit is ready", reach the chat callback at all?), at most one line per HEARD_ANY_GAP per sender; and the chat
+-- event's key names once per game, in case an item alert has another shape. Only in the local match log.
+local function LogHeardAny(chatEvent)
+	if not Usage._chatKeysLogged then
+		Usage._chatKeysLogged = true
+		local keys = {}
+		for key, value in pairs(chatEvent) do
+			keys[#keys + 1] = tostring(key) .. ":" .. type(value)
+		end
+		table.sort(keys)
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s chat-event keys=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				table.concat(keys, ",")
+			)
+		)
+	end
+	local senderId = chatEvent.player_id
+	if senderId == nil or IsPlayerBot(senderId) then
+		return
+	end
+	Usage._heardAnyAt = Usage._heardAnyAt or {}
+	local now = GameTime()
+	if now < (Usage._heardAnyAt[senderId] or -999) + HEARD_ANY_GAP then
+		return
+	end
+	Usage._heardAnyAt[senderId] = now
+	local text = type(chatEvent.string) == "string" and chatEvent.string or tostring(chatEvent.string)
+	local nameOk, senderHero = pcall(GetSelectedHeroName, senderId)
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s heard-any from=%s team_only=%s len=%d text=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			nameOk
+					and type(senderHero) == "string"
+					and senderHero ~= ""
+					and (string.gsub(senderHero, "npc_dota_hero_", ""))
+				or tostring(senderId),
+			tostring(chatEvent.team_only),
+			#text,
+			(string.gsub(text, "%c+", " ")):sub(1, 60)
+		)
+	)
+end
 function Usage.SetReplyHumanTime(chatEvent)
+	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
 	-- [SHy-CHAT] heard: one line per `!` command that reached the team's chat callback (game 077: `!push` and
