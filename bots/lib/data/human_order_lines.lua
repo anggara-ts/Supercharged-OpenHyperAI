@@ -6,10 +6,11 @@
 -- bot say one short reason from this file (at most once per 30s per team); a bot busy with a team call gives that
 -- call's words (busy-roshan / busy-push / busy-defend, game 078). {name} is the human's hero (the replies to
 -- a command), {s} the seconds until a dead bot respawns, {lane} the lane (lane_top / lane_mid / lane_bot of the same
--- language), {target} the enemy hero's display name.
+-- language), {target} the enemy hero's display name, {cmd} the command word the human typed (which_lane: `!def` for
+-- a defend, `!push` when none is given).
 local Lines = {
 	en = {
-		which_lane = "{name}, which lane? !push top / mid / bot",
+		which_lane = "{name}, which lane? {cmd} top / mid / bot",
 		cancelled = "OK {name}, cancelled",
 		["on-my-way"] = "On my way",
 		pushing = "Pushing {lane}",
@@ -37,7 +38,7 @@ local Lines = {
 		["busy-defend"] = "Defending {lane}",
 	},
 	zh = {
-		which_lane = "{name}，哪一路？!push top / mid / bot",
+		which_lane = "{name}，哪一路？{cmd} top / mid / bot",
 		cancelled = "好的{name}，取消",
 		["on-my-way"] = "我来了",
 		pushing = "去推{lane}",
@@ -65,7 +66,7 @@ local Lines = {
 		["busy-defend"] = "去守{lane}",
 	},
 	ru = {
-		which_lane = "{name}, какая линия? !push top / mid / bot",
+		which_lane = "{name}, какая линия? {cmd} top / mid / bot",
 		cancelled = "Ок {name}, отмена",
 		["on-my-way"] = "Иду",
 		pushing = "Пушу {lane}",
@@ -93,7 +94,7 @@ local Lines = {
 		["busy-defend"] = "Защищаю {lane}",
 	},
 	ja = {
-		which_lane = "{name}、どのレーン？ !push top / mid / bot",
+		which_lane = "{name}、どのレーン？ {cmd} top / mid / bot",
 		cancelled = "了解{name}、中止",
 		["on-my-way"] = "向かってる",
 		pushing = "{lane}をプッシュ",
@@ -127,8 +128,9 @@ local function Plain(text)
 	return (string.gsub(text or "", "%%", ""))
 end
 
--- The line for `key` in `locale` (English when the locale or the key is missing), with {name}, {s}, {lane} and
--- {target} filled in. `extra`: { lane = "top" / "mid" / "bot", target = the enemy hero's display name } or nil.
+-- The line for `key` in `locale` (English when the locale or the key is missing), with {name}, {s}, {lane},
+-- {target} and {cmd} filled in. `extra`: { lane = "top" / "mid" / "bot", target = the enemy hero's display name,
+-- cmd = the command word } or nil.
 function Lines.Get(locale, key, name, seconds, extra)
 	local set = type(Lines[locale]) == "table" and Lines[locale] or Lines.en
 	local line = set[key]
@@ -141,6 +143,7 @@ function Lines.Get(locale, key, name, seconds, extra)
 	line = string.gsub(line, "{s}", tostring(math.floor(seconds or 0)))
 	line = string.gsub(line, "{lane}", Plain(laneWord))
 	line = string.gsub(line, "{target}", Plain(extra.target))
+	line = string.gsub(line, "{cmd}", Plain(extra.cmd or "!push"))
 	return line
 end
 

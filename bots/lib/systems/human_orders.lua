@@ -867,7 +867,14 @@ function Orders.OnChat(chatEvent)
 	if senderId == nil or IsPlayerBot(senderId) or not Fu.Role.IsAllyMemberID(senderId) then
 		return true
 	end
-	state.chat = { kind = command.kind, lane = command.lane, all = command.all, senderId = senderId, at = GameTime() }
+	state.chat = {
+		kind = command.kind,
+		lane = command.lane,
+		all = command.all,
+		cmd = command.cmd,
+		senderId = senderId,
+		at = GameTime(),
+	}
 	return true
 end
 
@@ -896,7 +903,9 @@ local function StartChatOrder(chat, tickBot)
 	end
 	if (chat.kind == "push" or chat.kind == "defend") and chat.lane == nil then
 		Log("%s order kind=%s from=%s via=chat verdict=refuse why=no-lane", Short(tickBot), chat.kind, Short(human))
-		QueueReply(nil, chat.kind, tickBot:GetPlayerID(), "which_lane", human)
+		-- Names the command that was typed (game 080, maintainer: "sending !def asked confirm 'which lane? !push
+		-- top/mid/bot'").
+		QueueReply(nil, chat.kind, tickBot:GetPlayerID(), "which_lane", human, nil, nil, { cmd = chat.cmd })
 		return
 	end
 	local found = {}

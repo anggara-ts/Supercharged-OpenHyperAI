@@ -591,6 +591,26 @@ T.test("human orders: reply lines per language", function()
 	T.eq(Lines.Get("xx", "too-early", "Leshrac"), "Too early", "unknown locale: English")
 	T.eq(Lines.Get("en", "nonsense", "Leshrac"), "Can't now", "unknown key")
 	T.eq(Lines.Get("en", "which_lane", "Leshrac"), "Leshrac, which lane? !push top / mid / bot", "a command reply")
+	-- Game 080, maintainer: "sending !def asked confirm 'which lane? !push top/mid/bot'".
+	local R = require(GetScriptDirectory() .. "/lib/systems/human_order_rules")
+	local def = R.ParseChat("!def")
+	T.eq(def.cmd, "!def", "the typed command word")
+	T.eq(R.ParseChat("!DEFEND").cmd, "!defend", "lower case")
+	T.eq(
+		Lines.Get("en", "which_lane", "Leshrac", nil, { cmd = def.cmd }),
+		"Leshrac, which lane? !def top / mid / bot",
+		"!def is asked with !def"
+	)
+	T.eq(
+		Lines.Get("en", "which_lane", "Leshrac", nil, { cmd = R.ParseChat("!push").cmd }),
+		"Leshrac, which lane? !push top / mid / bot",
+		"!push with !push"
+	)
+	for _, locale in ipairs({ "zh", "ru", "ja" }) do
+		local line = Lines.Get(locale, "which_lane", "Leshrac", nil, { cmd = "!def" })
+		T.ok(line:find("!def", 1, true) ~= nil and line:find("!push", 1, true) == nil, locale .. " names !def")
+		T.ok(line:find("{cmd}", 1, true) == nil, locale .. " fills {cmd}")
+	end
 	for _, locale in ipairs({ "en", "zh", "ru", "ja" }) do
 		for key in pairs(Lines.en) do
 			T.ok(Lines[locale][key] ~= nil, locale .. " has " .. key)

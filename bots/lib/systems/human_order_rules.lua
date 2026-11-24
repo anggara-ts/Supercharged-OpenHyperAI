@@ -152,9 +152,10 @@ local LANE_WORDS = {
 	bottom = "bot",
 }
 
--- "!push top" -> { kind = "push", lane = "top", all = false }; "!push top all" -> the same with all = true (FORCE
--- ALL; without it FORCE NEAR); "!push" -> { kind = "push" } (no lane: the bots ask which); "!rosh all",
--- "!group all", "!def mid all" likewise; "!stop" takes no words. Any other text -> nil.
+-- "!push top" -> { kind = "push", lane = "top", all = false, cmd = "!push" }; "!push top all" -> the same with all =
+-- true (FORCE ALL; without it FORCE NEAR); "!push" -> { kind = "push" } (no lane: the bots ask which, naming `cmd`,
+-- the command word as typed); "!rosh all", "!group all", "!def mid all" likewise; "!stop" takes no words. Any other
+-- text -> nil.
 function Rules.ParseChat(text)
 	if type(text) ~= "string" then
 		return nil
@@ -175,12 +176,12 @@ function Rules.ParseChat(text)
 	end
 	if kind == "push" or kind == "defend" then
 		local lane = #words == 1 and LANE_WORDS[words[1]] or nil
-		return { kind = kind, lane = lane, all = all }
+		return { kind = kind, lane = lane, all = all, cmd = word }
 	end
 	if #words > 0 then
 		return nil
 	end
-	return { kind = kind, all = all }
+	return { kind = kind, all = all, cmd = word }
 end
 
 -- Kinds whose repeated pings chain by lane (the order goes to that lane's front building wherever the ping lands).
