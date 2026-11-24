@@ -333,6 +333,21 @@ end
 --   tier            the target building's tier (push)
 --   ourCreepsNear   our wave is near the target building (push)
 --   roshanAlive     (rosh)
+-- Roshan respawns 8-11 minutes after his death (turbo: half). Fu.IsRoshanAlive answers "alive" only after the
+-- longest wait (11 min), so between 8 and 11 minutes he may be up and the bots can't tell. A human's `!rosh` / Roshan
+-- ping is refused only while he is surely dead (under the shortest wait). Game 082, 24:05: Roshan was up (the
+-- maintainer saw him), killed at 14:12, and `!rosh` got "Roshan is dead" (maintainer: "they dont react to !rosh or
+-- saying roshan is dead. rosh is up"). The 8-11 min window is the commonly cited respawn time, not read from game data.
+Rules.ROSHAN_MIN_RESPAWN = 8 * 60
+-- killTime: GetRoshanKillTime() (0 = never killed); now: DotaTime(). True only while Roshan is surely dead.
+function Rules.RoshanSurelyDead(killTime, now, turbo)
+	if killTime == nil or killTime <= 0 or now == nil then
+		return false
+	end
+	local wait = turbo and Rules.ROSHAN_MIN_RESPAWN / 2 or Rules.ROSHAN_MIN_RESPAWN
+	return now - killTime < wait
+end
+
 -- Returns "go" or "refuse", and the reason.
 function Rules.Check(kind, tier, f)
 	if kind == "rosh" and f.roshanAlive == false then

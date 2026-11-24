@@ -537,6 +537,11 @@ T.test("human orders: a ping is a request, insist and chat are orders", function
 	facts.baseUnderAttack, facts.aliveAllies = false, 2
 	T.eq(select(2, R.Check("push", "ask", facts)), "too-few-alive", "2 alive")
 	T.eq(select(2, R.Check("rosh", "force-near", { roshanAlive = false, available = 3 })), "roshan-dead", "!rosh, dead")
+	-- Game 082: killed at 852 (14:12), `!rosh` at 1445 (24:05), 9:53 later: maybe up, so not refused.
+	T.eq(R.RoshanSurelyDead(852, 1445, false), false, "9:53 after the kill: maybe up")
+	T.eq(R.RoshanSurelyDead(852, 852 + 7 * 60, false), true, "7 min after the kill: surely dead")
+	T.eq(R.RoshanSurelyDead(0, 1445, false), false, "never killed")
+	T.eq(R.RoshanSurelyDead(852, 852 + 5 * 60, true), false, "turbo: 4 min wait")
 	T.eq(select(2, R.Check("push", "force-all", { available = 0 })), "nobody-free", "nobody can go")
 	T.eq(R.Check("danger", "ask", { available = 0 }), "go", "danger needs nobody")
 end)

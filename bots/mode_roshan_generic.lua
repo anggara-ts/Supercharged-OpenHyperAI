@@ -511,7 +511,9 @@ function GetDesireHelper()
 	-- at 0.96; game 078), passed as the call so GetDesire does not clamp it to VERYHIGH (0.6), as it did to the 0.95
 	-- this returned before.
 	local roshCall, roshOrderDesire = false, nil
-	if isRoshanAlive then
+	-- A human call also counts while Roshan may be up (8-11 min after his death), not only after the 11 minutes
+	-- Fu.IsRoshanAlive waits (game 082).
+	if isRoshanAlive or HumanOrders.RoshanMaybeUp() then
 		roshCall, roshOrderDesire = HumanOrders.RoshCalled(bot)
 	end
 	if roshCall == "order" or roshCall == "ping" and hasEnoughDps and IsRoshanEngageSafe(roshanLocation, false) then

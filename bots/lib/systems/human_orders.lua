@@ -700,7 +700,8 @@ function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 		ourCreepsNear = ourCreepsNear,
 	}
 	if kind == "rosh" then
-		facts.roshanAlive = Fu.IsRoshanAlive()
+		-- Refuse only while Roshan is surely dead: between 8 and 11 minutes he may be up (Rules.RoshanSurelyDead).
+		facts.roshanAlive = not Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
 	end
 	local need = Rules.Need(kind, facts)
 	local obey, queue, ignore, decisions =
@@ -1024,7 +1025,7 @@ local function KeepOrder()
 	if order.kind == "push" and order.building ~= nil and (order.building:IsNull() or not order.building:IsAlive()) then
 		return EndOrder("building-dead")
 	end
-	if order.kind == "rosh" and not Fu.IsRoshanAlive() then
+	if order.kind == "rosh" and Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo()) then
 		return EndOrder("roshan-dead")
 	end
 	if order.kind == "defend" and now - order.startedAt > 8 then
@@ -1384,6 +1385,11 @@ end
 -- mode_roshan_generic.lua: while this bot is called to Roshan, "ping" (a single Roshan ping the team agreed with:
 -- the pit safety checks still apply) or "order" (a forced call: a repeated ping or `!rosh`: go anyway), and the
 -- order's desire (Rules.OrderDesire); else false.
+-- Roshan may be up (not killed in the last 8 minutes; turbo 4): a human's Roshan call is followed then, even before
+-- Fu.IsRoshanAlive's 11-minute mark (game 082, 24:05).
+function Orders.RoshanMaybeUp()
+	return not Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
+end
 function Orders.RoshCalled(bot)
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or order.kind ~= "rosh" then
