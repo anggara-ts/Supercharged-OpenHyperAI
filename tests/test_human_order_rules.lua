@@ -53,13 +53,14 @@ T.test("human orders: chat commands parse, other commands do not", function()
 	T.eq(R.ParseChat(nil), nil, "nil text")
 end)
 
-T.test("human orders: the same ping again within 2s is an insist", function()
+T.test("human orders: the same ping again within 3s is an insist", function()
 	local R = rules()
 	local first = { time = 100, x = 4825, y = -3676 }
 	T.eq(R.IsInsist(nil, first), false, "no previous ping")
 	T.eq(R.IsInsist(first, first), false, "the same ping read twice")
 	T.eq(R.IsInsist(first, { time = 101.5, x = 4900, y = -3700 }), true, "79 away, 1.5s later")
-	T.eq(R.IsInsist(first, { time = 103, x = 4900, y = -3700 }), false, "3s later: too slow for an insist")
+	T.eq(R.IsInsist(first, { time = 103, x = 4900, y = -3700 }), true, "3s later: still an insist (game 078)")
+	T.eq(R.IsInsist(first, { time = 103.5, x = 4900, y = -3700 }), false, "3.5s later: too slow for an insist")
 	T.eq(R.IsInsist(first, { time = 106, x = 4825, y = -3676 }), false, "6s later")
 	T.eq(R.IsInsist(first, { time = 101, x = 5300, y = -3676 }), true, "475 away: within the 600 radius")
 	T.eq(R.IsInsist(first, { time = 101, x = 5525, y = -3676 }), false, "700 away")
@@ -88,10 +89,10 @@ T.test("human orders: push / defend pings chain by kind and lane, wherever they 
 		counts[i] = ping.count
 		prev = ping
 	end
-	T.eq(counts[2], 1, "2.3s after the first: a new chain")
-	T.eq(counts[3], 2, "the same spot 1.5s later: force near")
-	T.eq(counts[4], 3, "590 away on the same lane 1.1s later: force all")
-	T.eq(R.Tier(counts[4]), "force-all", "the game 077 pings now force everyone")
+	T.eq(counts[2], 2, "2.3s after the first: chains with the 3s window")
+	T.eq(counts[3], 3, "the same spot 1.5s later: force all")
+	T.eq(counts[4], 4, "590 away on the same lane 1.1s later: still force all")
+	T.eq(R.Tier(counts[3]), "force-all", "the game 077 pings force everyone from the third")
 	local push = { time = 100, x = 0, y = 0, kind = "push", lane = "top", normal = false }
 	T.eq(
 		R.IsInsist(push, { time = 101, x = 1500, y = 0, kind = "push", lane = "top", normal = true }),
@@ -109,9 +110,9 @@ T.test("human orders: push / defend pings chain by kind and lane, wherever they 
 		"another kind on the same lane"
 	)
 	T.eq(
-		R.IsInsist(push, { time = 103, x = 0, y = 0, kind = "push", lane = "top", normal = false }),
+		R.IsInsist(push, { time = 103.5, x = 0, y = 0, kind = "push", lane = "top", normal = false }),
 		false,
-		"the same lane 3s later"
+		"the same lane 3.5s later"
 	)
 	T.eq(
 		R.IsInsist({ time = 100, x = 0, y = 0, kind = "move" }, { time = 101, x = 1500, y = 0, kind = "move" }),
@@ -120,8 +121,25 @@ T.test("human orders: push / defend pings chain by kind and lane, wherever they 
 	)
 end)
 
+-- Game 078, maintainer: "how does ping count works? i think i need to ping 5+ to make it work for 2 pings". The pings
+-- of 24:07-24:13 reached the scripts at these times (the [SHy-PING] trace); with a 2s window they counted 1, 2, 1, 2.
+T.test("human orders: the game 078 camp pings chain with the 3s window", function()
+	local R = rules()
+	local prev, counts = nil, {}
+	for i, time in ipairs({ 1447.1, 1448.7, 1451.5, 1453.1 }) do
+		local ping = { time = time, x = -800, y = 4850, targetKey = "camp", normal = true }
+		ping.count = R.PingCount(prev, ping)
+		counts[i] = ping.count
+		prev = ping
+	end
+	T.eq(R.INSIST_SECONDS, 3, "3s between pings")
+	T.eq(counts[2], 2, "1.6s: force near")
+	T.eq(counts[3], 3, "2.8s (the insist-miss of game 078): force all")
+	T.eq(counts[4], 4, "1.6s: still force all")
+end)
+
 -- Maintainer 2026-11-23: "1 ping = ask / 2 ping = force ally nearby ping / 3+ ping = force all ally accross map".
-T.test("human orders: ping tiers by count, each ping within 2s of the one before", function()
+T.test("human orders: ping tiers by count, each ping within 3s of the one before", function()
 	local R = rules()
 	local function chain(times, xs, key)
 		local prev, count = nil, 0
@@ -138,9 +156,10 @@ T.test("human orders: ping tiers by count, each ping within 2s of the one before
 	T.eq(select(2, chain({ 100, 101.5, 103 })), "force-all", "3 pings 1.5s apart: force all")
 	T.eq(chain({ 100, 101.5, 103, 104.5 }), 4, "4 pings: count 4")
 	T.eq(select(2, chain({ 100, 101.5, 103, 104.5 })), "force-all", "4 pings: still force all")
-	T.eq(select(2, chain({ 100, 102.5 })), "ask", "2 pings 2.5s apart: two asks")
-	T.eq(select(2, chain({ 100, 101.5, 104 })), "ask", "the third 2.5s late starts a new chain")
-	T.eq(select(2, chain({ 100, 102.5, 104 })), "force-near", "a late second ping, then 1.5s: force near")
+	T.eq(select(2, chain({ 100, 103.5 })), "ask", "2 pings 3.5s apart: two asks")
+	T.eq(select(2, chain({ 100, 101.5, 105 })), "ask", "the third 3.5s late starts a new chain")
+	T.eq(select(2, chain({ 100, 103.5, 105 })), "force-near", "a late second ping, then 1.5s: force near")
+	T.eq(select(2, chain({ 100, 102.5 })), "force-near", "2 pings 2.5s apart: force near (was two asks with 2s)")
 	-- The chain is per gap, not from the first ping: 3 pings 1.5s apart span 3s and still count.
 	T.eq(select(2, chain({ 100, 101.5, 103 }, { 0, 100, 200 })), "force-all", "small moves within 600")
 	T.eq(select(2, chain({ 100, 101.5 }, { 0, 400 })), "force-near", "400 away: within the 600 radius")
@@ -255,7 +274,7 @@ T.test("human orders: a danger ping needs no responders", function()
 	T.eq(decisions[3].answer, "far", "1300 away: not affected")
 	T.eq(R.DANGER_RADIUS, 1200, "maintainer: ~1200")
 	T.ok(R.DANGER_SAFE > R.DANGER_RADIUS, "backs off past the radius")
-	T.eq(#R.ReplyPlan("danger", "go", "agree", { 1 }, nil, {}), 0, "no chat reply")
+	T.eq(#R.ReplyPlan("danger", "go", "agree", nil, {}), 0, "no chat reply")
 	-- Three X-pings stay a danger ping: never forced (no team TP onto the danger spot).
 	obey = R.PickResponders("danger", {
 		{ id = 1, dist = 900, state = "ok" },
@@ -324,54 +343,57 @@ T.test("human orders: game 075 !push bot asks the bottom laners first", function
 end)
 
 -- Maintainer 2026-11-23: "response 'on my way' only when acknowledging. no reply for 'cant do'".
-T.test("human orders: replies - on my way from every bot that goes, a reason only when nobody goes", function()
-	local R = rules()
-	-- Someone goes: one "On my way!" per bot that goes, no refusal line (the bots that can't go stay quiet).
-	local plan = R.ReplyPlan("push", "go", "forced", { 9, 7 }, { id = 3, key = "retreat" }, { now = 500 })
-	T.eq(#plan, 2, "two on my way, nothing else")
-	T.eq(plan[1].id, 9, "first responder")
-	T.eq(plan[1].key, "on-my-way", "on my way (no ackKey given)")
-	T.eq(plan[2].id, 7, "second responder")
-	for _, line in ipairs(plan) do
-		T.eq(line.key, "on-my-way", "no refusal line when a bot goes")
+T.test(
+	"human orders: replies - each bot that goes says it at its first obey, a reason only when nobody goes",
+	function()
+		local R = rules()
+		-- Someone goes: no line when the order is made (game 078: Largo said "Clearing the camp" when picked and never
+		-- went); each bot says its line at its first obey (Rules.ShouldAck), once per ping chain.
+		T.eq(#R.ReplyPlan("push", "go", "forced", { id = 3, key = "retreat" }, { now = 500 }), 0, "go: nothing planned")
+		T.eq(R.ShouldAck("push", {}, 9), true, "first obey: says it")
+		T.eq(R.ShouldAck("push", { [9] = true }, 9), false, "said it for this chain already")
+		T.eq(R.ShouldAck("push", { [9] = true }, 7), true, "another bot of the chain")
+		T.eq(R.ShouldAck("push", nil, 7), true, "no acked table yet")
+		T.eq(R.ShouldAck("danger", {}, 7), false, "a danger ping: no line")
+		-- Everyone joins later (fighting / dead): nothing now, each says its line at its first obey.
+		T.eq(#R.ReplyPlan("push", "queue", "forced", nil, { now = 500 }), 0, "queue: no reply")
+		-- Nobody goes: one short reason, said after the 3s a repeated ping has to force the order.
+		local plan = R.ReplyPlan("push", "refuse", "too-early", nil, { now = 200 })
+		T.eq(#plan, 1, "a refused request: one reason")
+		T.eq(plan[1].key, "too-early", "the reason")
+		T.eq(plan[1].id, nil, "said by the bot that read it")
+		T.eq(plan[1].delay, R.INSIST_SECONDS, "held for the insist window")
+		plan = R.ReplyPlan("gank", "refuse", "nobody-free", { id = 4, key = "dead", seconds = 20 }, { now = 900 })
+		T.eq(plan[1].key, "dead", "nobody free: the nearest says why")
+		T.eq(plan[1].seconds, 20, "with the respawn time")
+		T.eq(plan[1].id, 4, "that bot says it")
+		T.eq(R.ReplyPlan("gank", "refuse", "nobody-free", nil, { now = 900 })[1].key, "busy", "nobody at all")
+		-- Game 078: the nearest bot was held by the Roshan gather; it says so, a push / defend with its own lane.
+		plan = R.ReplyPlan("farm", "refuse", "nobody-free", { id = 4, key = R.BusyKey("busy:roshan") }, { now = 900 })
+		T.eq(plan[1].key, "busy-roshan", "busy with Roshan")
+		plan = R.ReplyPlan("farm", "refuse", "nobody-free", { id = 4, key = "busy-push", lane = "top" }, { now = 900 })
+		T.eq(plan[1].lane, "top", "its own push lane")
+		T.eq(R.BusyKey("busy:push-top"), "busy-push", "push")
+		T.eq(R.BusyKey("busy:defend-mid"), "busy-defend", "defend")
+		T.eq(R.BusyKey("busy:farm"), "busy", "farm: can't now")
+		T.eq(R.BusyKey("fight"), "busy", "not a busy state")
+		T.ok(R.IsRefusalKey("busy-roshan") and R.IsRefusalKey("busy-push"), "busy lines are reasons")
+		-- At most one reason per 30s per team.
+		T.eq(
+			#R.ReplyPlan("push", "refuse", "outnumbered", nil, { now = 920, lastRefusalAt = 900 }),
+			0,
+			"20s later: quiet"
+		)
+		T.eq(#R.ReplyPlan("push", "refuse", "outnumbered", nil, { now = 930, lastRefusalAt = 900 }), 1, "30s later")
+		T.ok(R.RefusalAllowed(0, nil), "the first one")
+		T.ok(R.IsRefusalKey("too-early") and R.IsRefusalKey("busy"), "reasons")
+		T.ok(not R.IsRefusalKey("on-my-way") and not R.IsRefusalKey("which_lane"), "not reasons")
+		for key in pairs(R.ACK_KEYS) do
+			T.ok(not R.IsRefusalKey(key), key .. " is not a reason")
+		end
+		T.eq(R.REPLY_GAP_SECONDS, 0.5, "replies ~0.5s apart")
 	end
-	-- Game 077 (maintainer): each bot says what it does, the same line for every bot of the order.
-	plan = R.ReplyPlan("push", "go", "forced", { 9, 7 }, nil, { now = 500, ackKey = "pushing" })
-	T.eq(#plan, 2, "one line per bot that goes")
-	T.eq(plan[1].key, "pushing", "first: pushing")
-	T.eq(plan[2].key, "pushing", "second: pushing")
-	-- The same ping chain again: the bots that already said it stay quiet, a new one speaks.
-	plan = R.ReplyPlan("push", "go", "forced", { 9, 7, 5 }, nil, { now = 501, acked = { [9] = true, [7] = true } })
-	T.eq(#plan, 1, "only the new bot")
-	T.eq(plan[1].id, 5, "the bot that joined with the force")
-	-- Everyone joins later (fighting / dead): nothing now, each says "On my way!" when it joins.
-	T.eq(#R.ReplyPlan("push", "queue", "forced", {}, nil, { now = 500 }), 0, "queue: no reply")
-	-- Nobody goes: one short reason, said after the 2s a repeated ping has to force the order.
-	plan = R.ReplyPlan("push", "refuse", "too-early", {}, nil, { now = 200 })
-	T.eq(#plan, 1, "a refused request: one reason")
-	T.eq(plan[1].key, "too-early", "the reason")
-	T.eq(plan[1].id, nil, "said by the bot that read it")
-	T.eq(plan[1].delay, R.INSIST_SECONDS, "held for the insist window")
-	plan = R.ReplyPlan("gank", "refuse", "nobody-free", {}, { id = 4, key = "dead", seconds = 20 }, { now = 900 })
-	T.eq(plan[1].key, "dead", "nobody free: the nearest says why")
-	T.eq(plan[1].seconds, 20, "with the respawn time")
-	T.eq(plan[1].id, 4, "that bot says it")
-	T.eq(R.ReplyPlan("gank", "refuse", "nobody-free", {}, nil, { now = 900 })[1].key, "busy", "nobody at all")
-	-- At most one reason per 30s per team.
-	T.eq(
-		#R.ReplyPlan("push", "refuse", "outnumbered", {}, nil, { now = 920, lastRefusalAt = 900 }),
-		0,
-		"20s later: quiet"
-	)
-	T.eq(#R.ReplyPlan("push", "refuse", "outnumbered", {}, nil, { now = 930, lastRefusalAt = 900 }), 1, "30s later")
-	T.ok(R.RefusalAllowed(0, nil), "the first one")
-	T.ok(R.IsRefusalKey("too-early") and R.IsRefusalKey("busy"), "reasons")
-	T.ok(not R.IsRefusalKey("on-my-way") and not R.IsRefusalKey("which_lane"), "not reasons")
-	for key in pairs(R.ACK_KEYS) do
-		T.ok(not R.IsRefusalKey(key), key .. " is not a reason")
-	end
-	T.eq(R.REPLY_GAP_SECONDS, 0.5, "replies ~0.5s apart")
-end)
+)
 
 -- Maintainer, game 077: "instead of generic 'on my way', change to 'pushing bot', 'on my way' (when checking fog),
 -- 'attacking medusa'".
@@ -523,6 +545,10 @@ T.test("human orders: who answers", function()
 	T.eq(R.BotState({ alive = true, hp = 0.9, holdingBase = true }), "base", "holding the base")
 	T.eq(R.BotState({ alive = true, hp = 0.9, inFight = true }), "fight", "fighting")
 	T.eq(R.BotState({ alive = true, hp = 0.9, inFight = true, losing = true }), "losing", "losing")
+	T.eq(R.BotState({ alive = true, hp = 0.9, busy = "roshan" }), "busy:roshan", "held by a team call")
+	T.eq(R.BotState({ alive = true, hp = 0.9, inFight = true, busy = "roshan" }), "fight", "a fight comes first")
+	T.eq(R.Answer("farm", "busy:roshan"), "ignore", "a request skips a busy bot")
+	T.eq(R.ForceAnswer({ state = "busy:roshan", hp = 0.9 }), "obey", "a forced order takes it")
 	T.eq(R.Answer("push", "fight"), "queue", "a fight first, then the push")
 	T.eq(R.Answer("push", "losing"), "obey", "a lost fight may be left")
 	T.eq(R.Answer("focus", "fight"), "obey", "focus is about the fight")
@@ -614,4 +640,27 @@ T.test("human orders: a ping in our own fountain area is not an order", function
 	T.eq(select(2, R.InOwnFountainArea({ x = -6700, y = -6300 }, spawn, building)), "spawn", "by the spawn point")
 	T.eq(R.InOwnFountainArea({ x = -5000, y = -5000 }, spawn, building), false, "far from both")
 	T.eq(R.InOwnFountainArea(onBuilding, nil, building), true, "the building without a spawn point")
+end)
+
+-- Game 078 (24:11): a forced camp order at 0.75 lost to the team's Roshan gather (0.96). Maintainer: the human
+-- insisting outranks the team's own calls, not survival.
+T.test("human orders: a forced order's desire beats the team's calls, not a strong retreat", function()
+	local R = rules()
+	T.near(R.OrderDesire("ask", 1), 0.75, 1e-9, "a request at full HP")
+	T.near(R.OrderDesire("force-near", 1), 0.97, 1e-9, "a forced order at full HP")
+	T.ok(R.OrderDesire("force-all", 1) > 0.96, "above the Roshan gather (0.96)")
+	T.ok(R.OrderDesire("force-all", 1) < 0.98, "below the hard retreat (0.98)")
+	T.near(R.OrderDesire("force-near", 0.2), 0.97 * 0.6, 1e-9, "fades to 60% at FORCE_MIN_HP")
+	T.near(R.OrderDesire("ask", 0.3), 0.75 * 0.6, 1e-9, "a request fades to 60% at LEAVE_HP")
+	T.near(R.OrderDesire("force-near", 1, 0.5), 0.97, 1e-9, "a mild retreat desire does not cut it")
+	T.near(R.OrderDesire("force-near", 1, 0.9), 0.88, 1e-9, "a 0.9 retreat rule wins")
+	T.near(R.OrderDesire("force-near", 1, 0.98), 0.96, 1e-9, "under the hard retreat")
+	T.near(R.OrderDesire("ask", 1, 0.98), 0.75, 1e-9, "a request is already under it")
+	T.eq(R.IsBusy("roshan", 0.96, 0.75), true, "the Roshan gather holds a bot from a request")
+	T.eq(R.IsBusy("farm", 0.6, 0.75), false, "farm does not")
+	T.eq(R.IsBusy(nil, 0.95, 0.75), false, "attack, retreat, evasive: not busy")
+	local Lines = require(GetScriptDirectory() .. "/lib/data/human_order_lines")
+	T.eq(Lines.Get("en", "busy-roshan", "Leshrac"), "Going Roshan", "busy with Roshan")
+	T.eq(Lines.Get("en", "busy-push", "Leshrac", nil, { lane = "top" }), "Pushing top", "busy pushing top")
+	T.eq(Lines.Get("en", "busy-defend", "Leshrac", nil, { lane = "mid" }), "Defending mid", "busy defending mid")
 end)

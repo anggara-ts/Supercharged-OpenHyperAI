@@ -3,7 +3,8 @@
 -- A bot that goes says what it does, once (maintainer, 2026-11-23: "response 'on my way' only when acknowledging. no
 -- reply for 'cant do'"; game 077: "instead of generic 'on my way', change to 'pushing bot', 'on my way' (when checking
 -- fog), 'attacking medusa'"): the key comes from human_order_rules.lua Rules.AckKey. Only when nobody goes does one
--- bot say one short reason from this file (at most once per 30s per team). {name} is the human's hero (the replies to
+-- bot say one short reason from this file (at most once per 30s per team); a bot busy with a team call gives that
+-- call's words (busy-roshan / busy-push / busy-defend, game 078). {name} is the human's hero (the replies to
 -- a command), {s} the seconds until a dead bot respawns, {lane} the lane (lane_top / lane_mid / lane_bot of the same
 -- language), {target} the enemy hero's display name.
 local Lines = {
@@ -31,6 +32,9 @@ local Lines = {
 		retreat = "Low HP",
 		base = "Base under attack",
 		busy = "Can't now",
+		["busy-roshan"] = "Going Roshan",
+		["busy-push"] = "Pushing {lane}",
+		["busy-defend"] = "Defending {lane}",
 	},
 	zh = {
 		which_lane = "{name}，哪一路？!push top / mid / bot",
@@ -56,6 +60,9 @@ local Lines = {
 		retreat = "血量太低",
 		base = "基地被攻击",
 		busy = "现在去不了",
+		["busy-roshan"] = "去打肉山",
+		["busy-push"] = "去推{lane}",
+		["busy-defend"] = "去守{lane}",
 	},
 	ru = {
 		which_lane = "{name}, какая линия? !push top / mid / bot",
@@ -81,6 +88,9 @@ local Lines = {
 		retreat = "Мало HP",
 		base = "База под атакой",
 		busy = "Сейчас не могу",
+		["busy-roshan"] = "Иду на Рошана",
+		["busy-push"] = "Пушу {lane}",
+		["busy-defend"] = "Защищаю {lane}",
 	},
 	ja = {
 		which_lane = "{name}、どのレーン？ !push top / mid / bot",
@@ -106,6 +116,9 @@ local Lines = {
 		retreat = "HPが低い",
 		base = "本拠地が攻撃されている",
 		busy = "今は無理",
+		["busy-roshan"] = "ロシャンに行く",
+		["busy-push"] = "{lane}をプッシュ",
+		["busy-defend"] = "{lane}を防衛",
 	},
 }
 

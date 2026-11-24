@@ -127,8 +127,17 @@ T.test("the reply member installs the chat callback and logs each ! command it h
 		callback = fn
 	end
 	Fu.Role.replyMemberID = bot:GetPlayerID()
+	Stub.printed = {}
 	Usage.SetTalkMessage()
 	T.ok(callback ~= nil, "the chat callback is installed")
+	T.eq(Fu.Role.chatListenerId, bot:GetPlayerID(), "the team's listener is recorded")
+	local listener = 0
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" listener team=radiant id=", 1, true) then
+			listener = listener + 1
+		end
+	end
+	T.eq(listener, 1, "one listener line")
 	if callback == nil then
 		return
 	end
@@ -147,4 +156,71 @@ T.test("the reply member installs the chat callback and logs each ! command it h
 		heard[1] ~= nil and heard[1]:find("heard cmd=!push from=" .. humanHero .. " team_only=true", 1, true) ~= nil,
 		"cmd, sender hero and team_only"
 	)
+end)
+
+-- Games 077-078: the first GetReplyMemberID call comes at t=-89, before the team is fully loaded; a pick that read as a
+-- bot then may be the human, and then no bot installs the chat callback.
+T.test("Role.GetReplyMemberID replaces a cached pick that is no longer a bot", function()
+	local _, Fu = setup()
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	local loaded = false
+	IsPlayerBot = function(playerId)
+		return not loaded or playerId ~= humanId
+	end
+	Fu.Role.replyMemberID, Fu.Role.chatListenerId = humanId, nil
+	T.eq(Fu.Role.GetReplyMemberID(), humanId, "early: the human still reads as a bot")
+	loaded = true
+	local picked = Fu.Role.GetReplyMemberID()
+	T.ok(picked ~= nil and picked ~= humanId, "re-picked among the bots once IsPlayerBot reads right")
+	T.eq(Fu.Role.GetReplyMemberID(), picked, "then kept")
+	-- Once a bot listens it stays the reply member (no second callback).
+	Fu.Role.chatListenerId = ids[2]
+	Fu.Role.replyMemberID = humanId
+	T.eq(Fu.Role.GetReplyMemberID(), ids[2], "the listener")
+end)
+
+-- Game 078: `!debug` switched the mode at t=700 but its reply never reached the chat (an ActionImmediate_Chat from
+-- inside the chat callback says nothing). It is said from the bot's next think.
+T.test("the !debug reply is said from the next think, not inside the chat callback", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_alchemist", slot = 1, time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	local callback = nil
+	InstallChatCallback = function(fn)
+		callback = fn
+	end
+	local chats = {}
+	bot.ActionImmediate_Chat = function(_, text)
+		if type(text) == "string" and text:find("ebug", 1, true) then
+			chats[#chats + 1] = text
+		end
+	end
+	Fu.Role.replyMemberID, Fu.Role.chatListenerId = bot:GetPlayerID(), nil
+	Usage.SetTalkMessage()
+	T.ok(callback ~= nil, "the chat callback is installed")
+	if callback == nil then
+		return
+	end
+	local before = Fu.Utils.DebugMode
+	callback({ string = "!debug", player_id = humanId, team_only = true })
+	T.eq(Fu.Utils.DebugMode, not before, "the mode switched")
+	T.eq(#chats, 0, "nothing said inside the callback")
+	Stub.printed = {}
+	Usage.SetTalkMessage()
+	T.eq(#chats, 1, "said on the next think")
+	local logged = false
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" debug o", 1, true) and line:find("said=yes", 1, true) then
+			logged = true
+		end
+	end
+	T.ok(logged, "[SHy-CHAT] debug on|off said=yes")
+	Usage.SetTalkMessage()
+	T.eq(#chats, 1, "once")
 end)

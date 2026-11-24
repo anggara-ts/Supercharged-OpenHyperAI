@@ -1,14 +1,15 @@
 -- Shared bot system: human orders (#222). The human's pings and chat commands become team orders for the bots.
 --   * Ping tiers by count (maintainer, 2026-11-23: "1 ping = ask / 2 ping = force ally nearby ping / 3+ ping = force
 --     all ally accross map"): one ping is a request (ASK: the bots check it, bots/lib/systems/human_order_rules.lua,
---     and may refuse); the same ping again within 2s is FORCE NEAR (every bot within 4000 or at that lane goes); a
---     third is FORCE ALL (every bot). Under a force a far bot TPs at once when that is clearly faster (TravelFar).
---     `!push top` is FORCE NEAR, `!push top all` FORCE ALL. A force still queues dead, channelling and very low
---     bots; they join when back.
+--     and may refuse; a bot whose mode is above the request's desire, e.g. a Roshan gather, is busy); the same ping
+--     again within 3s is FORCE NEAR (every bot within 4000 or at that lane goes); a third is FORCE ALL (every bot).
+--     A forced order's desire is above the team's own calls and below retreat (Rules.OrderDesire). Under a force a
+--     far bot TPs at once when that is clearly faster (TravelFar). `!push top` is FORCE NEAR, `!push top all` FORCE
+--     ALL. A force still queues dead, channelling and very low bots; they join when back.
 --   * Replies ("response 'on my way' only when acknowledging. no reply for 'cant do'"): every bot that goes says what
---     it does once, "Pushing bot", "Attacking Medusa", "On my way" (game 077; Rules.AckKey), a queued bot when it
---     joins; bots that can't go say nothing. Only when nobody goes does one bot
---     say one short reason, at most once per 30s per team, after the 2s a repeated ping has to force the order.
+--     it does once, "Pushing bot", "Attacking Medusa", "On my way" (game 077; Rules.AckKey), when it starts doing it
+--     (its first obey; game 078); bots that can't go say nothing. Only when nobody goes does one bot say one short
+--     reason, at most once per 30s per team, after the 3s a repeated ping has to force the order.
 --   * What a ping means comes from what it is on, whatever the ping type: an enemy hero (focus in a fight, gank
 --     elsewhere), an enemy building or wave near their tower (push), our building or a wave coming to ours
 --     (defend), a neutral camp (one bot, a core first, clears it), Roshan, or fog (chase a hero seen there a moment
@@ -21,7 +22,7 @@
 --
 -- Logs: [SHy-PING] t= <hero> order kind= from= via=ping|insist|chat tier=ask|force-near|force-all count= lane=
 -- target= verdict=go|refuse|queue why= responders= queued= reply= replies= cands=<hero>:<answer>[/<state>]:<dist>,...
--- (danger: affected=) once per order; per bot obey / queue why= / ignore why= / done why=, and <hero> said id= reply=
+-- (danger: affected=) once per order; per bot obey ack=yes|no / queue why= / ignore why= / done why=, and <hero> said id= reply=
 -- for every chat reply. A forced bot that goes by TP prints [SHy-TRAVEL] ... for=order; a far one that walks
 -- order-walk why=. A quick ping that did not chain: <human> insist-miss dist= age= kind= lane=. A ping at our
 -- fountain: skip why=own-fountain near=spawn|building; the fountain building once found: fountain-building at=.
@@ -36,11 +37,11 @@ local ObjectiveTravel = require(GetScriptDirectory() .. "/lib/systems/objective_
 local Orders = {}
 Orders.Rules = Rules
 
--- An order's desire: above farm (up to ~0.6) and laning (0.565 for a safe core), below a base last stand (0.9) and
--- a hurt bot's retreat. Fades with HP so a retreat takes over; a bot under 30% HP leaves a request (done
--- why=low-hp); a forced order keeps it down to Rules.FORCE_MIN_HP (then it queues and rejoins when healed).
-Orders.DESIRE = 0.75
-Orders.LEAVE_HP = 0.3
+-- A request's desire (Rules.OrderDesire has both tiers and why): fades with HP so a retreat takes over; a bot under
+-- 30% HP leaves a request (done why=low-hp); a forced order keeps it down to Rules.FORCE_MIN_HP (then it queues and
+-- rejoins when healed).
+Orders.DESIRE = Rules.ASK_DESIRE
+Orders.LEAVE_HP = Rules.LEAVE_HP
 -- A bot's think-to-think checks run at most this often for the whole team (seconds of game time).
 local TICK_SECONDS = 0.2
 -- A ping older than this when first read is old news (e.g. from before a reload).
@@ -179,6 +180,51 @@ local function InFight(member)
 	return true, #allies < count or Fu.GetHP(member) < 0.45
 end
 
+-- Short names of the modes that make a bot busy for a request (Rules.IsBusy); push / defend carry the lane. Attack,
+-- retreat and evasive maneuvers are left out: the fight and retreat states cover them, and a dodge is a moment.
+local BUSY_MODE_NAMES = {}
+for _, pair in ipairs({
+	{ BOT_MODE_ROSHAN, "roshan" },
+	{ BOT_MODE_PUSH_TOWER_TOP, "push-top" },
+	{ BOT_MODE_PUSH_TOWER_MID, "push-mid" },
+	{ BOT_MODE_PUSH_TOWER_BOT, "push-bot" },
+	{ BOT_MODE_DEFEND_TOWER_TOP, "defend-top" },
+	{ BOT_MODE_DEFEND_TOWER_MID, "defend-mid" },
+	{ BOT_MODE_DEFEND_TOWER_BOT, "defend-bot" },
+	{ BOT_MODE_FARM, "farm" },
+	{ BOT_MODE_LANING, "laning" },
+	{ BOT_MODE_RUNE, "rune" },
+	{ BOT_MODE_WARD, "ward" },
+	{ BOT_MODE_ITEM, "item" },
+	{ BOT_MODE_OUTPOST or 26, "outpost" },
+	{ BOT_MODE_TEAM_ROAM, "team-roam" },
+	{ BOT_MODE_ROAM, "roam" },
+	{ BOT_MODE_DEFEND_ALLY, "defend-ally" },
+	{ BOT_MODE_SECRET_SHOP, "shop" },
+	{ BOT_MODE_SIDE_SHOP, "shop" },
+	{ BOT_MODE_ASSEMBLE, "assemble" },
+}) do
+	if pair[1] ~= nil then
+		BUSY_MODE_NAMES[pair[1]] = pair[2]
+	end
+end
+
+-- The mode that keeps `member` from a request (its active mode's desire above the request's, Rules.IsBusy), or nil.
+-- A bot carrying out the human's current order is not busy with it.
+local function BusyMode(member)
+	local order = state.order
+	local entry = order ~= nil and order.bots[member:GetPlayerID()] or nil
+	if entry ~= nil and entry.state == "obey" then
+		return nil
+	end
+	local mode = member:GetActiveMode()
+	local name = BUSY_MODE_NAMES[mode]
+	if name == nil or not Rules.IsBusy(name, member:GetActiveModeDesire(), Orders.DESIRE) then
+		return nil
+	end
+	return name
+end
+
 local function BotState(member)
 	local alive = member:IsAlive()
 	local inFight, losing = false, false
@@ -200,6 +246,7 @@ local function BotState(member)
 		inFight = inFight,
 		losing = losing,
 		holdingBase = holdingBase,
+		busy = alive and BusyMode(member) or nil,
 	})
 end
 
@@ -567,7 +614,9 @@ local function NearestRefuser(decisions, unitById)
 	if nearest == nil then
 		return nil
 	end
-	local key = "busy"
+	-- A bot busy with a team call says that call (game 078: "Going Roshan" for a Roshan gather), with its lane for a
+	-- push or defend (Rules.BusyKey).
+	local key = Rules.BusyKey(nearest.state)
 	if
 		nearest.state == "dead"
 		or nearest.state == "low-hp"
@@ -577,7 +626,8 @@ local function NearestRefuser(decisions, unitById)
 		key = nearest.state
 	end
 	local seconds = nearest.state == "dead" and unitById[nearest.id]:GetRespawnTime() or nil
-	return { id = nearest.id, key = key, seconds = seconds }
+	local lane = type(nearest.state) == "string" and nearest.state:match("^busy:%a+%-(%a+)$") or nil
+	return { id = nearest.id, key = key, seconds = seconds, lane = LANE_OF[lane or ""] ~= nil and lane or nil }
 end
 
 -- How long until `unit` can be at `loc` (a dead bot: its respawn, then the walk from the fountain, roughly).
@@ -593,7 +643,8 @@ end
 
 -- Starts an order. `found`: what Orders.ReadSpot found (target, buildings, camp), or the chat command's target.
 -- `tier`: "ask" (default) / "force-near" / "force-all"; `count`: pings in a row (1 for a chat command); `acked`:
--- bots that already said their line for this ping chain (they don't say it again).
+-- bots that already said their line for this ping chain (they don't say it again; order.acked starts as a copy and
+-- NoteObey adds each bot that says it).
 function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 	tier = kind == "danger" and "ask" or (tier or "ask")
 	state.nextId = state.nextId + 1
@@ -676,6 +727,7 @@ function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 		camp = found.camp,
 		target = found.target,
 		targetId = found.targetId,
+		acked = {},
 		startedAt = DotaTime(),
 		untilAt = DotaTime() + Rules.OrderSeconds(kind, tier, maxEta),
 		bots = {},
@@ -683,30 +735,33 @@ function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 	if order.camp ~= nil then
 		order.campObj = { idx = order.camp.idx, cattr = order.camp }
 	end
+	for id in pairs(acked or {}) do
+		order.acked[id] = true
+	end
 	for _, id in ipairs(obey) do
 		order.bots[id] = { state = "obey", unit = unitById[id] }
 	end
 	for _, id in ipairs(queue) do
 		order.bots[id] = { state = "queue", unit = unitById[id], why = queueWhy[id] }
 	end
-	-- Replies (Rules.ReplyPlan): what it does ("Pushing bot", Rules.AckKey) from every bot that goes (not again for
-	-- the same ping chain); one reason only when nobody goes.
+	-- Replies (Rules.ReplyPlan): one reason only when nobody goes. A bot that goes says what it does ("Pushing bot",
+	-- Rules.AckKey) at its first obey (NoteObey), not here.
 	local refuser = nil
 	if verdict == "refuse" and why == "nobody-free" and kind ~= "danger" then
 		refuser = NearestRefuser(decisions, unitById)
 	end
 	local replyKey, replies = "none", {}
 	local tickId = tickBot ~= nil and tickBot:GetPlayerID() or nil
-	local ackKey, ackFill = AckLine(order)
-	local plan = Rules.ReplyPlan(kind, verdict, why, obey, refuser, {
-		acked = acked,
+	local _, ackFill = AckLine(order)
+	local plan = Rules.ReplyPlan(kind, verdict, why, refuser, {
 		now = DotaTime(),
 		lastRefusalAt = state.refusalAt,
-		ackKey = ackKey,
 	})
 	for _, line in ipairs(plan) do
 		local speakerId = line.id or tickId
-		QueueReply(order.id, kind, speakerId, line.key, human, line.seconds, line.delay, ackFill)
+		-- A busy bot's "Pushing <lane>" names its own lane, not the order's.
+		local fill = line.lane ~= nil and { lane = line.lane } or ackFill
+		QueueReply(order.id, kind, speakerId, line.key, human, line.seconds, line.delay, fill)
 		if replyKey == "none" then
 			replyKey = line.key
 		end
@@ -872,7 +927,7 @@ local function StartPingOrder(human, ping, tickBot)
 		kind = kind,
 		lane = lane,
 	}
-	-- Pings in a row on the same spot, target or (push / defend) lane, each within 2s of the one before: 1 ask, 2
+	-- Pings in a row on the same spot, target or (push / defend) lane, each within 3s of the one before: 1 ask, 2
 	-- force near, 3+ force all (Rules.IsInsist).
 	local prev = state.prevPing
 	local same = prev ~= nil and prev.humanId == current.humanId
@@ -908,15 +963,14 @@ local function StartPingOrder(human, ping, tickBot)
 	end
 	local via = current.count >= 2 and "insist" or "ping"
 	local order, verdict = Orders.Start(kind, via, human, loc, found, tickBot, tier, current.count, acked)
-	current.acked = {}
-	for id in pairs(acked or {}) do
-		current.acked[id] = true
-	end
+	-- The chain's acked bots: the running order's own table when this ping made one (NoteObey adds the bots that say
+	-- their line later), else the ones from before.
 	if verdict ~= "refuse" and kind ~= "danger" then
-		for id, entry in pairs(order.bots) do
-			if entry.state == "obey" then
-				current.acked[id] = true
-			end
+		current.acked = order.acked
+	else
+		current.acked = {}
+		for id in pairs(acked or {}) do
+			current.acked[id] = true
 		end
 	end
 	state.prevPing = current
@@ -986,10 +1040,11 @@ local function KeepOrder()
 			Log("%s retarget id=%d kind=%s target=%s", Short(enemy), order.id, order.kind, Short(enemy))
 		end
 	end
-	-- Queued bots join when they can, and say their line then (maintainer: "on my way" only when acknowledging).
+	-- Queued bots join when they can, and say their line at their first obey (NoteObey; maintainer: "on my way" only
+	-- when acknowledging).
 	-- A request's queued bot (in a fight) leaves when it dies or retreats; a forced order's queued bot (dead,
 	-- channelling, very low) waits until it respawns, the channel ends or it is healed (Rules.ForceRejoin).
-	for id, entry in pairs(order.bots) do
+	for _, entry in pairs(order.bots) do
 		if entry.state == "queue" then
 			local join = false
 			if order.tier ~= "ask" and entry.why ~= "in-fight" then
@@ -1007,8 +1062,6 @@ local function KeepOrder()
 			end
 			if join then
 				entry.state, entry.logged, entry.after = "obey", false, entry.why or "in-fight"
-				local ackKey, ackFill = AckLine(order)
-				QueueReply(order.id, order.kind, id, ackKey, order.from, nil, nil, ackFill)
 			end
 		end
 	end
@@ -1115,10 +1168,35 @@ local function EntryOf(order, bot)
 	return entry
 end
 
+-- This bot's part in a danger ping's back-off (Rules.DANGER_RADIUS around it when pinged), else nil. It ends when
+-- the bot is DANGER_SAFE away, dies or retreats (the retreat mode moves it away anyway).
+local function DangerFor(bot)
+	local order = state.danger
+	local entry = EntryOf(order, bot)
+	if entry == nil then
+		return nil
+	end
+	if not bot:IsAlive() then
+		LeaveOrder(order, entry, "dead")
+		return nil
+	end
+	if Fu.IsRetreating(bot) then
+		LeaveOrder(order, entry, "retreat")
+		return nil
+	end
+	if GetUnitToLocationDistance(bot, order.loc) >= Rules.DANGER_SAFE then
+		LeaveOrder(order, entry, "safe")
+		return nil
+	end
+	return order, entry
+end
+
+-- This bot's part in the current order: the order and its entry, else nil. While the bot backs off from a danger
+-- ping (DangerFor) the order waits: a forced order (0.97) would beat the back-off (0.85) otherwise.
 function Orders.ForBot(bot)
 	local order = state.order
 	local entry = EntryOf(order, bot)
-	if entry == nil then
+	if entry == nil or DangerFor(bot) ~= nil then
 		return nil
 	end
 	-- A forced bot that dies or drops under FORCE_MIN_HP queues again and rejoins when it is back (KeepOrder); a
@@ -1152,36 +1230,22 @@ function Orders.ForBot(bot)
 	return order, entry
 end
 
--- This bot's part in a danger ping's back-off (Rules.DANGER_RADIUS around it when pinged), else nil. It ends when
--- the bot is DANGER_SAFE away, dies or retreats (the retreat mode moves it away anyway).
-local function DangerFor(bot)
-	local order = state.danger
-	local entry = EntryOf(order, bot)
-	if entry == nil then
-		return nil
-	end
-	if not bot:IsAlive() then
-		LeaveOrder(order, entry, "dead")
-		return nil
-	end
-	if Fu.IsRetreating(bot) then
-		LeaveOrder(order, entry, "retreat")
-		return nil
-	end
-	if GetUnitToLocationDistance(bot, order.loc) >= Rules.DANGER_SAFE then
-		LeaveOrder(order, entry, "safe")
-		return nil
-	end
-	return order, entry
-end
-
+-- The bot's first obey of an order (it is in the order's mode now): logs it, and the bot says what it does then, once
+-- per ping chain (Rules.ShouldAck; game 078: a bot picked for a camp said "Clearing the camp" and never went).
 local function NoteObey(bot, order, entry)
 	if entry.logged then
 		return
 	end
 	entry.logged = true
+	local id = bot:GetPlayerID()
+	local ack = order.acked ~= nil and Rules.ShouldAck(order.kind, order.acked, id)
+	if ack then
+		order.acked[id] = true
+		local ackKey, ackFill = AckLine(order)
+		QueueReply(order.id, order.kind, id, ackKey, order.from, nil, nil, ackFill)
+	end
 	Log(
-		"%s obey id=%d kind=%s via=%s tier=%s mode=%d dist=%.0f%s",
+		"%s obey id=%d kind=%s via=%s tier=%s mode=%d dist=%.0f ack=%s%s",
 		Short(bot),
 		order.id,
 		order.kind,
@@ -1189,14 +1253,35 @@ local function NoteObey(bot, order, entry)
 		tostring(order.tier),
 		bot:GetActiveMode(),
 		GetUnitToLocationDistance(bot, order.loc),
+		ack and "yes" or "no",
 		entry.after ~= nil and (" after=" .. (entry.after == "in-fight" and "fight" or entry.after)) or ""
 	)
 end
 
--- A forced order keeps its desire down to FORCE_MIN_HP; a request fades out from 60% to LEAVE_HP.
+-- The bot's retreat desire from its last think (mode_retreat_generic.lua publishes it), or nil when older than 1s.
+local function RetreatDesireNow(bot)
+	local last = bot._retreatFinalDesire
+	if last == nil or last.d == nil or DotaTime() - (last.t or -999) > 1 then
+		return nil
+	end
+	return last.d
+end
+
+-- The order's desire for this bot (Rules.OrderDesire): a request 0.75, a forced order 0.97, fading with HP and kept
+-- under a strong retreat. A danger back-off (order nil) uses the request's.
 local function Desire(bot, order)
-	local low = (order ~= nil and order.tier ~= "ask") and Rules.FORCE_MIN_HP or Orders.LEAVE_HP
-	return Orders.DESIRE * RemapValClamped(Fu.GetHP(bot), low, 0.6, 0.6, 1)
+	return Rules.OrderDesire(order ~= nil and order.tier or "ask", Fu.GetHP(bot), RetreatDesireNow(bot))
+end
+
+-- Push.GetPushDesire for a lane the bot is not ordered to: the most that lane may return while the bot carries out a
+-- forced order (just under the order's desire, so a kill push at 0.99 does not pull it away; maintainer, game 078:
+-- the human insisting outranks the team's calls), else nil.
+function Orders.CapForOrder(bot)
+	local order = Orders.ForBot(bot)
+	if order == nil or order.tier == "ask" or order.kind == "danger" then
+		return nil
+	end
+	return Desire(bot, order) - 0.01
 end
 
 -- Push.GetPushDesire: the order's desire for the ordered lane, else nil.
@@ -1224,7 +1309,8 @@ function Orders.DefendDesire(bot, lane)
 end
 
 -- mode_roshan_generic.lua: while this bot is called to Roshan, "ping" (a single Roshan ping the team agreed with:
--- the pit safety checks still apply) or "order" (a forced call: a repeated ping or `!rosh`: go anyway); else false.
+-- the pit safety checks still apply) or "order" (a forced call: a repeated ping or `!rosh`: go anyway), and the
+-- order's desire (Rules.OrderDesire); else false.
 function Orders.RoshCalled(bot)
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or order.kind ~= "rosh" then
@@ -1233,7 +1319,7 @@ function Orders.RoshCalled(bot)
 	if bot:GetActiveMode() == BOT_MODE_ROSHAN then
 		NoteObey(bot, order, entry)
 	end
-	return order.tier == "ask" and "ping" or "order"
+	return order.tier == "ask" and "ping" or "order", Desire(bot, order)
 end
 
 -- mode_farm_generic.lua GetDesire: the camp this bot was sent to (a farm camp object { idx =, cattr = <spawner> })

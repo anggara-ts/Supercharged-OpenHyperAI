@@ -116,7 +116,10 @@ function GetDesire()
 	local final = AdjustDesireForHealth(rawDesire)
 	-- A live gather has to beat farm and a one-kill push. VERYHIGH in this engine is ~0.6,
 	-- so clamping the call there is why the rest of the team never leaves the lane.
-	if gatherCall and final >= 0.9 then
+	if type(gatherCall) == "number" then
+		-- A human's Roshan order (#222): its own desire, cut as much as the health check above cut the raw one (0: leave).
+		final = rawDesire > 0 and gatherCall * math.max(0, math.min(1, final / rawDesire)) or 0
+	elseif gatherCall and final >= 0.9 then
 		final = 0.96
 	else
 		final = Clamp(final, 0, BOT_MODE_DESIRE_VERYHIGH)
@@ -504,9 +507,15 @@ function GetDesireHelper()
 	-- The human's Roshan call (#222, bots/lib/systems/human_orders.lua). A Roshan ping the team agreed with (the request
 	-- checks - too early, outnumbered, too few alive - ran when it was made) still needs the damage and a safe pit, as
 	-- before; an insisted ping or `!rosh` goes anyway. Before the early-game and window checks below.
-	local roshCall = isRoshanAlive and HumanOrders.RoshCalled(bot)
+	-- Its desire is the order's (HumanOrders.RoshCalled: a request 0.75, a forced call 0.97, above the team's own gather
+	-- at 0.96; game 078), passed as the call so GetDesire does not clamp it to VERYHIGH (0.6), as it did to the 0.95
+	-- this returned before.
+	local roshCall, roshOrderDesire = false, nil
+	if isRoshanAlive then
+		roshCall, roshOrderDesire = HumanOrders.RoshCalled(bot)
+	end
 	if roshCall == "order" or roshCall == "ping" and hasEnoughDps and IsRoshanEngageSafe(roshanLocation, false) then
-		return Ret(0.95, roshCall)
+		return Ret(0.95, roshCall, roshOrderDesire)
 	end
 	local alliesInPit = #(Fu.GetAlliesNearLoc(roshanLocation, 1600) or {})
 	local roshLow = Fu.Utils.IsValidUnit(roshan) and (roshan:GetHealth() / roshan:GetMaxHealth()) < 0.8

@@ -784,20 +784,55 @@ local chatCallbackInstalled = false
 local humanChatTime = nil
 local humanChatString = nil
 local replyToAllChat = false
+-- A chat line asked for inside the chat callback, said from this bot's next think instead: an ActionImmediate_Chat
+-- from the callback itself says nothing (game 078: `!debug` switched the mode at t=700 but its "Verbose debug ON"
+-- never reached the chat). { text =, allChat =, what = the log word }, or nil.
+local callbackChat = nil
 function Usage.SetTalkMessage()
 	local playerId = bot:GetPlayerID()
 	local gold = bot:GetGold()
 	local kills = GetHeroKills(playerId)
 	local deaths = GetHeroDeaths(playerId)
 	local turboGoldScale = GetGameMode() == GAMEMODE_TURBO and 2.0 or 1.0
+	if callbackChat ~= nil then
+		local line = callbackChat
+		callbackChat = nil
+		local said = pcall(function()
+			bot:ActionImmediate_Chat(line.text, line.allChat)
+		end) and "yes" or "error"
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s %s said=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				line.what,
+				said
+			)
+		)
+	end
 	-- The chat callback carries every chat command (!push, !debug, ...), so it does not depend on the reply count;
-	-- only the small-talk replies below stop after maxReplies (#222).
+	-- only the small-talk replies below stop after maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
+	-- re-pick of the reply member (Role.GetReplyMemberID) must not install a second one.
 	if playerId == Fu.Role.GetReplyMemberID() then
-		if not chatCallbackInstalled and GetGameState() == GAME_STATE_GAME_IN_PROGRESS then
+		if
+			not chatCallbackInstalled
+			and Fu.Role.chatListenerId == nil
+			and GetGameState() == GAME_STATE_GAME_IN_PROGRESS
+		then
 			chatCallbackInstalled = true
+			Fu.Role.chatListenerId = playerId
 			InstallChatCallback(function(chatEvent)
 				Usage.SetReplyHumanTime(chatEvent)
 			end)
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s listener team=%s id=%d",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+					playerId
+				)
+			)
 		end
 		if
 			replyCount <= maxReplies
@@ -943,10 +978,13 @@ function Usage.SetReplyHumanTime(chatEvent)
 			if type(debugReply) == "table" and #debugReply > 0 then
 				debugReply = debugReply[RandomInt(1, #debugReply)]
 			end
-			bot:ActionImmediate_Chat(
-				debugReply or (Fu.Utils.DebugMode and "Verbose debug ON." or "Verbose debug OFF."),
-				false
-			)
+			-- Said from this bot's next think (callbackChat): [SHy-CHAT] debug on|off said=.
+			callbackChat = {
+				text = type(debugReply) == "string" and debugReply
+					or (Fu.Utils.DebugMode and "Verbose debug ON." or "Verbose debug OFF."),
+				allChat = false,
+				what = Fu.Utils.DebugMode and "debug on" or "debug off",
+			}
 		end
 		return
 	end

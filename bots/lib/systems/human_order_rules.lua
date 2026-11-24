@@ -4,7 +4,7 @@
 --
 -- The maintainer's design (2026-11-23, issue #222), ping tiers by count: "refine ping response: 1 ping = ask / 2 ping
 -- = force ally nearby ping / 3+ ping = force all ally accross map / response 'on my way' only when acknowledging. no
--- reply for 'cant do'". One ping is a request (ASK: the bots check it and may refuse); the same ping again within 2s
+-- reply for 'cant do'". One ping is a request (ASK: the bots check it and may refuse); the same ping again within 3s
 -- is FORCE NEAR (every bot within FORCE_NEAR_RADIUS or at that lane goes, whatever the checks say); a third is FORCE
 -- ALL (every bot on the team goes, by TP when the walk is long). A chat command (`!push top`) is FORCE NEAR,
 -- `!push top all` FORCE ALL. A ping is read by what is under it, whatever its type (game 075: a ping clicked on a
@@ -15,7 +15,12 @@ local Rules = {}
 -- The same spot (or the same target) pinged again within this many seconds, this close, is an insist: the next tier.
 -- A push or defend ping chains with the one before when it reads as the same kind on the same lane, wherever it lands
 -- (game 077: quick pings around our bottom tower landed 590-620 apart and never chained with a 300 radius).
-Rules.INSIST_SECONDS = 2 -- maintainer 2026-11-23: "narrow it to 2 pings in 2 seconds"
+-- Was 2 (maintainer 2026-11-23: "narrow it to 2 pings in 2 seconds"). Game 078, maintainer: "how does ping count
+-- works? i think i need to ping 5+ to make it work for 2 pings". The pings reach the scripts spaced out even when
+-- clicked fast (GetMostRecentPing times, gaps under 6s: game 077 51 gaps, min 1.0s, median 1.5s; game 078 median 1.5s,
+-- 90th percentile 3.8s), so one gap over 2s restarted the chain and 5 clicks made two pairs. 3s lets each ping chain
+-- to the one before; `insist-miss age=` logs the near misses.
+Rules.INSIST_SECONDS = 3
 Rules.INSIST_RADIUS = 600
 -- A FORCE NEAR order takes every bot within this distance of the spot, or at the ordered lane (maintainer's "~4000").
 Rules.FORCE_NEAR_RADIUS = 4000
@@ -23,6 +28,46 @@ Rules.FORCE_NEAR_RADIUS = 4000
 -- it respawns) and a channelling one (a TP in progress: it joins when the channel ends).
 Rules.FORCE_MIN_HP = 0.2
 Rules.FORCE_REJOIN_HP = 0.5
+-- An order's mode desire. A request (ASK_DESIRE): above farm (up to ~0.6) and laning (0.565 for a safe core), below a
+-- base last stand (0.9) and a hurt bot's retreat; it fades from 60% HP to LEAVE_HP (the bot leaves it under that).
+-- A forced order (FORCED_DESIRE; maintainer, game 078: the human insisting outranks the team's own calls, not
+-- survival) is above the team's calls as the modes return them: the Roshan gather (mode_roshan_generic.lua, 0.96),
+-- a defend last stand (defend.lua, 0.9), attack mode (up to 0.95), the strength push (0.78) and farm; and below the
+-- hard retreat (mode_retreat_generic.lua, 0.98) and Valve's evasive maneuvers (1.00 in most game 06x-07x lines). It
+-- fades from 60% HP to FORCE_MIN_HP, and stays under the bot's own retreat desire when that is RETREAT_YIELD or more
+-- (its 0.9 tower rules, or a pit walk-out at 0.96 from an open retreat PR). The kill push (push.lua, 0.99 after two kills) is capped under it
+-- on the other lanes (Orders.CapForOrder).
+Rules.ASK_DESIRE = 0.75
+Rules.FORCED_DESIRE = 0.97
+Rules.LEAVE_HP = 0.3
+Rules.RETREAT_YIELD = 0.9
+
+local function Remap(value, fromLow, fromHigh, toLow, toHigh)
+	local t = (value - fromLow) / (fromHigh - fromLow)
+	t = math.max(0, math.min(1, t))
+	return toLow + (toHigh - toLow) * t
+end
+
+-- The mode desire of an order of `tier` for a bot at `hp` (0-1); `retreatDesire`: the bot's own retreat desire from
+-- its last think, or nil.
+function Rules.OrderDesire(tier, hp, retreatDesire)
+	local forced = tier ~= nil and tier ~= "ask"
+	local base = forced and Rules.FORCED_DESIRE or Rules.ASK_DESIRE
+	local low = forced and Rules.FORCE_MIN_HP or Rules.LEAVE_HP
+	local desire = base * Remap(hp or 1, low, 0.6, 0.6, 1)
+	if forced and retreatDesire ~= nil and retreatDesire >= Rules.RETREAT_YIELD then
+		desire = math.min(desire, retreatDesire - 0.02)
+	end
+	return desire
+end
+
+-- Is a bot whose active mode runs at `modeDesire` too busy for a request (ask tier, desire `orderDesire`)? Game 078,
+-- 24:11: Largo was picked for a camp ping while the team's Roshan gather (0.96) held him; he said "Clearing the camp"
+-- and walked to Roshan. `mode`: the mode's short name, or nil for the modes that never count (attack and fights,
+-- retreat, evasive maneuvers: their own states cover them) and for a bot already carrying out the human's order.
+function Rules.IsBusy(mode, modeDesire, orderDesire)
+	return mode ~= nil and (modeDesire or 0) > (orderDesire or Rules.ASK_DESIRE)
+end
 -- A forced order lasts long enough for the farthest bot to get there (ETA + FORCE_SLACK_SECONDS), within
 -- ORDER_SECONDS..FORCE_MAX_SECONDS.
 Rules.FORCE_SLACK_SECONDS = 15
@@ -317,8 +362,9 @@ function Rules.MaxDistance(kind)
 	return MAX_DISTANCE[kind] or math.huge
 end
 
--- A bot's state for an order. `b`: alive, hp (0-1), retreating, inFight, losing, holdingBase.
--- Returns ok, fight, losing, retreat, low-hp, dead or base.
+-- A bot's state for an order. `b`: alive, hp (0-1), retreating, inFight, losing, holdingBase, busy (the short name
+-- of an active mode above a request's desire, Rules.IsBusy, else nil).
+-- Returns ok, fight, losing, retreat, low-hp, dead, base or busy:<mode> (a request skips it; a forced order takes it).
 Rules.LOW_HP = 0.35
 function Rules.BotState(b)
 	if not b.alive then
@@ -335,6 +381,9 @@ function Rules.BotState(b)
 	end
 	if b.inFight then
 		return b.losing and "losing" or "fight"
+	end
+	if b.busy ~= nil then
+		return "busy:" .. tostring(b.busy)
 	end
 	return "ok"
 end
@@ -563,44 +612,53 @@ function Rules.RefusalAllowed(now, lastAt)
 	return lastAt == nil or (now or 0) - lastAt >= Rules.REFUSAL_CHAT_SECONDS
 end
 
--- Who says what in team chat for an order (maintainer, 2026-11-23: "response 'on my way' only when acknowledging.
--- no reply for 'cant do'"): every bot that goes says what it does (`opts.ackKey`, Rules.AckKey: "Pushing bot",
--- "Attacking Medusa", ...; default "on-my-way") unless it already said it for the same ping chain (`acked[id]`: it
--- obeyed the ping before this one). Bots that can't go and queued bots say nothing (a queued bot says its line when it
--- joins: Orders' KeepOrder). Only when nobody goes at all (verdict refuse) one bot says one short reason, if
--- Rules.RefusalAllowed: the check's reason, or with nobody free the nearest bot's own (`refuser`: { id =, key =,
--- seconds = } or nil: "busy"). The reason waits INSIST_SECONDS (`delay`) so a repeated ping that forces the order
--- drops it. A danger ping, or an order everyone joins later (verdict queue): no reply. `opts`: { acked =, now =,
--- lastRefusalAt =, ackKey = }. Returns a list of { id =, key =, seconds =, delay = } in speaking order (said
+-- Who says what in team chat when an order is made (maintainer, 2026-11-23: "response 'on my way' only when
+-- acknowledging. no reply for 'cant do'"). A bot that goes says what it does only when it starts doing it
+-- (Rules.ShouldAck, at its first obey; game 078, 24:11: Largo said "Clearing the camp" when picked, a Roshan gather
+-- took him and he never went), so an order that goes plans no line here. Only when nobody goes at all (verdict refuse)
+-- one bot says one short reason, if Rules.RefusalAllowed: the check's reason, or with nobody free the nearest bot's own
+-- (`refuser`: { id =, key =, seconds =, lane = } or nil: "busy"). The reason waits INSIST_SECONDS (`delay`) so a
+-- repeated ping that forces the order drops it. A danger ping, or an order everyone joins later (verdict queue): no
+-- reply. `opts`: { now =, lastRefusalAt = }. Returns a list of { id =, key =, seconds =, lane =, delay = } (said
 -- REPLY_GAP_SECONDS apart); id nil: the bot that read the order says it.
 Rules.REPLY_GAP_SECONDS = 0.5
-function Rules.ReplyPlan(kind, verdict, why, obey, refuser, opts)
+function Rules.ReplyPlan(kind, verdict, why, refuser, opts)
 	opts = opts or {}
 	local plan = {}
-	if kind == "danger" then
+	if kind == "danger" or verdict ~= "refuse" then
 		return plan
 	end
-	if verdict == "refuse" then
-		if not Rules.RefusalAllowed(opts.now, opts.lastRefusalAt) then
-			return plan
-		end
-		if why ~= "nobody-free" then
-			plan[1] = { key = why, delay = Rules.INSIST_SECONDS }
-		elseif refuser ~= nil then
-			plan[1] = { id = refuser.id, key = refuser.key, seconds = refuser.seconds, delay = Rules.INSIST_SECONDS }
-		else
-			plan[1] = { key = "busy", delay = Rules.INSIST_SECONDS }
-		end
+	if not Rules.RefusalAllowed(opts.now, opts.lastRefusalAt) then
 		return plan
 	end
-	local acked = opts.acked or {}
-	local ackKey = opts.ackKey or "on-my-way"
-	for _, id in ipairs(obey or {}) do
-		if not acked[id] then
-			plan[#plan + 1] = { id = id, key = ackKey }
-		end
+	if why ~= "nobody-free" then
+		plan[1] = { key = why, delay = Rules.INSIST_SECONDS }
+	elseif refuser ~= nil then
+		plan[1] = {
+			id = refuser.id,
+			key = refuser.key,
+			seconds = refuser.seconds,
+			lane = refuser.lane,
+			delay = Rules.INSIST_SECONDS,
+		}
+	else
+		plan[1] = { key = "busy", delay = Rules.INSIST_SECONDS }
 	end
 	return plan
+end
+
+-- Does a bot say its "what I do" line (Rules.AckKey) at its first obey of an order of `kind`? Once per ping chain:
+-- `acked[id]` is set when it said it for this order or an earlier ping of the same chain. A danger ping: never.
+function Rules.ShouldAck(kind, acked, id)
+	return kind ~= "danger" and not (acked or {})[id]
+end
+
+-- The reason a busy bot gives when nobody goes (a refusal key, not the ack line of the same words, so the team's
+-- refusal limit and the insist drop apply): its mode's line, else "busy" ("Can't now").
+Rules.BUSY_KEYS = { roshan = "busy-roshan", push = "busy-push", defend = "busy-defend" }
+function Rules.BusyKey(state)
+	local mode = type(state) == "string" and state:match("^busy:(%a+)") or nil
+	return mode ~= nil and Rules.BUSY_KEYS[mode] or "busy"
 end
 
 -- What a bot that goes says (maintainer, game 077: "instead of generic 'on my way', change to 'pushing bot', 'on my
