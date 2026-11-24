@@ -1427,7 +1427,7 @@ function PickOneAnnouncer()
 	hasPickedAnnouncer = true
 end
 -- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
--- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (update: 22 Nov
+-- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (22 Nov
 -- 2026)", maintainer 2026-11-23), the second points to the Workshop page. No command hints ("no need to hint !pos and
 -- !Xpos Y, or language change in welcome message", no !debug hint; maintainer 2026-11-23). No URL: chat links are not
 -- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the

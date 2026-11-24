@@ -50,8 +50,8 @@ end)
 T.test("chat rules: the welcome line gets the version and the date", function()
 	local R = load()
 	T.eq(
-		R.FillWelcomeLine("Supercharged OpenHyperAI {version} (update: {date})", "v0.4", "22 Nov 2026"),
-		"Supercharged OpenHyperAI v0.4 (update: 22 Nov 2026)"
+		R.FillWelcomeLine("Supercharged OpenHyperAI {version} ({date})", "v0.4", "22 Nov 2026"),
+		"Supercharged OpenHyperAI v0.4 (22 Nov 2026)"
 	)
 	T.eq(R.FillWelcomeLine("100% {other}", "v0.4", "d"), "100% {other}", "other text and placeholders stay")
 	local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
