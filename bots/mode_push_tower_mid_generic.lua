@@ -1,5 +1,7 @@
 -- Push the mid lane towers.
 local Push = require(GetScriptDirectory() .. "/lib/systems/push")
+-- Strength push (#12): the lane's desire is raised while our team is clearly ahead (bots/lib/systems/strength_push.lua).
+local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
 local bot = GetBot()
 if bot.PushLaneDesire == nil then
 	bot.PushLaneDesire = { 0, 0, 0 }
@@ -8,7 +10,7 @@ function GetDesire()
 	if ShouldSkipBotThink(bot) then
 		return 0
 	end
-	return Push.GetPushDesire(bot, LANE_MID)
+	return StrengthPush.LaneDesire(bot, LANE_MID, Push.GetPushDesire(bot, LANE_MID))
 end
 function Think()
 	if ShouldSkipBotThink(bot) then
