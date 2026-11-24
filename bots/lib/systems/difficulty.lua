@@ -8,8 +8,10 @@
 local D = {}
 
 -- The API's DIFFICULTY_* values (the game's [SHy-API] dump, docs/BOT_API_RUNTIME.md): PASSIVE=0, EASY=1, MEDIUM=2,
--- HARD=3, UNFAIR=4; INVALID=5 and NPX=9 are not lobby levels.
-D.NAMES = { [0] = "passive", [1] = "easy", [2] = "medium", [3] = "hard", [4] = "unfair" }
+-- HARD=3, UNFAIR=4, NPX=9; INVALID=5 is not a lobby level. NPX ("new player experience") is taken to be the lobby's
+-- "New Player" bot difficulty (maintainer, 2026-11-24: "there is a newplayer difficulty, do we handle that?"); the
+-- [SHy-DIFF] start line's raw= shows what a New Player lobby really reports. Before this it fell back to Unfair.
+D.NAMES = { [0] = "passive", [1] = "easy", [2] = "medium", [3] = "hard", [4] = "unfair", [9] = "newplayer" }
 D.DEFAULT = "unfair"
 
 -- Knobs per level. Estimates for a human-like player, not game data; the [SHy-DIFF] held lines show their effect.
@@ -29,7 +31,18 @@ D.DEFAULT = "unfair"
 --   fightHeroes     false: no hero hunts / help fights, no attack orders or targeted spells on enemy heroes
 --                   (escapes in retreat mode excepted), Valve's attack mode off.
 -- Passive takes Easy's mechanics: it never fights, so they only touch its farming and escapes.
+-- New Player is the gentlest level that still fights: slower and sloppier than Easy, no ganks, smoke or dives.
 D.PROFILES = {
+	newplayer = {
+		reactionDelay = 1.0,
+		castSkipChance = 0.45,
+		lastHitError = 0.35,
+		dodgeChance = 0,
+		hunt = "off",
+		smoke = "off",
+		dive = "off",
+		fightHeroes = true,
+	},
 	passive = {
 		reactionDelay = 0.8,
 		castSkipChance = 0.35,

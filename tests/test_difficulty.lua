@@ -45,7 +45,7 @@ local function countRandom()
 	return count
 end
 
-T.test("difficulty: API values map to levels, anything else to unfair (default)", function()
+T.test("difficulty: API values map to levels (NPX 9 = newplayer), anything else to unfair (default)", function()
 	local _, D = load()
 	local names = { [0] = "passive", "easy", "medium", "hard", "unfair" }
 	for raw = 0, 4 do
@@ -55,7 +55,12 @@ T.test("difficulty: API values map to levels, anything else to unfair (default)"
 		T.ok(profile == D.PROFILES[name], "profile " .. raw)
 		T.eq(src, "api", "src " .. raw)
 	end
-	for _, raw in ipairs({ 5, 9, -1, "4" }) do
+	local npxLevel, npxName, npxProfile, npxSrc = D.Resolve(9)
+	T.eq(npxLevel, 9, "level 9")
+	T.eq(npxName, "newplayer", "name 9 (NPX, the lobby's New Player)")
+	T.ok(npxProfile == D.PROFILES.newplayer and npxProfile.fightHeroes == true, "profile 9")
+	T.eq(npxSrc, "api", "src 9")
+	for _, raw in ipairs({ 5, 10, -1, "4" }) do
 		local level, name, _, src = D.Resolve(raw)
 		T.eq(level, 4, "level for " .. tostring(raw))
 		T.eq(name, "unfair", "name for " .. tostring(raw))
@@ -69,7 +74,7 @@ end)
 T.test("difficulty: only Unfair is neutral, lower levels only take away", function()
 	local _, D = load()
 	T.ok(D.PROFILES.unfair.neutral, "unfair neutral")
-	local order = { "passive", "easy", "medium", "hard", "unfair" }
+	local order = { "newplayer", "passive", "easy", "medium", "hard", "unfair" }
 	local rank = { off = 0, careful = 1, on = 2 }
 	for i, name in ipairs(order) do
 		local p = D.PROFILES[name]
