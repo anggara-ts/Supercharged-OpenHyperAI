@@ -33,7 +33,8 @@ Rules.FORCE_REJOIN_HP = 0.5
 -- A forced order (FORCED_DESIRE; maintainer, game 078: the human insisting outranks the team's own calls, not
 -- survival) is above the team's calls as the modes return them: the Roshan gather (mode_roshan_generic.lua, 0.96),
 -- a defend last stand (defend.lua, 0.9), attack mode (up to 0.95), the strength push (0.78) and farm; and below the
--- hard retreat (mode_retreat_generic.lua, 0.98) and Valve's evasive maneuvers (1.00 in most game 06x-07x lines). It
+-- hard retreat (mode_retreat_generic.lua, 0.98) and Valve's evasive maneuvers (1.00 in most game 06x-07x lines; a
+-- running dodge that reads lower still wins, YieldToDodge). It
 -- fades from 60% HP to FORCE_MIN_HP, and stays under the bot's own retreat desire when that is RETREAT_YIELD or more
 -- (its 0.9 tower rules, or a pit walk-out at 0.96 from an open retreat PR). The kill push (push.lua, 0.99 after two kills) is capped under it
 -- on the other lanes (Orders.CapForOrder).
@@ -59,6 +60,29 @@ function Rules.OrderDesire(tier, hp, retreatDesire)
 		desire = math.min(desire, retreatDesire - 0.02)
 	end
 	return desire
+end
+
+-- A dodge always wins over an order (#225, the lead's proposal when the maintainer asked whether forced orders
+-- override defences). Valve's evasive maneuvers mode (kept on purpose, AGENTS.md) is readable only while it is the
+-- bot's active mode, and it reads anywhere from 0.00 to 1.00 there (game 078 [SHy-DEFEND] mode=evasive_maneuvers/0.60,
+-- 0.70, 0.79, 1.00 lines); a forced order at 0.97 would take the bot back from a dodge that dropped to 0.90-0.96.
+-- While the evasive desire is EVASIVE_ACTIVE or more (0.00 reads are a dodge that already ended), the order stays
+-- EVASIVE_MARGIN under it: 0.1 also covers the ~10% the active mode reads above its desire (mode_retreat_generic.lua,
+-- OverEvasiveDesire). The order resumes on the first think after the dodge.
+Rules.EVASIVE_ACTIVE = 0.1
+Rules.EVASIVE_MARGIN = 0.1
+
+-- The order's `desire` while the bot's evasive maneuvers mode runs at `evasiveDesire` (nil: not the active mode), and
+-- whether it was cut for the dodge.
+function Rules.YieldToDodge(desire, evasiveDesire)
+	if evasiveDesire == nil or evasiveDesire < Rules.EVASIVE_ACTIVE then
+		return desire, false
+	end
+	local cap = math.max(0, evasiveDesire - Rules.EVASIVE_MARGIN)
+	if desire <= cap then
+		return desire, false
+	end
+	return cap, true
 end
 
 -- Is a bot whose active mode runs at `modeDesire` too busy for a request (ask tier, desire `orderDesire`)? Game 078,

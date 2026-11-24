@@ -23,7 +23,8 @@
 -- Logs: [SHy-PING] t= <hero> order kind= from= via=ping|insist|chat tier=ask|force-near|force-all count= lane=
 -- target= verdict=go|refuse|queue why= responders= queued= reply= replies= cands=<hero>:<answer>[/<state>]:<dist>,...
 -- (danger: affected=) once per order; per bot obey ack=yes|no / queue why= / ignore why= / done why=, and <hero> said id= reply=
--- for every chat reply. A forced bot that goes by TP prints [SHy-TRAVEL] ... for=order; a far one that walks
+-- for every chat reply. A bot whose order gives way to Valve's dodge (#225): <hero> yield id= to=evasive des= evasive=
+-- order= tier= (at the start, then every 3s), and <hero> resume id= after=evasive held= des= when the dodge ends. A forced bot that goes by TP prints [SHy-TRAVEL] ... for=order; a far one that walks
 -- order-walk why=. A quick ping that did not chain: <human> insist-miss dist= age= kind= lane=. A ping at our
 -- fountain: skip why=own-fountain near=spawn|building; the fountain building once found: fountain-building at=.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
@@ -1286,10 +1287,54 @@ local function RetreatDesireNow(bot)
 	return last.d
 end
 
--- The order's desire for this bot (Rules.OrderDesire): a request 0.75, a forced order 0.97, fading with HP and kept
--- under a strong retreat. A danger back-off (order nil) uses the request's.
-local function Desire(bot, order)
+-- Seconds between two yield lines of one bot while the same dodge goes on.
+local YIELD_LOG_SECONDS = 3
+
+-- `desire` cut under a running dodge (Rules.YieldToDodge; #225: a forced order at 0.97 could take the bot back from
+-- Valve's evasive maneuvers at 0.90-0.96). Logs the yield when it starts and every YIELD_LOG_SECONDS, and the resume.
+local function YieldToDodge(bot, order, desire)
+	local evasive = nil
+	if bot:GetActiveMode() == BOT_MODE_EVASIVE_MANEUVERS then
+		evasive = bot:GetActiveModeDesire()
+	end
+	local cut, yielded = Rules.YieldToDodge(desire, evasive)
+	local now = DotaTime()
+	local id = order ~= nil and order.id or -1
+	if yielded then
+		if bot._orderYieldSince == nil or bot._orderYieldId ~= id then
+			bot._orderYieldSince, bot._orderYieldId, bot._orderYieldLogAt = now, id, nil
+		end
+		if now >= (bot._orderYieldLogAt or -999) then
+			bot._orderYieldLogAt = now + YIELD_LOG_SECONDS
+			Log(
+				"%s yield id=%d to=evasive des=%.2f evasive=%.2f order=%.2f tier=%s",
+				Short(bot),
+				id,
+				cut,
+				evasive,
+				desire,
+				order ~= nil and tostring(order.tier) or "danger"
+			)
+		end
+	elseif bot._orderYieldSince ~= nil and evasive == nil then
+		-- Only for the order it yielded (a later order's first think does not print the old one's resume).
+		if bot._orderYieldId == id then
+			Log("%s resume id=%d after=evasive held=%.1f des=%.2f", Short(bot), id, now - bot._orderYieldSince, desire)
+		end
+		bot._orderYieldSince, bot._orderYieldId, bot._orderYieldLogAt = nil, nil, nil
+	end
+	return cut
+end
+
+-- The order's desire for this bot before a dodge (Rules.OrderDesire): a request 0.75, a forced order 0.97, fading
+-- with HP and kept under a strong retreat. A danger back-off (order nil) uses the request's.
+local function BaseDesire(bot, order)
 	return Rules.OrderDesire(order ~= nil and order.tier or "ask", Fu.GetHP(bot), RetreatDesireNow(bot))
+end
+
+-- The order's desire for this bot: BaseDesire, under a running dodge (YieldToDodge).
+local function Desire(bot, order)
+	return YieldToDodge(bot, order, BaseDesire(bot, order))
 end
 
 -- Push.GetPushDesire for a lane the bot is not ordered to: the most that lane may return while the bot carries out a
@@ -1598,7 +1643,7 @@ end
 -- A danger ping's back-off comes first: just above an order's desire, so it also beats an ordered push or defend.
 function Orders.AssembleDesire(bot)
 	if DangerFor(bot) ~= nil then
-		return math.min(0.85, Desire(bot) + 0.05)
+		return YieldToDodge(bot, nil, math.min(0.85, BaseDesire(bot) + 0.05))
 	end
 	local order, entry = Orders.ForBot(bot)
 	if order == nil or not ASSEMBLE_KINDS[order.kind] then
