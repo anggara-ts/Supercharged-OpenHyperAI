@@ -866,6 +866,8 @@ function WardMode.PlantShort()
 	)
 	pcall(MarkEarlyWard, wardSpot)
 	if observerWard:GetName() == "item_ward_observer" then
+		-- A plain ward plants on the order (no AnnounceWard here): log a short lane plant now.
+		LaneObsLog(wardSpot, loc)
 		bot:Action_UseAbilityOnLocation(observerWard, loc)
 	else
 		DispenserPlant(observerWard, loc, true)
