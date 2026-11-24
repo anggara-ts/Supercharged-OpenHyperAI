@@ -1431,7 +1431,7 @@ end
 -- 2026)", maintainer 2026-11-23), the second points to the Workshop page. No command hints ("no need to hint !pos and
 -- !Xpos Y, or language change in welcome message", no !debug hint; maintainer 2026-11-23). No URL: chat links are not
 -- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
--- announcer) don't repeat it; welcomeNext > 1 means the version line was said. It starts at -0:30
+-- announcer) don't repeat it; welcomeNext > 1 means the version line was said. It starts at -1:00
 -- (ChatRules.WELCOME_START), after the position lines, which no longer wait for it (ChatRules.POSITION_WAITS_FOR_WELCOME).
 local WELCOME_START = ChatRules.WELCOME_START
 local WELCOME_GAP = 2
