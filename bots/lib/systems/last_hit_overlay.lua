@@ -132,6 +132,79 @@ local function busyWhy(bot)
 	return nil
 end
 
+-- Creep aggro (RoamRules.CreepAggroWhy, #165 game 078): enemy lane creeps hitting the bot end the overlay's hold and
+-- start no new one, and team roam offers no snipe. Worked out once per frame (GameTime): HoldModeThink (before the
+-- mode Think), team roam's GetDesire and Think all read it. Returns { attackers, loss, why, on }:
+--   attackers  enemy lane creeps within AGGRO_RADIUS whose attack target is the bot (scanned only while creeps hit it)
+--   loss       HP lost in the last second while only creeps damaged the bot (a hero or tower hit clears the samples)
+--   why        CreepAggroWhy this frame, else the last one while latched ("attackers" / "damage"), or nil
+--   on         latched for RoamRules.AGGRO_LATCH seconds after the rule last fired
+local AGGRO_RADIUS = 900
+local function creepLoss(bot, now, otherHit)
+	local samples = bot._lhHpSamples
+	if samples == nil or otherHit then
+		samples = {}
+		bot._lhHpSamples = samples
+	end
+	samples[#samples + 1] = { t = now, hp = bot:GetHealth() }
+	while #samples > 1 and now - samples[1].t > Rules.LOSS_WINDOW + 0.2 do
+		table.remove(samples, 1)
+	end
+	if otherHit or not bot:WasRecentlyDamagedByCreep(Rules.LOSS_WINDOW) then
+		return 0
+	end
+	return Rules.RecentLoss(samples, now)
+end
+function X.CreepAggro(bot)
+	local now = GameTime()
+	local aggro = bot._lhAggro
+	if aggro ~= nil and aggro.t == now then
+		return aggro
+	end
+	local attackers = 0
+	if bot:WasRecentlyDamagedByCreep(1.5) then
+		for _, creep in ipairs(bot:GetNearbyLaneCreeps(AGGRO_RADIUS, true) or {}) do
+			if Fu.IsValid(creep) and creep:GetAttackTarget() == bot then
+				attackers = attackers + 1
+			end
+		end
+	end
+	local otherHit = bot:WasRecentlyDamagedByAnyHero(1.0) or bot:WasRecentlyDamagedByTower(1.0)
+	local loss = creepLoss(bot, now, otherHit)
+	local why = Rules.CreepAggroWhy(attackers, loss, bot:GetHealth())
+	if why ~= nil then
+		bot._lhAggroAt, bot._lhAggroWhy = now, why
+	end
+	local on = Rules.CreepAggroOn(now, bot._lhAggroAt)
+	aggro = { t = now, attackers = attackers, loss = loss, why = on and bot._lhAggroWhy or nil, on = on }
+	bot._lhAggro = aggro
+	return aggro
+end
+
+-- [SHy-ROAM] snipe-skip why=creep-aggro: a snipe / creep hit not taken, or a hold ended, because creeps hit the bot.
+-- at=offer (team roam), new (a new overlay hit), hold (a running hold let go). src= attackers|damage. Every 5s per bot.
+function X.LogAggroSkip(bot, at, rule, aggro)
+	if DotaTime() < (bot._lhAggroLogAt or -99) then
+		return
+	end
+	bot._lhAggroLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[SHy-ROAM] t=%.0f %s snipe-skip why=creep-aggro attackers=%d hp=%.2f loss=%d src=%s rule=%s at=%s mode=%s",
+			DotaTime(),
+			shortName(bot),
+			aggro.attackers,
+			Fu.GetHP(bot),
+			math.floor(aggro.loss),
+			aggro.why or "latch",
+			rule or "?",
+			at,
+			RoamStats.ModeName(bot:GetActiveMode())
+		)
+	)
+end
+
 -- The state OverlaySkipWhy reads.
 function X.State(bot, desire)
 	local mode = bot:GetActiveMode()
@@ -146,6 +219,7 @@ function X.State(bot, desire)
 		-- open: up to HuntTrace.KILL_WINDOW (3s) after the reveal, when the hit belongs to the hero (game 064, 36:30:
 		-- the old 1s block let a snipe through 1.5s after Clinkz's reveal).
 		charging = bot:HasModifier("modifier_spirit_breaker_charge_of_darkness") or bot._huntTrace ~= nil,
+		creepAggro = X.CreepAggro(bot).on,
 		heroFight = X.FightingHero(bot),
 		channeling = bot:IsChanneling(),
 		busy = busy ~= nil,
@@ -187,6 +261,10 @@ local function release(bot, why)
 			-- A hit that did not come in HOLD_CAP: no second hold on this unit (the mode gets the bot back).
 			own.try.capped = true
 		end
+		if why == "creep-aggro" or why == "skip-creep-aggro" then
+			-- overlay-try aggro=: the creeps on the bot when creep aggro ended the hold.
+			own.try.aggro = X.CreepAggro(bot).attackers
+		end
 	end
 end
 
@@ -201,6 +279,7 @@ local function holdWhy(bot, own)
 		ownAttack = own.attackT,
 		windup = own.windup,
 		free = mode == BOT_MODE_RETREAT or mode == BOT_MODE_EVASIVE_MANEUVERS,
+		creepAggro = X.CreepAggro(bot).on,
 	})
 end
 
@@ -215,6 +294,9 @@ function X.Owns(bot)
 	local why = holdWhy(bot, own)
 	if why ~= nil then
 		release(bot, why)
+		if why == "creep-aggro" then
+			X.LogAggroSkip(bot, "hold", own.why, X.CreepAggro(bot))
+		end
 		return false
 	end
 	return true
@@ -276,7 +358,7 @@ local function resolveTries(bot, now)
 			pcall(
 				print,
 				string.format(
-					"[SHy-ROAM] t=%.0f %s overlay-try result=%s rule=%s mode=%s lasted=%.1f held=%d release=%s gap=%d allies=%d replaced=%d cast=%d",
+					"[SHy-ROAM] t=%.0f %s overlay-try result=%s rule=%s mode=%s lasted=%.1f held=%d release=%s gap=%d allies=%d replaced=%d cast=%d aggro=%d",
 					now,
 					shortName(bot),
 					try.result,
@@ -288,7 +370,8 @@ local function resolveTries(bot, now)
 					try.gap or -1,
 					try.allies or -1,
 					try.replaced or 0,
-					try.cast or 0
+					try.cast or 0,
+					try.aggro or 0
 				)
 			)
 		end
@@ -340,6 +423,8 @@ end
 
 function X.Think(bot)
 	local now = DotaTime()
+	-- Every frame, so the HP samples behind the creep-damage rule have no gaps.
+	X.CreepAggro(bot)
 	resolveTries(bot, now)
 	noteReplaced(bot)
 	local own = bot._lhOwn
@@ -394,7 +479,11 @@ function X.Think(bot)
 		if bot._lhOwn ~= nil then
 			release(bot, "skip-" .. skip)
 		end
-		logSkip(bot, skip, why, unit, skip == "busy" and state.busyWhy or nil)
+		if skip == "creep-aggro" then
+			X.LogAggroSkip(bot, "new", why, X.CreepAggro(bot))
+		else
+			logSkip(bot, skip, why, unit, skip == "busy" and state.busyWhy or nil)
+		end
 		return false
 	end
 	local mode = bot:GetActiveMode()

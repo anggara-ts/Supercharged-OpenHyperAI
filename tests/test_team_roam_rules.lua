@@ -209,3 +209,36 @@ T.test("team roam rules: a new overlay hit skips long hunt walks and snipes an a
 	T.eq(R.NewHitSkipWhy("snipe", 0, { -100 }), nil, "already in range: still swings")
 	T.eq(R.NewHitSkipWhy("hunt-carry/lane", 100, { -100 }), nil, "ally-first is for the snipe only")
 end)
+
+T.test("team roam rules: creep aggro ends the last-hit hold (game 078, Winter Wyvern)", function()
+	local R = rules()
+	-- Game 078, 14:30: two lane creeps on Winter Wyvern.
+	T.eq(R.CreepAggroWhy(2, 0, 900), "attackers", "two creeps on the bot")
+	T.eq(R.CreepAggroWhy(1, 0, 900), nil, "one creep, no damage yet")
+	-- One creep: 3s of the last second's loss against 15% of the HP now.
+	T.eq(R.CreepAggroWhy(1, 40, 900), nil, "40/s: 120 in 3s, under 135")
+	T.eq(R.CreepAggroWhy(1, 50, 900), "damage", "50/s: 150 in 3s, over 135")
+	T.eq(R.CreepAggroWhy(1, 20, 300), "damage", "low HP: 60 in 3s over 45")
+	T.eq(R.CreepAggroWhy(0, 200, 900), nil, "loss with no lane creep on the bot (neutrals, a DoT)")
+	-- The latch keeps it on 2s after the rule last fired.
+	T.eq(R.CreepAggroOn(100, nil), false, "never fired")
+	T.eq(R.CreepAggroOn(101.5, 100), true, "1.5s later")
+	T.eq(R.CreepAggroOn(102, 100), false, "2s later")
+	-- A hold lets go on creep aggro, before a pending hit.
+	local o = { now = 10, since = 9.8, alive = true, lastAttack = 9, ownAttack = 9, windup = 0.3 }
+	T.eq(R.OverlayHoldWhy(o), nil, "no aggro: keep")
+	o.creepAggro = true
+	T.eq(R.OverlayHoldWhy(o), "creep-aggro", "aggro: let go")
+	-- A new hit: creep aggro is checked last, where the hit would have gone.
+	T.eq(R.OverlaySkipWhy({ desire = 1.5, modeDesire = 0.6, creepAggro = true }), "creep-aggro", "would have hit")
+	T.eq(R.OverlaySkipWhy({ desire = 0.5, modeDesire = 0.6, creepAggro = true }), "mode", "the mode had it anyway")
+	T.eq(R.OverlaySkipWhy({ desire = 1.5, modeDesire = 0.6, retreat = true, creepAggro = true }), "retreat", "retreat")
+end)
+
+T.test("team roam rules: HP lost in the last second", function()
+	local R = rules()
+	T.eq(R.RecentLoss({}, 10), 0, "no samples")
+	local samples = { { t = 8.5, hp = 1000 }, { t = 9.2, hp = 900 }, { t = 9.6, hp = 860 }, { t = 10, hp = 820 } }
+	T.eq(R.RecentLoss(samples, 10), 80, "900 at 9.2 to 820 now; 1000 at 8.5 is older than 1s")
+	T.eq(R.RecentLoss({ { t = 9.5, hp = 800 }, { t = 10, hp = 850 } }, 10), 0, "healed")
+end)
