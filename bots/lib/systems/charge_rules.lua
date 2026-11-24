@@ -13,11 +13,13 @@ local Rules = {}
 
 -- A target this close is the near rules' job (channel interrupt, engage, an ally's target at 600-1900).
 Rules.FAR_DIST = 1600
--- Unverified: whether the charge ignores the 550 move speed cap. Capping makes the ETA longer (the safer side for
--- the save's "does the ally live until he lands" check). The [SHy-SB] charge-land line (eta= vs took=) measures it.
+-- The charge is not held to the 550 move speed cap (there was a MAX_SPEED = 550 here): his move speed + the bonus
+-- is used uncapped. Measured, not in the game data (the datafeed and the hero file name no cap): the charges that
+-- reached the target in games 074-078 took 2.8s against an estimate of 4.5, 5.5 against 6.4 and 10.9 against 16.6
+-- ([SHy-SB] charge-land took= vs eta=); 074 t=3416 covered about 8800 in 10.9s, ~850/s after the windup.
 -- 7.42 hero file (pak01_dir.vpk npc_dota_hero_spirit_breaker.txt): the same values, a +50 charge speed talent
--- (special_bonus_unique_spirit_breaker_increased_charge_speed, read with movement_speed) and ROOT_DISABLES.
-Rules.MAX_SPEED = 550
+-- (special_bonus_unique_spirit_breaker_increased_charge_speed; whether GetSpecialValueInt("movement_speed")
+-- includes it is unverified: the charge line logs bonus=) and ROOT_DISABLES.
 -- A teamfight charge that lands later than this is likely too late (fights end; no duration estimate exists).
 Rules.MAX_FIGHT_ETA = 7
 -- Spirit Breaker himself below this HP ratio does not charge into a fight or a gank.
@@ -40,6 +42,7 @@ Rules.SAMPLE_MAX_AGE = 1.5
 
 -- Seconds from the cast to the arrival over dist. moveSpeed = his move speed now, bonus = movement_speed at his
 -- level. The windup is assumed linear (from minPct% of the bonus to all of it over windup seconds): unverified.
+-- maxSpeed: an optional cap (the hero file passes none, see the note above Rules.MAX_FIGHT_ETA).
 function Rules.ChargeEta(dist, moveSpeed, bonus, windup, minPct, castPoint, maxSpeed)
 	windup = windup or 1.5
 	minPct = minPct or 25

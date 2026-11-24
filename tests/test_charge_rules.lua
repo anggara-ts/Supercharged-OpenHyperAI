@@ -14,6 +14,12 @@ T.test("charge rules: travel time with the 1.5s windup and the speed cap", funct
 	T.near(R.ChargeEta(3000, 300, 275, 1.5, 25, 0.1, nil), 5.59, 0.01, "3000 away, no cap: shorter")
 	T.near(R.ChargeEta(300, 300, 275, 1.5, 25, 0.1, 550), 0.83, 0.01, "300 away lands inside the windup")
 	T.ok(R.ChargeEta(3000, 300, 425) < R.ChargeEta(3000, 300, 275), "defaults: a higher level is faster")
+	T.eq(R.MAX_SPEED, nil, "no speed cap constant: the charge is faster than 550 (games 074-078)")
+	-- Game 074 t=3416: 9056 away, reached the target (targetDist 219) in 10.9s; the capped estimate was 16.6. Uncapped
+	-- with about 400 move speed and the level 4 bonus 425 it is ~11.4s.
+	local uncapped = R.ChargeEta(9056, 400, 425, 1.5, 25, 0.1)
+	T.ok(math.abs(uncapped - 10.9) < 1.5, "uncapped estimate near the measured 10.9s, got " .. uncapped)
+	T.ok(R.ChargeEta(9056, 400, 425, 1.5, 25, 0.1, 550) > 15, "the old 550 cap: about 16.6s")
 end)
 
 T.test("charge rules: HP-loss rate from a 0.5-1.5s old sample", function()

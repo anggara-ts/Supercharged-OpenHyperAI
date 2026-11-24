@@ -157,10 +157,98 @@ local botTarget
 local isEngaging
 local isRetreating
 local isAttacking
+-- #208: the charge lock (maintainer, game 074 comment on the PR: "13:40 spirit breaker charged then immediately
+-- cancel"). A move, attack or stop order ends Charge of Darkness at once, and the modes and shared systems (outpost
+-- hold, push, defend, farm, team roam's snipe, the last-hit release) gave such orders during a charge: in games
+-- 074-078 long charges ended 0.2-0.5s after they started with the target still 2000-15800 away and no cancel of ours
+-- (charge-land started=1 cancel=none). While the charge modifier is up, those orders on this bot are dropped, except
+-- in the retreat mode when the charge is not itself the escape (bot.chargeRetreat): retreating out of a bad charge
+-- stays possible. This file's own stop and move orders call the class methods (CDOTA_Bot_Script.*) and pass.
+-- [SHy-SB] charge-lock: the first blocked order of each charge; charge-lock-end: how many were blocked.
+local CHARGE_MODIFIER = "modifier_spirit_breaker_charge_of_darkness"
+local LOCKED_ORDERS = {
+	"Action_MoveToLocation",
+	"Action_MoveToUnit",
+	"Action_MoveDirectly",
+	"Action_MovePath",
+	"Action_AttackUnit",
+	"Action_AttackMove",
+	"Action_ClearActions",
+	"Action_PickUpRune",
+	"Action_PickUpItem",
+	"ActionPush_MoveToLocation",
+	"ActionPush_MoveToUnit",
+	"ActionPush_MoveDirectly",
+	"ActionPush_AttackUnit",
+	"ActionPush_AttackMove",
+	"ActionQueue_MoveToLocation",
+	"ActionQueue_MoveToUnit",
+	"ActionQueue_MoveDirectly",
+	"ActionQueue_AttackUnit",
+	"ActionQueue_AttackMove",
+}
+-- this charge: orders blocked, the first one (method@mode); reset once the modifier is gone
+local chargeLock = { blocked = 0, first = nil }
+local function chargeLocked()
+	if not bot:HasModifier(CHARGE_MODIFIER) then
+		return false
+	end
+	return bot:GetActiveMode() ~= BOT_MODE_RETREAT or bot.chargeRetreat == true
+end
+local function noteChargeLockBlock(method)
+	chargeLock.blocked = chargeLock.blocked + 1
+	if chargeLock.first ~= nil then
+		return
+	end
+	local mode = bot:GetActiveMode()
+	chargeLock.first = method .. "@" .. tostring(mode)
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-lock method=%s mode=%s escape=%s target=%s",
+			DotaTime(),
+			method,
+			tostring(mode),
+			tostring(bot.chargeRetreat == true),
+			bot._chargeTarget ~= nil and not bot._chargeTarget:IsNull() and bot._chargeTarget:GetUnitName() or "-"
+		)
+	)
+end
+if CDOTA_Bot_Script ~= nil then
+	for _, method in ipairs(LOCKED_ORDERS) do
+		if CDOTA_Bot_Script[method] ~= nil then
+			bot[method] = function(self, ...)
+				if self == bot then
+					local ok, locked = pcall(chargeLocked)
+					if ok and locked then
+						pcall(noteChargeLockBlock, method)
+						return nil
+					end
+				end
+				return CDOTA_Bot_Script[method](self, ...)
+			end
+		end
+	end
+end
+-- Every think: once the charge is over, report the blocked orders and reset the count.
+function X.ChargeLockTick()
+	if bot:HasModifier(CHARGE_MODIFIER) or chargeLock.blocked == 0 then
+		return
+	end
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-lock-end blocked=%d first=%s",
+			DotaTime(),
+			chargeLock.blocked,
+			chargeLock.first or "-"
+		)
+	)
+	chargeLock.blocked, chargeLock.first = 0, nil
+end
 function X.SkillsComplement()
 	-- before every gate: the save charge needs each ally's HP history when the charge comes off cooldown
 	X.SampleAllyHp()
 	X.TraceFarCharge()
+	X.ChargeLockTick()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -171,7 +259,8 @@ function X.SkillsComplement()
 	nearbyEnemies = context.enemies
 	if bot:HasModifier("modifier_spirit_breaker_charge_of_darkness") or chargeOfDarknessAbility:IsInAbilityPhase() then
 		if bot.chargeRetreat and #nearbyEnemies == 0 then
-			bot:Action_MoveToLocation(bot:GetLocation() + RandomVector(150))
+			-- the class method: this file's own stop of the escape charge passes the charge lock
+			CDOTA_Bot_Script.Action_MoveToLocation(bot, bot:GetLocation() + RandomVector(150))
 			bot.chargeRetreat = false
 		end
 		return
@@ -418,12 +507,14 @@ function X.TraceFarCharge()
 	local charging = bot:HasModifier("modifier_spirit_breaker_charge_of_darkness")
 	if charging then
 		trace.started = true
+		-- for the end line: the mode during the charge (a change of mode right before the end points at its Think)
+		trace.chargeMode = bot:GetActiveMode()
 		if trace.cancelWhy == nil then
 			X.CheckFarChargeCancel(trace)
 		elseif not trace.moveTried and DotaTime() - trace.cancelAt >= 0.3 then
 			-- the stop did not end the charge: try a move order home (which order cancels it is unverified)
 			trace.moveTried = true
-			bot:Action_MoveToLocation(Fu.GetTeamFountain())
+			CDOTA_Bot_Script.Action_MoveToLocation(bot, Fu.GetTeamFountain())
 		end
 		return
 	end
@@ -433,11 +524,39 @@ function X.TraceFarCharge()
 	farChargeTrace = nil
 	local target = trace.target
 	local targetDist = -1
+	-- Why a charge ended early when no cancel of ours did it (#208: started=1, took 0.2-0.5s, the target far):
+	-- blocked= orders the charge lock dropped (an order that got through ends the charge), self= a disable on him
+	-- (the ability has ROOT_DISABLES: a root ends it), targetState= the target (gone, invulnerable, debuff immune:
+	-- the charge does not pierce it, datafeed immunity 4), mode=/endMode= the mode during the charge and now,
+	-- action= his current action now.
+	local targetState = "ok"
+	if target == nil or target:IsNull() then
+		targetState = "gone"
+	elseif not target:IsAlive() then
+		targetState = "dead"
+	elseif not target:CanBeSeen() then
+		targetState = "unseen"
+	elseif target:IsInvulnerable() then
+		targetState = "invulnerable"
+	elseif target:IsMagicImmune() then
+		targetState = "immune"
+	end
 	if target ~= nil and not target:IsNull() and target:IsAlive() and target:CanBeSeen() then
 		targetDist = GetUnitToUnitDistance(bot, target)
 	end
+	local selfState = "ok"
+	if bot:IsRooted() then
+		selfState = "rooted"
+	elseif bot:IsStunned() then
+		selfState = "stunned"
+	elseif bot:IsHexed() then
+		selfState = "hexed"
+	end
+	local okAction, action = pcall(function()
+		return bot:GetCurrentActionType()
+	end)
 	print(string.format(
-		"[SHy-SB] t=%.0f spirit_breaker charge-land why=%s started=%d eta=%.1f took=%.1f dist=%d targetDist=%d cancel=%s stopped=%s cancelLag=%.1f",
+		"[SHy-SB] t=%.0f spirit_breaker charge-land why=%s started=%d eta=%.1f took=%.1f dist=%d targetDist=%d cancel=%s stopped=%s cancelLag=%.1f blocked=%d self=%s targetState=%s mode=%s endMode=%s action=%s",
 		DotaTime(),
 		trace.kind,
 		trace.started and 1 or 0,
@@ -448,7 +567,13 @@ function X.TraceFarCharge()
 		trace.cancelWhy or "none",
 		-- which order ended the cancelled charge: the stop (clear), the later move, or neither yet
 		trace.cancelWhy == nil and "-" or trace.moveTried and "move" or "clear",
-		trace.cancelAt ~= nil and DotaTime() - trace.cancelAt or -1
+		trace.cancelAt ~= nil and DotaTime() - trace.cancelAt or -1,
+		chargeLock.blocked,
+		selfState,
+		targetState,
+		tostring(trace.chargeMode or "-"),
+		tostring(bot:GetActiveMode()),
+		okAction and tostring(action) or "?"
 	))
 end
 function X.SampleAllyHp()
@@ -473,7 +598,7 @@ end
 local function shortName(unit)
 	return unit ~= nil and string.gsub(unit:GetUnitName(), "npc_dota_hero_", "") or "-"
 end
--- Seconds from the cast to the arrival. Datafeed hero_id=71 (2026-11-22): movement_speed 275/325/375/425 bonus,
+-- Seconds from the cast to the arrival, his move speed and the charge bonus used. Datafeed hero_id=71 (2026-11-22): movement_speed 275/325/375/425 bonus,
 -- windup_time 1.5, min_movespeed_bonus_pct 25, AbilityCastPoint 0.1; read from the ability, these are fallbacks.
 local function chargeEta(dist)
 	local bonus = chargeOfDarknessAbility:GetSpecialValueInt("movement_speed")
@@ -488,7 +613,9 @@ local function chargeEta(dist)
 	if minPct == nil or minPct <= 0 then
 		minPct = 25
 	end
-	return ChargeRules.ChargeEta(dist, bot:GetCurrentMovementSpeed(), bonus, windup, minPct, 0.1, ChargeRules.MAX_SPEED)
+	local moveSpeed = bot:GetCurrentMovementSpeed()
+	-- No speed cap: the charge is faster than 550 (charge_rules.lua, measured in games 074-078).
+	return ChargeRules.ChargeEta(dist, moveSpeed, bonus, windup, minPct, 0.1, nil), moveSpeed, bonus
 end
 -- Fu.CanCastOnNonMagicImmune: visible, not magic immune, not invulnerable, not an illusion
 local function canChargeHero(enemyHero)
@@ -550,7 +677,7 @@ local function logFarCharge(kind, ally, target, s, ttd)
 	farChargeTrace = { kind = kind, ally = ally, target = target, eta = s.eta, dist = s.dist, ordered = DotaTime() }
 	print(
 		string.format(
-			"[SHy-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d hit=%s away=%s hp=%.2f",
+			"[SHy-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d hit=%s away=%s hp=%.2f ms=%d bonus=%d",
 			DotaTime(),
 			kind,
 			shortName(ally),
@@ -564,7 +691,9 @@ local function logFarCharge(kind, ally, target, s, ttd)
 			s.hitBy or 0,
 			s.hit and "yes" or "no",
 			s.away and "yes" or "no",
-			s.selfHp
+			s.selfHp,
+			s.ms or 0,
+			s.bonus or 0
 		)
 	)
 end
@@ -645,7 +774,8 @@ function X.CheckFarChargeCancel(trace)
 		return
 	end
 	trace.cancelWhy, trace.cancelAt = why, now
-	bot:Action_ClearActions(true)
+	-- the class method: this file's own cancel passes the charge lock
+	CDOTA_Bot_Script.Action_ClearActions(bot, true)
 	print(
 		string.format(
 			"[SHy-SB] t=%.0f spirit_breaker charge-cancel why=%s kind=%s ally=%s target=%s eta-left=%.1f ours=%d enemies=%d distLeft=%d towerDist=%d",
@@ -710,7 +840,7 @@ function X.ConsiderFarCharge()
 					allyHpRatio = Fu.GetHP(ally),
 					lossRate = ChargeRules.LossRate(samples, now, ally:GetHealth()),
 				}
-				s.eta = chargeEta(s.dist)
+				s.eta, s.ms, s.bonus = chargeEta(s.dist)
 				local why
 				if target == nil then
 					why = "no-target"
@@ -768,7 +898,7 @@ function X.ConsiderFarCharge()
 		allies = #Fu.GetAlliesNearLoc(fightLocation, 1400),
 		enemies = #enemiesThere,
 	}
-	s.eta = chargeEta(s.dist)
+	s.eta, s.ms, s.bonus = chargeEta(s.dist)
 	local why
 	if target == nil then
 		why = "no-target"
