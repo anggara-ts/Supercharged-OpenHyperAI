@@ -743,7 +743,8 @@ function X.CastHoldTick()
 	X.SkillsComplement()
 end
 -- Why a realm cast never took, for the no-cast end line: stunned | silenced | hexed | channel | casting:<ability> |
--- not-castable | -.
+-- casting | using | queued:<n> | not-castable | -. The re-send is skipped while Fu.CanNotUseAbility is true, which
+-- also covers the casting / using / queued states.
 function X.CastBlocker()
 	if bot:IsStunned() then
 		return "stunned"
@@ -760,6 +761,16 @@ function X.CastBlocker()
 	local active = bot:GetCurrentActiveAbility()
 	if active ~= nil and not active:IsNull() then
 		return "casting:" .. tostring(active:GetName())
+	end
+	if bot:IsCastingAbility() then
+		return "casting"
+	end
+	if bot:IsUsingAbility() then
+		return "using"
+	end
+	local queued = bot:NumQueuedActions() or 0
+	if queued > 0 then
+		return "queued:" .. queued
 	end
 	if not shadowRealmAbility:IsFullyCastable() then
 		return "not-castable"
