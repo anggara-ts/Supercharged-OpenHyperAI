@@ -13,6 +13,7 @@ local skipHumanWait = false
 local MatchupsData = require(GetScriptDirectory() .. "/lib/data/matchups_data")
 local Role = require(GetScriptDirectory() .. "/lib/systems/role")
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local AboutRules = require(GetScriptDirectory() .. "/lib/systems/about_rules")
 local TeamNames = require(GetScriptDirectory() .. "/lib/data/team_names")
 local CaptainMode = require(GetScriptDirectory() .. "/lib/hero/captain_mode")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
@@ -856,7 +857,7 @@ local function handleChatCommand(text, senderId, teamOnly)
 				heroPickedByChat = true
 			else
 				log(
-					"Hero name not found or not supported! See: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71"
+					"Hero name not found or not supported! See: https://github.com/anggara-ts/Supercharged-OpenHyperAI/blob/main/bots/lib/data/hero_names.lua"
 				)
 			end
 		elseif action == "!ban" and GetGameState() == GAME_STATE_HERO_SELECTION then
@@ -872,7 +873,7 @@ local function handleChatCommand(text, senderId, teamOnly)
 				Utils.PrintTable(banList)
 			else
 				log(
-					"Hero name not found or not supported! See: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71"
+					"Hero name not found or not supported! See: https://github.com/anggara-ts/Supercharged-OpenHyperAI/blob/main/bots/lib/data/hero_names.lua"
 				)
 			end
 		elseif action == "!sp" or action == "!speak" then
@@ -957,6 +958,18 @@ function SelectHeroChatCallback(senderId, text, teamOnly)
 		if Localization.Supported(text) then
 			HandleLocaleSetting(text)
 		end
+	end
+	-- `!about` (#215): noted on the shared Role table; the team's first bot answers it (ability_item_usage_generic.lua).
+	if AboutRules.IsCommand(text) then
+		AboutRules.Note(
+			Role,
+			text,
+			IsPlayerBot(senderId),
+			teamOnly,
+			GetTeamForPlayer(senderId) == GetTeam(),
+			GameTime()
+		)
+		return
 	end
 	if isChatCommand(lowerText) then
 		handleChatCommand(lowerText, senderId, teamOnly)
