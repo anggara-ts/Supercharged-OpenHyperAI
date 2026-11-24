@@ -10798,6 +10798,12 @@ function ItemUsageThink()
 		end
 	end
 	MatchTrace.Tick(bot)
+	-- The item swap probe (#218, off unless Customize.Swap_Probe): it owns this bot's slots while it runs.
+	local okProbe, probeOwns = pcall(require(GetScriptDirectory() .. "/lib/systems/swap_probe").Tick, bot)
+	if okProbe and probeOwns then
+		_perfDone()
+		return
+	end
 	pcall(MuteCloneChat)
 	pcall(TrackCyclone)
 	-- Ability charges for every bot (the API has no ability-charge read); before any gate below.

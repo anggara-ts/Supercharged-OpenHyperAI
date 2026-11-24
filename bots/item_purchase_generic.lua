@@ -1433,6 +1433,11 @@ function ItemPurchaseThink()
 	if isStale then
 		return
 	end
+	-- The item swap probe (#218, off unless Customize.Swap_Probe) holds this bot's purchases while it runs.
+	local okProbe, probeBusy = pcall(require(GetScriptDirectory() .. "/lib/systems/swap_probe").Busy, bot)
+	if okProbe and probeBusy then
+		return
+	end
 	if currentName ~= botName then
 		if not currentHero:IsAlive() then
 			return
