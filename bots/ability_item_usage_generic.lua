@@ -27,6 +27,7 @@ local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local BotBuild = dofile(GetScriptDirectory() .. "/heroes/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local CurseLog = require(GetScriptDirectory() .. "/lib/systems/curse_log")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
@@ -230,6 +231,40 @@ local function LevelUpAbilities()
 		return
 	end
 	local position = Fu.GetPosition(bot)
+	-- The first "I will play position N" waits until the team's welcome has said the version line (maintainer,
+	-- 2026-11-23: "print the bot version at the beginning of the game before ally bot state their position"), at most
+	-- ChatRules.WELCOME_FIRST_WAIT seconds after the welcome's start. A swap while it waits still reloads the build.
+	if
+		lastPosition == nil
+		and bot.announcedRole == nil
+		and bot.isBear == nil
+		and GetGameMode() ~= GAMEMODE_1V1MID
+		and GetGameState() == GAME_STATE_PRE_GAME
+	then
+		-- Required here, not at the top: the require block is where most open PRs add lines.
+		local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+		local now = DotaTime()
+		bot._playPosWait = bot._playPosWait or { at = now, position = position }
+		local versionSaid = (TeamMemory.Get(GetTeam(), "welcomeNext") or 1) > 1
+		local waits, by = ChatRules.PositionLineWaits(versionSaid, bot._playPosWait.at, ChatRules.WELCOME_START, now)
+		if waits then
+			goto positionLineDone
+		end
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s welcome-first waited=%.0f by=%s pos=%s",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				now - bot._playPosWait.at,
+				by,
+				tostring(position)
+			)
+		)
+		if bot._playPosWait.position ~= position then
+			-- The position changed while the line waited: the swap branch below reloads the build and says it.
+			lastPosition = bot._playPosWait.position
+		end
+	end
 	if lastPosition == nil then
 		lastPosition = position
 		if
@@ -255,6 +290,7 @@ local function LevelUpAbilities()
 			end)
 		end
 	end
+	::positionLineDone::
 	if bot:GetLevel() >= 30 and botName == "npc_dota_hero_bloodseeker" then
 		return
 	end
@@ -739,6 +775,7 @@ local chatReplyDelay = RandomInt(19, 56) / 10
 local killStreakEndedTime = -999
 local lastGold = 9999
 local lastKills = 999
+local saidFirstBloodAt = nil
 local lastDeaths = 0
 local killStreak = 0
 local replyCount = 0
@@ -794,8 +831,16 @@ function Usage.SetTalkMessage()
 		then
 			local chatLine = Localization.Get("got_first_blood")[RandomInt(1, #Localization.Get("got_first_blood"))]
 			bot:ActionImmediate_Chat(chatLine, true)
+			saidFirstBloodAt = kills
 		end
-		if bot:IsAlive() and gold > lastGold + 300 * turboGoldScale and kills > lastKills then
+		-- One chat line per kill: first blood's bonus gold also passed the kill-gold check below, so the first blood got
+		-- two lines (maintainer, 2026-11-23).
+		if
+			bot:IsAlive()
+			and gold > lastGold + 300 * turboGoldScale
+			and kills > lastKills
+			and saidFirstBloodAt ~= kills
+		then
 			local chatLine = "?"
 			if Fu.Customize.Trash_Talk_Level and Fu.Customize.Trash_Talk_Level >= 2 then
 				-- A normal kill: one of our lines 3 times in 4, "?" once in 4 (#90; it was 2 in 9).
@@ -1462,6 +1507,9 @@ local function ConsiderItems()
 			itemName = nil
 		end
 		local ready = Fu.CanCastAbility(item)
+		if itemName == "item_ancient_janggo" or itemName == "item_boots_of_bearing" then
+			Usage.LogDrumCharges(item, ready)
+		end
 		if smokeFromBag and item ~= nil and not item:IsNull() then
 			local cooldown = item:GetCooldownTimeRemaining()
 			ready = not (type(cooldown) == "number" and cooldown > 0)
@@ -1641,6 +1689,28 @@ function Usage.WillBreakInvisible(unit)
 	end
 	return false
 end
+-- [SHy-ITEM] drum-charges (#9): once per game per bot and item, the first time the Drum / Boots of Bearing is off
+-- cooldown: what the API reads for its charges and whether it counts as castable (the 7.42 Drum has no charges; the
+-- old rule waited for one).
+function Usage.LogDrumCharges(item, castable)
+	local itemName = item:GetName()
+	bot._drumChargesLogged = bot._drumChargesLogged or {}
+	if bot._drumChargesLogged[itemName] or item:GetCooldownTimeRemaining() > 0 then
+		return
+	end
+	bot._drumChargesLogged[itemName] = true
+	pcall(
+		print,
+		string.format(
+			"[SHy-ITEM] t=%.0f %s drum-charges item=%s charges=%s castable=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			itemName,
+			tostring(item:GetCurrentCharges()),
+			tostring(castable)
+		)
+	)
+end
 Usage.ConsiderItemDesire = {}
 Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	-- Overwhelm is melee range (150) and pierces debuff immunity. A short
@@ -1683,30 +1753,87 @@ Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Drum of Endurance / Boots of Bearing active (#9). The old rule cast only when going on a hero within 680 and
+-- returned at 0 charges, but the 7.42 Drum has no charges (ItemRequiresCharges is commented out in the game file),
+-- so it was probably never cast. Now: escape > fight > chase > push (bots/lib/systems/drum_rules.lua). Ally counts
+-- come from Fu.GetAllyList, which holds the bot itself (Arcane Boots below reads allyHeroes[2] as the first other
+-- ally). [SHy-ITEM] drum why= item= allies= target=, at most once per 3s per bot.
+local DrumRules = require(GetScriptDirectory() .. "/lib/systems/drum_rules")
+-- An enemy tower, barracks or Ancient (the API has IsTower and IsFort, barracks go by name).
+local function IsEnemyBuilding(unit)
+	if unit == nil or unit:IsNull() or not unit:IsAlive() or unit:GetTeam() == team then
+		return false
+	end
+	return unit:IsTower() or unit:IsFort() or string.find(unit:GetUnitName(), "rax", 1, true) ~= nil
+end
 Usage.ConsiderItemDesire["item_ancient_janggo"] = function(item)
-	if item:GetCurrentCharges() <= 0 and item:GetName() == "item_ancient_janggo" then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	local castRange = 680
-	local castType = "none"
-	local hEffectTarget = nil
-	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
-	if bot:HasModifier("modifier_nyx_assassin_vendetta") then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	if Fu.IsGoingOnSomeone(bot) then
-		if
-			Fu.IsValidHero(botTarget)
-			and Fu.CanCastOnMagicImmune(botTarget)
-			and Fu.IsInRange(bot, botTarget, castRange)
-		then
-			hEffectTarget = botTarget
-			castReason = "进攻:" .. Fu.Chat.GetNormName(hEffectTarget)
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+	-- Riki's passive invisibility and Glimmer's fade are not broken by an item cast.
+	local invisible = bot:IsInvisible()
+		and botName ~= "npc_dota_hero_riki"
+		and not bot:HasModifier("modifier_item_glimmer_cape_fade")
+	local allies = Fu.GetAllyList(bot, DrumRules.RADIUS)
+	local alliesOnBuilding = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and IsEnemyBuilding(ally:GetAttackTarget()) then
+			alliesOnBuilding = alliesOnBuilding + 1
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE
+	local enemies = Fu.GetNearbyHeroes(bot, DrumRules.RADIUS, true, BOT_MODE_NONE)
+	local attackingAllies = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and (ally:GetActiveMode() == BOT_MODE_ATTACK or Fu.IsValidHero(ally:GetAttackTarget())) then
+			attackingAllies = attackingAllies + 1
+		end
+	end
+	local targetDist, targetMovingAway = nil, false
+	local goingOn = Fu.IsGoingOnSomeone(bot)
+	if goingOn and Fu.IsValidHero(botTarget) and botTarget:CanBeSeen() then
+		targetDist = GetUnitToUnitDistance(bot, botTarget)
+		local ahead = botTarget:GetExtrapolatedLocation(0.5)
+		targetMovingAway = ahead ~= nil and GetUnitToLocationDistance(bot, ahead) > targetDist + 30
+	end
+	local why = DrumRules.Why({
+		vendetta = bot:HasModifier("modifier_nyx_assassin_vendetta"),
+		invisible = invisible,
+		retreating = Fu.IsRetreating(bot) or bot:GetActiveMode() == BOT_MODE_RETREAT,
+		hitByHero = bot:WasRecentlyDamagedByAnyHero(DrumRules.HIT_WITHIN),
+		inFight = attackingAllies >= DrumRules.MIN_ALLIES and #enemies >= 1,
+		allies = #allies,
+		enemies = #enemies,
+		goingOn = goingOn,
+		targetDist = targetDist,
+		attackRange = bot:GetAttackRange(),
+		targetMovingAway = targetMovingAway,
+		alliesOnBuilding = alliesOnBuilding,
+	})
+	if why == nil then
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if DotaTime() >= (bot._drumLogAt or -999) then
+		bot._drumLogAt = DotaTime() + 3
+		local targetName = "-"
+		if why == "chase" or why == "fight" then
+			targetName = Fu.IsValidHero(botTarget) and string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "") or "-"
+		elseif why == "push" then
+			local buildingTarget = bot:GetAttackTarget()
+			targetName = IsEnemyBuilding(buildingTarget) and buildingTarget:GetUnitName() or "ally-building"
+		end
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s drum why=%s item=%s allies=%d enemies=%d target=%s dist=%.0f",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				why,
+				item:GetName(),
+				#allies,
+				#enemies,
+				targetName,
+				targetDist or -1
+			)
+		)
+	end
+	return BOT_ACTION_DESIRE_HIGH, bot, "none", "drum:" .. why
 end
 Usage.ConsiderItemDesire["item_arcane_boots"] = function(item)
 	if bot:DistanceFromFountain() < 800 then
@@ -2208,8 +2335,16 @@ Usage.ConsiderItemDesire["item_blink"] = function(item)
 		return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
 	end
 	local attackingAllies = bot:GetNearbyHeroes(800, false, BOT_MODE_ATTACK)
+	-- Alchemist holding a brew (#34; bots/heroes/hero_alchemist.lua refreshes the field while brewing): a retreat blink
+	-- carries it away from every target and it blows up on him (game 063, 34:20, blink at 0.7s brewed).
+	local brewHold = bot._alchBrewingUntil ~= nil and DotaTime() < bot._alchBrewingUntil
+	if brewHold and Fu.IsRetreating(bot) and DotaTime() >= (bot._alchBlinkHoldLogAt or -999) then
+		bot._alchBlinkHoldLogAt = DotaTime() + 3
+		pcall(print, string.format("[SHy-ALCHEMIST] t=%.0f concoction hold cast=item_blink why=retreat", DotaTime()))
+	end
 	if
-		Fu.IsRetreating(bot)
+		not brewHold
+		and Fu.IsRetreating(bot)
 		and not Fu.IsRealInvisible(bot)
 		and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_MODERATE
 	then
@@ -4823,13 +4958,88 @@ Usage.ConsiderItemDesire["item_refresher"] = function(item)
 	local hEffectTarget = nil
 	local castReason = "刷新技能"
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
-	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
+	local heroName = string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")
+	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil then
+		if BotBuild.CanUseRefresherShard() then
+			Usage.LogRefresher(item, "hero-rule", heroName, -1)
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+		end
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if #enemyHeroes == 0 or not (Fu.IsGoingOnSomeone(bot) or Fu.IsInTeamFight(bot)) then
+		Fu.RefresherResetHold(bot)
+		return BOT_ACTION_DESIRE_NONE
+	end
+	-- #47 (maintainer, 2026-11-21): the ultimate in its refresh window; a useful spell (learned, not passive, not a
+	-- toggle, cooldown 8s+) still ready holds the refresh up to 1s so the hero casts it first; the mana gate is the
+	-- refresher and the ultimate (needed=). The other useful spells on cooldown are optional (optional=, their mana):
+	-- they come back too and are cast again if mana is left (maintainer, 2026-11-22: "zeus could refresher + wrath
+	-- only, refreshed nimbus is optional"). Fu.RefresherPlan, bots/lib/systems/refresher_rules.lua.
+	local plan = Fu.RefresherPlan(bot, item)
+	if plan.step == "go" then
+		Fu.RefresherResetHold(bot)
+		Usage.LogRefresher(item, "ult", heroName, plan.needed, plan.othersReady, plan.combo, plan.optional)
 		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 	end
-	if #enemyHeroes > 0 and (Fu.IsGoingOnSomeone(bot) or Fu.IsInTeamFight(bot)) and Fu.CanUseRefresherShard(bot) then
-		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+	if plan.step == "hold" and plan.holdStarted then
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s refresher-hold others-ready=%d ready=%s mana=%d needed=%d optional=%d combo=%s",
+				DotaTime(),
+				heroName,
+				plan.othersReady,
+				plan.ready,
+				bot:GetMana(),
+				plan.needed,
+				plan.optional or 0,
+				plan.combo
+			)
+		)
+	elseif plan.step == "mana" and DotaTime() >= (bot._refresherSkipLogAt or -999) then
+		-- Only the mana is short (the ultimate is in its window): say so, every 10s at most.
+		bot._refresherSkipLogAt = DotaTime() + 10
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s refresher-skip why=mana item=%s mana=%d needed=%d optional=%d itemCost=%d others-ready=%d combo=%s",
+				DotaTime(),
+				heroName,
+				item:GetName(),
+				bot:GetMana(),
+				plan.needed,
+				plan.optional or 0,
+				item:GetManaCost(),
+				plan.othersReady,
+				plan.combo
+			)
+		)
 	end
 	return BOT_ACTION_DESIRE_NONE
+end
+-- One line per refresh: which rule, the mana before it and what it needed, the useful spells still ready and the
+-- combo it brings back; needed: the gate (refresher + ultimate), optional: the mana of the other spells it brings
+-- back (-1 / "-": a hero file's own rule).
+function Usage.LogRefresher(item, why, heroName, needed, othersReady, combo, optional)
+	local ultimate = Fu.GetUltimateAbility(bot)
+	pcall(
+		print,
+		string.format(
+			"[SHy-ITEM] t=%.0f %s refresher why=%s item=%s mana=%d needed=%d optional=%d itemCost=%d ult=%s ultCd=%.0f others-ready=%d combo=%s",
+			DotaTime(),
+			heroName,
+			why,
+			item:GetName(),
+			bot:GetMana(),
+			needed,
+			optional or -1,
+			item:GetManaCost(),
+			ultimate ~= nil and ultimate:GetName() or "-",
+			ultimate ~= nil and ultimate:GetCooldownTimeRemaining() or -1,
+			othersReady or -1,
+			combo or "-"
+		)
+	)
 end
 Usage.ConsiderItemDesire["item_refresher_shard"] = function(item)
 	return Usage.ConsiderItemDesire["item_refresher"](item)
@@ -10825,6 +11035,8 @@ function ItemUsageThink()
 	pcall(Usage.DumpBotApi)
 	pcall(Usage.DumpHeroAbilities)
 	pcall(Usage.ProbeHiddenItems)
+	-- [SHy-CURSE]: right-clicks on enemies under Winter's Curse (log only).
+	pcall(CurseLog.Watch, bot)
 	pcall(Usage.LogHomeWalk)
 	pcall(Usage.WatchDodgeResults)
 	PartEnd("watchers", tWatch)

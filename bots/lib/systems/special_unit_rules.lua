@@ -1,0 +1,118 @@
+-- Pure rules for bots/lib/hero/special_units.lua (#185): plain numbers in, so tests/test_special_unit_rules.lua can
+-- check them without the bot API.
+local SpecialUnitRules = {}
+
+local function remap(value, fromLow, fromHigh, toLow, toHigh)
+	local ratio = (value - fromLow) / (fromHigh - fromLow)
+	ratio = math.max(0, math.min(1, ratio))
+	return toLow + (toHigh - toLow) * ratio
+end
+
+-- Undying's Tombstone. 7.42 (Valve datafeed hero_id=85 and npc_dota_hero_undying.txt in pak01_dir.vpk): pip health
+-- tombstone_health / hits_to_destroy 5/6/7/8 (+4 talent), duration 30, radius 1200, a zombie next to every enemy in
+-- the radius every 4/3.6/3.2/2.8s; zombies slow, Deathlust makes them faster on targets under 40% HP.
+-- npc_units.txt: npc_dota_unit_tombstone1-4 StatusHealth 20/24/28/32, 4x the hit count. Which scale the bot API's
+-- GetHealth reports is unverified, so: max health 20 or more reads 4 health per hero hit, less reads 1 (pips).
+SpecialUnitRules.TOMBSTONE_RADIUS = 1200
+SpecialUnitRules.TOMBSTONE_CLOSE = 600
+SpecialUnitRules.TOMBSTONE_FEW_HITS = 3
+SpecialUnitRules.TOMBSTONE_ALLIES = 2
+SpecialUnitRules.TOMBSTONE_MIN_HP = 0.25
+-- Attack mode tops out at 0.95 (games 064 / 065: 86 of the attack lines read 0.95, none higher).
+SpecialUnitRules.TOMBSTONE_PRIORITY_DESIRE = 0.98
+-- A bot slowed by the zombies hits a Tombstone this close that dies in TOMBSTONE_FEW_HITS hits instead of running.
+SpecialUnitRules.TOMBSTONE_SLOW_HIT_RANGE = 400
+
+function SpecialUnitRules.TombstoneHitsLeft(health, maxHealth)
+	if health == nil or health <= 0 then
+		return 0
+	end
+	local perHit = (maxHealth or 0) >= 20 and 4 or 1
+	return math.ceil(health / perHit - 1e-6)
+end
+
+-- With enemy heroes in the fight (#185, game 069 37:39-37:49): Axe hit a full Tombstone (8 hits) alone with 3 allies
+-- vs 4 enemies near, Puck at 17% and Vengeful Spirit at 39%; the close rule gave it 0.98 and all three died. Then the
+-- Tombstone comes first only when it dies quickly: hits left / allied heroes on it within TOMBSTONE_KILL_TIME, at an
+-- assumed TOMBSTONE_HITS_PER_SECOND per hero (about one attack a second: base attack time 1.7 with mid-game attack
+-- speed; a guess, not game data), or TOMBSTONE_FEW_HITS hits or fewer. A hero with a teamfight spell ready (its
+-- ultimate, or an initiator spell, X.TeamfightSpellReady) fights instead unless the Tombstone dies in
+-- TOMBSTONE_TEAMFIGHT_HITS (maintainer, 2026-11-22: "idea of teamfight spell to keep fighting is good").
+SpecialUnitRules.TOMBSTONE_FIGHT_RANGE = 1200
+SpecialUnitRules.TOMBSTONE_HITTER_RANGE = 700
+SpecialUnitRules.TOMBSTONE_HITS_PER_SECOND = 1
+SpecialUnitRules.TOMBSTONE_KILL_TIME = 2.5
+SpecialUnitRules.TOMBSTONE_TEAMFIGHT_HITS = 2
+-- Seconds the allied heroes on it take to kill it (TOMBSTONE_HITS_PER_SECOND each; the bot counts as at least one).
+function SpecialUnitRules.TombstoneKillTime(hitsLeft, hitters)
+	return hitsLeft / (math.max(1, hitters or 1) * SpecialUnitRules.TOMBSTONE_HITS_PER_SECOND)
+end
+
+-- Kill the Tombstone first (above attack mode, no even-fight gate): close (TOMBSTONE_CLOSE), a few hits from dying
+-- and inside its radius, or TOMBSTONE_ALLIES+ allied heroes inside its radius. Never while retreating or under
+-- TOMBSTONE_MIN_HP. dist: bot to the Tombstone; alliesInRadius: allied heroes (the bot too) within the radius.
+-- fight (nil: no enemy hero near): enemies = enemy heroes within TOMBSTONE_FIGHT_RANGE of the bot, hitters = allied
+-- heroes (the bot too) within TOMBSTONE_HITTER_RANGE of the Tombstone, teamfightReady = a teamfight spell ready.
+-- Returns the priority and, when the fight rule turned it down, why ("teamfight-ready" | "slow-kill").
+function SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio, fight)
+	if retreating or hpRatio < SpecialUnitRules.TOMBSTONE_MIN_HP then
+		return false
+	end
+	local base = dist <= SpecialUnitRules.TOMBSTONE_CLOSE
+		or hitsLeft <= SpecialUnitRules.TOMBSTONE_FEW_HITS and dist <= SpecialUnitRules.TOMBSTONE_RADIUS
+		or alliesInRadius >= SpecialUnitRules.TOMBSTONE_ALLIES
+	if not base or fight == nil or (fight.enemies or 0) <= 0 then
+		return base
+	end
+	if fight.teamfightReady and hitsLeft > SpecialUnitRules.TOMBSTONE_TEAMFIGHT_HITS then
+		return false, "teamfight-ready"
+	end
+	if
+		hitsLeft <= SpecialUnitRules.TOMBSTONE_FEW_HITS
+		or SpecialUnitRules.TombstoneKillTime(hitsLeft, fight.hitters) <= SpecialUnitRules.TOMBSTONE_KILL_TIME
+	then
+		return true
+	end
+	return false, "slow-kill"
+end
+
+-- The desire for the Tombstone and whether it is the priority case. Outside it the old rule: only when the fight is
+-- even (alliesNear >= enemiesNear, heroes within 1600 of the bot) and not retreating; within attack range + 200 0.40
+-- to 0.96 by the bot's HP, farther 0.56 (team roam then scales both by HP). fight: see TombstonePriority. When the
+-- fight rule turned the priority down: 0 with a teamfight spell ready (fight), else the old rule held under
+-- TOMBSTONE_FIGHT_CAP (below attack mode's 0.95, so a fight wins). Returns desire, priority, why.
+SpecialUnitRules.TOMBSTONE_FIGHT_CAP = 0.9
+function SpecialUnitRules.TombstoneDesire(
+	dist,
+	attackRange,
+	hitsLeft,
+	alliesInRadius,
+	alliesNear,
+	enemiesNear,
+	retreating,
+	hpRatio,
+	fight
+)
+	local priority, why = SpecialUnitRules.TombstonePriority(dist, hitsLeft, alliesInRadius, retreating, hpRatio, fight)
+	if priority then
+		return SpecialUnitRules.TOMBSTONE_PRIORITY_DESIRE, true
+	end
+	if why == "teamfight-ready" then
+		return 0, false, why
+	end
+	local desire = 0
+	if alliesNear >= enemiesNear and not retreating then
+		desire = dist <= attackRange + 200 and remap(hpRatio, 0.25, 0.9, 0.4, 0.96) or 0.56
+	end
+	if why ~= nil then
+		desire = math.min(desire, SpecialUnitRules.TOMBSTONE_FIGHT_CAP)
+	end
+	return desire, false, why
+end
+
+-- A zombie-slowed bot hits the Tombstone instead of running to the fountain.
+function SpecialUnitRules.TombstoneHitWhenSlowed(dist, hitsLeft)
+	return dist <= SpecialUnitRules.TOMBSTONE_SLOW_HIT_RANGE and hitsLeft <= SpecialUnitRules.TOMBSTONE_FEW_HITS
+end
+
+return SpecialUnitRules
