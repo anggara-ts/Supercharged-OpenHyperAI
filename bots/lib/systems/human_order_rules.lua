@@ -444,8 +444,11 @@ end
 -- { lane = the ordered lane, now = DotaTime(), tier = "ask" (default) / "force-near" / "force-all" }.
 -- Ask: for a lane order (push / defend with a lane), bots at that lane first (its own laners in the laning stage, or
 -- within LANE_NEAR of the target); then nearest first (a core first for a camp: a core within CORE_FIRST_SLACK
--- farther than the nearest support still gets it), up to `need`. Bots beyond MaxDistance, and in the laning stage a
--- support off the lane farther than FAR_SUPPORT from a push, are not asked ("far").
+-- farther than the nearest support still gets it), up to `need`. Only bots in the force-near range are asked
+-- (Rules.InNearRange: within FORCE_NEAR_RADIUS, or at / on the ordered lane; game 079, 5:50: one ping on the mid
+-- tower pulled Alchemist 7509 away out of the bottom lane); far bots come on force all. A Roshan ping is the
+-- exception: the take needs the team. Bots beyond MaxDistance, and in the laning stage a support off the lane
+-- farther than FAR_SUPPORT from a push, are not asked either ("far").
 -- Force near: every bot within FORCE_NEAR_RADIUS or at / on the ordered lane; force all: every bot. Both ignore
 -- `need` (a camp still takes one bot), MaxDistance and the far-support rule, and the bot's state (Rules.ForceAnswer:
 -- only dead, channelling and very low bots queue). A dead bot is not near anything: force near leaves it out.
@@ -466,11 +469,11 @@ function Rules.PickResponders(kind, cands, need, ctx)
 	local function atLane(c)
 		return laneOrder and ((laning and c.lane == ctx.lane) or c.dist <= Rules.LANE_NEAR)
 	end
-	local function forcedIn(c)
-		if tier == "force-all" then
-			return true
-		end
+	local function nearRange(c)
 		return c.dist <= Rules.FORCE_NEAR_RADIUS or atLane(c) or (laneOrder and c.onLane == true)
+	end
+	local function forcedIn(c)
+		return tier == "force-all" or nearRange(c)
 	end
 	local sorted = {}
 	for _, c in ipairs(cands or {}) do
@@ -508,7 +511,7 @@ function Rules.PickResponders(kind, cands, need, ctx)
 			end
 		else
 			answer = Rules.Answer(kind, c.state, here)
-			if c.dist > maxDist then
+			if c.dist > maxDist or (kind ~= "rosh" and kind ~= "danger" and not nearRange(c)) then
 				answer = "far"
 			elseif
 				kind == "push"

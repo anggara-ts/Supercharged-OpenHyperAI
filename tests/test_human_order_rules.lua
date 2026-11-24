@@ -300,8 +300,7 @@ T.test("human orders: game 075 !push bot asks the bottom laners first", function
 	T.eq(need, 2, "T1: two")
 	local obey, queue, _, decisions = R.PickResponders("push", cands, need, { lane = "bot", now = 60 })
 	T.eq(obey[1], 9, "Alchemist, in the bottom lane, first")
-	T.eq(obey[2], 7, "then the nearest free bot")
-	T.eq(#obey, 2, "two")
+	T.eq(#obey, 1, "a single ping: only the bots in range (game 079); the rest come on force all")
 	T.eq(#queue, 0, "nobody queued")
 	T.eq(decisions[1].answer, "obey", "Alchemist obeys while trading in his lane")
 	local largo = nil
@@ -316,13 +315,15 @@ T.test("human orders: game 075 !push bot asks the bottom laners first", function
 		R.CandsText(decisions, function(id)
 			return names[id]
 		end),
-		"alchemist:obey/fight:900,puck:obey:6689,spirit_breaker:wait/fight:13000,largo:far:14016",
+		"alchemist:obey/fight:900,puck:far:6689,spirit_breaker:far/fight:13000,largo:far:14016",
 		"every candidate on the order line"
 	)
-	T.eq(R.Available(decisions), 3, "far bots do not count as available")
-	-- After 10:00 the far support may go; the laner rule gives way to distance (Alchemist is still nearest).
+	T.eq(R.Available(decisions), 1, "far bots do not count as available")
+	-- After 10:00 a far bot still does not come on a single ping (game 079); force all brings it.
 	obey = R.PickResponders("push", cands, 3, { lane = "bot", now = 900 })
-	T.eq(obey[3], 8, "15:00: Largo may come")
+	T.eq(#obey, 1, "15:00, one ping: only Alchemist, within 2000 of the target")
+	obey = R.PickResponders("push", cands, 3, { lane = "bot", now = 900, tier = "force-all" })
+	T.eq(#obey, 4, "force all: every bot, fighting or not")
 	-- A bot's own lane only counts in the laning stage: at 15:00 a bottom laner far away is not first.
 	obey = R.PickResponders("push", {
 		{ id = 1, dist = 9000, state = "ok", core = true, lane = "bot" },
@@ -432,7 +433,7 @@ T.test("human orders: force near takes every bot within 4000 or at the lane, for
 	}
 	-- A gank (max 6000, need 2 on a request).
 	local obey, queue = R.PickResponders("gank", cands, 2, { now = 900, tier = "ask" })
-	T.eq(#obey, 2, "ask: two")
+	T.eq(#obey, 1, "ask: only the free bot within 4000 (4100 is out of range)")
 	obey, queue = R.PickResponders("gank", cands, 2, { now = 900, tier = "force-near" })
 	T.eq(#obey, 2, "force near: the two within 4000, the retreating one too")
 	T.eq(obey[1], 1, "nearest first")
@@ -564,9 +565,9 @@ T.test("human orders: who answers", function()
 		{ id = 5, dist = 6000, state = "ok" },
 	}
 	local obey, queue, ignore = R.PickResponders("push", cands, 3)
-	T.eq(#obey, 3, "three free bots, the far one too")
+	T.eq(#obey, 2, "two free bots in range; the one 6000 away is far")
 	T.eq(obey[1], 2, "nearest first")
-	T.eq(#queue, 0, "free bots first: the fighter is not needed")
+	T.eq(queue[1], 3, "the fighter fills the third place after its fight")
 	obey, queue = R.PickResponders("push", cands, 4)
 	T.eq(queue[1], 3, "a fourth place: the fighter goes after its fight")
 	T.eq(#ignore, 1, "the retreating bot")
@@ -669,4 +670,27 @@ T.test("human orders: a forced order's desire beats the team's calls, not a stro
 	T.eq(Lines.Get("en", "busy-roshan", "Leshrac"), "Going Roshan", "busy with Roshan")
 	T.eq(Lines.Get("en", "busy-push", "Leshrac", nil, { lane = "top" }), "Pushing top", "busy pushing top")
 	T.eq(Lines.Get("en", "busy-defend", "Leshrac", nil, { lane = "mid" }), "Defending mid", "busy defending mid")
+end)
+
+-- Game 079, 5:50 (maintainer: "i only ping mid tower once but alchemist on bottom lane answer it"): one ping on the
+-- mid T1 took Puck (1608) and Alchemist (bottom lane, 7509) because the T1 needs 2.
+T.test("human orders: a single ping takes only bots in the force-near range", function()
+	local R = rules()
+	local cands = {
+		{ id = 1, dist = 1608, state = "ok", core = true, lane = "mid" }, -- puck
+		{ id = 2, dist = 7509, state = "ok", core = true, lane = "bot" }, -- alchemist
+	}
+	local obey, _, _, decisions = R.PickResponders("push", cands, 2, { lane = "mid", now = 351 })
+	T.eq(#obey, 1, "only Puck")
+	T.eq(obey[1], 1, "Puck")
+	T.eq(decisions[2].answer, "far", "Alchemist is far")
+	T.eq(#R.PickResponders("push", cands, 2, { lane = "mid", now = 351, tier = "force-all" }), 2, "force all: both")
+	-- A bot on the ordered lane outside 4000 is in range, as for force near.
+	obey = R.PickResponders("push", {
+		{ id = 3, dist = 5000, state = "ok", core = true, lane = "top", onLane = true },
+	}, 2, { lane = "mid", now = 900 })
+	T.eq(#obey, 1, "on the lane: asked")
+	-- A Roshan ping still asks the whole team.
+	obey = R.PickResponders("rosh", { { id = 4, dist = 9000, state = "ok" } }, 5, { now = 1500 })
+	T.eq(#obey, 1, "Roshan: from anywhere")
 end)
