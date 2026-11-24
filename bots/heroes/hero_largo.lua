@@ -24,7 +24,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 7,088 matches (tools/item-builds/generate.js).
+-- Stratz 7.41f, week of 9 Nov 2026: pos 4, 7,677 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -67,7 +67,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_ultimate_scepter_2",
 }
 -- No Boots of Travel: this build's Guardian Greaves / Boots of Bearing are its one pair of boots.
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,647 matches (tools/item-builds/generate.js).
+-- Stratz 7.41f, week of 9 Nov 2026: pos 3, 11,750 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
