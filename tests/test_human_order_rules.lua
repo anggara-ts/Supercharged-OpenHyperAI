@@ -34,7 +34,8 @@ T.test("human orders: chat commands parse, other commands do not", function()
 	T.eq(R.ParseChat("!push all").lane, nil, "!push all without a lane: which lane")
 	T.eq(R.ParseChat("!push top mid").lane, nil, "two lanes: which lane")
 	T.eq(R.ParseChat("!stop all"), nil, "!stop takes no words")
-	-- The other commands stay theirs (#210 !pos, #215 !about, the draft's !pick / !ban, !sp, !debug).
+	-- The other commands stay theirs (#210 !pos, #215 !about, the draft's !pick / !ban, !sp, !chatty); the removed
+	-- !debug / !verbose are no order either.
 	for _, text in ipairs({
 		"!pos",
 		"!pos 2",

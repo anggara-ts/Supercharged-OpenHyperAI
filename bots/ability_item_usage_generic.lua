@@ -844,8 +844,8 @@ local function LogHeardAny(chatEvent)
 	)
 end
 -- A chat line asked for inside the chat callback, said from this bot's next think instead: an ActionImmediate_Chat
--- from the callback itself says nothing (game 078: `!debug` switched the mode at t=700 but its "Verbose debug ON"
--- never reached the chat). { text =, allChat =, what = the log word }, or nil.
+-- from the callback itself says nothing (game 078: the old `!debug` switched the mode at t=700 but its "Verbose
+-- debug ON" never reached the chat; now used by the `!chatty` reply). { text =, allChat =, what = the log word }, or nil.
 local callbackChat = nil
 function Usage.SetTalkMessage()
 	local playerId = bot:GetPlayerID()
@@ -869,7 +869,7 @@ function Usage.SetTalkMessage()
 			)
 		)
 	end
-	-- The chat callback carries every chat command (!push, !debug, ...), so it does not depend on the reply count;
+	-- The chat callback carries every chat command (!push, !chatty, ...), so it does not depend on the reply count;
 	-- only the small-talk replies below stop after maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
 	-- re-pick of the reply member (Role.GetReplyMemberID) must not install a second one.
 	if playerId == Fu.Role.GetReplyMemberID() then
@@ -1027,33 +1027,28 @@ function Usage.SetReplyHumanTime(chatEvent)
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
-	-- `!debug` is the technical output (console logs, IsDebug, the ward-coordinates line); `!chatty` is the heroes'
-	-- decision chat ("Pushing top!", "Taking lotus", ChatRules.SayDecision). Maintainer, 2026-11-24: "separate !debug
-	-- and !chatty, debug is for technical debugging things. chatty is for hero chat when doing actions".
-	local isDebug = chatCommand == "!debug" or chatCommand == "!verbose"
-	local isChatty = chatCommand == "!chatty"
-	if isDebug or isChatty then
+	-- `!debug` / `!verbose` are gone (maintainer, 2026-11-24: "i dont think we need !debug anymore, we have logger
+	-- anyway"): the [SHy-*] lines always print. Typing one does nothing; it returns here so it never reaches the small
+	-- talk below. Utils.DebugMode / IsDebug stay false, so the old log() calls stay silent.
+	if chatCommand == "!debug" or chatCommand == "!verbose" then
+		return
+	end
+	-- `!chatty` is the heroes' decision chat ("Pushing top!", "Taking lotus", ChatRules.SayDecision). Maintainer,
+	-- 2026-11-24: "chatty is for hero chat when doing actions".
+	if chatCommand == "!chatty" then
 		if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsAllyMemberID(senderPlayerId)) then
 			Fu.Utils.GameStates = Fu.Utils.GameStates or {}
-			local on, key, word
-			if isDebug then
-				Fu.Utils.DebugMode = not Fu.Utils.DebugMode
-				IsDebug = Fu.Utils.DebugMode
-				Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
-				on, key, word = Fu.Utils.DebugMode, "say_debug_tech", "debug"
-			else
-				Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
-				on, key, word = Fu.Utils.GameStates.chattyChat, "say_chatty", "chatty"
-			end
-			local reply = Localization.Get(key .. (on and "_on" or "_off"))
+			Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
+			local on = Fu.Utils.GameStates.chattyChat
+			local reply = Localization.Get(on and "say_chatty_on" or "say_chatty_off")
 			if type(reply) == "table" and #reply > 0 then
 				reply = reply[RandomInt(1, #reply)]
 			end
-			-- Said from this bot's next think (callbackChat): [SHy-CHAT] debug|chatty on|off said=.
+			-- Said from this bot's next think (callbackChat): [SHy-CHAT] chatty on|off said=.
 			callbackChat = {
-				text = type(reply) == "string" and reply or (word .. (on and " ON." or " OFF.")),
+				text = type(reply) == "string" and reply or (on and "chatty ON." or "chatty OFF."),
 				allChat = false,
-				what = word .. (on and " on" or " off"),
+				what = on and "chatty on" or "chatty off",
 			}
 		end
 		return

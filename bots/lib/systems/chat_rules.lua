@@ -5,9 +5,9 @@ local ChatRules = {}
 -- Seconds between two [SHy-CHAT] decision lines of one bot.
 ChatRules.LOG_GAP = 10
 
--- Is the `!debug` mode on (technical output)? The team chat command (`!debug` / `!verbose`,
--- ability_item_usage_generic.lua Usage.SetReplyHumanTime) sets Utils.DebugMode and Utils.GameStates.verboseChat;
--- mode_ward_generic.lua reads them for its `[debug] ward` coordinates line. It no longer turns the decision chat on.
+-- Is the old debug mode on (Utils.DebugMode or Utils.GameStates.verboseChat)? Nothing switches it on any more: the
+-- `!debug` / `!verbose` chat commands were removed (maintainer, 2026-11-24: "i dont think we need !debug anymore, we
+-- have logger anyway"). Kept for code that still reads it; it never turns the decision chat on.
 function ChatRules.IsDebugChat(utils)
 	if type(utils) ~= "table" then
 		return false
@@ -16,15 +16,14 @@ function ChatRules.IsDebugChat(utils)
 end
 
 -- Is the team's `!chatty` mode on (the heroes' decision chat)? The team chat command `!chatty` toggles
--- Utils.GameStates.chattyChat (maintainer, 2026-11-24: "separate !debug and !chatty, debug is for technical debugging
--- things. chatty is for hero chat when doing actions").
+-- Utils.GameStates.chattyChat (maintainer, 2026-11-24: "chatty is for hero chat when doing actions").
 function ChatRules.IsChattyChat(utils)
 	return type(utils) == "table" and type(utils.GameStates) == "table" and utils.GameStates.chattyChat == true
 end
 
 -- A decision line ("Going for X", "Harassing X", "Pushing top", "Defend mid", lotus / wisdom shrine, leaving farm):
 -- said in team chat only while `!chatty` is on ("make bots less chatty ... belong to `!debug`", maintainer
--- 2026-11-23; moved from `!debug` to `!chatty` on 2026-11-24). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
+-- 2026-11-23; moved from the removed `!debug` to `!chatty` on 2026-11-24). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
 function ChatRules.SayDecision(bot, text, key)
 	if bot == nil or text == nil then
 		return false

@@ -30,7 +30,7 @@ local sentryWard = nil
 local wardSpot = nil
 local wardModeOffUntil = -math.huge
 -- Switched off on purpose: the ping when a ward is planted (user request) and per-try plant logging. The ward chat
--- lines need `!chatty` instead (ChatRules), the coordinates line `!debug`.
+-- lines need `!chatty` instead (ChatRules); the plant spot is in [SHy-WARD] ... planted ... at=.
 local ANNOUNCE_WARD_PLANT = false
 local LOG_PLANT_TRIES = false
 local function DispenserSentryCharges(item)
@@ -251,18 +251,9 @@ local function AnnounceWard(kind)
 	end
 	local text = PickChat(key, kind == "sentry" and "Planting sentry." or "Planting observer.")
 	-- "Planting observer": only with `!chatty` ("placing ward also goes to !debug", maintainer 2026-11-23; decision
-	-- lines moved to `!chatty` 2026-11-24). The coordinates line below is technical: only with `!debug`.
+	-- lines moved to `!chatty` 2026-11-24). No coordinates chat line any more (`!debug` was removed, maintainer
+	-- 2026-11-24): [SHy-WARD] ... dispenser planted ... at=x,y logs the spot.
 	ChatRules.SayDecision(bot, text, key)
-	if Fu.Utils.DebugMode or Fu.Utils.GameStates.verboseChat then
-		local extra = string.format(
-			"[debug] ward %s role=%s at (%.0f, %.0f)",
-			kind,
-			tostring(role or "n/a"),
-			wardSpot and wardSpot.location.x or 0,
-			wardSpot and wardSpot.location.y or 0
-		)
-		bot:ActionImmediate_Chat(extra, false)
-	end
 end
 function GetDesire()
 	DumpWards()

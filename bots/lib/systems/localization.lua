@@ -228,10 +228,8 @@ local strings = {
 		say_ward_sentry_defend = { "Defensive sentry up.", "Sentry near base.", "True sight for defense." },
 		say_ward_observer_offense = { "Offensive observer up.", "Warding their jungle.", "Deep observer." },
 		say_ward_sentry_offense = { "Offensive sentry up.", "Sentry in their jungle.", "Deep sentry." },
-		-- `!debug` (technical output) and `!chatty` (the decision chat) replies (#222; maintainer, 2026-11-24: "separate
-		-- !debug and !chatty"). say_debug_on / say_debug_off below are the old combined replies, no longer said.
-		say_debug_tech_on = { "Debug ON: technical output.", "Debug mode enabled." },
-		say_debug_tech_off = { "Debug OFF.", "Debug mode disabled." },
+		-- `!chatty` (the decision chat) replies (#222). `!debug` was removed (maintainer, 2026-11-24); say_debug_on /
+		-- say_debug_off below are its old replies, no longer said.
 		say_chatty_on = { "Chatty ON: we'll call out what we do.", "Chatty mode enabled." },
 		say_chatty_off = { "Chatty OFF.", "Chatty mode disabled." },
 		say_take_lotus = { "Taking lotus.", "Grabbing the lotus pool.", "Lotus for me." },
@@ -471,8 +469,6 @@ local strings = {
 		say_ward_sentry_defend = { "防守假眼。", "家里补哨兵。", "防守真视。" },
 		say_ward_observer_offense = { "进攻真眼。", "对面野区插眼。", "深插观察者。" },
 		say_ward_sentry_offense = { "进攻假眼。", "对面野区哨兵。", "深插哨兵。" },
-		say_debug_tech_on = { "调试模式已开启：技术输出。", "调试模式已开启。" },
-		say_debug_tech_off = { "调试模式已关闭。", "调试已关闭。" },
 		say_chatty_on = { "聊天模式已开启：我们会说出在做什么。", "聊天模式已开启。" },
 		say_chatty_off = { "聊天模式已关闭。", "聊天已关闭。" },
 		say_take_lotus = { "去拿莲花。", "我去采莲花池。", "莲花给我。" },
@@ -743,11 +739,6 @@ local strings = {
 			"Сентри в их лесу.",
 			"Глубокий сентри.",
 		},
-		say_debug_tech_on = {
-			"Отладка ВКЛ: технический вывод.",
-			"Режим отладки включён.",
-		},
-		say_debug_tech_off = { "Отладка ВЫКЛ.", "Режим отладки выключен." },
 		say_chatty_on = {
 			"Болтовня ВКЛ: скажем, что делаем.",
 			"Режим болтовни включён.",
@@ -993,8 +984,6 @@ local strings = {
 			"敵ジャングルにセントリー。",
 			"深いセントリー。",
 		},
-		say_debug_tech_on = { "デバッグON：技術的な出力。", "デバッグモード有効。" },
-		say_debug_tech_off = { "デバッグOFF。", "デバッグモード無効。" },
 		say_chatty_on = { "おしゃべりON：行動を伝えます。", "おしゃべりモード有効。" },
 		say_chatty_off = { "おしゃべりOFF。", "おしゃべりモード無効。" },
 		say_take_lotus = { "ロータスを取る。", "ロータスプールへ。", "ロータスもらう。" },

@@ -129,7 +129,7 @@ Rules.CHASE_SEEN_SECONDS = 5
 Rules.CHASE_RADIUS = 1000
 
 -- Chat commands. Names checked against the other commands (`!pos`, `!Npos`, `!about`, `!pick`, `!ban`, `!sp`,
--- `!speak`, `!debug`, `!verbose`, `!chatty`): none starts with these words. `!stop` cancels the order (maintainer,
+-- `!speak`, `!chatty`): none starts with these words. `!stop` cancels the order (maintainer,
 -- 2026-11-24: "replace !no with !stop"; `!no` is gone, not an alias). The match is on the whole first word, so
 -- `!sp` / `!speak` (matched by find in ability_item_usage_generic.lua) never see `!stop`: "!stop" holds no "!sp".
 local COMMANDS = {

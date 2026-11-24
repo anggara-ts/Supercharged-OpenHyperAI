@@ -1,4 +1,4 @@
--- bots/lib/systems/chat_rules.lua (#182): decision chat only with `!debug`, and the welcome's version line.
+-- bots/lib/systems/chat_rules.lua (#182): decision chat only with `!chatty`, and the welcome's version line.
 local T = ...
 local Stub = T.stub
 
@@ -84,9 +84,9 @@ T.test("chat rules: the first position line waits for the welcome's version line
 	T.ok(usage:find("welcome-first waited=", 1, true) ~= nil, "no [SHy-CHAT] welcome-first log")
 end)
 
--- Maintainer, 2026-11-24: "separate !debug and !chatty, debug is for technical debugging things. chatty is for hero
--- chat when doing actions".
-T.test("chat rules: decision lines only while !chatty is on, not with !debug", function()
+-- Maintainer, 2026-11-24: "chatty is for hero chat when doing actions". The old debug flags (DebugMode, verboseChat;
+-- the `!debug` command that set them was removed the same day) never turn the decision chat on.
+T.test("chat rules: decision lines only while !chatty is on, not with the old debug flags", function()
 	local R = load()
 	local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 	local said = {}
@@ -104,11 +104,11 @@ T.test("chat rules: decision lines only while !chatty is on, not with !debug", f
 	T.eq(R.IsDebugChat(Utils), false)
 	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false)
 	T.eq(#said, 0, "said without !chatty")
-	-- !debug (DebugMode, verboseChat) is technical: no decision line.
+	-- The old debug flags (DebugMode, verboseChat): no decision line.
 	Utils.GameStates.verboseChat = true
 	Utils.DebugMode = true
 	T.eq(R.IsDebugChat(Utils), true, "debug on")
-	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false, "!debug alone: no decision line")
+	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false, "debug flags alone: no decision line")
 	T.eq(#said, 0)
 	Utils.GameStates.verboseChat, Utils.DebugMode = nil, false
 	Utils.GameStates.chattyChat = true
