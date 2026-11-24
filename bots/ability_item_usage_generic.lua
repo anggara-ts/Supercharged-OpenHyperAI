@@ -786,20 +786,119 @@ local chatCallbackInstalled = false
 local humanChatTime = nil
 local humanChatString = nil
 local replyToAllChat = false
+-- Seconds between two heard-any lines of one sender.
+local HEARD_ANY_GAP = 0.5
+-- [SHy-CHAT] heard-any: every chat event from a human (maintainer, 2026-11-24: does an alt-clicked item, "Smoke of
+-- Deceit is ready", reach the chat callback at all?), at most one line per HEARD_ANY_GAP per sender (an event with no
+-- player_id prints from=?); and the chat event's key names once per distinct set of keys, in case an item alert has
+-- another shape. Only in the local match log.
+local function LogHeardAny(chatEvent)
+	local keys = {}
+	for key, value in pairs(chatEvent) do
+		keys[#keys + 1] = tostring(key) .. ":" .. type(value)
+	end
+	table.sort(keys)
+	local keySet = table.concat(keys, ",")
+	Usage._chatKeySets = Usage._chatKeySets or {}
+	if not Usage._chatKeySets[keySet] then
+		Usage._chatKeySets[keySet] = true
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s chat-event keys=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				keySet
+			)
+		)
+	end
+	local senderId = chatEvent.player_id
+	if senderId ~= nil and IsPlayerBot(senderId) then
+		return
+	end
+	local throttleKey = senderId ~= nil and senderId or "?"
+	Usage._heardAnyAt = Usage._heardAnyAt or {}
+	local now = GameTime()
+	if now < (Usage._heardAnyAt[throttleKey] or -999) + HEARD_ANY_GAP then
+		return
+	end
+	Usage._heardAnyAt[throttleKey] = now
+	local text = type(chatEvent.string) == "string" and chatEvent.string or tostring(chatEvent.string)
+	local nameOk, senderHero = false, nil
+	if senderId ~= nil then
+		nameOk, senderHero = pcall(GetSelectedHeroName, senderId)
+	end
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s heard-any from=%s team_only=%s len=%d text=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			nameOk
+					and type(senderHero) == "string"
+					and senderHero ~= ""
+					and (string.gsub(senderHero, "npc_dota_hero_", ""))
+				or (senderId ~= nil and tostring(senderId) or "?"),
+			tostring(chatEvent.team_only),
+			#text,
+			(string.gsub(text, "%c+", " ")):sub(1, 60)
+		)
+	)
+end
+-- A chat line asked for inside the chat callback, said from this bot's next think instead: an ActionImmediate_Chat
+-- from the callback itself says nothing (game 078: the old `!debug` switched the mode at t=700 but its "Verbose
+-- debug ON" never reached the chat; now used by the `!chatty` reply). { text =, allChat =, what = the log word }, or nil.
+local callbackChat = nil
 function Usage.SetTalkMessage()
 	local playerId = bot:GetPlayerID()
 	local gold = bot:GetGold()
 	local kills = GetHeroKills(playerId)
 	local deaths = GetHeroDeaths(playerId)
 	local turboGoldScale = GetGameMode() == GAMEMODE_TURBO and 2.0 or 1.0
-	if playerId == Fu.Role.GetReplyMemberID() and replyCount <= maxReplies then
-		if not chatCallbackInstalled and GetGameState() == GAME_STATE_GAME_IN_PROGRESS then
+	if callbackChat ~= nil then
+		local line = callbackChat
+		callbackChat = nil
+		local said = pcall(function()
+			bot:ActionImmediate_Chat(line.text, line.allChat)
+		end) and "yes" or "error"
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s %s said=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				line.what,
+				said
+			)
+		)
+	end
+	-- The chat callback carries every chat command (!push, !chatty, ...), so it does not depend on the reply count;
+	-- only the small-talk replies below stop after maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
+	-- re-pick of the reply member (Role.GetReplyMemberID) must not install a second one.
+	if playerId == Fu.Role.GetReplyMemberID() then
+		if
+			not chatCallbackInstalled
+			and Fu.Role.chatListenerId == nil
+			and GetGameState() == GAME_STATE_GAME_IN_PROGRESS
+		then
 			chatCallbackInstalled = true
+			Fu.Role.chatListenerId = playerId
 			InstallChatCallback(function(chatEvent)
 				Usage.SetReplyHumanTime(chatEvent)
 			end)
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s listener team=%s id=%d",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+					playerId
+				)
+			)
 		end
-		if humanChatString ~= nil and humanChatTime ~= nil and DotaTime() > humanChatTime + chatReplyDelay then
+		if
+			replyCount <= maxReplies
+			and humanChatString ~= nil
+			and humanChatTime ~= nil
+			and DotaTime() > humanChatTime + chatReplyDelay
+		then
 			local replyString = Fu.Chat.GetReplyString(humanChatString, replyToAllChat)
 			if replyString ~= nil then
 				if replyCount == maxReplies then
@@ -894,8 +993,33 @@ function Usage.SetTalkMessage()
 	lastGold = bot:GetGold()
 end
 function Usage.SetReplyHumanTime(chatEvent)
+	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
+	-- [SHy-CHAT] heard: one line per `!` command that reached the team's chat callback (game 077: `!push` and
+	-- `!debug` were lost with no trace in the log), so a lost command shows by its missing line.
+	local commandWord = type(chatText) == "string" and chatText:match("^%s*(![^%s]*)") or nil
+	if commandWord ~= nil then
+		local nameOk, senderHero = pcall(GetSelectedHeroName, senderPlayerId)
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s heard cmd=%s from=%s team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				commandWord:lower(),
+				nameOk
+						and type(senderHero) == "string"
+						and senderHero ~= ""
+						and (string.gsub(senderHero, "npc_dota_hero_", ""))
+					or tostring(senderPlayerId),
+				tostring(chatEvent.team_only)
+			)
+		)
+	end
+	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!stop` (bots/lib/systems/human_orders.lua).
+	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
+		return
+	end
 	if string.find(chatText, "!sp") or string.find(chatText, "!speak") then
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
@@ -903,21 +1027,29 @@ function Usage.SetReplyHumanTime(chatEvent)
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
+	-- `!debug` / `!verbose` are gone (maintainer, 2026-11-24: "i dont think we need !debug anymore, we have logger
+	-- anyway"): the [SHy-*] lines always print. Typing one does nothing; it returns here so it never reaches the small
+	-- talk below. Utils.DebugMode / IsDebug stay false, so the old log() calls stay silent.
 	if chatCommand == "!debug" or chatCommand == "!verbose" then
+		return
+	end
+	-- `!chatty` is the heroes' decision chat ("Pushing top!", "Taking lotus", ChatRules.SayDecision). Maintainer,
+	-- 2026-11-24: "chatty is for hero chat when doing actions".
+	if chatCommand == "!chatty" then
 		if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsAllyMemberID(senderPlayerId)) then
-			Fu.Utils.DebugMode = not Fu.Utils.DebugMode
-			IsDebug = Fu.Utils.DebugMode
 			Fu.Utils.GameStates = Fu.Utils.GameStates or {}
-			Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
-			local debugReply = Fu.Utils.DebugMode and Localization.Get("say_debug_on")
-				or Localization.Get("say_debug_off")
-			if type(debugReply) == "table" and #debugReply > 0 then
-				debugReply = debugReply[RandomInt(1, #debugReply)]
+			Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
+			local on = Fu.Utils.GameStates.chattyChat
+			local reply = Localization.Get(on and "say_chatty_on" or "say_chatty_off")
+			if type(reply) == "table" and #reply > 0 then
+				reply = reply[RandomInt(1, #reply)]
 			end
-			bot:ActionImmediate_Chat(
-				debugReply or (Fu.Utils.DebugMode and "Verbose debug ON." or "Verbose debug OFF."),
-				false
-			)
+			-- Said from this bot's next think (callbackChat): [SHy-CHAT] chatty on|off said=.
+			callbackChat = {
+				text = type(reply) == "string" and reply or (on and "chatty ON." or "chatty OFF."),
+				allChat = false,
+				what = on and "chatty on" or "chatty off",
+			}
 		end
 		return
 	end
@@ -936,10 +1068,28 @@ function Usage.SetReplyHumanTime(chatEvent)
 	if chatText ~= "-都来守家" or Fu.Role.IsAllyMemberID(senderPlayerId) then
 		Fu.Role.SetLastChatString(chatText)
 	end
-	if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsEnemyMemberID(senderPlayerId)) then
+	-- Small talk only for an enemy human's all chat (ChatRules.SmallTalkReply; game 080: the bots answered the
+	-- maintainer's team chat with trash talk). [SHy-CHAT] smalltalk-skip why=ally, once per 30s.
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local reply, skipWhy = ChatRules.SmallTalkReply(
+		IsPlayerBot(senderPlayerId),
+		chatEvent.team_only,
+		Fu.Role.IsEnemyMemberID(senderPlayerId)
+	)
+	if reply then
 		humanChatString = chatText
 		humanChatTime = DotaTime()
-		replyToAllChat = not chatEvent.team_only
+		replyToAllChat = true
+	elseif skipWhy == "ally" and DotaTime() >= (Usage._smallTalkSkipLogAt or -999) then
+		Usage._smallTalkSkipLogAt = DotaTime() + ChatRules.SMALLTALK_SKIP_LOG_GAP
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s smalltalk-skip why=ally team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(chatEvent.team_only)
+			)
+		)
 	end
 end
 -- [SHy-BUYBACK]: every buyback with its reason, and a support's skipped one (once per 10s).

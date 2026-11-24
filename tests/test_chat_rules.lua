@@ -1,4 +1,4 @@
--- bots/lib/systems/chat_rules.lua (#182): decision chat only with `!debug`, and the welcome's version line.
+-- bots/lib/systems/chat_rules.lua (#182): decision chat only with `!chatty`, and the welcome's version line.
 local T = ...
 local Stub = T.stub
 
@@ -95,7 +95,9 @@ T.test("chat rules: the first position line waits for the welcome's version line
 	T.ok(usage:find("welcome-first waited=", 1, true) ~= nil, "no [SHy-CHAT] welcome-first log")
 end)
 
-T.test("chat rules: decision lines only while !debug is on", function()
+-- Maintainer, 2026-11-24: "chatty is for hero chat when doing actions". The old debug flags (DebugMode, verboseChat;
+-- the `!debug` command that set them was removed the same day) never turn the decision chat on.
+T.test("chat rules: decision lines only while !chatty is on, not with the old debug flags", function()
 	local R = load()
 	local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 	local said = {}
@@ -112,15 +114,34 @@ T.test("chat rules: decision lines only while !debug is on", function()
 	Utils.GameStates = {}
 	T.eq(R.IsDebugChat(Utils), false)
 	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false)
-	T.eq(#said, 0, "said without !debug")
+	T.eq(#said, 0, "said without !chatty")
+	-- The old debug flags (DebugMode, verboseChat): no decision line.
 	Utils.GameStates.verboseChat = true
+	Utils.DebugMode = true
+	T.eq(R.IsDebugChat(Utils), true, "debug on")
+	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false, "debug flags alone: no decision line")
+	T.eq(#said, 0)
+	Utils.GameStates.verboseChat, Utils.DebugMode = nil, false
+	Utils.GameStates.chattyChat = true
+	T.eq(R.IsChattyChat(Utils), true, "chatty on")
+	T.eq(R.IsDebugChat(Utils), false, "chatty is not debug")
 	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), true)
 	T.eq(#said, 1)
 	T.eq(said[1].allChat, false, "team chat")
-	Utils.GameStates.verboseChat = nil
-	Utils.DebugMode = true
-	T.eq(R.IsDebugChat(Utils), true)
 	T.eq(R.SayDecision(bot, nil, "say_push_top"), false, "nil text")
+	T.eq(R.IsChattyChat(nil), false)
 	Utils.DebugMode, Utils.GameStates = oldDebug, oldStates
 	T.eq(R.IsDebugChat(nil), false)
+end)
+
+-- Game 080, maintainer: "sending team chat make them reply trashtalk to ally"; "enemy bot can reply with trashtalk
+-- when human chat-all".
+T.test("chat rules: small talk only for an enemy human's all chat", function()
+	local R = load()
+	T.eq(R.SmallTalkReply(false, false, true), true, "enemy human, all chat: reply")
+	T.eq(select(2, R.SmallTalkReply(false, true, false)), "ally", "ally's team chat: none")
+	T.eq(R.SmallTalkReply(false, true, false), false)
+	T.eq(select(2, R.SmallTalkReply(false, false, false)), "ally", "ally's all chat: none")
+	T.eq(select(2, R.SmallTalkReply(true, false, true)), "bot", "a bot's line: none")
+	T.eq(R.SmallTalkReply(false, nil, true), true, "team_only missing: all chat")
 end)

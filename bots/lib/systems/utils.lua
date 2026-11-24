@@ -949,13 +949,18 @@ function Utils.SetFrameProcessTime(bot)
 end
 function Utils.GetHumanPing()
 	-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review); same in the loops below.
+	-- The newest ping among the team's humans (#222: it was the first human's only).
+	local bestMember, bestPing = nil, nil
 	for slot = 1, #GetTeamPlayers(GetTeam()) do
 		local member = GetTeamMember(slot)
 		if member ~= nil and not member:IsBot() then
-			return member, member:GetMostRecentPing()
+			local ping = member:GetMostRecentPing()
+			if bestMember == nil or ping ~= nil and ping.time ~= nil and ping.time > ((bestPing or {}).time or 0) then
+				bestMember, bestPing = member, ping
+			end
 		end
 	end
-	return nil, nil
+	return bestMember, bestPing
 end
 function Utils.IsPingedByAnyPlayer(bot, maxAge, minDistance, maxDistance)
 	if not bot:IsAlive() then

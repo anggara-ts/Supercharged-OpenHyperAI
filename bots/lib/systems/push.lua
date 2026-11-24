@@ -28,7 +28,7 @@ local function arraySome(self, callback, thisArg)
 	return false
 end
 local Push = {}
-local refreshThreatState, getGameState, getLocationState, getUnitState, discountLaneCost, getLaneTargetBuilding, humanPingSeconds, enemyAncient, lastThreatTick, teamPushLane, enemyHeroesAtAncient, enemyHeroesOnHighGround, laneFrontHasEnemies, wasDefendPinged, recentDefendTime, maxPushDesire, lockedPushLane, lockedPushLaneUntil, isBotOnlyGame, pushAfterDefendUntil, lastDefendDesire, pushAfterDefendSeconds, stateCacheSeconds, gameStateCache, locationStateCache, unitStateCache, ancientThreatRadius, laneTargetCache
+local refreshThreatState, getGameState, getLocationState, getUnitState, discountLaneCost, getLaneTargetBuilding, enemyAncient, lastThreatTick, teamPushLane, enemyHeroesAtAncient, enemyHeroesOnHighGround, laneFrontHasEnemies, wasDefendPinged, recentDefendTime, maxPushDesire, lockedPushLane, lockedPushLaneUntil, isBotOnlyGame, pushAfterDefendUntil, lastDefendDesire, pushAfterDefendSeconds, stateCacheSeconds, gameStateCache, locationStateCache, unitStateCache, ancientThreatRadius, laneTargetCache
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Dota = require(GetScriptDirectory() .. "/lib/dota/index")
 local Barracks = Dota.Barracks
@@ -46,6 +46,7 @@ local radiantFountainTpPoint = Utils.RadiantFountainTpPoint
 local direFountainTpPoint = Utils.DireFountainTpPoint
 local Cache = require(GetScriptDirectory() .. "/lib/systems/cache")
 local KillWindow = require(GetScriptDirectory() .. "/lib/systems/kill_window")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 -- Our base is being hit. A fresh kill must not pull the team away from it, since
 -- defend desire tops out at 0.6 and the kill floor is 0.91 or 0.99.
 local BASE_CREEP_RADIUS = 1600
@@ -326,13 +327,6 @@ function Push.GetPushDesireHelper(bot, lane)
 	end
 	if Fu.IsDoingRoshan(bot) and #Fu.GetAlliesNearLoc(locationState.roshanLocation, 2800) >= 3 then
 		return BotModeDesire.None
-	end
-	local pingingHuman, ping = Fu.GetHumanPing()
-	if pingingHuman ~= nil and ping ~= nil and not ping.normal_ping and DotaTime() > 0 then
-		local isPingNearTower, pingedLane = Fu.IsPingCloseToValidTower(GetOpposingTeam(), ping, 700, 5)
-		if isPingNearTower and lane == pingedLane and GameTime() < ping.time + humanPingSeconds then
-			return 0.6
-		end
 	end
 	local ourAncient = gameState.ourAncient
 	if Fu.IsValidBuilding(ourAncient) and Push.IsHealthyInsideFountain(bot) then
@@ -998,7 +992,6 @@ function Push.IsAnyTargetBackdooredAt(bot, lane)
 end
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
-humanPingSeconds = 5
 enemyAncient = nil
 lastThreatTick = -1
 teamPushLane = nil
@@ -1085,6 +1078,13 @@ function Push.GetPushDesire(bot, lane)
 	then
 		return BotModeDesire.None
 	end
+	-- A human's push order (#222, bots/lib/systems/human_orders.lua: `!push <lane>`, a ping on an enemy building or
+	-- its wave, of any ping type): before the level and lane checks below, which would refuse it.
+	local orderDesire = HumanOrders.PushDesire(bot, lane)
+	if orderDesire ~= nil then
+		bot.pushDesire = orderDesire
+		return orderDesire
+	end
 	if bot:GetLevel() < 6 then
 		return BotModeDesire.None
 	end
@@ -1098,6 +1098,13 @@ function Push.GetPushDesire(bot, lane)
 		end
 	end
 	bot._lastPushChatDesire = desire
+	-- A bot carrying out a human's forced order elsewhere (#222): this lane stays under the order's desire, so a kill
+	-- push (0.99) does not pull it away (maintainer, game 078: the human insisting outranks the team's calls).
+	local orderCap = HumanOrders.CapForOrder(bot)
+	if orderCap ~= nil and desire > orderCap then
+		bot.pushDesire = orderCap
+		return orderCap
+	end
 	return desire
 end
 local function isAttackableBuilding(unit)
@@ -1226,6 +1233,10 @@ local function getAllyLaneTower(team, lane)
 end
 function Push.PushThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- A forced push order (#222): a far bot TPs first when that is clearly faster (game 077: they walked).
+	if HumanOrders.TravelThink(bot, "push", lane) then
 		return
 	end
 	if Fu.TryDropTowerAggro(bot) then
