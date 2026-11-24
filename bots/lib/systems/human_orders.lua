@@ -199,7 +199,7 @@ for _, pair in ipairs({
 	{ BOT_MODE_OUTPOST or 26, "outpost" },
 	{ BOT_MODE_TEAM_ROAM, "team-roam" },
 	{ BOT_MODE_ROAM, "roam" },
-	{ BOT_MODE_DEFEND_ALLY, "defend-ally" },
+	{ BOT_MODE_DEFEND_ALLY, "ally-defend" },
 	{ BOT_MODE_SECRET_SHOP, "shop" },
 	{ BOT_MODE_SIDE_SHOP, "shop" },
 	{ BOT_MODE_ASSEMBLE, "assemble" },
@@ -209,17 +209,36 @@ for _, pair in ipairs({
 	end
 end
 
+-- The mode that carries out an order of this kind (lane), or nil.
+local function OrderMode(order)
+	if order == nil then
+		return nil
+	elseif order.kind == "push" then
+		return PUSH_MODE[LANE_OF[order.lane or ""] or -1]
+	elseif order.kind == "defend" then
+		return DEFEND_MODE[LANE_OF[order.lane or ""] or -1]
+	elseif order.kind == "rosh" then
+		return BOT_MODE_ROSHAN
+	elseif order.kind == "farm" then
+		return BOT_MODE_FARM
+	elseif ASSEMBLE_KINDS[order.kind] then
+		return BOT_MODE_ASSEMBLE
+	end
+	return nil
+end
+
 -- The mode that keeps `member` from a request (its active mode's desire above the request's, Rules.IsBusy), or nil.
--- A bot carrying out the human's current order is not busy with it.
+-- A bot is not busy with the mode that carries out the human's current order for it; a bot still listed for that
+-- order but held by another mode (game 078: Largo, obeying a camp ping, taken by the Roshan gather) is.
 local function BusyMode(member)
 	local order = state.order
 	local entry = order ~= nil and order.bots[member:GetPlayerID()] or nil
+	local orderMode = nil
 	if entry ~= nil and entry.state == "obey" then
-		return nil
+		orderMode = BUSY_MODE_NAMES[OrderMode(order) or -1]
 	end
-	local mode = member:GetActiveMode()
-	local name = BUSY_MODE_NAMES[mode]
-	if name == nil or not Rules.IsBusy(name, member:GetActiveModeDesire(), Orders.DESIRE) then
+	local name = BUSY_MODE_NAMES[member:GetActiveMode()]
+	if not Rules.IsBusy(name, member:GetActiveModeDesire(), Orders.DESIRE, orderMode) then
 		return nil
 	end
 	return name
@@ -864,13 +883,13 @@ end
 
 local function StartChatOrder(chat, tickBot)
 	local human = MemberById(chat.senderId)
-	if chat.kind == "no" then
+	if chat.kind == "stop" then
 		local hadOrder = state.order ~= nil or state.danger ~= nil
 		EndOrder("cancelled")
 		Finish("danger", "cancelled")
-		Log("%s order kind=no from=%s via=chat verdict=%s", Short(tickBot), Short(human), hadOrder and "go" or "none")
+		Log("%s order kind=stop from=%s via=chat verdict=%s", Short(tickBot), Short(human), hadOrder and "go" or "none")
 		if hadOrder then
-			QueueReply(nil, "no", tickBot:GetPlayerID(), "cancelled", human)
+			QueueReply(nil, "stop", tickBot:GetPlayerID(), "cancelled", human)
 		end
 		return
 	end
@@ -1338,6 +1357,41 @@ end
 -- A forced bot this far from the spot that walks logs why it did not TP (order-walk).
 local WALK_LOG_DIST = 4000
 local NEAR_WALK_DIST = 3000
+-- No order TP with a visible enemy hero this close: it can interrupt the 3s channel (game 079, 0:35: Dark Willow's
+-- Bramble Maze, cast on Largo's TP, rooted Spirit Breaker and broke his order TP; he never tried again). A map
+-- estimate around cast ranges, not game data.
+local TP_ENEMY_RADIUS = 1200
+-- How far a bot walks per step to get clear of that enemy before it TPs.
+local TP_CLEAR_STEP = 700
+
+-- The nearest visible enemy hero within `radius` of the bot (illusions left out), or nil.
+local function NearestEnemyHero(bot, radius)
+	local best, bestDist = nil, radius
+	for _, enemy in ipairs(bot:GetNearbyHeroes(radius, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			local dist = GetUnitToUnitDistance(bot, enemy)
+			if dist <= bestDist then
+				best, bestDist = enemy, dist
+			end
+		end
+	end
+	return best
+end
+
+-- A step away from `enemy`, bent toward our fountain (our side), TP_CLEAR_STEP long.
+local function StepClearOf(bot, enemy)
+	local here, from, home = bot:GetLocation(), enemy:GetLocation(), Fu.GetTeamFountain()
+	local ax, ay = here.x - from.x, here.y - from.y
+	local hx, hy = home.x - here.x, home.y - here.y
+	local al, hl = math.sqrt(ax * ax + ay * ay), math.sqrt(hx * hx + hy * hy)
+	local dx, dy =
+		(al > 0 and ax / al or 0) + (hl > 0 and hx / hl or 0), (al > 0 and ay / al or 0) + (hl > 0 and hy / hl or 0)
+	local dl = math.sqrt(dx * dx + dy * dy)
+	if dl <= 0 then
+		return home
+	end
+	return Vector(here.x + dx / dl * TP_CLEAR_STEP, here.y + dy / dl * TP_CLEAR_STEP, here.z or 0)
+end
 
 -- "ready" / "cooldown" / "none": the bot's TP scroll or Boots of Travel (the items objective_travel.lua uses).
 local function TpState(bot)
@@ -1364,24 +1418,63 @@ end
 -- force-all push Spirit Breaker (12857 away) walked 15s before the push mode's own TP rule fired, and Largo (10066)
 -- walked and was caught, so push and defend call this too (Orders.TravelThink), before their modes walk. No TP under
 -- Orders.LEAVE_HP or while hit by a hero (ObjectiveTravel.Go). A far bot that walks logs why, at most every 5s
--- (`order-walk why=low-hp|danger|rooted|no-scroll|cooldown|eta`). True when it gave the bot an action.
+-- (`order-walk why=enemy-near|low-hp|danger|rooted|no-scroll|cooldown|eta`). With a visible enemy hero within
+-- TP_ENEMY_RADIUS it walks clear of it toward our side first; a TP that was broken is tried again once the guards
+-- allow (`order-tp-retry try=`). True when it gave the bot an action (also while it channels the TP).
 local function TravelFar(bot, order, loc)
 	if order.tier == "ask" or loc == nil then
 		return false
 	end
+	-- A TP being channelled: no other order on top of it (game 079: the push Think's moves must not cancel it).
+	if bot:IsChanneling() or bot:HasModifier("modifier_teleporting") then
+		return true
+	end
 	-- Within NEAR_WALK_DIST a TP (3s channel + 1s) cannot save the 8s objective_travel.lua asks for; skip the work.
 	local dist = GetUnitToLocationDistance(bot, loc)
-	if dist <= NEAR_WALK_DIST and not bot:IsChanneling() then
+	if dist <= NEAR_WALK_DIST then
 		return false
 	end
 	local hpOk = Fu.GetHP(bot) >= Orders.LEAVE_HP
-	if hpOk and ObjectiveTravel.Go(bot, loc, "order") == true then
-		return true
+	local entry = order.bots[bot:GetPlayerID()]
+	local enemyNear = nil
+	if hpOk and not bot:IsRooted() then
+		local ok, _, how = pcall(ObjectiveTravel.Best, bot, loc)
+		if ok and how == "tp" then
+			-- A visible enemy hero near could break the channel: walk clear of it toward our side first, then TP.
+			enemyNear = NearestEnemyHero(bot, TP_ENEMY_RADIUS)
+			if enemyNear == nil and ObjectiveTravel.Go(bot, loc, "order") == true then
+				-- Each TP started for this order (orders repeated until the channel starts count once: 4s apart); a
+				-- second one is a retry after a broken channel (game 079).
+				if entry ~= nil and DotaTime() - (entry.tpAt or -999) > 4 then
+					entry.tpAt = DotaTime()
+					entry.tpTries = (entry.tpTries or 0) + 1
+					if entry.tpTries >= 2 then
+						Log(
+							"%s order-tp-retry id=%d kind=%s try=%d dist=%.0f",
+							Short(bot),
+							order.id,
+							order.kind,
+							entry.tpTries,
+							dist
+						)
+					end
+				end
+				return true
+			end
+		elseif ok and ObjectiveTravel.Go(bot, loc, "order") == true then
+			-- A Twin Gate.
+			return true
+		end
+	end
+	if enemyNear ~= nil then
+		bot:Action_MoveToLocation(StepClearOf(bot, enemyNear))
 	end
 	if dist > WALK_LOG_DIST and DotaTime() >= (bot._orderWalkLogAt or -999) then
 		bot._orderWalkLogAt = DotaTime() + 5
 		local why = "eta"
-		if not hpOk then
+		if enemyNear ~= nil then
+			why = "enemy-near"
+		elseif not hpOk then
 			why = "low-hp"
 		elseif bot:WasRecentlyDamagedByAnyHero(2) then
 			why = "danger"
@@ -1406,7 +1499,7 @@ local function TravelFar(bot, order, loc)
 			ObjectiveTravel.Eta(bot, loc)
 		)
 	end
-	return false
+	return enemyNear ~= nil
 end
 
 -- Push.PushThink / Defend.DefendThink: a bot carrying out a forced push / defend order on `lane` TPs toward the

@@ -224,3 +224,46 @@ T.test("the !debug reply is said from the next think, not inside the chat callba
 	Usage.SetTalkMessage()
 	T.eq(#chats, 1, "once")
 end)
+
+-- Maintainer, 2026-11-24: "separate !debug and !chatty, debug is for technical debugging things. chatty is for hero
+-- chat when doing actions". `!chatty` toggles the decision chat with its own reply; `!debug` leaves it alone.
+T.test("!chatty toggles the decision chat, !debug does not", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_alchemist", slot = 1, time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	local callback = nil
+	InstallChatCallback = function(fn)
+		callback = fn
+	end
+	bot.ActionImmediate_Chat = function() end
+	Fu.Role.replyMemberID, Fu.Role.chatListenerId = bot:GetPlayerID(), nil
+	Usage.SetTalkMessage()
+	T.ok(callback ~= nil, "the chat callback is installed")
+	if callback == nil then
+		return
+	end
+	callback({ string = "!debug", player_id = humanId, team_only = true })
+	T.eq(Fu.Utils.DebugMode, true, "!debug: debug on")
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), false, "!debug: no decision chat")
+	Usage.SetTalkMessage()
+	callback({ string = "!chatty", player_id = humanId, team_only = true })
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), true, "!chatty: decision chat on")
+	Stub.printed = {}
+	Usage.SetTalkMessage()
+	local logged = false
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" chatty on said=yes", 1, true) then
+			logged = true
+		end
+	end
+	T.ok(logged, "[SHy-CHAT] chatty on said=yes")
+	callback({ string = "!chatty", player_id = humanId, team_only = true })
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), false, "!chatty again: off")
+	T.eq(Fu.Utils.DebugMode, true, "debug untouched")
+end)

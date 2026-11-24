@@ -20,7 +20,8 @@ T.test("human orders: chat commands parse, other commands do not", function()
 	T.eq(R.ParseChat("!defend top").lane, "top", "!defend")
 	T.eq(R.ParseChat("!rosh").kind, "rosh", "!rosh")
 	T.eq(R.ParseChat("!group").kind, "group", "!group")
-	T.eq(R.ParseChat("!no").kind, "no", "!no")
+	T.eq(R.ParseChat("!stop").kind, "stop", "!stop")
+	T.eq(R.ParseChat("!no"), nil, '!no is gone (maintainer, 2026-11-24: "replace !no with !stop")')
 	T.eq(R.ParseChat("!rosh now"), nil, "extra words on !rosh")
 	-- Maintainer 2026-11-23: a chat command is FORCE NEAR, "all" makes it FORCE ALL.
 	T.eq(R.ParseChat("!push bot").all, false, "!push bot: force near")
@@ -32,7 +33,7 @@ T.test("human orders: chat commands parse, other commands do not", function()
 	T.eq(R.ParseChat("!group all").kind, "group", "!group all")
 	T.eq(R.ParseChat("!push all").lane, nil, "!push all without a lane: which lane")
 	T.eq(R.ParseChat("!push top mid").lane, nil, "two lanes: which lane")
-	T.eq(R.ParseChat("!no all"), nil, "!no takes no words")
+	T.eq(R.ParseChat("!stop all"), nil, "!stop takes no words")
 	-- The other commands stay theirs (#210 !pos, #215 !about, the draft's !pick / !ban, !sp, !debug).
 	for _, text in ipairs({
 		"!pos",
@@ -45,6 +46,7 @@ T.test("human orders: chat commands parse, other commands do not", function()
 		"!speak ru",
 		"!debug",
 		"!verbose",
+		"!chatty",
 		"push top",
 		"gg",
 	}) do
@@ -659,6 +661,10 @@ T.test("human orders: a forced order's desire beats the team's calls, not a stro
 	T.eq(R.IsBusy("roshan", 0.96, 0.75), true, "the Roshan gather holds a bot from a request")
 	T.eq(R.IsBusy("farm", 0.6, 0.75), false, "farm does not")
 	T.eq(R.IsBusy(nil, 0.95, 0.75), false, "attack, retreat, evasive: not busy")
+	-- Largo had obeyed the camp ping (id=31) when the gather took him: on the order, but not in its mode.
+	T.eq(R.IsBusy("roshan", 0.96, 0.75, "farm"), true, "obeying a camp order, held by the Roshan gather: busy")
+	T.eq(R.IsBusy("farm", 0.97, 0.75, "farm"), false, "in the mode of its own forced order: not busy")
+	T.eq(R.BusyKey("busy:ally-defend"), "busy", "defending an ally: can't now, no lane")
 	local Lines = require(GetScriptDirectory() .. "/lib/data/human_order_lines")
 	T.eq(Lines.Get("en", "busy-roshan", "Leshrac"), "Going Roshan", "busy with Roshan")
 	T.eq(Lines.Get("en", "busy-push", "Leshrac", nil, { lane = "top" }), "Pushing top", "busy pushing top")

@@ -24,6 +24,8 @@ confirmed or disproved.
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[SHy-API] slots`, #172, game 064).
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
+- **Chat from inside the chat callback (seen once, game 078, #225).** `bot:ActionImmediate_Chat` called inside the function given to `InstallChatCallback` said nothing: `!debug` switched the mode at t=700 (`[SHy-CHAT] heard cmd=!debug`, then 25 decision lines), but its reply never reached the chat, and the game printed no `CLocalize::FindSafe` echo of it. A line said from the bot's own think does show up. Queue anything said in reply to chat and say it from a think (`AboutRules.Note` for `!about` in #217, `callbackChat` in `ability_item_usage_generic.lua`).
+- **Human pings arrive spaced out (games 077-078, #225).** The times of the human's pings as `GetMostRecentPing` sees them came a median 1.5s apart, even when the human clicked fast (game 077: 51 gaps under 6s, the shortest 1.0s; game 078: 90th percentile 3.8s). Pings may be rate-limited or dropped by the game; this is not confirmed. `GetMostRecentPing` keeps only the last ping, so a reader that polls slower than that misses some.
 
 ## 7.42 check (2026-11-19)
 

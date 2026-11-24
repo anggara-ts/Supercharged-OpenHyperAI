@@ -84,7 +84,9 @@ T.test("chat rules: the first position line waits for the welcome's version line
 	T.ok(usage:find("welcome-first waited=", 1, true) ~= nil, "no [SHy-CHAT] welcome-first log")
 end)
 
-T.test("chat rules: decision lines only while !debug is on", function()
+-- Maintainer, 2026-11-24: "separate !debug and !chatty, debug is for technical debugging things. chatty is for hero
+-- chat when doing actions".
+T.test("chat rules: decision lines only while !chatty is on, not with !debug", function()
 	local R = load()
 	local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 	local said = {}
@@ -101,15 +103,22 @@ T.test("chat rules: decision lines only while !debug is on", function()
 	Utils.GameStates = {}
 	T.eq(R.IsDebugChat(Utils), false)
 	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false)
-	T.eq(#said, 0, "said without !debug")
+	T.eq(#said, 0, "said without !chatty")
+	-- !debug (DebugMode, verboseChat) is technical: no decision line.
 	Utils.GameStates.verboseChat = true
+	Utils.DebugMode = true
+	T.eq(R.IsDebugChat(Utils), true, "debug on")
+	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), false, "!debug alone: no decision line")
+	T.eq(#said, 0)
+	Utils.GameStates.verboseChat, Utils.DebugMode = nil, false
+	Utils.GameStates.chattyChat = true
+	T.eq(R.IsChattyChat(Utils), true, "chatty on")
+	T.eq(R.IsDebugChat(Utils), false, "chatty is not debug")
 	T.eq(R.SayDecision(bot, "Pushing top!", "say_push_top"), true)
 	T.eq(#said, 1)
 	T.eq(said[1].allChat, false, "team chat")
-	Utils.GameStates.verboseChat = nil
-	Utils.DebugMode = true
-	T.eq(R.IsDebugChat(Utils), true)
 	T.eq(R.SayDecision(bot, nil, "say_push_top"), false, "nil text")
+	T.eq(R.IsChattyChat(nil), false)
 	Utils.DebugMode, Utils.GameStates = oldDebug, oldStates
 	T.eq(R.IsDebugChat(nil), false)
 end)

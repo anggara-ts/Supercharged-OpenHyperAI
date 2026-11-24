@@ -1,13 +1,13 @@
--- Bot chat rules (#182): decision lines only with `!debug`, and the welcome's version line.
+-- Bot chat rules (#182): decision lines only with `!chatty`, and the welcome's version line.
 -- Pure functions (plain values in) except SayDecision, so tests/test_chat_rules.lua can run them.
 local ChatRules = {}
 
 -- Seconds between two [SHy-CHAT] decision lines of one bot.
 ChatRules.LOG_GAP = 10
 
--- Is the `!debug` chat mode on? The team chat command (`!debug` / `!verbose`, ability_item_usage_generic.lua
--- Usage.SetReplyHumanTime) sets Utils.DebugMode and Utils.GameStates.verboseChat; mode_ward_generic.lua reads the
--- same two flags for its ward-coordinates line.
+-- Is the `!debug` mode on (technical output)? The team chat command (`!debug` / `!verbose`,
+-- ability_item_usage_generic.lua Usage.SetReplyHumanTime) sets Utils.DebugMode and Utils.GameStates.verboseChat;
+-- mode_ward_generic.lua reads them for its `[debug] ward` coordinates line. It no longer turns the decision chat on.
 function ChatRules.IsDebugChat(utils)
 	if type(utils) ~= "table" then
 		return false
@@ -15,15 +15,22 @@ function ChatRules.IsDebugChat(utils)
 	return utils.DebugMode == true or (type(utils.GameStates) == "table" and utils.GameStates.verboseChat == true)
 end
 
+-- Is the team's `!chatty` mode on (the heroes' decision chat)? The team chat command `!chatty` toggles
+-- Utils.GameStates.chattyChat (maintainer, 2026-11-24: "separate !debug and !chatty, debug is for technical debugging
+-- things. chatty is for hero chat when doing actions").
+function ChatRules.IsChattyChat(utils)
+	return type(utils) == "table" and type(utils.GameStates) == "table" and utils.GameStates.chattyChat == true
+end
+
 -- A decision line ("Going for X", "Harassing X", "Pushing top", "Defend mid", lotus / wisdom shrine, leaving farm):
--- said in team chat only while `!debug` is on. "make bots less chatty ... belong to `!debug`" (maintainer,
--- 2026-11-23). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
+-- said in team chat only while `!chatty` is on ("make bots less chatty ... belong to `!debug`", maintainer
+-- 2026-11-23; moved from `!debug` to `!chatty` on 2026-11-24). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
 function ChatRules.SayDecision(bot, text, key)
 	if bot == nil or text == nil then
 		return false
 	end
 	local utilsOk, utils = pcall(require, GetScriptDirectory() .. "/lib/systems/utils")
-	local on = utilsOk and ChatRules.IsDebugChat(utils)
+	local on = utilsOk and ChatRules.IsChattyChat(utils)
 	if on then
 		bot:ActionImmediate_Chat(text, false)
 	end

@@ -956,7 +956,7 @@ function Usage.SetReplyHumanTime(chatEvent)
 			)
 		)
 	end
-	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!no` (bots/lib/systems/human_orders.lua).
+	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!stop` (bots/lib/systems/human_orders.lua).
 	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
 		return
 	end
@@ -967,23 +967,33 @@ function Usage.SetReplyHumanTime(chatEvent)
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
-	if chatCommand == "!debug" or chatCommand == "!verbose" then
+	-- `!debug` is the technical output (console logs, IsDebug, the ward-coordinates line); `!chatty` is the heroes'
+	-- decision chat ("Pushing top!", "Taking lotus", ChatRules.SayDecision). Maintainer, 2026-11-24: "separate !debug
+	-- and !chatty, debug is for technical debugging things. chatty is for hero chat when doing actions".
+	local isDebug = chatCommand == "!debug" or chatCommand == "!verbose"
+	local isChatty = chatCommand == "!chatty"
+	if isDebug or isChatty then
 		if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsAllyMemberID(senderPlayerId)) then
-			Fu.Utils.DebugMode = not Fu.Utils.DebugMode
-			IsDebug = Fu.Utils.DebugMode
 			Fu.Utils.GameStates = Fu.Utils.GameStates or {}
-			Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
-			local debugReply = Fu.Utils.DebugMode and Localization.Get("say_debug_on")
-				or Localization.Get("say_debug_off")
-			if type(debugReply) == "table" and #debugReply > 0 then
-				debugReply = debugReply[RandomInt(1, #debugReply)]
+			local on, key, word
+			if isDebug then
+				Fu.Utils.DebugMode = not Fu.Utils.DebugMode
+				IsDebug = Fu.Utils.DebugMode
+				Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
+				on, key, word = Fu.Utils.DebugMode, "say_debug", "debug"
+			else
+				Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
+				on, key, word = Fu.Utils.GameStates.chattyChat, "say_chatty", "chatty"
 			end
-			-- Said from this bot's next think (callbackChat): [SHy-CHAT] debug on|off said=.
+			local reply = Localization.Get(key .. (on and "_on" or "_off"))
+			if type(reply) == "table" and #reply > 0 then
+				reply = reply[RandomInt(1, #reply)]
+			end
+			-- Said from this bot's next think (callbackChat): [SHy-CHAT] debug|chatty on|off said=.
 			callbackChat = {
-				text = type(debugReply) == "string" and debugReply
-					or (Fu.Utils.DebugMode and "Verbose debug ON." or "Verbose debug OFF."),
+				text = type(reply) == "string" and reply or (word .. (on and " ON." or " OFF.")),
 				allChat = false,
-				what = Fu.Utils.DebugMode and "debug on" or "debug off",
+				what = word .. (on and " on" or " off"),
 			}
 		end
 		return

@@ -64,9 +64,11 @@ end
 -- Is a bot whose active mode runs at `modeDesire` too busy for a request (ask tier, desire `orderDesire`)? Game 078,
 -- 24:11: Largo was picked for a camp ping while the team's Roshan gather (0.96) held him; he said "Clearing the camp"
 -- and walked to Roshan. `mode`: the mode's short name, or nil for the modes that never count (attack and fights,
--- retreat, evasive maneuvers: their own states cover them) and for a bot already carrying out the human's order.
-function Rules.IsBusy(mode, modeDesire, orderDesire)
-	return mode ~= nil and (modeDesire or 0) > (orderDesire or Rules.ASK_DESIRE)
+-- retreat, evasive maneuvers: their own states cover them). `orderMode`: the short name of the mode that carries out
+-- the human's current order for this bot (nil: none); that mode is not busy, any other is (Largo had obeyed the camp
+-- ping before the gather took him, so being on the order alone must not exempt a bot).
+function Rules.IsBusy(mode, modeDesire, orderDesire, orderMode)
+	return mode ~= nil and mode ~= orderMode and (modeDesire or 0) > (orderDesire or Rules.ASK_DESIRE)
 end
 -- A forced order lasts long enough for the farthest bot to get there (ETA + FORCE_SLACK_SECONDS), within
 -- ORDER_SECONDS..FORCE_MAX_SECONDS.
@@ -103,7 +105,9 @@ Rules.CHASE_SEEN_SECONDS = 5
 Rules.CHASE_RADIUS = 1000
 
 -- Chat commands. Names checked against the other commands (`!pos`, `!Npos`, `!about`, `!pick`, `!ban`, `!sp`,
--- `!speak`, `!debug`, `!verbose`): none starts with these words.
+-- `!speak`, `!debug`, `!verbose`, `!chatty`): none starts with these words. `!stop` cancels the order (maintainer,
+-- 2026-11-24: "replace !no with !stop"; `!no` is gone, not an alias). The match is on the whole first word, so
+-- `!sp` / `!speak` (matched by find in ability_item_usage_generic.lua) never see `!stop`: "!stop" holds no "!sp".
 local COMMANDS = {
 	["!push"] = "push",
 	["!def"] = "defend",
@@ -111,7 +115,7 @@ local COMMANDS = {
 	["!rosh"] = "rosh",
 	["!roshan"] = "rosh",
 	["!group"] = "group",
-	["!no"] = "no",
+	["!stop"] = "stop",
 }
 local LANE_WORDS = {
 	top = "top",
@@ -126,7 +130,7 @@ local LANE_WORDS = {
 
 -- "!push top" -> { kind = "push", lane = "top", all = false }; "!push top all" -> the same with all = true (FORCE
 -- ALL; without it FORCE NEAR); "!push" -> { kind = "push" } (no lane: the bots ask which); "!rosh all",
--- "!group all", "!def mid all" likewise; "!no" takes no words. Any other text -> nil.
+-- "!group all", "!def mid all" likewise; "!stop" takes no words. Any other text -> nil.
 function Rules.ParseChat(text)
 	if type(text) ~= "string" then
 		return nil
@@ -139,7 +143,7 @@ function Rules.ParseChat(text)
 	end
 	local all, words = false, {}
 	for token in rest:gmatch("%S+") do
-		if token == "all" and kind ~= "no" then
+		if token == "all" and kind ~= "stop" then
 			all = true
 		else
 			words[#words + 1] = token
