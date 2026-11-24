@@ -221,7 +221,7 @@ end)
 -- Game 078, 26:18-26:23: five pings read by the [SHy-PING] trace (DotaTime when read; the pings' own times are
 -- GameTime, a fixed offset away). The first at -7117,-6692 (612 from the spawn point, 419 from the building), four on
 -- the fountain building at -7456,-6938. They answered (`[SHy-CHAT] t=1584 alchemist egg team=radiant human=4
--- said=yes`); this replays them, and the egg-step line shows each count.
+-- said=yes`); this replays them, and the fountain-ping line shows each count.
 T.test("ping streak: the game 078 streak at 26:18 answers on the fifth ping", function()
 	local Streak = Load()
 	local fx, fy, bx, by = -6619, -6336, -7456, -6938
@@ -258,7 +258,7 @@ T.test("ping streak: the game 078 streak at 26:18 answers on the fifth ping", fu
 	T.eq(done, true, "read 1s late: still answers")
 end)
 
-T.test("ping streak: the item think logs egg-step for each fountain ping", function()
+T.test("ping streak: the item think logs fountain-ping for each fountain ping", function()
 	T.stub.reset({ hero = "npc_dota_hero_lich", time = 600 })
 	local Usage = dofile("bots/ability_item_usage_generic.lua")
 	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
@@ -292,7 +292,7 @@ T.test("ping streak: the item think logs egg-step for each fountain ping", funct
 	end
 	local steps = {}
 	for _, line in ipairs(T.stub.printed) do
-		if line:find("[SHy-CHAT]", 1, true) and line:find(" egg-step ", 1, true) then
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" fountain-ping ", 1, true) then
 			steps[#steps + 1] = line
 		end
 	end

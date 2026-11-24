@@ -56,7 +56,7 @@ end
 
 -- One human's most recent ping, read at `now` (GameTime()). `state`: that human's streak, kept by the caller
 -- ({ seen = the last ping time read, count =, at = the last counted ping's time }; Step also leaves the last new
--- ping's facts for the egg-step log: near =, gap = seconds since the counted ping before it or nil, old = read too
+-- ping's facts for the fountain-ping log: near =, gap = seconds since the counted ping before it or nil, old = read too
 -- late, prevCount = the count before it). `pingTime`, `x`, `y`: the ping
 -- (GetMostRecentPing: time in GameTime(), location); `fx`, `fy`: our spawn point; `bx`, `by` (optional): our
 -- fountain building (PingStreak.Near). A ping is new when its time differs from the last one read, so any bot's think

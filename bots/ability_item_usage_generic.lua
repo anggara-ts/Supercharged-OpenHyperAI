@@ -1090,13 +1090,13 @@ function Usage.WatchFountainPings()
 				building and building.x,
 				building and building.y
 			)
-			-- [SHy-CHAT] egg-step (game 078): one line per new ping that is near the fountain or ends a running count, so
+			-- [SHy-CHAT] fountain-ping (game 078): one line per new ping that is near the fountain or ends a running count, so
 			-- the next game shows how far a streak got. Each ping is read once per team (state.seen), so this prints at
 			-- most once per ping.
 			if state.seen ~= seenBefore and (state.near or (state.prevCount or 0) > 0) then
 				print(
 					string.format(
-						"[SHy-CHAT] t=%.0f %s egg-step team=%s human=%d count=%d near=%s gap=%s old=%s at=%.0f,%.0f",
+						"[SHy-CHAT] t=%.0f %s fountain-ping team=%s human=%d count=%d near=%s gap=%s old=%s at=%.0f,%.0f",
 						DotaTime(),
 						(string.gsub(botName, "npc_dota_hero_", "")),
 						team == TEAM_RADIANT and "radiant" or "dire",
