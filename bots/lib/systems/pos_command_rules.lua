@@ -105,6 +105,74 @@ function PosRules.Apply(roles, plan)
 	return true
 end
 
+-- A refused swap gets one team-chat reply naming the reason (game 082: `!pos 2` from Nature's Prophet was refused as
+-- core-holder before the horn and nobody saw why; maintainer 2026-11-24 "sure go"). The swap runs in
+-- hero_selection.lua's chat callback, where a chat order is lost (#225), so the reply is queued on the shared Role
+-- table and the speaker says it from its think. A reply nobody said within ReplyMaxAge seconds is dropped.
+PosRules.ReplyMaxAge = 10
+
+-- Localization key and fields for each refused result (nil for "ok" and unknown results).
+--   heroOf(slot) -> the display name of that slot's hero
+local replyKeys = {
+	["core-holder"] = "say_pos_refused_core",
+	core = "say_pos_refused_core",
+	human = "say_pos_refused_human",
+	["human-mover"] = "say_pos_refused_human_mover",
+	same = "say_pos_refused_same",
+	missing = "say_pos_refused_missing",
+}
+function PosRules.Reply(plan, heroOf)
+	local key = plan and replyKeys[plan.result]
+	if key == nil then
+		return nil
+	end
+	local result = plan.result
+	local fields = {}
+	if result == "core-holder" then
+		-- The holder would get the mover's old 4 or 5: "Puck can't play pos 5".
+		fields.hero, fields.pos = heroOf(plan.holder), plan.holderTo
+	elseif result == "core" then
+		fields.hero, fields.pos = heroOf(plan.mover), plan.to
+	elseif result == "human" then
+		fields.hero, fields.pos = heroOf(plan.holder), plan.to
+	elseif result == "human-mover" then
+		fields.hero = heroOf(plan.mover)
+	elseif result == "same" then
+		fields.pos = plan.to
+	else
+		fields.index = plan.mover
+	end
+	return key, fields
+end
+
+-- Fills "{hero}", "{pos}" and "{index}" in a localized template.
+function PosRules.FillReply(template, fields)
+	if type(template) ~= "string" then
+		return nil
+	end
+	fields = fields or {}
+	return (
+		template:gsub("{(%a+)}", function(name)
+			return fields[name] ~= nil and tostring(fields[name]) or "?"
+		end)
+	)
+end
+
+-- Who says the reply: the mover's player if it is a bot, otherwise the team's first bot (nil when no bot).
+function PosRules.ReplySpeaker(teamPlayers, mover, isBot)
+	local moverId = mover ~= nil and teamPlayers[mover] or nil
+	if moverId ~= nil and isBot(moverId) then
+		return moverId
+	end
+	for slot = 1, 5 do
+		local playerId = teamPlayers[slot]
+		if playerId ~= nil and isBot(playerId) then
+			return playerId
+		end
+	end
+	return nil
+end
+
 -- "1,2,3,4,5": the positions of slots 1..5, for the [SHy-ROLE] lines.
 function PosRules.RolesText(roles)
 	local parts = {}

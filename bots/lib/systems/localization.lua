@@ -235,6 +235,13 @@ local strings = {
 		-- `!pos` answer, one line per bot: "Pos 1 Safelane" (#210). zh and ru use these English names.
 		say_pos_prefix = "Pos",
 		pos_names = { "Safelane", "Mid", "Offlane", "Offlane Support", "Hard Support" },
+		-- A refused `!pos Y` / `!Xpos Y` (#210, game 082): one team-chat line naming the reason. {hero} is the hero's
+		-- display name, {pos} a position, {index} the X of `!Xpos` (bots/lib/systems/pos_command_rules.lua Reply).
+		say_pos_refused_core = "{hero} can't play pos {pos}",
+		say_pos_refused_human = "pos {pos} is {hero}'s",
+		say_pos_refused_human_mover = "only {hero} can move himself",
+		say_pos_refused_same = "you're already pos {pos}",
+		say_pos_refused_missing = "no player {index}",
 		mode_laning = "laning",
 		mode_farming = "farming",
 		mode_pushing = "pushing",
@@ -472,6 +479,11 @@ local strings = {
 		say_take_wisdom = { "去拿智慧神殿。", "我去收经验神殿。", "智慧神殿我来。" },
 		say_debug_on = { "调试模式已开启，机器人会更啰嗦。", "Verbose debug 已开启。" },
 		say_debug_off = { "调试模式已关闭。", "Verbose debug 已关闭。" },
+		say_pos_refused_core = "{hero}不能打{pos}号位",
+		say_pos_refused_human = "{pos}号位是{hero}的",
+		say_pos_refused_human_mover = "只有{hero}自己能换位置",
+		say_pos_refused_same = "你已经是{pos}号位了",
+		say_pos_refused_missing = "没有{index}号玩家",
 		mode_laning = "在对线",
 		mode_farming = "在打钱",
 		mode_pushing = "在推塔",
@@ -744,6 +756,11 @@ local strings = {
 		},
 		say_debug_on = { "Verbose debug ВКЛ.", "Режим отладки включён." },
 		say_debug_off = { "Verbose debug ВЫКЛ.", "Режим отладки выключен." },
+		say_pos_refused_core = "{hero} не может играть на позиции {pos}",
+		say_pos_refused_human = "позиция {pos} занята: {hero}",
+		say_pos_refused_human_mover = "только {hero} может сменить свою позицию",
+		say_pos_refused_same = "ты уже на позиции {pos}",
+		say_pos_refused_missing = "нет игрока {index}",
 	},
 	ja = {
 		say_play_pos = "私はポジション ",
@@ -992,6 +1009,11 @@ local strings = {
 			"ソフトサポート",
 			"ハードサポート",
 		},
+		say_pos_refused_core = "{hero}はポジション{pos}をプレイできません",
+		say_pos_refused_human = "ポジション{pos}は{hero}のものです",
+		say_pos_refused_human_mover = "{hero}本人しか移動できません",
+		say_pos_refused_same = "すでにポジション{pos}です",
+		say_pos_refused_missing = "プレイヤー{index}はいません",
 	},
 }
 if CustomLoader and CustomLoader.Enable and strings[CustomLoader.Localization] then

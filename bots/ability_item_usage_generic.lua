@@ -970,6 +970,51 @@ do
 			)
 		)
 	end
+	-- A refused `!pos Y` / `!Xpos Y` (hero_selection.lua QueueSwapReply): the chosen bot says the reason in team chat,
+	-- once. Any bot drops a reply nobody said within PosRules.ReplyMaxAge, so a lost reply still leaves a log line.
+	local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
+	function Usage.AnswerPosSwapReply()
+		local reply = Fu.Role.PosSwapReply
+		if
+			reply == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local stale = GameTime() - reply.at > PosRules.ReplyMaxAge
+		if not stale and bot:GetPlayerID() ~= reply.speaker then
+			return
+		end
+		Fu.Role.PosSwapReply = nil
+		local said = "stale"
+		if not stale then
+			-- The same key as the repeat guard in global_overrides.lua: a repeat inside its window is dropped there, so
+			-- name it here instead of logging said=yes for a line nobody saw.
+			local guardKey = tostring(GetTeam()) .. "t:" .. reply.line
+			local lastSaid = ChatGuard.said and ChatGuard.said[guardKey]
+			local now = DotaTime()
+			if lastSaid ~= nil and now >= lastSaid and now - lastSaid < ChatGuard.REPEAT_WINDOW then
+				said = "guarded"
+			else
+				said = pcall(function()
+					bot:ActionImmediate_Chat(reply.line, false)
+				end) and "yes" or "error"
+			end
+		end
+		print(
+			string.format(
+				'[SHy-ROLE] t=%.0f %s swap-reply result=%s said=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(reply.result),
+				said,
+				reply.line
+			)
+		)
+	end
 end
 function Usage.SetReplyHumanTime(chatEvent)
 	local chatText = chatEvent.string
@@ -11770,6 +11815,7 @@ function AbilityLevelUpThink()
 		return
 	end
 	Usage.AnswerPosRequest()
+	Usage.AnswerPosSwapReply()
 	if bot.lastLevelUpFrameProcessTime == nil then
 		bot.lastLevelUpFrameProcessTime = DotaTime()
 	end

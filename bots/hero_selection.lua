@@ -527,6 +527,39 @@ local function ShortHeroName(playerId)
 	name = string.gsub(name or "", "npc_dota_hero_", "")
 	return name ~= "" and name or "-"
 end
+local function DisplayHeroName(playerId)
+	local name = playerId ~= nil and GetSelectedHeroName(playerId) or ""
+	if name == nil or name == "" then
+		return "?"
+	end
+	local localized = HeroDisplayNames[Localization.GetLocale()] or HeroDisplayNames["en"]
+	return localized[name] or HeroDisplayNames["en"][name] or (string.gsub(name, "npc_dota_hero_", ""))
+end
+-- A refused swap (any PlanSwap result but "ok") gets one team-chat reply naming the reason. This runs inside the chat
+-- callback, where a chat order is lost (#225), so the line goes on the shared Role table and the speaker (the mover if
+-- it is a bot, else the team's first bot) says it from its think: Usage.AnswerPosSwapReply in
+-- ability_item_usage_generic.lua, next to the `!pos` answer.
+local function QueueSwapReply(plan, teamPlayers, teamTag, who)
+	local key, fields = PosRules.Reply(plan, function(slot)
+		return DisplayHeroName(slot ~= nil and teamPlayers[slot] or nil)
+	end)
+	if key == nil then
+		return
+	end
+	local speaker = PosRules.ReplySpeaker(teamPlayers, plan.mover, IsPlayerBot)
+	local line = PosRules.FillReply(Localization.Get(key), fields)
+	if speaker == nil or line == nil then
+		RoleLog(
+			"%s swap-reply team=%s result=%s said=no why=%s",
+			who,
+			teamTag,
+			plan.result,
+			speaker == nil and "no-bot" or "no-text"
+		)
+		return
+	end
+	Role.PosSwapReply = { at = GameTime(), speaker = speaker, result = plan.result, line = line }
+end
 -- Position chat commands (#210). `!pos`: every bot of the team says its position (the bots answer from their own
 -- think, ability_item_usage_generic.lua, through Role.PosListRequest). `!pos Y` and `!Xpos Y` (pre-game only): one
 -- two-way swap, bots/lib/systems/pos_command_rules.lua PlanSwap: the mover takes Y, the holder of Y takes the mover's
@@ -610,6 +643,7 @@ local function handlePosCommand(posCommand, commandText, senderId, teamPlayers)
 		plan.result,
 		PosRules.RolesText(roles)
 	)
+	QueueSwapReply(plan, teamPlayers, teamTag, who)
 end
 local function countWeakHeroes(team)
 	local count = 0
