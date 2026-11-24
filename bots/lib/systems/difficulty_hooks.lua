@@ -160,6 +160,13 @@ function H.CastAllowed(unit, kind, ability, target)
 	if profile.reactionDelay <= 0 and profile.castSkipChance <= 0 then
 		return true
 	end
+	-- Items go out at once unless aimed at an enemy hero (maintainer, 2026-11-24). The hold below needs the same
+	-- order again within DECISION_GAP, and many item orders are given only once (an eat right after a backpack swap,
+	-- a TP, a ward), so a held one never went out (game 077 20:56: Puck's Vital Toadstool). Items on an enemy hero
+	-- (Hex, Orchid, Dagon, Abyssal) keep the hold and the skip, so a lower level still reacts slower in fights.
+	if string.sub(name, 1, 5) == "item_" and not aimsAtEnemyHero(bot, kind, target) then
+		return true
+	end
 	-- A dodge item the item think chose this frame (Usage.LogDodge sets bot._dodgeChosen before the order): the
 	-- dodge share already decided whether to react, and its timing window ([react, react + 0.35s],
 	-- dodge_rules.lua Window) is shorter than a reaction hold, so a held dodge order would always land too late.

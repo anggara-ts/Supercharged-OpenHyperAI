@@ -298,8 +298,31 @@ T.test("difficulty hooks: a dodge item chosen this frame is not held (its window
 	bot._dodgeChosen = { t = 599, target = bot }
 	Stub.time = 610
 	bot:Action_UseAbility(bkb)
-	T.eq(#castCalls, 1, "not chosen this frame: the reaction hold applies")
-	T.eq(printed("held kind=reaction level=medium ability=item_black_king_bar"), 1, "held line")
+	T.eq(#castCalls, 2, "not chosen this frame: still at once (a no-target item is never held)")
+	T.eq(printed("held kind=reaction"), 0, "no held line")
+end)
+
+T.test("difficulty hooks: items go out at once unless aimed at an enemy hero", function()
+	local bot = load(1)
+	local entityCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnEntity")
+	local locationCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnLocation")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	math.random = function()
+		return 0.9
+	end
+	-- One-shot orders (game 077: an eat after a swap): sent on the first call, even on Easy.
+	local toadstool = Stub.newAbility("item_foragers_health", bot, false)
+	bot:Action_UseAbilityOnEntity(toadstool, bot)
+	T.eq(#entityCalls, 1, "a mushroom on self goes out at once")
+	local tp = Stub.newAbility("item_tpscroll", bot, false)
+	bot:Action_UseAbilityOnLocation(tp, Vector(5000, 5000, 0))
+	T.eq(#locationCalls, 1, "a TP far from enemy heroes goes out at once")
+	-- An item on an enemy hero keeps the reaction hold.
+	local hex = Stub.newAbility("item_sheepstick", bot, false)
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	bot:Action_UseAbilityOnEntity(hex, enemy)
+	T.eq(#entityCalls, 1, "Hex on an enemy hero is held")
+	T.eq(printed("held kind=reaction level=easy ability=item_sheepstick"), 1, "held line")
 end)
 
 T.test("difficulty hooks: Unfair projectile checks return exactly what they returned", function()
