@@ -144,6 +144,8 @@ local fightSongAbility = SafeAbility(bot:GetAbilityByName("largo_song_fight_song
 local doubleTimeAbility = SafeAbility(bot:GetAbilityByName("largo_song_double_time"), "largo_song_double_time", "largo")
 local goodVibrationsAbility =
 	SafeAbility(bot:GetAbilityByName("largo_song_good_vibrations"), "largo_song_good_vibrations", "largo")
+-- The innate Encore carries the Shard upgrade (repeat_buff 0, 1 with the Shard: datafeed hero_id=155).
+local encoreAbility = SafeAbility(bot:GetAbilityByName("largo_encore"), "largo_encore", "largo")
 local catchyLickDesire, catchyLickTarget, catchyLickReason
 local frogstompDesire, frogstompLocation, frogstompReason, frogstompCount, frogstompTarget
 local croakOfGeniusDesire, croakOfGeniusTarget, croakOfGeniusDamage, croakOfGeniusReason, croakOfGeniusDamageType
@@ -164,6 +166,8 @@ local rhapsody = {
 	lastBeat = 0,
 	lastReasonAt = 0,
 	toggleOrderAt = -99,
+	-- When the song last came on or went off (LargoRules.ToggleOrderReady: did the last toggle order take).
+	flipAt = -99,
 	first = "fight",
 	second = nil,
 	why = "none",
@@ -176,7 +180,12 @@ local rhapsody = {
 	holdOwned = false,
 	holdUntil = -99,
 	stacks = 0,
+	-- The last idle toggle-off, and what the song was for then (sinceIdle= on the toggle-on line: the on / off loop).
+	idleOffAt = -999,
+	lastSituation = nil,
 }
+-- X.ReadShard's last reading (hasShard= on the croak-cast line).
+local shardRead = { has = false, mod = false, kv = 0, item = "none", logged = nil }
 
 -- [SHy-LARGO] lines, at most one per `key` every `interval` seconds.
 local logAt = {}
@@ -232,14 +241,15 @@ function X.SkillsComplement()
 		LogLargo(
 			"croak",
 			3,
-			"croak-cast target=%s why=%s dmgType=%s dmg=%d level=%d shrink=%s hp=%.2f",
+			"croak-cast target=%s why=%s dmgType=%s dmg=%d level=%d shrink=%s hp=%.2f hasShard=%s",
 			ShortName(croakOfGeniusTarget),
 			croakOfGeniusReason or "?",
 			croakOfGeniusDamageType or "self",
 			croakOfGeniusDamage or 0,
 			croakOfGeniusAbility:GetLevel(),
 			croakOfGeniusTarget == bot and "no" or "0.5/spend",
-			Fu.GetHP(croakOfGeniusTarget)
+			Fu.GetHP(croakOfGeniusTarget),
+			Bool(shardRead.has)
 		)
 		Fu.SetQueuePtToINT(bot, false)
 		bot:ActionQueue_UseAbilityOnEntity(croakOfGeniusAbility, croakOfGeniusTarget)
@@ -279,15 +289,22 @@ function X.SkillsComplement()
 		local rhapsodyDesire, rhapsodyWhy = X.ConsiderAmphibianRhapsody(now)
 		if rhapsodyDesire > 0 then
 			rhapsody.toggleOrderAt = now
+			-- sinceIdle=: seconds since the last idle toggle-off (a top-up right after one is the on / off loop).
+			local situation = rhapsody.lastSituation
 			LogLargo(
 				"toggle",
 				1,
-				"rhapsody-toggle on why=%s song=%s second=%s mana=%d stacks=%d",
+				"rhapsody-toggle on why=%s song=%s second=%s mana=%d stacks=%d lowest=%.2f missing=%d healers=%d mp=%.2f sinceIdle=%.1f",
 				rhapsodyWhy,
 				rhapsody.first,
 				tostring(rhapsody.second),
 				bot:GetMana(),
-				Fu.GetModifierCount(bot, GROOVIN_MODIFIER)
+				Fu.GetModifierCount(bot, GROOVIN_MODIFIER),
+				situation.hurtHp,
+				situation.missing,
+				situation.healCount,
+				situation.mpRatio,
+				math.min(999, now - rhapsody.idleOffAt)
 			)
 			bot:Action_UseAbility(amphibianRhapsodyAbility)
 			return
@@ -821,6 +838,36 @@ function X.SpellKitCount(hero)
 	return count
 end
 
+-- Does Largo have the Shard (#198 item 15)? Game 074: Shard bought at t=5002, but croak-cast why=self-upkeep (Shard
+-- false) went on to t=6392. Fu.HasAghanimsShard reads modifier_item_aghanims_shard, and the bot API does not seem to
+-- see that modifier: game 078, the human Leshrac's Shard left his stash at t=1684 (consumed), and the modifier list
+-- ([SHy-HUMAN] mods add=, NumModifiers / GetModifierName) never showed it; game 017, Techies had the Shard barrel
+-- and HasAghanimsShard stayed false. The API has HasScepter but no Shard call ([SHy-API] dump). So this also reads
+-- the Encore's repeat_buff, which the Shard turns from 0 to 1 (datafeed hero_id=155), the way Doom reads
+-- can_target_ancient. Unverified until a game: the shard-read line says which source answered, and whether the
+-- Shard still sits in a slot unconsumed (item=).
+function X.ReadShard()
+	shardRead.mod = Fu.HasAghanimsShard(bot)
+	shardRead.kv = encoreAbility:GetSpecialValueInt("repeat_buff") or 0
+	local slot = bot:FindItemSlot("item_aghanims_shard")
+	shardRead.item = (slot ~= nil and slot >= 0) and ("slot" .. slot) or "none"
+	shardRead.has = shardRead.mod or shardRead.kv > 0
+	local key = string.format("%s/%s/%d/%s", Bool(shardRead.has), Bool(shardRead.mod), shardRead.kv, shardRead.item)
+	if key ~= shardRead.logged then
+		shardRead.logged = key
+		LogLargo(
+			"shard-read",
+			0,
+			"shard-read hasShard=%s mod=%s repeatBuff=%d item=%s",
+			Bool(shardRead.has),
+			Bool(shardRead.mod),
+			shardRead.kv,
+			shardRead.item
+		)
+	end
+	return shardRead.has
+end
+
 function X.ConsiderCroakOfGenius()
 	if not Fu.CanCastAbility(croakOfGeniusAbility) then
 		return BOT_ACTION_DESIRE_NONE, nil, 0, nil, nil
@@ -875,7 +922,7 @@ function X.ConsiderCroakOfGenius()
 			break
 		end
 	end
-	local hasShard = Fu.HasAghanimsShard(bot)
+	local hasShard = X.ReadShard()
 	-- A magic hero in cast range with no buff (for the Shard upkeep, no fight needed): the most magical / pure spells.
 	local magicAlly, magicKit = nil, LargoRules.MAGIC_KIT - 1
 	if hasShard then
@@ -972,9 +1019,14 @@ end
 -- Strumming needs no free action slot or finished cast (the songs are instant, DOTA_ABILITY_BEHAVIOR_IMMEDIATE in
 -- the game file), only a Largo who can cast at all. Not while channeling: the songs have no IGNORE_CHANNEL, a strum
 -- would break a TP.
+-- Winter's Curse: the heroes it curses are made to attack their frozen ally (datafeed hero_id=112), and no strum goes
+-- out under it: games 073 t=2139-2143 and 074 t=842-844, strums with cast=no, then the song ended as no-cast. The
+-- modifier is the one on the cursed heroes (game 074 t=839: [SHy-HUMAN] mods add=modifier_winter_wyvern_winters_curse
+-- on Leshrac, gone at t=845). X.StrumBlockState names it for strum-skip.
 function X.CanStrum()
 	return bot:IsAlive()
 		and not bot:IsChanneling()
+		and not bot:HasModifier("modifier_winter_wyvern_winters_curse")
 		and not bot:IsStunned()
 		and not bot:IsSilenced()
 		and not bot:IsHexed()
@@ -996,8 +1048,10 @@ function X.SongBlockReason(song, manaNeeded)
 end
 
 -- What the songs could do now (LargoRules.ChooseSongs' input). Largo counts as an ally of his own.
-function X.RhapsodySituation(radius)
+-- singing: the song is on now (the top-up then keeps going on the looser bars, LargoRules.TopUpWanted).
+function X.RhapsodySituation(radius, singing)
 	local situation = {
+		singing = singing == true,
 		enemies = 0,
 		fighting = isGoingOnSomeone or Fu.IsInTeamFight(bot, 1200),
 		hurtHp = 1,
@@ -1092,16 +1146,17 @@ function X.ConsiderAmphibianRhapsody(now)
 	if
 		not Fu.CanCastAbility(amphibianRhapsodyAbility)
 		or amphibianRhapsodyAbility:GetToggleState()
-		or now - rhapsody.toggleOrderAt < 1
+		or not LargoRules.ToggleOrderReady(now, rhapsody.toggleOrderAt, rhapsody.flipAt)
 		or now < rhapsody.holdUntil
 	then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
-	local situation = X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius"))
+	local situation = X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius"), false)
 	local first, second, why = LargoRules.ChooseSongs(situation)
 	if first == nil then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
+	rhapsody.lastSituation = situation
 	if Fu.IsRealInvisible(bot) and not situation.fighting then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
@@ -1128,6 +1183,7 @@ function X.TrackRhapsody(now)
 	if isOn and not rhapsody.on then
 		rhapsody.on = true
 		rhapsody.onAt = now
+		rhapsody.flipAt = now
 		rhapsody.anchor = now
 		rhapsody.lastBeat = now
 		rhapsody.lastReasonAt = now
@@ -1156,6 +1212,7 @@ function X.TrackRhapsody(now)
 		)
 	elseif not isOn and rhapsody.on then
 		rhapsody.on = false
+		rhapsody.flipAt = now
 		print(
 			string.format(
 				"[SHy-LARGO] t=%.0f largo rhapsody-off held=%.1f strums=%d hits=%d reanchors=%d stacks=%d",
@@ -1277,7 +1334,8 @@ function X.CheckStrum(now, stacks)
 	end
 	if pending.cast then
 		rhapsody.noCast = 0
-	elseif LargoRules.CountsAsNoCast(false, nil, X.IsEscaping()) then
+	elseif X.CanStrum() and LargoRules.CountsAsNoCast(false, nil, X.IsEscaping()) then
+		-- A strum lost to a stun or Winter's Curse that landed after the order is not the cast failing.
 		rhapsody.noCast = rhapsody.noCast + 1
 	end
 	local reanchor = "no"
@@ -1353,7 +1411,7 @@ end
 -- While the song is on: pick the songs, end the song when there is nothing to sing for, strum on the beat.
 -- Returns whether it gave an order.
 function X.RhapsodyThink(now)
-	local situation = X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius"))
+	local situation = X.RhapsodySituation(amphibianRhapsodyAbility:GetSpecialValueInt("radius"), true)
 	local first, second, why = LargoRules.ChooseSongs(situation)
 	if first ~= nil then
 		rhapsody.lastReasonAt = now
@@ -1381,7 +1439,8 @@ function X.RhapsodyThink(now)
 	-- A Catchy Lick or Frogstomp worth more than the song (game 071, maintainer): end the song for it. The spells show
 	-- again once the song is off and the normal rules cast them; the toggle-on rule starts the song again after.
 	-- With no song worth playing now, any Lick or Frogstomp play beats a disarmed, idle song (game 071 23:10).
-	if Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
+	local toggleReady = LargoRules.ToggleOrderReady(now, rhapsody.toggleOrderAt, rhapsody.flipAt)
+	if Fu.CanCastAbility(amphibianRhapsodyAbility) and toggleReady then
 		local play, playTarget, playWhy = X.SongBreakPlay(first ~= nil)
 		if play ~= nil then
 			rhapsody.toggleOrderAt = now
@@ -1411,21 +1470,30 @@ function X.RhapsodyThink(now)
 		rhapsody.noCast,
 		X.IsEscaping() and 0 or now - rhapsody.ableSince
 	)
-	if offWhy ~= nil and Fu.CanCastAbility(amphibianRhapsodyAbility) and now - rhapsody.toggleOrderAt >= 0.5 then
+	if offWhy ~= nil and Fu.CanCastAbility(amphibianRhapsodyAbility) and toggleReady then
 		rhapsody.toggleOrderAt = now
 		if offWhy == "no-cast" then
 			-- The songs don't go out: no new song for a while rather than a disarmed, silent Largo.
 			rhapsody.holdUntil = now + LargoRules.NO_CAST_HOLD
+		elseif offWhy == "idle" then
+			rhapsody.idleOffAt = now
 		end
+		-- last=: what the song was for when its reason ended; reasonFor=: seconds of the song that had a reason;
+		-- lowest= / missing=: the group's HP now (an idle top-up should end with the group healed).
 		LogLargo(
 			"toggle",
 			1,
-			"rhapsody-toggle off why=%s held=%.1f strums=%d hits=%d mana=%d",
+			"rhapsody-toggle off why=%s last=%s held=%.1f reasonFor=%.1f strums=%d hits=%d mana=%d lowest=%.2f missing=%d mp=%.2f",
 			offWhy,
+			rhapsody.why,
 			now - rhapsody.onAt,
+			math.max(0, rhapsody.lastReasonAt - rhapsody.onAt),
 			rhapsody.strums,
 			rhapsody.hits,
-			bot:GetMana()
+			bot:GetMana(),
+			situation.hurtHp,
+			situation.missing,
+			situation.mpRatio
 		)
 		bot:Action_UseAbility(amphibianRhapsodyAbility)
 		return true

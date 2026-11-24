@@ -103,8 +103,25 @@ end
 -- TOP_UP_MP mana or more.
 LargoRules.HEAL_URGENT = 0.35
 LargoRules.TOP_UP_HP = 0.8
-LargoRules.TOP_UP_STRUMS = 3
+LargoRules.TOP_UP_STRUMS = 5
 LargoRules.TOP_UP_MP = 0.4
+-- Once the song is on (s.singing), the top-up goes on until the group is nearly full: a looser bar than the one that
+-- starts it. Game 074: 35 of 74 top-up songs went off as idle within 5s (t=987-990, 1209-1213: held=3.3-3.4, so the
+-- reason was gone by the first strum, and the 3s idle tail ended the song). One bar both started and ended the song:
+-- 3 strums missing was 222 HP on two heroes at 30 a strum (t=1146 song-change why=top-up lowest=0.88), so one strum
+-- ended it. The start bar is now 5 strums; the song, once on, heals to 90% / under 2 strums missing.
+LargoRules.TOP_UP_KEEP_HP = 0.9
+LargoRules.TOP_UP_KEEP_STRUMS = 2
+LargoRules.TOP_UP_KEEP_MP = 0.3
+
+-- The out-of-fight top-up: the lowest ally's HP ratio, the strums the group misses, Largo's mana ratio, and whether the
+-- song is on already (then the KEEP bars: no on / idle-off loop around one threshold).
+function LargoRules.TopUpWanted(lowestHp, strumsNeeded, mpRatio, singing)
+	local hpBar = singing and LargoRules.TOP_UP_KEEP_HP or LargoRules.TOP_UP_HP
+	local strumBar = singing and LargoRules.TOP_UP_KEEP_STRUMS or LargoRules.TOP_UP_STRUMS
+	local mpBar = singing and LargoRules.TOP_UP_KEEP_MP or LargoRules.TOP_UP_MP
+	return mpRatio >= mpBar and (lowestHp < hpBar or strumsNeeded >= strumBar)
+end
 
 -- Which songs to play. s (all optional):
 --   enemies     enemy heroes inside the song radius (800)
@@ -114,6 +131,7 @@ LargoRules.TOP_UP_MP = 0.4
 --   chasing     an ally inside the radius chases a target that is getting away
 --   objective   allies inside the radius hit Roshan or a Tormentor
 --   double      Scepter: two songs per beat
+--   singing     the song is on now (the top-up keeps going on the looser KEEP bars)
 -- Returns first, second, why ("fight" | "vibes" | "time", second only with double), or nil when there is no reason.
 --   Good Vibrations (heal): someone below 30% first of all, below 50% above a fight, below 75% in a fight.
 --   Double Time (move speed, slow resistance): an escape, then a chase.
@@ -150,10 +168,7 @@ function LargoRules.ChooseSongs(s)
 		if hurtHp < 0.75 then
 			offer("vibes", 1.8, "hurt")
 		end
-	elseif
-		(s.mpRatio or 0) >= LargoRules.TOP_UP_MP
-		and (hurtHp < LargoRules.TOP_UP_HP or strumsNeeded >= LargoRules.TOP_UP_STRUMS)
-	then
+	elseif LargoRules.TopUpWanted(hurtHp, strumsNeeded, s.mpRatio or 0, s.singing) then
 		-- After a fight: top the group up while the mana lasts, stop when it is full.
 		offer("vibes", 1.5, "top-up")
 	end
@@ -210,6 +225,19 @@ function LargoRules.ToggleOffReason(now, lastReasonAt, canAffordSong, holdSecond
 		return "idle"
 	end
 	return nil
+end
+
+-- Whether a toggle order (on or off) may go out now. orderAt: the last toggle order; flipAt: when the song last came
+-- on or went off. An order that took (a flip after it) frees the next one after 0.5s. One that did not take yet is not
+-- sent again for the toggle's 1.5s cooldown (datafeed hero_id=155): game 073 t=2142-2143, two off orders 1s apart under
+-- Winter's Curse, then rhapsody-off and rhapsody-on in one think with no toggle-on order (both orders went through).
+LargoRules.TOGGLE_RESEND = 1.5
+function LargoRules.ToggleOrderReady(now, orderAt, flipAt)
+	local since = now - (orderAt or -math.huge)
+	if (flipAt or -math.huge) >= (orderAt or -math.huge) then
+		return since >= 0.5
+	end
+	return since >= LargoRules.TOGGLE_RESEND
 end
 
 -- Enough mana to turn the song on: `beats` beats of the chosen songs (songCost each, songsPerBeat per beat).

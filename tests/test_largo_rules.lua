@@ -103,8 +103,53 @@ T.test("largo: the heal follows the group's need (game 071 ~26:00)", function()
 	T.eq(pick(with({ escaping = true, double = true })), "time/vibes/escape+hurt", "Scepter: run and heal")
 	T.eq(pick(with({})), "vibes/nil/top-up", "after the fight: top the group up")
 	T.eq(pick(with({ hurtHp = 0.85, missing = 400 })), "nil/nil/nil", "everyone above 80%, under 3 strums missing")
-	T.eq(pick(with({ hurtHp = 0.82, missing = 900 })), "vibes/nil/top-up", "above 80% but 4 strums missing")
+	T.eq(
+		pick(with({ hurtHp = 0.82, missing = 900 })),
+		"nil/nil/nil",
+		"above 80% and 4 strums missing: not worth a song"
+	)
+	T.eq(pick(with({ hurtHp = 0.82, missing = 1200 })), "vibes/nil/top-up", "above 80% but 5+ strums missing")
 	T.eq(pick(with({ mpRatio = 0.3 })), "nil/nil/nil", "30% mana: keep it for the fight")
+end)
+
+T.test("largo: a top-up song, once on, heals the group up (game 074 on / idle-off loop)", function()
+	local R = load()
+	local function pick(s)
+		local first, _, why = R.ChooseSongs(s)
+		return tostring(first) .. "/" .. tostring(why)
+	end
+	-- Game 074 t=1146: lowest 0.88, 222 HP missing on two heroes, 30 a strum (level 1): 3.7 strums.
+	local small = { hurtHp = 0.88, missing = 222, healCount = 2, healPerStrum = 30, mpRatio = 0.64 }
+	T.eq(pick(small), "nil/nil", "not worth starting a song")
+	small.singing = true
+	T.eq(pick(small), "vibes/top-up", "already singing: heal it up")
+	-- One strum later: 162 HP missing, 2.7 strums.
+	T.eq(
+		pick({ hurtHp = 0.9, missing = 162, healCount = 2, healPerStrum = 30, mpRatio = 0.62, singing = true }),
+		"vibes/top-up",
+		"2.7 strums missing: keep going"
+	)
+	T.eq(
+		pick({ hurtHp = 0.93, missing = 50, healCount = 2, healPerStrum = 30, mpRatio = 0.6, singing = true }),
+		"nil/nil",
+		"full: let the song end"
+	)
+	T.eq(pick({ hurtHp = 0.85, healPerStrum = 30, mpRatio = 0.35, singing = true }), "vibes/top-up", "35% mana once on")
+	T.eq(pick({ hurtHp = 0.85, healPerStrum = 30, mpRatio = 0.25, singing = true }), "nil/nil", "25%: keep it")
+	T.ok(R.TopUpWanted(0.79, 0, 0.5, false), "under 80% starts it")
+	T.ok(not R.TopUpWanted(0.85, 4, 0.5, false), "85% and 4 strums: not started")
+	T.ok(R.TopUpWanted(0.85, 0, 0.5, true), "85% once on: keep healing")
+	T.ok(not R.TopUpWanted(0.92, 1.5, 0.5, true), "92% and 1.5 strums: done")
+end)
+
+T.test("largo: a toggle order that has not taken is not sent again before the cooldown", function()
+	local R = load()
+	-- The toggle's cooldown is 1.5s (datafeed hero_id=155).
+	T.ok(R.ToggleOrderReady(10, -99, -99), "no order yet")
+	T.ok(not R.ToggleOrderReady(10.3, 10, 10.05), "the order took 0.05s later: not within 0.5s")
+	T.ok(R.ToggleOrderReady(10.6, 10, 10.05), "the order took: the next one after 0.5s")
+	T.ok(not R.ToggleOrderReady(11, 10, 5), "not taken yet (game 073 t=2142-2143): no second order 1s later")
+	T.ok(R.ToggleOrderReady(11.5, 10, 5), "not taken after 1.5s: send again")
 end)
 
 T.test("largo: the song ends only after a few seconds with no reason, or with no mana", function()
