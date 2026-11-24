@@ -4,6 +4,7 @@ local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
+local ChargeRules = require(GetScriptDirectory() .. "/lib/systems/charge_rules")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
 local sRole = Fu.Item.GetRoleItemsBuyList(bot)
@@ -156,7 +157,98 @@ local botTarget
 local isEngaging
 local isRetreating
 local isAttacking
+-- #208: the charge lock (maintainer, game 074 comment on the PR: "13:40 spirit breaker charged then immediately
+-- cancel"). A move, attack or stop order ends Charge of Darkness at once, and the modes and shared systems (outpost
+-- hold, push, defend, farm, team roam's snipe, the last-hit release) gave such orders during a charge: in games
+-- 074-078 long charges ended 0.2-0.5s after they started with the target still 2000-15800 away and no cancel of ours
+-- (charge-land started=1 cancel=none). While the charge modifier is up, those orders on this bot are dropped, except
+-- in the retreat mode when the charge is not itself the escape (bot.chargeRetreat): retreating out of a bad charge
+-- stays possible. This file's own stop and move orders call the class methods (CDOTA_Bot_Script.*) and pass.
+-- [SHy-SB] charge-lock: the first blocked order of each charge; charge-lock-end: how many were blocked.
+local CHARGE_MODIFIER = "modifier_spirit_breaker_charge_of_darkness"
+local LOCKED_ORDERS = {
+	"Action_MoveToLocation",
+	"Action_MoveToUnit",
+	"Action_MoveDirectly",
+	"Action_MovePath",
+	"Action_AttackUnit",
+	"Action_AttackMove",
+	"Action_ClearActions",
+	"Action_PickUpRune",
+	"Action_PickUpItem",
+	"ActionPush_MoveToLocation",
+	"ActionPush_MoveToUnit",
+	"ActionPush_MoveDirectly",
+	"ActionPush_AttackUnit",
+	"ActionPush_AttackMove",
+	"ActionQueue_MoveToLocation",
+	"ActionQueue_MoveToUnit",
+	"ActionQueue_MoveDirectly",
+	"ActionQueue_AttackUnit",
+	"ActionQueue_AttackMove",
+}
+-- this charge: orders blocked, the first one (method@mode); reset once the modifier is gone
+local chargeLock = { blocked = 0, first = nil }
+local function chargeLocked()
+	if not bot:HasModifier(CHARGE_MODIFIER) then
+		return false
+	end
+	return bot:GetActiveMode() ~= BOT_MODE_RETREAT or bot.chargeRetreat == true
+end
+local function noteChargeLockBlock(method)
+	chargeLock.blocked = chargeLock.blocked + 1
+	if chargeLock.first ~= nil then
+		return
+	end
+	local mode = bot:GetActiveMode()
+	chargeLock.first = method .. "@" .. tostring(mode)
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-lock method=%s mode=%s escape=%s target=%s",
+			DotaTime(),
+			method,
+			tostring(mode),
+			tostring(bot.chargeRetreat == true),
+			bot._chargeTarget ~= nil and not bot._chargeTarget:IsNull() and bot._chargeTarget:GetUnitName() or "-"
+		)
+	)
+end
+if CDOTA_Bot_Script ~= nil then
+	for _, method in ipairs(LOCKED_ORDERS) do
+		if CDOTA_Bot_Script[method] ~= nil then
+			bot[method] = function(self, ...)
+				if self == bot then
+					local ok, locked = pcall(chargeLocked)
+					if ok and locked then
+						pcall(noteChargeLockBlock, method)
+						return nil
+					end
+				end
+				return CDOTA_Bot_Script[method](self, ...)
+			end
+		end
+	end
+end
+-- Every think: once the charge is over, report the blocked orders and reset the count.
+function X.ChargeLockTick()
+	if bot:HasModifier(CHARGE_MODIFIER) or chargeLock.blocked == 0 then
+		return
+	end
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-lock-end blocked=%d first=%s",
+			DotaTime(),
+			chargeLock.blocked,
+			chargeLock.first or "-"
+		)
+	)
+	chargeLock.blocked, chargeLock.first = 0, nil
+end
 function X.SkillsComplement()
+	-- before every gate: the save charge needs each ally's HP history when the charge comes off cooldown
+	X.SampleAllyHp()
+	X.TraceFarCharge()
+	X.ChargeLockTick()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -167,7 +259,8 @@ function X.SkillsComplement()
 	nearbyEnemies = context.enemies
 	if bot:HasModifier("modifier_spirit_breaker_charge_of_darkness") or chargeOfDarknessAbility:IsInAbilityPhase() then
 		if bot.chargeRetreat and #nearbyEnemies == 0 then
-			bot:Action_MoveToLocation(bot:GetLocation() + RandomVector(150))
+			-- the class method: this file's own stop of the escape charge passes the charge lock
+			CDOTA_Bot_Script.Action_MoveToLocation(bot, bot:GetLocation() + RandomVector(150))
 			bot.chargeRetreat = false
 		end
 		return
@@ -230,39 +323,10 @@ function X.ConsiderChargeOfDarkness()
 			end
 		end
 	end
-	local teamFightLocation = Fu.GetTeamFightLocation(bot)
-	if
-		teamFightLocation ~= nil
-		and GetUnitToLocationDistance(bot, teamFightLocation) > 1600
-		and not Fu.IsInLaningPhase()
-	then
-		-- Review fix: this charged nearbyEnemies[1], the nearest enemy within 1600 of Spirit Breaker, i.e. NOT
-		-- one at the fight (which is 1600+ away), and needed an enemy next to him to fire at all.
-		-- Charge (global cast range) an enemy hero standing at the fight instead.
-		if not Fu.IsLocationInChrono(teamFightLocation) and not isRetreating then
-			for _, enemyHero in pairs(Fu.GetEnemiesNearLoc(teamFightLocation, 1200)) do
-				if
-					Fu.IsValidHero(enemyHero)
-					and Fu.CanCastOnNonMagicImmune(enemyHero)
-					and not Fu.IsSuspiciousIllusion(enemyHero)
-					and not Fu.IsLocationInChrono(enemyHero:GetLocation())
-				then
-					if DotaTime() - (X.lastChargeLog or -99) > 10 then
-						X.lastChargeLog = DotaTime()
-						pcall(
-							print,
-							string.format(
-								"[SHy-SB] t=%.0f charge-fight target=%s dist=%d",
-								DotaTime(),
-								enemyHero:GetUnitName(),
-								GetUnitToUnitDistance(bot, enemyHero)
-							)
-						)
-					end
-					return BOT_ACTION_DESIRE_HIGH, enemyHero
-				end
-			end
-		end
+	-- #47: a long charge to another lane, to save a ganked ally (also in the laning phase) or join a teamfight
+	local farTarget = X.ConsiderFarCharge()
+	if farTarget ~= nil then
+		return BOT_ACTION_DESIRE_HIGH, farTarget
 	end
 	if isEngaging then
 		local bestTarget = nil
@@ -423,6 +487,432 @@ function X.ConsiderChargeOfDarkness()
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- #47: the long charge to another lane. Each ally's HP is sampled every 0.2s (player ID -> samples) so the save
+-- knows how fast the ally is losing HP; the rules are in bots/lib/systems/charge_rules.lua.
+local allyHpSamples = {}
+local lastHpSampleTime = -99
+local lastFarChargeLog = -99
+local lastFarSkipWhy, lastFarSkipLog = nil, -99
+-- the last long charge ordered: { kind, ally, target, eta, dist, ordered, started, cancelWhy, cancelAt, moveTried }
+-- until its charge-land line
+local farChargeTrace = nil
+-- [SHy-SB] charge-land: once the charge modifier is gone, eta= (the estimate) against took= (order to end) and
+-- targetDist= (near 0: it reached the target), so the next game measures the speed cap / windup assumptions.
+function X.TraceFarCharge()
+	local trace = farChargeTrace
+	if trace == nil then
+		return
+	end
+	local charging = bot:HasModifier("modifier_spirit_breaker_charge_of_darkness")
+	if charging then
+		trace.started = true
+		-- for the end line: the mode during the charge (a change of mode right before the end points at its Think)
+		trace.chargeMode = bot:GetActiveMode()
+		if trace.cancelWhy == nil then
+			X.CheckFarChargeCancel(trace)
+		elseif not trace.moveTried and DotaTime() - trace.cancelAt >= 0.3 then
+			-- the stop did not end the charge: try a move order home (which order cancels it is unverified)
+			trace.moveTried = true
+			CDOTA_Bot_Script.Action_MoveToLocation(bot, Fu.GetTeamFountain())
+		end
+		return
+	end
+	if not trace.started and DotaTime() - trace.ordered < 1 then
+		return
+	end
+	farChargeTrace = nil
+	local target = trace.target
+	local targetDist = -1
+	-- Why a charge ended early when no cancel of ours did it (#208: started=1, took 0.2-0.5s, the target far):
+	-- blocked= orders the charge lock dropped (an order that got through ends the charge), self= a disable on him
+	-- (the ability has ROOT_DISABLES: a root ends it), targetState= the target (gone, invulnerable, debuff immune:
+	-- the charge does not pierce it, datafeed immunity 4), mode=/endMode= the mode during the charge and now,
+	-- action= his current action now.
+	local targetState = "ok"
+	if target == nil or target:IsNull() then
+		targetState = "gone"
+	elseif not target:IsAlive() then
+		targetState = "dead"
+	elseif not target:CanBeSeen() then
+		targetState = "unseen"
+	elseif target:IsInvulnerable() then
+		targetState = "invulnerable"
+	elseif target:IsMagicImmune() then
+		targetState = "immune"
+	end
+	if target ~= nil and not target:IsNull() and target:IsAlive() and target:CanBeSeen() then
+		targetDist = GetUnitToUnitDistance(bot, target)
+	end
+	local selfState = "ok"
+	if bot:IsRooted() then
+		selfState = "rooted"
+	elseif bot:IsStunned() then
+		selfState = "stunned"
+	elseif bot:IsHexed() then
+		selfState = "hexed"
+	end
+	local okAction, action = pcall(function()
+		return bot:GetCurrentActionType()
+	end)
+	print(string.format(
+		"[SHy-SB] t=%.0f spirit_breaker charge-land why=%s started=%d eta=%.1f took=%.1f dist=%d targetDist=%d cancel=%s stopped=%s cancelLag=%.1f blocked=%d self=%s targetState=%s mode=%s endMode=%s action=%s",
+		DotaTime(),
+		trace.kind,
+		trace.started and 1 or 0,
+		trace.eta,
+		DotaTime() - trace.ordered,
+		trace.dist,
+		targetDist,
+		trace.cancelWhy or "none",
+		-- which order ended the cancelled charge: the stop (clear), the later move, or neither yet
+		trace.cancelWhy == nil and "-" or trace.moveTried and "move" or "clear",
+		trace.cancelAt ~= nil and DotaTime() - trace.cancelAt or -1,
+		chargeLock.blocked,
+		selfState,
+		targetState,
+		tostring(trace.chargeMode or "-"),
+		tostring(bot:GetActiveMode()),
+		okAction and tostring(action) or "?"
+	))
+end
+function X.SampleAllyHp()
+	local now = DotaTime()
+	if now - lastHpSampleTime < 0.2 then
+		return
+	end
+	lastHpSampleTime = now
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local member = GetTeamMember(i)
+		if member ~= nil and member ~= bot then
+			local id = member:GetPlayerID()
+			if member:IsAlive() then
+				allyHpSamples[id] = allyHpSamples[id] or {}
+				ChargeRules.PushSample(allyHpSamples[id], now, member:GetHealth())
+			else
+				allyHpSamples[id] = nil
+			end
+		end
+	end
+end
+local function shortName(unit)
+	return unit ~= nil and string.gsub(unit:GetUnitName(), "npc_dota_hero_", "") or "-"
+end
+-- Seconds from the cast to the arrival, his move speed and the charge bonus used. Datafeed hero_id=71 (2026-11-22): movement_speed 275/325/375/425 bonus,
+-- windup_time 1.5, min_movespeed_bonus_pct 25, AbilityCastPoint 0.1; read from the ability, these are fallbacks.
+local function chargeEta(dist)
+	local bonus = chargeOfDarknessAbility:GetSpecialValueInt("movement_speed")
+	if bonus == nil or bonus <= 0 then
+		bonus = 275 + 50 * math.max(0, chargeOfDarknessAbility:GetLevel() - 1)
+	end
+	local windup = chargeOfDarknessAbility:GetSpecialValueFloat("windup_time")
+	if windup == nil or windup <= 0 then
+		windup = 1.5
+	end
+	local minPct = chargeOfDarknessAbility:GetSpecialValueInt("min_movespeed_bonus_pct")
+	if minPct == nil or minPct <= 0 then
+		minPct = 25
+	end
+	local moveSpeed = bot:GetCurrentMovementSpeed()
+	-- No speed cap: the charge is faster than 550 (charge_rules.lua, measured in games 074-078).
+	return ChargeRules.ChargeEta(dist, moveSpeed, bonus, windup, minPct, 0.1, nil), moveSpeed, bonus
+end
+-- Fu.CanCastOnNonMagicImmune: visible, not magic immune, not invulnerable, not an illusion
+local function canChargeHero(enemyHero)
+	return Fu.IsValidHero(enemyHero)
+		and Fu.CanCastOnNonMagicImmune(enemyHero)
+		and not Fu.IsSuspiciousIllusion(enemyHero)
+		and not Fu.IsLocationInChrono(enemyHero:GetLocation())
+end
+-- the standing enemy tower whose range covers location, or nil
+local function standingEnemyTowerAt(location)
+	for _, building in pairs(GetUnitList(UNIT_LIST_ENEMY_BUILDINGS)) do
+		if
+			Fu.IsValidBuilding(building)
+			and building:IsTower()
+			and GetUnitToLocationDistance(building, location) <= ChargeRules.TOWER_RANGE
+		then
+			return building
+		end
+	end
+	return nil
+end
+-- enemy heroes at a spot: the ones we see, or more when the last-seen info (3s) or incoming TPs say so
+local function enemyCountNear(location, visible)
+	return math.max(#visible, #Fu.Utils.GetLastSeenEnemyIdsNearLocation(location, 1200))
+end
+-- On change (the same reason again after 30s), at most every 3s; "no-gank" (any ally taking lane harass) never.
+local function logFarSkip(why, kind, ally, target, s)
+	if why == "no-gank" then
+		return
+	end
+	local key = why .. kind .. shortName(ally)
+	local sinceLog = DotaTime() - lastFarSkipLog
+	if sinceLog < 3 or key == lastFarSkipWhy and sinceLog < 30 then
+		return
+	end
+	lastFarSkipWhy, lastFarSkipLog = key, DotaTime()
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-skip why=%s kind=%s ally=%s target=%s eta=%.1f limit=%d dist=%d ours=%d enemies=%d hit=%s",
+			DotaTime(),
+			why,
+			kind,
+			shortName(ally),
+			shortName(target),
+			s.eta or 0,
+			ChargeRules.MAX_FIGHT_ETA,
+			s.dist or 0,
+			(s.allies or 0) + 1,
+			s.enemies or 0,
+			s.hit and "yes" or "no"
+		)
+	)
+end
+local function logFarCharge(kind, ally, target, s, ttd)
+	if DotaTime() - lastFarChargeLog < 3 then
+		return
+	end
+	lastFarChargeLog = DotaTime()
+	farChargeTrace = { kind = kind, ally = ally, target = target, eta = s.eta, dist = s.dist, ordered = DotaTime() }
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge why=%s ally=%s target=%s eta=%.1f ours=%d enemies=%d down=%d dist=%d ttd=%.1f hitBy=%d hit=%s away=%s hp=%.2f ms=%d bonus=%d",
+			DotaTime(),
+			kind,
+			shortName(ally),
+			shortName(target),
+			s.eta,
+			s.allies + 1,
+			s.enemies,
+			s.enemies - s.allies - 1,
+			s.dist,
+			math.min(ttd or 99, 99),
+			s.hitBy or 0,
+			s.hit and "yes" or "no",
+			s.away and "yes" or "no",
+			s.selfHp,
+			s.ms or 0,
+			s.bonus or 0
+		)
+	)
+end
+-- Is he being hit, and does a charge onto target head away from the enemy heroes hitting him (ChargeRules.IsAway)?
+-- Attackers: the enemy heroes near him that damaged him in the last 1.5s (unseen ones can't be placed: not away).
+local function escapeState(target)
+	local hit = bot:WasRecentlyDamagedByAnyHero(1.5)
+	if not hit or target == nil then
+		return hit, false
+	end
+	local attackers = {}
+	for _, enemyHero in pairs(nearbyEnemies or {}) do
+		if Fu.IsValidHero(enemyHero) and bot:WasRecentlyDamagedByHero(enemyHero, 1.5) then
+			local loc = enemyHero:GetLocation()
+			attackers[#attackers + 1] = { x = loc.x, y = loc.y }
+		end
+	end
+	local myLoc, targetLoc = bot:GetLocation(), target:GetLocation()
+	return hit, ChargeRules.IsAway({ x = myLoc.x, y = myLoc.y }, { x = targetLoc.x, y = targetLoc.y }, attackers)
+end
+-- #208 (game 072 t=863-883: a save charge ran him into four heroes under Dire's mid tier 1): a running long charge
+-- is re-checked every 0.2s (about 140 units at 700 speed, inside the 300 tower margin) and cancelled when he
+-- would land outnumbered, the save is no longer needed, or the target is under a standing enemy tower and the
+-- fight there is not ours (ChargeRules.CancelWhy). The cancel is a stop order (Action_ClearActions(true)), then a
+-- move home 0.3s later if he is still charging; charge-land's stopped= shows which one ended it.
+function X.CheckFarChargeCancel(trace)
+	local now = DotaTime()
+	if now - (trace.lastCheck or -99) < 0.2 then
+		return
+	end
+	trace.lastCheck = now
+	local target = trace.target
+	if target == nil or target:IsNull() or not target:IsAlive() then
+		-- the charge retargets the nearest enemy unit by itself (datafeed): leave it
+		return
+	end
+	local targetLoc = target:GetLocation()
+	local enemies = enemyCountNear(targetLoc, Fu.GetEnemiesNearLoc(targetLoc, 1200))
+	-- our heroes that will be there: him, plus allies within 1600 of the target
+	local ours = 1
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local member = GetTeamMember(i)
+		if
+			member ~= nil
+			and member ~= bot
+			and member:IsAlive()
+			and GetUnitToLocationDistance(member, targetLoc) <= 1600
+		then
+			ours = ours + 1
+		end
+	end
+	local tower = standingEnemyTowerAt(targetLoc)
+	local c = {
+		kind = trace.kind,
+		distLeft = GetUnitToUnitDistance(bot, target),
+		ours = ours,
+		enemies = enemies,
+		tower = tower ~= nil,
+		towerDist = tower ~= nil and GetUnitToUnitDistance(bot, tower) or nil,
+	}
+	if trace.kind == "save" then
+		local ally = trace.ally
+		c.allyDead = ally == nil or ally:IsNull() or not ally:IsAlive()
+		if not c.allyDead then
+			local safe = ChargeRules.AllySafe(
+				#Fu.GetEnemiesNearLoc(ally:GetLocation(), 1200),
+				GetUnitToLocationDistance(ally, Fu.GetTeamFountain()) < 2500,
+				ally:WasRecentlyDamagedByAnyHero(1.5),
+				ChargeRules.LossRate(allyHpSamples[ally:GetPlayerID()] or {}, now, ally:GetHealth()),
+				Fu.GetHP(ally)
+			)
+			trace.safeSince = safe and (trace.safeSince or now) or nil
+			c.allySafeFor = trace.safeSince ~= nil and now - trace.safeSince or 0
+		end
+	end
+	local why = ChargeRules.CancelWhy(c)
+	if why == nil then
+		return
+	end
+	trace.cancelWhy, trace.cancelAt = why, now
+	-- the class method: this file's own cancel passes the charge lock
+	CDOTA_Bot_Script.Action_ClearActions(bot, true)
+	print(
+		string.format(
+			"[SHy-SB] t=%.0f spirit_breaker charge-cancel why=%s kind=%s ally=%s target=%s eta-left=%.1f ours=%d enemies=%d distLeft=%d towerDist=%d",
+			now,
+			why,
+			trace.kind,
+			shortName(trace.ally),
+			shortName(target),
+			c.distLeft / math.max(bot:GetCurrentMovementSpeed(), 1),
+			ours,
+			enemies,
+			c.distLeft,
+			c.towerDist or -1
+		)
+	)
+end
+-- The charge target 1600+ away: the enemy hero hurting a ganked ally (save), else the best enemy at a teamfight
+-- (fight, after the laning phase), or nil.
+function X.ConsiderFarCharge()
+	local selfHp = Fu.GetHP(bot)
+	local now = DotaTime()
+	local saveTarget, saveAlly, saveState, saveTtd
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local ally = GetTeamMember(i)
+		if
+			Fu.IsValidHero(ally)
+			and ally ~= bot
+			and not ally:IsIllusion()
+			and GetUnitToUnitDistance(bot, ally) > ChargeRules.FAR_DIST
+		then
+			local enemiesThere = Fu.GetEnemiesNearLoc(ally:GetLocation(), 1200)
+			local hitBy, target, targetScore = 0, nil, nil
+			for _, enemyHero in pairs(enemiesThere) do
+				local hits = enemyHero:GetAttackTarget() == ally or ally:WasRecentlyDamagedByHero(enemyHero, 1.5)
+				if hits then
+					hitBy = hitBy + 1
+				end
+				if canChargeHero(enemyHero) then
+					local score = ChargeRules.TargetScore({
+						hp = Fu.GetHP(enemyHero),
+						core = Fu.IsCore(enemyHero),
+						hitsAlly = hits,
+						distToSpot = GetUnitToUnitDistance(enemyHero, ally),
+					})
+					if targetScore == nil or score > targetScore then
+						target, targetScore = enemyHero, score
+					end
+				end
+			end
+			-- nobody hits the ally: no gank, nothing to check or log
+			if hitBy > 0 then
+				local samples = allyHpSamples[ally:GetPlayerID()] or {}
+				local s = {
+					kind = "save",
+					selfHp = selfHp,
+					retreating = isRetreating,
+					dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
+					allies = #Fu.GetAlliesNearLoc(ally:GetLocation(), 1200),
+					enemies = enemyCountNear(ally:GetLocation(), enemiesThere),
+					hitBy = hitBy,
+					allyHp = ally:GetHealth(),
+					allyHpRatio = Fu.GetHP(ally),
+					lossRate = ChargeRules.LossRate(samples, now, ally:GetHealth()),
+				}
+				s.eta, s.ms, s.bonus = chargeEta(s.dist)
+				local why
+				if target == nil then
+					why = "no-target"
+				else
+					s.tower = standingEnemyTowerAt(target:GetLocation()) ~= nil
+					s.hit, s.away = escapeState(target)
+					why = ChargeRules.ChargeSkipWhy(s)
+				end
+				if why ~= nil then
+					logFarSkip(why, "save", ally, target, s)
+				else
+					-- several ganked allies: the one that dies first (and still lives until he lands)
+					local ttd = ChargeRules.TimeToDie(s.allyHp, s.lossRate)
+					if saveTtd == nil or ttd < saveTtd then
+						saveTarget, saveAlly, saveState, saveTtd = target, ally, s, ttd
+					end
+				end
+			end
+		end
+	end
+	if saveTarget ~= nil then
+		logFarCharge("save", saveAlly, saveTarget, saveState, saveTtd)
+		return saveTarget
+	end
+	if Fu.IsInLaningPhase() then
+		return nil
+	end
+	local fightLocation = Fu.GetTeamFightLocation(bot)
+	if
+		fightLocation == nil
+		or GetUnitToLocationDistance(bot, fightLocation) <= ChargeRules.FAR_DIST
+		or Fu.IsLocationInChrono(fightLocation)
+	then
+		return nil
+	end
+	local enemiesThere = Fu.GetEnemiesNearLoc(fightLocation, 1400)
+	local target, targetScore = nil, nil
+	for _, enemyHero in pairs(enemiesThere) do
+		if canChargeHero(enemyHero) then
+			local score = ChargeRules.TargetScore({
+				hp = Fu.GetHP(enemyHero),
+				core = Fu.IsCore(enemyHero),
+				distToSpot = GetUnitToLocationDistance(enemyHero, fightLocation),
+			})
+			if targetScore == nil or score > targetScore then
+				target, targetScore = enemyHero, score
+			end
+		end
+	end
+	local s = {
+		kind = "fight",
+		selfHp = selfHp,
+		retreating = isRetreating,
+		dist = target ~= nil and GetUnitToUnitDistance(bot, target) or 0,
+		allies = #Fu.GetAlliesNearLoc(fightLocation, 1400),
+		enemies = #enemiesThere,
+	}
+	s.eta, s.ms, s.bonus = chargeEta(s.dist)
+	local why
+	if target == nil then
+		why = "no-target"
+	else
+		s.tower = standingEnemyTowerAt(target:GetLocation()) ~= nil
+		s.hit, s.away = escapeState(target)
+		why = ChargeRules.ChargeSkipWhy(s)
+	end
+	if why ~= nil then
+		logFarSkip(why, "fight", nil, target, s)
+		return nil
+	end
+	logFarCharge("fight", nil, target, s, nil)
+	return target
 end
 function X.ConsiderBulldoze()
 	if not bulldozeAbility:IsFullyCastable() then
