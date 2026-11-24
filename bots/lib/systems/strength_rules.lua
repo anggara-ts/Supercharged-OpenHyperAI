@@ -27,7 +27,12 @@ StrengthRules.DEFAULTS = {
 	extendSeconds = 20, -- extra hold while the target is still losing HP
 	cooldown = 20, -- seconds after an end before a new window
 	cooldownAfterFall = 5, -- after the target fell (chain to the next building)
-	maxNwAge = 120, -- an enemy net worth read older than this counts as unknown
+	maxNwAge = 120, -- an enemy net worth read older than this is stale
+	-- Stale enemy reads still count with their last value (items never shrink, so it is a lower bound), up to this many
+	-- heroes; more stale heroes than this is unknown. Game 081: Dire led 37.6k to 30.9k but skipped the push 28 times
+	-- from 24:43 (why=no-lead-nw-unknown) because one Radiant hero had not been seen for 2 minutes (maintainer: "minute
+	-- 32 bots still farms. is the networth based push not kick off?").
+	maxStaleHeroes = 2,
 }
 local scale = 1
 function StrengthRules.SetScale(value)
@@ -42,19 +47,25 @@ local D = StrengthRules.DEFAULTS
 
 -- Team net worth from per-player reads. reads = { [pid] = { value=, at= } } for every player of the team, a missing
 -- or stale (older than maxAge) entry makes the total unknown (nil): an unread hero must not count as 0.
-function StrengthRules.TeamTotal(playerIds, reads, now, maxAge)
-	local total = 0
+-- Sum of the reads of playerIds. A hero never read (or read as 0) makes it unknown (nil). A read older than maxAge is
+-- stale: with maxStale nil any stale read makes it unknown; else up to maxStale stale reads count with their last
+-- value. Returns total (or nil), the number of stale reads counted.
+function StrengthRules.TeamTotal(playerIds, reads, now, maxAge, maxStale)
+	local total, stale = 0, 0
 	for _, pid in ipairs(playerIds or {}) do
 		local read = reads and reads[pid]
 		if read == nil or read.value == nil or read.value <= 0 then
-			return nil
+			return nil, stale
 		end
 		if maxAge ~= nil and now ~= nil and now - (read.at or -math.huge) > maxAge then
-			return nil
+			stale = stale + 1
+			if maxStale == nil or stale > maxStale then
+				return nil, stale
+			end
 		end
 		total = total + read.value
 	end
-	return total
+	return total, stale
 end
 
 -- The lead. i = { ourNw, theirNw (nil = unknown), ourLvl, theirLvl, aegis, factor (1 = start, endFactor = in a

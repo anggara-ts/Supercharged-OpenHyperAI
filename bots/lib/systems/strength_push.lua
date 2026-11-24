@@ -131,16 +131,17 @@ local function ReadNetWorth(state, team, now)
 		end
 	end
 	local maxAge = Rules.DEFAULTS.maxNwAge
+	local maxStale = Rules.DEFAULTS.maxStaleHeroes
 	local ourNw = Rules.TeamTotal(allyIds, state.allyNw, now, nil)
-	local theirNw = Rules.TeamTotal(enemyIds, state.enemyNw, now, maxAge)
+	local theirNw, nwStale = Rules.TeamTotal(enemyIds, state.enemyNw, now, maxAge, maxStale)
 	if ourNw ~= nil and theirNw ~= nil then
-		return ourNw, theirNw, "nw"
+		return ourNw, theirNw, nwStale > 0 and ("nw-stale" .. nwStale) or "nw"
 	end
-	-- Like with like: our items against their items seen.
+	-- Like with like: our items against their items seen (an enemy unseen for a while counts with its last items).
 	local ourItems = Rules.TeamTotal(allyIds, state.allyItems, now, nil)
-	local theirItems = Rules.TeamTotal(enemyIds, state.enemyItems, now, maxAge)
+	local theirItems, itemsStale = Rules.TeamTotal(enemyIds, state.enemyItems, now, maxAge, maxStale)
 	if ourItems ~= nil and theirItems ~= nil then
-		return ourItems, theirItems, "items"
+		return ourItems, theirItems, itemsStale > 0 and ("items-stale" .. itemsStale) or "items"
 	end
 	return ourItems, nil, "unknown"
 end
