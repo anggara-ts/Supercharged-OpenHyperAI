@@ -34,7 +34,7 @@ game files.
      `.../scripts/npc/neutral_items.txt`, `.../scripts/npc/npc_heroes.txt`). Check its last commit date: it can be
      behind the patch.
    - [Liquipedia](https://liquipedia.net/dota2/) (hero and item pages; the `Cheats` page lists internal names).
-     Community-written.
+     Community-written. It refuses scripted requests (curl gets 403): read it in a browser.
    - Patch-note summaries from anyone (including AI): least trusted. An AI-written list in upstream's 7.41 update
      had wrong innates and wrong ability names (its guide, "Lessons Learned").
 

@@ -113,7 +113,9 @@ active was changed, another that it was removed. The game file settles such a qu
   `Utils.WisdomRunes` (`bots/lib/systems/utils.lua`); `Fu.CheckTimeOfDay`, `Fu.GetCurrentRoshanLocation`,
   `Fu.GetTormentorLocation` with the Tormentor and wait spots, and the fountains (`bots/lib/general_utils/map_info.lua`,
   fountains also in `bots/ability_item_usage_generic.lua`); `Site.top_power_rune` / `bot_power_rune` / `roshan` and
-  the outposts found by unit name (`bots/lib/data/site.lua`).
+  the outposts found by unit name (`bots/lib/data/site.lua`); `OUTPOST_FALLBACK` in `bots/mode_outpost_generic.lua`
+  (used when the scan finds no outpost unit). Watchers have no coordinates: `bots/mode_watcher_generic.lua` finds the
+  `npc_dota_lantern` units.
 - "Pit preference switched" (Roshan, Tormentor) means swapping which spot day and night return, not new vectors. A
   new day or night length changes `Fu.CheckTimeOfDay`.
 - Check them against the game, not the notes: `GetRuneSpawnLocation` (the `[SHy-RUNE] spots team= b1= b2= p1= p2=`
@@ -126,6 +128,10 @@ active was changed, another that it was removed. The game file settles such a qu
 - The dump runs once per game (Radiant's first bot). Diff the first game of the new patch against the last game of
   the old one:
   `grep -a "\[SHy-API\]" <game.log> | sed 's/^.*\[SHy-API\]/[SHy-API]/' | sort > api-<patch>.txt`, then `diff`.
+  The lines that describe the API (`globals`, `CDOTA_Bot_Script`, `CDOTABaseAbility_BotScript`,
+  `CDOTA_TeamCommander`, `bot-handle`, `constants`, `item`, `item-names`, `shrine`) compare across games. Ignore
+  `slots <hero>` (the items held at that moment) and the lines with `t=`; compare `abilities <hero>` only for heroes
+  who played in both games.
 - New or removed functions, methods and constants, and changed constant values, go into `docs/BOT_API_RUNTIME.md`
   as an "<X> check" section like "7.42 check". A changed constant matters where `bots/lib/dota/enums.lua` has a
   fallback value.
