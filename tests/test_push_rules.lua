@@ -470,26 +470,73 @@ T.test("finish hold: a Glyph pauses it instead of dropping it (game 074 t=1308-1
 	T.eq(select(2, R.FinishHold(s)), "alone", "one left")
 end)
 
-T.test("glyph wait: stay at a tier 1 with our creeps, edge for multishot, back when outnumbered or low", function()
+T.test("glyph wait: edge at every tier (game 078: no stay under a T1), back when outnumbered or low", function()
 	local R = rules()
-	-- The maintainer's case (game 074): a glyphed T1, our creeps under it, 3 of ours and no enemy hero.
+	-- Game 074's case: a glyphed T1, our creeps under it, 3 of ours and no enemy hero. Game 078 (maintainer): wait at
+	-- the edge, not under the tower.
 	local s = { tier = 1, hp = 1, allies = 3, enemies = 0, creeps = 3 }
-	T.eq(pair(R.GlyphWait(s)), "stay/creeps-tank", "T1 with creeps: stay")
+	T.eq(pair(R.GlyphWait(s)), "edge/tier1", "T1 with creeps: edge, no stay")
 	s.creeps = 0
 	T.eq(pair(R.GlyphWait(s)), "edge/no-creeps", "T1 without creeps: just outside its range")
-	s.creeps, s.towerOnBot = 2, true
-	T.eq(pair(R.GlyphWait(s)), "stay/creeps-tank", "T1 on us, creeps there to take it back: stay")
-	s.towerHurts = true
-	T.eq(pair(R.GlyphWait(s)), "edge/tower-aggro", "T1 on us and it hurts: step to the edge")
-	s.towerOnBot, s.towerHurts, s.creeps = false, false, 3
-	s.tier = 2
+	s.creeps, s.tier = 3, 2
 	T.eq(pair(R.GlyphWait(s)), "edge/multishot", "T2: multishot hits 5 more, creeps don't cover us")
 	s.tier, s.enemies = 1, 4
 	T.eq(pair(R.GlyphWait(s)), "back/outnumbered", "more enemy heroes than ours")
 	s.enemies = 3
-	T.eq(R.GlyphWait(s), "stay", "even numbers stay")
+	T.eq(R.GlyphWait(s), "edge", "even numbers wait at the edge")
 	s.hp = 0.25
 	T.eq(pair(R.GlyphWait(s)), "back/low-hp", "low HP")
+end)
+
+T.test("glyph wait: edge point stays on the arc toward our fountain", function()
+	local R = rules()
+	-- Tower at the origin, our fountain straight down (b = 0,-1), radius 1000, arc 0.8 rad.
+	local x, y = R.GlyphEdgePoint(0, 0, 0, -400, 0, -1, 1000, 0.8)
+	T.near(x, 0, 0.01, "on the line: x")
+	T.near(y, -1000, 0.01, "on the line: pushed out to the radius")
+	-- A bot on the far side of the tower is put on the arc's end on its side (x > 0), not behind the tower.
+	x, y = R.GlyphEdgePoint(0, 0, 500, 500, 0, -1, 1000, 0.8)
+	T.near(x, 1000 * math.sin(0.8), 0.01, "arc end x")
+	T.near(y, -1000 * math.cos(0.8), 0.01, "arc end y")
+	x = R.GlyphEdgePoint(0, 0, -500, 500, 0, -1, 1000, 0.8)
+	T.ok(x < 0, "the other side's end")
+	-- The bot on the tower itself: straight toward our fountain.
+	x, y = R.GlyphEdgePoint(0, 0, 0, 0, 0, -1, 1000, 0.8)
+	T.near(y, -1000, 0.01, "zero vector")
+	T.eq(R.NearestDistance(0, 0, {}), nil, "no allies")
+	T.near(R.NearestDistance(0, 0, { { x = 300, y = 400 }, { x = 0, y = 100 } }), 100, 0.01, "nearest ally")
+end)
+
+T.test("glyph wait: side-steps alternate along the edge and keep 300 from waiting allies", function()
+	local R = rules()
+	local s = { tx = 0, ty = 0, x = 0, y = -1000, bx = 0, by = -1, radius = 1000, step = 250, side = 1, maxAngle = 0.8 }
+	-- Side 1 at the bottom of the tower: the tangent (-uy, ux) = (1, 0), so x grows; it stays on the edge.
+	local x, y, side, gap = R.GlyphSideStep(s)
+	T.ok(x > 200, "stepped along the edge: " .. x)
+	T.near(math.sqrt(x * x + y * y), 1000, 0.01, "on the edge")
+	T.eq(side, 1, "the way asked")
+	T.eq(gap, nil, "no ally")
+	-- The next step (caller flips the side) comes back the other way.
+	s.x, s.y, s.side = x, y, -side
+	local x2 = R.GlyphSideStep(s)
+	T.ok(x2 < x - 200, "alternates: " .. x2)
+	-- An ally waiting where the step would go: the bot steps the other way.
+	s.x, s.y, s.side = 0, -1000, 1
+	s.allies = { { x = 250, y = -970 } }
+	x, _, side, gap = R.GlyphSideStep(s)
+	T.ok(x < 0 and side == -1, "away from the ally: " .. x)
+	T.ok(gap >= 300, "300+ from it: " .. gap)
+	-- At the arc's end the step that way is no move: it goes back along the arc.
+	s.allies = nil
+	s.x, s.y = 1000 * math.sin(0.8), -1000 * math.cos(0.8)
+	s.side = 1
+	x, _, side = R.GlyphSideStep(s)
+	T.ok(x < s.x - 100 and side == -1, "turns at the arc's end: " .. x)
+	-- Crowded on both sides: the candidate farthest from its nearest ally.
+	s.x, s.y, s.side = 0, -1000, 1
+	s.allies = { { x = 0, y = -1000 } }
+	x, _, _, gap = R.GlyphSideStep(s)
+	T.ok(gap ~= nil and gap >= 300 and math.abs(x) > 300, "two steps out when one is too close: " .. x)
 end)
 
 T.test("glyph helpers: tower tier, time left, fight factor", function()

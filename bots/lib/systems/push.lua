@@ -1758,15 +1758,22 @@ function Push.HasBackdoorOnly(building)
 		or building:HasModifier("modifier_backdoor_protection_in_base")
 		or building:HasModifier("modifier_backdoor_protection_active")
 end
--- Glyph wait (#12, maintainer, live game 074 2026-11-23: "bots are running away from t1 when glyph is active. t1 only
--- got shield and no multiple hits. creeps also only get shield for a few seconds (check online) so if we have nearby
--- ally creep, no need to back off except when outnumbered by enemy hero". Game 074 t=1308-1325: Alchemist and Largo
--- stepped back from Dire's bottom T1 at 106 HP through two save Glyphs). While an enemy tower within 1600 has the
--- Glyph, PushThink keeps the bot at it (PushRules.GlyphWait: stay, or just outside its range for a tier 2+ tower or
--- with no creeps of ours tanking), hitting creeps and heroes in reach, and the finish hold resumes when the Glyph
--- ends. Lines (on change): [SHy-PUSH] glyph-wait lane= tower= mode= why= left= src= allies= enemies= creeps= dist=,
--- and glyph-end why= held= maxDist= holdMaxDist= (the farthest from the tower after the first 2s of stay/edge).
+-- Glyph wait (#12, maintainer, live game 074 2026-11-23: "bots are running away from t1 when glyph is active". Game 074
+-- t=1308-1325: Alchemist and Largo stepped back from Dire's bottom T1 at 106 HP through two save Glyphs). While an
+-- enemy tower within 1600 has the Glyph, PushThink keeps the bot at it, just outside its range at every tier
+-- (PushRules.GlyphWait; game 078 dropped the tier 1 "stay": "standing still is bad. enemy could easily land disables
+-- or setup team fight to standstill heroes"), hitting creeps and heroes outside the tower's range, and the finish hold
+-- resumes when the Glyph ends. With nothing to hit the bot never stands still: it side-steps along the edge every
+-- 0.5-1s, alternating, at least 300 from the other waiting allies (PushRules.GlyphSideStep), and steps further back
+-- (up to the tower's reach + 500) while an enemy hero it can't hit is within 800 or a hero or creep hit it in the last
+-- second. Lines (on change): [SHy-PUSH] glyph-wait lane= tower= mode= why= left= src= allies= enemies= creeps= dist=,
+-- and glyph-end why= held= maxDist= holdMaxDist= (the farthest from the tower after the first 2s, outside step-backs)
+-- moves= (move goals given: out of range, side-steps, step-backs) backs= (step-backs started) spread= (closest
+-- waiting ally on the thinks with nothing to hit after 2s; -1 when nobody waited with it).
 local GLYPH_MODIFIER = "modifier_fountain_glyph"
+local GLYPH_THREAT_RADIUS = 800
+local GLYPH_BACK_STEP = 300
+local GLYPH_BACK_MAX = 500
 local function IsStandingTower(unit)
 	return unit ~= nil and not unit:IsNull() and unit:IsAlive() and unit:CanBeSeen()
 end
@@ -1803,7 +1810,7 @@ local function GlyphWaitEnd(bot, why)
 	pcall(
 		print,
 		string.format(
-			"[SHy-PUSH] t=%.0f %s glyph-end why=%s lane=%s tower=%s held=%.1f mode=%s allies=%d enemies=%d creeps=%d maxDist=%d holdMaxDist=%d",
+			"[SHy-PUSH] t=%.0f %s glyph-end why=%s lane=%s tower=%s held=%.1f mode=%s allies=%d enemies=%d creeps=%d maxDist=%d holdMaxDist=%d moves=%d backs=%d spread=%d",
 			DotaTime(),
 			ShortHeroName(bot),
 			why,
@@ -1815,7 +1822,10 @@ local function GlyphWaitEnd(bot, why)
 			wait.enemies or 0,
 			wait.creeps or 0,
 			math.floor(wait.maxDist or 0),
-			math.floor(wait.holdMaxDist or 0)
+			math.floor(wait.holdMaxDist or 0),
+			wait.moves or 0,
+			wait.backs or 0,
+			wait.spread ~= nil and math.floor(wait.spread) or -1
 		)
 	)
 end
@@ -1833,6 +1843,27 @@ local function GlyphWaitTick(bot)
 	elseif DotaTime() - (wait.seenAt or -999) > 2 then
 		GlyphWaitEnd(bot, "left")
 	end
+end
+-- Where the other bots waiting at the same tower stand, or walk to (their move goal): { x =, y = } each.
+local function GlyphWaitingAllies(bot, tower, now)
+	local points, here = {}, {}
+	for i = 1, 5 do
+		local member = GetTeamMember(i)
+		local wait = member ~= nil and member ~= bot and member._glyphWait or nil
+		if
+			wait ~= nil
+			and wait.tower == tower
+			and now - (wait.seenAt or -999) <= 0.5
+			and Fu.IsValidHero(member)
+			and member:IsAlive()
+		then
+			local location = member:GetLocation()
+			here[#here + 1] = { x = location.x, y = location.y }
+			local goal = wait.goal or location
+			points[#points + 1] = { x = goal.x, y = goal.y }
+		end
+	end
+	return points, here
 end
 -- Returns true when it gave the bot an order this think.
 local function GlyphWaitThink(bot, lane)
@@ -1881,21 +1912,11 @@ local function GlyphWaitThink(bot, lane)
 		end
 	end
 	local tier = PushRules.TowerTier(tower:GetUnitName()) or 1
-	local towerOnBot = tower:GetAttackTarget() == bot or bot:WasRecentlyDamagedByTower(1)
-	local towerHurts = false
-	if towerOnBot then
-		-- The tower step-out rule's test (PushThink): 5s of tower hits over 40% of our HP, or under 60% HP.
-		local towerDamage = tower:GetAttackDamage() * tower:GetAttackSpeed() * 5 - bot:GetHealthRegen() * 5
-		towerHurts = Fu.GetHP(bot) < 0.6
-			or bot:GetActualIncomingDamage(towerDamage, DamageType.Physical) / math.max(1, bot:GetHealth()) > 0.4
-	end
 	local mode, why = PushRules.GlyphWait({
 		tier = tier,
 		hp = Fu.GetHP(bot),
 		allies = allies,
 		enemies = enemies,
-		towerOnBot = towerOnBot,
-		towerHurts = towerHurts,
 		creeps = creeps,
 	})
 	if wait == nil or wait.tower ~= tower then
@@ -1903,15 +1924,21 @@ local function GlyphWaitThink(bot, lane)
 			GlyphWaitEnd(bot, "retarget")
 		end
 		local name = string.gsub(tower:GetUnitName(), "npc_dota_", "")
-		wait = { tower = tower, name = name, start = now, seenAt = now, maxDist = 0, holdMaxDist = 0 }
+		wait = {
+			tower = tower,
+			name = name,
+			start = now,
+			seenAt = now,
+			maxDist = 0,
+			holdMaxDist = 0,
+			moves = 0,
+			backs = 0,
+		}
 		bot._glyphWait = wait
 	end
 	wait.lane, wait.seenAt = lane, now
 	wait.allies, wait.enemies, wait.creeps = allies, enemies, creeps
 	wait.maxDist = math.max(wait.maxDist, distance)
-	if mode ~= "back" and now - wait.start >= 2 then
-		wait.holdMaxDist = math.max(wait.holdMaxDist, distance)
-	end
 	if (mode ~= wait.mode or why ~= wait.why) and now >= (wait.logAt or -999) then
 		wait.mode, wait.why, wait.logAt = mode, why, now + 1
 		if not Fu.IsMeepoClone(bot) then
@@ -1939,17 +1966,47 @@ local function GlyphWaitThink(bot, lane)
 		end
 	end
 	if mode == "back" then
+		wait.goal = nil
 		return false
 	end
-	local edgeSpot = Fu.AdjustLocationWithOffsetTowardsFountain(towerLocation, reach + 100)
-	-- At the edge: out of the tower's reach first.
-	if mode == "edge" and distance < reach + 50 then
-		bot:Action_MoveToLocation(edgeSpot)
+	-- The edge arc: around the tower, toward our fountain (the unit vector tower -> fountain side).
+	local baseSpot = Fu.AdjustLocationWithOffsetTowardsFountain(towerLocation, 1000)
+	local baseX, baseY = baseSpot.x - towerLocation.x, baseSpot.y - towerLocation.y
+	local baseLength = math.max(1, math.sqrt(baseX * baseX + baseY * baseY))
+	baseX, baseY = baseX / baseLength, baseY / baseLength
+	local botLocation = bot:GetLocation()
+	local function edgeAt(radius)
+		local x, y = PushRules.GlyphEdgePoint(
+			towerLocation.x,
+			towerLocation.y,
+			botLocation.x,
+			botLocation.y,
+			baseX,
+			baseY,
+			radius,
+			PushRules.GLYPH_EDGE_ARC
+		)
+		return Vector(x, y, botLocation.z)
+	end
+	-- A move order; a new goal (100+ from the last one) counts as a move.
+	local function moveTo(goal)
+		if wait.goal == nil or Fu.GetLocationToLocationDistance(wait.goal, goal) > 100 then
+			wait.moves = wait.moves + 1
+		end
+		wait.goal = goal
+		bot:Action_MoveToLocation(goal)
 		return true
 	end
-	-- Hit a hero, else a creep: one the bot reaches from where it stands, or one it walks to that stands within 300 of
-	-- the tower's reach (no chase away from it) and, at the edge, outside it. Glyphed creeps (3s) and the tower itself
-	-- fail Fu.CanBeAttacked.
+	-- Out of the tower's reach first, on the bot's own bearing (no walk of the whole group to one spot).
+	if distance < reach + 50 then
+		if now - wait.start >= 2 then
+			wait.holdMaxDist = math.max(wait.holdMaxDist, distance)
+		end
+		return moveTo(edgeAt(reach + 100))
+	end
+	-- Hit a hero, else a creep: one the bot reaches from where it stands, or one it walks to that stands outside the
+	-- tower's reach and within 300 of it (no chase away from it). Glyphed creeps (3s) and the tower itself fail
+	-- Fu.CanBeAttacked.
 	local attackRange = bot:GetAttackRange()
 	local function canHit(unit)
 		if not Fu.IsValid(unit) or not Fu.CanBeAttacked(unit) then
@@ -1959,17 +2016,21 @@ local function GlyphWaitThink(bot, lane)
 			return true
 		end
 		local toTower = GetUnitToUnitDistance(unit, tower)
-		return toTower <= reach + 300 and (mode == "stay" or toTower > reach)
+		return toTower <= reach + 300 and toTower > reach
 	end
 	local target, lowestHealth = nil, math.huge
-	for _, enemyHero in ipairs(bot:GetNearbyHeroes(math.min(attackRange + 150, 1600), true, BotMode.None) or {}) do
-		if
-			Fu.IsValidHero(enemyHero)
-			and not Fu.IsSuspiciousIllusion(enemyHero)
-			and canHit(enemyHero)
-			and enemyHero:GetHealth() < lowestHealth
-		then
-			target, lowestHealth = enemyHero, enemyHero:GetHealth()
+	local threatHero = false
+	local heroRadius = math.max(math.min(attackRange + 150, 1600), GLYPH_THREAT_RADIUS)
+	for _, enemyHero in ipairs(bot:GetNearbyHeroes(heroRadius, true, BotMode.None) or {}) do
+		if Fu.IsValidHero(enemyHero) and not Fu.IsSuspiciousIllusion(enemyHero) then
+			local heroDistance = GetUnitToUnitDistance(bot, enemyHero)
+			if heroDistance <= attackRange + 150 and canHit(enemyHero) then
+				if enemyHero:GetHealth() < lowestHealth then
+					target, lowestHealth = enemyHero, enemyHero:GetHealth()
+				end
+			elseif heroDistance <= GLYPH_THREAT_RADIUS then
+				threatHero = true
+			end
 		end
 	end
 	if target == nil then
@@ -1981,15 +2042,67 @@ local function GlyphWaitThink(bot, lane)
 		end
 	end
 	if target ~= nil then
+		if now - wait.start >= 2 then
+			wait.holdMaxDist = math.max(wait.holdMaxDist, distance)
+		end
 		bot:Action_AttackUnit(target, true)
 		return true
 	end
-	-- Nothing to hit: wait. The edge spot is just outside the tower's reach, toward our fountain.
-	if distance > reach + 150 then
-		bot:Action_MoveToLocation(edgeSpot)
-	else
-		bot:Action_MoveToLocation(bot:GetLocation())
+	-- Nothing to hit: never stand still (game 078). Closest waiting ally, from 2s into the wait (they arrive together).
+	local allyGoals, allyHere = GlyphWaitingAllies(bot, tower, now)
+	if now - wait.start >= 2 then
+		local closest = PushRules.NearestDistance(botLocation.x, botLocation.y, allyHere)
+		if closest ~= nil then
+			wait.spread = math.min(wait.spread or math.huge, closest)
+		end
 	end
+	-- Step back toward our side while an enemy hero it can't hit is near enough to cast, or a hero or creep (a glyphed
+	-- one, or one inside the tower's range) hit it in the last second; 1s more after that, up to reach + 500.
+	local radius = reach + 100
+	if threatHero or bot:WasRecentlyDamagedByAnyHero(1) or bot:WasRecentlyDamagedByCreep(1) then
+		if now >= (wait.backUntil or -999) then
+			wait.backs = wait.backs + 1
+		end
+		wait.backRadius = math.min(math.max(distance, reach + 100) + GLYPH_BACK_STEP, reach + GLYPH_BACK_MAX)
+		wait.backUntil = now + 1
+	end
+	if now < (wait.backUntil or -999) then
+		radius = wait.backRadius or radius
+		if distance < radius - 100 then
+			return moveTo(edgeAt(radius))
+		end
+	elseif now - wait.start >= 2 then
+		wait.holdMaxDist = math.max(wait.holdMaxDist, distance)
+	end
+	-- Side-step along the edge (at the step-back distance while backing): a new step every 0.5-1s or on arrival,
+	-- alternating, away from the other waiting allies.
+	if wait.goal == nil or now >= (wait.stepAt or -999) or GetUnitToLocationDistance(bot, wait.goal) < 50 then
+		local interval = RandomFloat(0.5, 1.0)
+		local step = math.min(350, math.max(150, bot:GetCurrentMovementSpeed() * interval))
+		if wait.side == nil then
+			-- Start toward the side of the tower -> fountain line the bot is on (away from the middle), so bots that
+			-- start on the same think don't slide as a clump.
+			local ux, uy = botLocation.x - towerLocation.x, botLocation.y - towerLocation.y
+			wait.side = (baseX * uy - baseY * ux) >= 0 and 1 or -1
+		end
+		local x, y, side = PushRules.GlyphSideStep({
+			tx = towerLocation.x,
+			ty = towerLocation.y,
+			x = botLocation.x,
+			y = botLocation.y,
+			bx = baseX,
+			by = baseY,
+			radius = radius,
+			step = step,
+			side = wait.side,
+			maxAngle = PushRules.GLYPH_EDGE_ARC,
+			allies = allyGoals,
+			minGap = PushRules.GLYPH_SPREAD,
+		})
+		wait.side, wait.stepAt = -side, now + interval
+		return moveTo(Vector(x, y, botLocation.z))
+	end
+	bot:Action_MoveToLocation(wait.goal)
 	return true
 end
 -- A lane's push that was on (0.5+) and is now off: one line naming the gate (throttled per bot).

@@ -104,6 +104,9 @@ T.test("push: a glyphed enemy tower keeps the bot at it (glyph-wait), the end pr
 	tower.IsTower = function()
 		return true
 	end
+	tower.GetAttackRange = function()
+		return 700
+	end
 	tower.IsBuilding = function()
 		return true
 	end
@@ -134,6 +137,20 @@ T.test("push: a glyphed enemy tower keeps the bot at it (glyph-wait), the end pr
 	end
 	T.ok(printed("glyph-wait lane=3"), "glyph-wait line")
 	T.ok(printed("why=no-creeps"), "why")
+	-- Game 078 (maintainer: "standing still is bad"): at the edge with nothing to hit, the bot side-steps along it
+	-- instead of a move to its own spot, and stays out of the tower's reach.
+	bot._loc = moved
+	moved = nil
+	T.stub.time = 1303
+	ok, err = pcall(function()
+		Push.PushThink(bot, 3)
+	end)
+	T.ok(ok, tostring(err))
+	T.ok(moved ~= nil, "a move order at the edge")
+	local stepped = moved ~= nil and math.sqrt((moved.x - bot._loc.x) ^ 2 + (moved.y - bot._loc.y) ^ 2) or 0
+	T.ok(stepped >= 100, "a side-step, not a stand-still: " .. stepped)
+	local fromTower = moved ~= nil and math.sqrt((moved.x - 6100) ^ 2 + (moved.y + 2200) ^ 2) or 0
+	T.ok(fromTower > 750, "the step stays outside the tower's reach: " .. fromTower)
 	-- The Glyph ends: the next desire think closes the episode.
 	glyphed = false
 	T.stub.time = 1307
@@ -143,4 +160,5 @@ T.test("push: a glyphed enemy tower keeps the bot at it (glyph-wait), the end pr
 	T.ok(ok, tostring(err))
 	T.ok(bot._glyphWait == nil, "episode closed")
 	T.ok(printed("glyph-end why=ended lane=3"), "glyph-end line")
+	T.ok(printed("moves=2 backs=0 spread=-1"), "glyph-end counts the moves (out of range, one side-step), no ally")
 end)

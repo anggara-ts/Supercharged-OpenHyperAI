@@ -329,17 +329,18 @@ function PushRules.GlyphLeft(read, elapsed)
 	return math.max(0, PushRules.GLYPH_STRUCTURE_SECONDS - (elapsed or 0)), "timer"
 end
 
--- What a pusher does while the enemy tower in front has the Glyph (#12, maintainer, live game 074 2026-11-23: "bots
--- are running away from t1 when glyph is active. t1 only got shield and no multiple hits. creeps also only get shield
--- for a few seconds (check online) so if we have nearby ally creep, no need to back off except when outnumbered by
--- enemy hero"). The tower can't be hit for 7s, its creeps for 3s; the group stays and hits what it can:
+-- What a pusher does while the enemy tower in front has the Glyph (#12). The tower can't be hit for 7s, its creeps for
+-- 3s; the group waits it out at the tower and hits what it can:
 --   "back"  - leave as before (the lane-front step back): HP under 30%, or more enemy heroes than ours near the tower.
---   "edge"  - wait just outside the tower's range, hitting creeps and heroes outside it: a tier 2+ tower (multishot hits
---             5 more targets, so our creeps don't keep it off us), or a tier 1 tower on us with none of our creeps in
---             its range or hurting us (s.towerHurts), or no creeps of ours in its range.
---   "stay"  - a tier 1 tower (one target at a time) with our creeps in its range: stay and hit anything in reach.
--- s: tier, hp, allies, enemies (heroes within 1200 of the tower), towerOnBot, towerHurts, creeps (ours in its range).
--- Returns mode, why.
+--   "edge"  - wait just outside the tower's range, hitting creeps and heroes outside it, at every tier: a tier 2+ tower
+--             ("multishot": it hits 5 more targets, so our creeps don't keep it off us), a tier 1 tower ("tier1", or
+--             "no-creeps" with none of ours in its range).
+-- Game 074 (maintainer: "if we have nearby ally creep, no need to back off except when outnumbered") had a "stay" mode
+-- at a tier 1 with our creeps under it. Game 078 replaced it (maintainer, 2026-11-24: "i'd like to revert how bot react
+-- to t1 glyph ... standing still under t1 ... i like how they dont attack creep under shield"; "agree to walk back and
+-- wait at the edge. but standing still is bad. enemy could easily land disables or setup team fight to standstill
+-- heroes"): game 078 t=508 Puck stood under Dire's mid T1 at 49% HP in mode=stay.
+-- s: tier, hp, allies, enemies (heroes within 1200 of the tower), creeps (ours in its range). Returns mode, why.
 function PushRules.GlyphWait(s)
 	if (s.hp or 1) < 0.3 then
 		return "back", "low-hp"
@@ -350,13 +351,100 @@ function PushRules.GlyphWait(s)
 	if (s.tier or 1) >= 2 then
 		return "edge", "multishot"
 	end
-	if s.towerOnBot and ((s.creeps or 0) < 1 or s.towerHurts) then
-		return "edge", "tower-aggro"
+	if (s.creeps or 0) < 1 then
+		return "edge", "no-creeps"
 	end
-	if (s.creeps or 0) >= 1 then
-		return "stay", "creeps-tank"
+	return "edge", "tier1"
+end
+
+-- The edge wait's arc (#12, game 078): the waiting bots stay within this many radians either side of the line from
+-- the tower to our fountain (no walk around the tower to its far side), and about this far from each other, so one
+-- AoE disable can't catch the group.
+PushRules.GLYPH_EDGE_ARC = 0.8
+PushRules.GLYPH_SPREAD = 300
+
+-- A point `radius` from the tower (tx, ty) in the direction of (px, py), kept within `maxAngle` radians of (bx, by),
+-- the unit vector from the tower toward our fountain. Returns x, y.
+function PushRules.GlyphEdgePoint(tx, ty, px, py, bx, by, radius, maxAngle)
+	local dx, dy = px - tx, py - ty
+	local length = math.sqrt(dx * dx + dy * dy)
+	if length < 1 then
+		dx, dy = bx, by
+	else
+		dx, dy = dx / length, dy / length
 	end
-	return "edge", "no-creeps"
+	local cosMax = math.cos(maxAngle)
+	if dx * bx + dy * by < cosMax then
+		-- Past the arc's end: the end on the side the point is on (rotate b by +-maxAngle).
+		local side = (bx * dy - by * dx) >= 0 and 1 or -1
+		local sinMax = math.sin(maxAngle) * side
+		dx, dy = bx * cosMax - by * sinMax, bx * sinMax + by * cosMax
+	end
+	return tx + dx * radius, ty + dy * radius
+end
+
+-- Distance from (x, y) to the nearest of `points` ({ x =, y = } each), or nil with none.
+function PushRules.NearestDistance(x, y, points)
+	local best = nil
+	for _, point in ipairs(points or {}) do
+		local distance = math.sqrt((point.x - x) ^ 2 + (point.y - y) ^ 2)
+		if best == nil or distance < best then
+			best = distance
+		end
+	end
+	return best
+end
+
+-- The next side-step of a bot waiting at a glyphed tower's edge with nothing to hit (#12, game 078: no standing
+-- still). s: tx, ty (tower), x, y (bot), bx, by (unit vector tower -> our fountain), radius (the edge), step (distance
+-- of one step), side (1 or -1: the way it goes this time; the caller flips it after every step), maxAngle (the arc),
+-- allies ({ x =, y = } of the other waiting allies or where they are walking to), minGap (spread). Candidates: `side`
+-- then the other way, one step then two, each put on the edge arc; a candidate that lands within a third of a step of
+-- the bot (the arc's end) is no move and is skipped. The first one minGap+ from every ally wins, else the one farthest
+-- from its nearest ally. Returns x, y, the side taken, the nearest ally's distance there (nil: no ally).
+function PushRules.GlyphSideStep(s)
+	local tx, ty, x, y = s.tx, s.ty, s.x, s.y
+	local ux, uy = x - tx, y - ty
+	local length = math.sqrt(ux * ux + uy * uy)
+	if length < 1 then
+		ux, uy = s.bx, s.by
+	else
+		ux, uy = ux / length, uy / length
+	end
+	-- The tangent at the bot (90 degrees from the tower -> bot direction).
+	local px, py = -uy, ux
+	local side = (s.side or 1) >= 0 and 1 or -1
+	local step = s.step or 250
+	local minGap = s.minGap or PushRules.GLYPH_SPREAD
+	local best, bestGap = nil, -1
+	for _, try in ipairs({ { side, 1 }, { -side, 1 }, { side, 2 }, { -side, 2 } }) do
+		local cx, cy = PushRules.GlyphEdgePoint(
+			tx,
+			ty,
+			x + px * step * try[1] * try[2],
+			y + py * step * try[1] * try[2],
+			s.bx,
+			s.by,
+			s.radius,
+			s.maxAngle or PushRules.GLYPH_EDGE_ARC
+		)
+		if math.sqrt((cx - x) ^ 2 + (cy - y) ^ 2) >= step / 3 then
+			local gap = PushRules.NearestDistance(cx, cy, s.allies)
+			if gap == nil or gap >= minGap then
+				return cx, cy, try[1], gap
+			end
+			if gap > bestGap then
+				best, bestGap = { cx, cy, try[1] }, gap
+			end
+		end
+	end
+	if best == nil then
+		-- Every candidate was no move (cannot happen on an arc wider than two steps): go back onto the edge.
+		local cx, cy =
+			PushRules.GlyphEdgePoint(tx, ty, x, y, s.bx, s.by, s.radius, s.maxAngle or PushRules.GLYPH_EDGE_ARC)
+		return cx, cy, -side, PushRules.NearestDistance(cx, cy, s.allies)
+	end
+	return best[1], best[2], best[3], bestGap
 end
 
 -- How much a tower counts in a fight estimate (Fu.WeAreStronger) while it has the Glyph: per target its damage is
