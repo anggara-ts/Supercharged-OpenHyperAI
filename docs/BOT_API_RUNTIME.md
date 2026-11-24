@@ -17,8 +17,6 @@ confirmed or disproved.
 - Item management beyond buy/sell: `ActionImmediate_DisassembleItem`, `ActionImmediate_SetItemCombineLock`, `ActionImmediate_SwapItems`.
 - Shrines and runes have their own orders: `Action_UseShrine`, `Action_PickUpRune` (plus Push/Queue). `GetOutpost`, `GetShrine`, `GetShrineCooldown`, `IsShrineHealing`, `GetNearbyShrines` are available.
 - **A mode file replaces Valve's mode whole, even without `Think`.** Game 063 (#141): a `mode_item_generic.lua` that defined only `GetDesire` won the item mode 3.5-5.3s at a time on the river bounties and water runes, and nothing was picked up (`[SHy-ITEMMODE] result ... picked=no`); Valve's item `Think` did not run behind it. The file was removed.
-- **Chat from inside the chat callback (seen once, game 078, #225).** `bot:ActionImmediate_Chat` called inside the function given to `InstallChatCallback` said nothing: `!debug` switched the mode at t=700 (`[SHy-CHAT] heard cmd=!debug`, then 25 decision lines), but its reply never reached the chat, and the game printed no `CLocalize::FindSafe` echo of it. A line said from the bot's own think does show up. Queue anything said in reply to chat and say it from a think (`AboutRules.Note` for `!about` in #217, `callbackChat` in `ability_item_usage_generic.lua`).
-- **Human pings arrive spaced out (games 077-078, #225).** The times of the human's pings as `GetMostRecentPing` sees them came a median 1.5s apart, even when the human clicked fast (game 077: 51 gaps under 6s, the shortest 1.0s; game 078: 90th percentile 3.8s). Pings may be rate-limited or dropped by the game; this is not confirmed. `GetMostRecentPing` keeps only the last ping, so a reader that polls slower than that misses some.
 - **Tested in 7.42 games (063-064):**
   - `Action_ClearActions(true)` stops an attack wind-up: 70 of 70 stops held (`[SHy-LH] cancel-result stopped=yes method=clear`, #157).
   - The time left on an enemy hero's `modifier_teleporting` counts down with the clock (`[SHy-ALCHEMIST] tp-left ... real=yes`, 4 of 4, #122/#166), so it is the real remaining TP time.
@@ -76,6 +74,11 @@ since #110. Issue #109.
 - **TOWER**: `TOWER_BASE_1`=9, `TOWER_BASE_2`=10, `TOWER_BOT_1`=6, `TOWER_BOT_2`=7, `TOWER_BOT_3`=8, `TOWER_MID_1`=3, `TOWER_MID_2`=4, `TOWER_MID_3`=5, `TOWER_TOP_1`=0, `TOWER_TOP_2`=1, `TOWER_TOP_3`=2
 - **UNIT_LIST**: `UNIT_LIST_ALL`=0, `UNIT_LIST_ALLIED_BUILDINGS`=5, `UNIT_LIST_ALLIED_CREEPS`=3, `UNIT_LIST_ALLIED_HEROES`=2, `UNIT_LIST_ALLIED_OTHER`=6, `UNIT_LIST_ALLIED_WARDS`=4, `UNIT_LIST_ALLIES`=1, `UNIT_LIST_ENEMIES`=7, `UNIT_LIST_ENEMY_BUILDINGS`=11, `UNIT_LIST_ENEMY_CREEPS`=9, `UNIT_LIST_ENEMY_HEROES`=8, `UNIT_LIST_ENEMY_OTHER`=12, `UNIT_LIST_ENEMY_WARDS`=10, `UNIT_LIST_NEUTRAL_CREEPS`=13, `UNIT_LIST_THINKERS`=14
 - **other**: `BOT_DESIRE_OVERRIDE`=1*, `DOTA_ABILITY_BEHAVIOR_NOT_LEARNABLE`=64, `GLYPH_COOLDOWN`=360, `SHRINE_BASE_1`=0, `SHRINE_BASE_2`=1, `SHRINE_BASE_3`=2, `SHRINE_JUNGLE_1`=3, `SHRINE_JUNGLE_2`=4
+
+## Chat and pings (#225)
+
+- **Chat from inside the chat callback (seen once, game 078, #225).** `bot:ActionImmediate_Chat` called inside the function given to `InstallChatCallback` said nothing: `!debug` switched the mode at t=700 (`[SHy-CHAT] heard cmd=!debug`, then 25 decision lines), but its reply never reached the chat, and the game printed no `CLocalize::FindSafe` echo of it. A line said from the bot's own think does show up. Queue anything said in reply to chat and say it from a think (`AboutRules.Note` for `!about` in #217, `callbackChat` in `ability_item_usage_generic.lua`).
+- **Human pings arrive spaced out (games 077-078, #225).** The times of the human's pings as `GetMostRecentPing` sees them came a median 1.5s apart, even when the human clicked fast (game 077: 51 gaps under 6s, the shortest 1.0s; game 078: 90th percentile 3.8s). Pings may be rate-limited or dropped by the game; this is not confirmed. `GetMostRecentPing` keeps only the last ping, so a reader that polls slower than that misses some.
 
 ## Names that come from our own scripts
 
