@@ -220,7 +220,9 @@ local function InvulnerableHoldDesire()
 end
 function GetDesire()
 	-- The item swap probe's hold (#218, bots/lib/systems/swap_probe.lua): stand still, above every other mode.
-	if DotaTime() < (bot._swapProbeHoldUntil or -1) then
+	-- Only while the probe set it: a default of -1 was later than every pre-game DotaTime(), so all ten bots sat in
+	-- this mode at 2.5 until t=-1 with the probe off (games 074-078: no pre-horn rune walk, #32).
+	if bot._swapProbeHoldUntil ~= nil and DotaTime() < bot._swapProbeHoldUntil then
 		return 2.5
 	end
 	-- Before the invulnerable gate (game 064: the gate returned 0 as soon as the shift made Puck invulnerable, so the
