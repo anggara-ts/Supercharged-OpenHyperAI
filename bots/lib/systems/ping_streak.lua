@@ -55,7 +55,9 @@ function PingStreak.Near(x, y, fx, fy, bx, by)
 end
 
 -- One human's most recent ping, read at `now` (GameTime()). `state`: that human's streak, kept by the caller
--- ({ seen = the last ping time read, count =, at = the last counted ping's time }). `pingTime`, `x`, `y`: the ping
+-- ({ seen = the last ping time read, count =, at = the last counted ping's time }; Step also leaves the last new
+-- ping's facts for the egg-step log: near =, gap = seconds since the counted ping before it or nil, old = read too
+-- late, prevCount = the count before it). `pingTime`, `x`, `y`: the ping
 -- (GetMostRecentPing: time in GameTime(), location); `fx`, `fy`: our spawn point; `bx`, `by` (optional): our
 -- fountain building (PingStreak.Near). A ping is new when its time differs from the last one read, so any bot's think
 -- can feed the same state. Returns true when this ping completes the streak (it then starts over).
@@ -64,7 +66,11 @@ function PingStreak.Step(state, pingTime, x, y, fx, fy, now, bx, by)
 		return false
 	end
 	state.seen = pingTime
-	if now - pingTime > PingStreak.GAP or not PingStreak.Near(x, y, fx, fy, bx, by) then
+	state.near = PingStreak.Near(x, y, fx, fy, bx, by)
+	state.gap = state.at ~= nil and pingTime - state.at or nil
+	state.old = now - pingTime > PingStreak.GAP
+	state.prevCount = state.count or 0
+	if state.old or not state.near then
 		state.count, state.at = 0, nil
 		return false
 	end

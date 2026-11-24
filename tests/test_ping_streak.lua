@@ -217,3 +217,87 @@ T.test("ping streak: the item think finds the fountain building and counts pings
 	end
 	T.ok(found, "the building is logged once found")
 end)
+
+-- Game 078, 26:18-26:23: five pings read by the [SHy-PING] trace (DotaTime when read; the pings' own times are
+-- GameTime, a fixed offset away). The first at -7117,-6692 (612 from the spawn point, 419 from the building), four on
+-- the fountain building at -7456,-6938. They answered (`[SHy-CHAT] t=1584 alchemist egg team=radiant human=4
+-- said=yes`); this replays them, and the egg-step line shows each count.
+T.test("ping streak: the game 078 streak at 26:18 answers on the fifth ping", function()
+	local Streak = Load()
+	local fx, fy, bx, by = -6619, -6336, -7456, -6938
+	local offset = 90
+	local pings = {
+		{ 1578.8, -7117, -6692 },
+		{ 1580.4, -7512, -6918 },
+		{ 1581.5, -7511, -6917 },
+		{ 1582.6, -7510, -6913 },
+		{ 1583.8, -7508, -6913 },
+	}
+	local state = { count = 0 }
+	for i, ping in ipairs(pings) do
+		local at = ping[1] + offset
+		local done = Streak.Step(state, at, ping[2], ping[3], fx, fy, at + 0.1, bx, by)
+		T.eq(state.near, true, "ping " .. i .. " is near")
+		if i < #pings then
+			T.eq(done, false, "ping " .. i .. ": not yet")
+			T.eq(state.count, i, "ping " .. i .. " counted")
+		else
+			T.eq(done, true, "the fifth ping answers")
+			T.eq(state.count, 0, "then it starts over")
+		end
+		if i > 1 then
+			T.near(state.gap, ping[1] - pings[i - 1][1], 1e-6, "gap " .. i)
+		end
+	end
+	-- The same pings read by a bot a second late are still fresh (within GAP).
+	state = { count = 0 }
+	local done = false
+	for _, ping in ipairs(pings) do
+		done = Streak.Step(state, ping[1] + offset, ping[2], ping[3], fx, fy, ping[1] + offset + 1, bx, by)
+	end
+	T.eq(done, true, "read 1s late: still answers")
+end)
+
+T.test("ping streak: the item think logs egg-step for each fountain ping", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich", time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local bot = GetBot()
+	local humanSlot = GetTeamMember(1) == bot and 2 or 1
+	local human = GetTeamMember(humanSlot)
+	local humanId = GetTeamPlayers(GetTeam())[humanSlot]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	bot.ActionImmediate_Chat = function() end
+	local fountain = Fu.GetTeamFountain()
+	local pingTime, pingX = -100, fountain.x + 200
+	human.GetMostRecentPing = function()
+		return { time = pingTime, location = Vector(pingX, fountain.y, 0), normal_ping = true }
+	end
+	Usage.WatchFountainPings()
+	T.stub.printed = {}
+	for _ = 1, 3 do
+		T.stub.time = T.stub.time + 1.2
+		pingTime = GameTime() - 0.2
+		Usage.WatchFountainPings()
+		Usage.WatchFountainPings()
+	end
+	-- A ping far away ends the count, a later far ping logs nothing.
+	pingX = fountain.x + 5000
+	for _ = 1, 2 do
+		T.stub.time = T.stub.time + 1.2
+		pingTime = GameTime() - 0.2
+		Usage.WatchFountainPings()
+	end
+	local steps = {}
+	for _, line in ipairs(T.stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" egg-step ", 1, true) then
+			steps[#steps + 1] = line
+		end
+	end
+	T.eq(#steps, 4, "three near pings and the far one that ended the count")
+	T.ok(steps[1] ~= nil and steps[1]:find("count=1 near=true gap=- ", 1, true) ~= nil, "the first: count 1")
+	T.ok(steps[3] ~= nil and steps[3]:find("count=3 near=true gap=1.2 ", 1, true) ~= nil, "the third: count 3")
+	T.ok(steps[4] ~= nil and steps[4]:find("count=0 near=false", 1, true) ~= nil, "the far ping: count 0")
+end)

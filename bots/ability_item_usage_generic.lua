@@ -1078,19 +1078,39 @@ function Usage.WatchFountainPings()
 				state = { count = 0 }
 				shared.humans[human.id] = state
 			end
-			if
-				PingStreak.Step(
-					state,
-					ping.time,
-					ping.location.x,
-					ping.location.y,
-					fountain.x,
-					fountain.y,
-					now,
-					building and building.x,
-					building and building.y
+			local seenBefore = state.seen
+			local done = PingStreak.Step(
+				state,
+				ping.time,
+				ping.location.x,
+				ping.location.y,
+				fountain.x,
+				fountain.y,
+				now,
+				building and building.x,
+				building and building.y
+			)
+			-- [SHy-CHAT] egg-step (game 078): one line per new ping that is near the fountain or ends a running count, so
+			-- the next game shows how far a streak got. Each ping is read once per team (state.seen), so this prints at
+			-- most once per ping.
+			if state.seen ~= seenBefore and (state.near or (state.prevCount or 0) > 0) then
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s egg-step team=%s human=%d count=%d near=%s gap=%s old=%s at=%.0f,%.0f",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						done and PingStreak.COUNT or (state.count or 0),
+						tostring(state.near),
+						state.gap ~= nil and string.format("%.1f", state.gap) or "-",
+						tostring(state.old),
+						ping.location.x,
+						ping.location.y
+					)
 				)
-			then
+			end
+			if done then
 				local said = "throttled"
 				if PingStreak.Allow(shared, now) then
 					said = pcall(function()
