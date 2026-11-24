@@ -8,6 +8,10 @@ The list of known limitations (what bots can't do, why, and the workaround) is k
 [discussion #50](https://github.com/anggara-ts/Supercharged-OpenHyperAI/discussions/50); update it when a limitation is
 confirmed or disproved.
 
+See also: upstream's [`docs/BOT_API_REFERENCE.md`](https://github.com/forest0xia/dota2bot-OpenHyperAI/blob/pr-140-refactor/docs/BOT_API_REFERENCE.md)
+(forest0xia/dota2bot-OpenHyperAI, branch `pr-140-refactor`, written for 7.41a from the online docs). It is an
+unverified secondary source: its claims that matter to us are listed on #243 to be probed in a game.
+
 ## Key findings
 
 - **No vector-target order.** Abilities can only be cast with no target, on a unit, on a location or on a tree (plus the Push/Queue variants). A vector-targeted spell such as Muerta's Dead Shot cannot have its direction chosen.

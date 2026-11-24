@@ -325,6 +325,7 @@ game, an outdated mechanic, or an idea that has a better alternative. Not every 
 | `/review-game` | the game ended: `after-game.js`, tracker, PR comments, findings, issues, next lineup |
 | `/merge-pr` | a PR is READY TO MERGE: mute proven logs, tick checks, squash-merge, tick issue items |
 | `/goodnight` | the maintainer is away: fix every open, unresolved issue in priority order, one ready PR each, build the next game |
+| `/patch-update` | Valve shipped a Dota patch: triage the notes, refresh game data, items, abilities, builds, map, API dump, test game, release |
 | `/release` | a release: next version, release notes from the PRs merged since the last tag (dry run by default), then version files, tag and GitHub release on "publish" |
 
 ## Working notes for AI agents
@@ -359,8 +360,9 @@ came with (or a small `docs/` PR).
   its own command; never chain `<check> | tail && git commit` (the chain sees tail's exit code).
 - **Local test settings.** The maintainer's uncommitted `bots/customize/general.lua` keeps `Weak_Hero_Cap = 5` while
   testing (shipped default 1): remind the maintainer to set it back when a test series ends.
-- **After every Dota patch** check the `[SHy-API]` dump for changes, and whether outposts and watchers work for
-  bots again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[SHy-OUTPOST] capture-off`;
+- **After every Dota patch** run [`/patch-update`](.claude/skills/patch-update/SKILL.md) (sources:
+  `docs/PATCH_UPDATE.md`): it diffs the `[SHy-API]` dump. Also check whether outposts and watchers work for bots
+  again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[SHy-OUTPOST] capture-off`;
   #111, discussion #50); remind the maintainer to re-implement them when Valve fixes it.
 
 ## Things not to do
