@@ -1089,12 +1089,6 @@ function Push.GetPushDesire(bot, lane)
 		return BotModeDesire.None
 	end
 	local desire = math.min(Push.GetPushDesireHelper(bot, lane), 1)
-	-- A bot carrying out a human's forced order elsewhere (#222): this lane stays under the order's desire, so a kill
-	-- push (0.99) does not pull it away (maintainer, game 078: the human insisting outranks the team's calls).
-	local orderCap = HumanOrders.CapForOrder(bot)
-	if orderCap ~= nil and desire > orderCap then
-		desire = orderCap
-	end
 	bot.pushDesire = desire
 	if desire >= 0.5 and (bot._lastPushChatDesire or 0) < 0.5 and FarmDefend.ClaimDecisionChat("late_push") then
 		local chatKey = lane == Lane.Top and "say_push_top" or (lane == Lane.Mid and "say_push_mid" or "say_push_bot")
@@ -1104,6 +1098,13 @@ function Push.GetPushDesire(bot, lane)
 		end
 	end
 	bot._lastPushChatDesire = desire
+	-- A bot carrying out a human's forced order elsewhere (#222): this lane stays under the order's desire, so a kill
+	-- push (0.99) does not pull it away (maintainer, game 078: the human insisting outranks the team's calls).
+	local orderCap = HumanOrders.CapForOrder(bot)
+	if orderCap ~= nil and desire > orderCap then
+		bot.pushDesire = orderCap
+		return orderCap
+	end
 	return desire
 end
 local function isAttackableBuilding(unit)

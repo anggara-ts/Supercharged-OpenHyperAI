@@ -980,7 +980,7 @@ function Usage.SetReplyHumanTime(chatEvent)
 				Fu.Utils.DebugMode = not Fu.Utils.DebugMode
 				IsDebug = Fu.Utils.DebugMode
 				Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
-				on, key, word = Fu.Utils.DebugMode, "say_debug", "debug"
+				on, key, word = Fu.Utils.DebugMode, "say_debug_tech", "debug"
 			else
 				Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
 				on, key, word = Fu.Utils.GameStates.chattyChat, "say_chatty", "chatty"
