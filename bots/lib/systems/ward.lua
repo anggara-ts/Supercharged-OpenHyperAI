@@ -354,7 +354,8 @@ local function NeedsCover(spot)
 end
 -- Lane spots (user call: after towers fall, bots never warded along the lane paths, only the fixed
 -- spots). For a lane where a tier-1 tower (either team's) is down, after 10:00: a point on the lane
--- path a little ahead of our wave, toward the enemy, so the vision follows the front both ways.
+-- path ahead of our wave (900, or farther to keep clear of our own towers, see PickLaneSpot), toward the
+-- enemy, so the vision follows the front both ways.
 -- Positions come from the game's lane data (GetLaneFrontLocation with a forward offset, as push.lua
 -- uses it backward with -500), so they are on walkable ground on the lane path. One spot table per
 -- lane is kept and moved only when the front has moved 900+, so a planted or given-up mark stays.
@@ -388,6 +389,164 @@ local function LaneTier1Down(lane)
 	local t1 = lane == LANE_TOP and TOWER_TOP_1 or lane == LANE_MID and TOWER_MID_1 or TOWER_BOT_1
 	return GetTower(TEAM_RADIANT, t1) == nil or GetTower(TEAM_DIRE, t1) == nil
 end
+-- Gap between a lane observer and our own towers (#15, game 080, 23:40: Largo planted a lane observer at the rim of
+-- our top T2's range, where the tower already sees most of what the ward sees). Maintainer's rule: the ward stands
+-- at least the tower's attack range plus the observer's vision away from every living tower of ours, so its vision
+-- starts where the tower's area ends. Observer vision 1600: 7.42 game files, item_ward_observer
+-- vision_range_tooltip 1600 (Valve datafeed item 42, the same). Tower range from tower:GetAttackRange() at runtime
+-- (700 in npc_units.txt for every tower, the fallback). LANE_GAP_MARGIN: the ward can land off the spot (the plant
+-- retry tries up to 100 out, PlantShort plants up to ~230 short of it), so the spot keeps that much more.
+local OBS_VISION = 1600
+local LANE_GAP_MARGIN = 250
+local OWN_TOWER_IDS = {
+	TOWER_TOP_1,
+	TOWER_TOP_2,
+	TOWER_TOP_3,
+	TOWER_MID_1,
+	TOWER_MID_2,
+	TOWER_MID_3,
+	TOWER_BOT_1,
+	TOWER_BOT_2,
+	TOWER_BOT_3,
+	TOWER_BASE_1,
+	TOWER_BASE_2,
+}
+function Ward.OwnTowerGap(range)
+	return (range or 700) + OBS_VISION
+end
+-- Our living towers as { x =, y =, range = } (plain numbers, for the pure helpers below).
+function Ward.OwnTowerList()
+	local towers = {}
+	for _, id in ipairs(OWN_TOWER_IDS) do
+		local tower = GetTower(GetTeam(), id)
+		if tower ~= nil and not tower:IsNull() then
+			local loc = tower:GetLocation()
+			towers[#towers + 1] = { x = loc.x, y = loc.y, range = tower:GetAttackRange() or 700 }
+		end
+	end
+	return towers
+end
+-- Pure: the distance from (x, y) to the nearest tower in towers, and the smallest margin (distance minus that
+-- tower's OwnTowerGap) over all of them. Both nil without towers.
+function Ward.OwnTowerClearance(x, y, towers)
+	local nearest, margin = nil, nil
+	for _, tower in ipairs(towers) do
+		local dist = math.sqrt((tower.x - x) ^ 2 + (tower.y - y) ^ 2)
+		local room = dist - Ward.OwnTowerGap(tower.range)
+		if nearest == nil or dist < nearest then
+			nearest = dist
+		end
+		if margin == nil or room < margin then
+			margin = room
+		end
+	end
+	return nearest, margin
+end
+-- Pure: picks the lane observer point. points are candidates on the lane path ahead of our wave, ordered from the
+-- wave forward, each { x =, y =, enemyNear = bool, inBase = bool }; first is the index of the preferred point (900
+-- ahead). Walks forward from it to the first point clear of our towers (margin >= extra); a point in enemy tower range
+-- or inside a base ends the walk (deeper is worse). When the preferred point itself is in enemy tower range, the
+-- points behind it are tried, back toward the wave (the old pull-back to 300), with the same own-tower rule.
+-- Returns the index, or nil and why ("own-tower", "enemy-tower", "base").
+function Ward.PickLaneSpot(points, first, towers, extra)
+	extra = extra or 0
+	local function clear(point)
+		local _, margin = Ward.OwnTowerClearance(point.x, point.y, towers)
+		return margin == nil or margin >= extra
+	end
+	local why = "own-tower"
+	for i = first, #points do
+		local point = points[i]
+		if point.inBase then
+			why = "base"
+			break
+		end
+		if point.enemyNear then
+			why = "enemy-tower"
+			break
+		end
+		if clear(point) then
+			return i
+		end
+	end
+	if points[first] ~= nil and points[first].enemyNear then
+		for i = first - 1, 1, -1 do
+			local point = points[i]
+			if not point.enemyNear and not point.inBase and clear(point) then
+				return i
+			end
+		end
+	end
+	return nil, why
+end
+-- Offsets ahead of the wave the lane spot can take: 300 and 600 (pull-back), 900 (preferred), then forward in steps
+-- of 300 up to 6900. A fixed list: GetLaneFrontLocation is called once per offset, at most every LANE_RECALC seconds.
+local LANE_OFFSETS = {}
+for offset = 300, 6900, 300 do
+	LANE_OFFSETS[#LANE_OFFSETS + 1] = offset
+end
+local LANE_FIRST = LANE_AHEAD / 300
+local LANE_RECALC = 2
+local laneCalc = {}
+local laneLog = {}
+local LANE_NAMES = { [LANE_TOP] = "top", [LANE_MID] = "mid", [LANE_BOT] = "bot" }
+-- One line per lane when its spot moves or when the lane has none (and why changed): `[SHy-WARD] lane-spot`.
+local function LaneSpotLog(lane, key, text)
+	if laneLog[lane] == key then
+		return
+	end
+	laneLog[lane] = key
+	local me = GetBot()
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s lane-spot lane=%s %s",
+			DotaTime(),
+			me ~= nil and (string.gsub(me:GetUnitName(), "npc_dota_hero_", "")) or "?",
+			LANE_NAMES[lane] or tostring(lane),
+			text
+		)
+	)
+end
+-- The lane observer point for one lane: { loc =, offset = } or { why = } when there is none.
+local function LaneSpotPick(lane, fountain, enemyFountain)
+	local calc = laneCalc[lane]
+	if calc ~= nil and DotaTime() - calc.t < LANE_RECALC then
+		return calc
+	end
+	local points = {}
+	for idx, offset in ipairs(LANE_OFFSETS) do
+		local loc = GetLaneFrontLocation(GetTeam(), lane, offset)
+		if loc == nil then
+			break
+		end
+		-- Not under an enemy tower (user question: a wave pushing their T2 put the spot in its range; the deep filter
+		-- only covers towers that still have an outer tower in front). Not inside either base: a front pushed to a
+		-- barracks is a siege, not a ward spot.
+		points[idx] = {
+			x = loc.x,
+			y = loc.y,
+			loc = loc,
+			offset = offset,
+			enemyNear = NearEnemyTower(loc),
+			inBase = fountain ~= nil
+				and enemyFountain ~= nil
+				and (Fu.GetDistance(loc, fountain) < 4000 or Fu.GetDistance(loc, enemyFountain) < 4000),
+		}
+	end
+	local idx, why = nil, "no-front"
+	if points[LANE_FIRST] ~= nil then
+		idx, why = Ward.PickLaneSpot(points, LANE_FIRST, Ward.OwnTowerList(), LANE_GAP_MARGIN)
+	end
+	calc = { t = DotaTime() }
+	if idx ~= nil then
+		calc.loc, calc.offset = points[idx].loc, points[idx].offset
+	else
+		calc.why = why
+	end
+	laneCalc[lane] = calc
+	return calc
+end
 local function LaneSpots()
 	local out = {}
 	if DotaTime() < 10 * 60 then
@@ -397,22 +556,9 @@ local function LaneSpots()
 	local enemyFountain = Fu.GetEnemyFountain and Fu.GetEnemyFountain() or nil
 	for _, lane in ipairs({ LANE_TOP, LANE_MID, LANE_BOT }) do
 		if LaneTier1Down(lane) then
-			local loc = GetLaneFrontLocation(GetTeam(), lane, LANE_AHEAD)
-			-- Not under an enemy tower (user question: a wave pushing their T2 put the spot in its
-			-- range; the deep filter only covers towers that still have an outer tower in front).
-			-- Pull back to 300 ahead of the wave, else no lane spot for now.
-			if loc ~= nil and NearEnemyTower(loc) then
-				loc = GetLaneFrontLocation(GetTeam(), lane, 300)
-				if loc ~= nil and NearEnemyTower(loc) then
-					loc = nil
-				end
-			end
-			-- Not inside either base: a front pushed to a barracks is a siege, not a ward spot.
-			local inBase = fountain ~= nil
-				and enemyFountain ~= nil
-				and loc ~= nil
-				and (Fu.GetDistance(loc, fountain) < 4000 or Fu.GetDistance(loc, enemyFountain) < 4000)
-			if loc ~= nil and not inBase then
+			local pick = LaneSpotPick(lane, fountain, enemyFountain)
+			local loc = pick.loc
+			if loc ~= nil then
 				local cur = laneSpots[lane]
 				if cur == nil or Fu.GetDistance(cur.location, loc) >= 900 then
 					local ours = fountain ~= nil
@@ -420,10 +566,31 @@ local function LaneSpots()
 						and Fu.GetDistance(loc, fountain) < Fu.GetDistance(loc, enemyFountain)
 					local ourSide = TeamSide()
 					local side = ours and ourSide or (ourSide == "radiant" and "dire" or "radiant")
-					cur = { location = loc, plant_time_obs = 0, plant_time_sentry = 0, role = "lane", side = side }
+					cur = {
+						location = loc,
+						plant_time_obs = 0,
+						plant_time_sentry = 0,
+						role = "lane",
+						side = side,
+						lane = LANE_NAMES[lane],
+					}
 					laneSpots[lane] = cur
+					local nearest = Ward.OwnTowerClearance(loc.x, loc.y, Ward.OwnTowerList())
+					LaneSpotLog(
+						lane,
+						string.format("%.0f,%.0f", loc.x, loc.y),
+						string.format(
+							"at=%.0f,%.0f ahead=%d ownTower=%.0f",
+							loc.x,
+							loc.y,
+							pick.offset or -1,
+							nearest or 99999
+						)
+					)
 				end
 				out[#out + 1] = cur
+			else
+				LaneSpotLog(lane, "none:" .. tostring(pick.why), "none why=" .. tostring(pick.why))
 			end
 		end
 	end

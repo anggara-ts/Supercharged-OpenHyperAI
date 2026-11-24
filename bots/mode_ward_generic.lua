@@ -263,9 +263,54 @@ local function DumpWards()
 		)
 	end
 end
-local function AnnounceWard(kind, spot)
+-- A lane observer down (#15, game 080): where it went and how far it stands from our nearest living tower.
+-- `ownTower` = that distance, `need` = that tower's range + observer vision 1600 (Ward.OwnTowerGap), `margin` = the
+-- smallest distance minus need over all our towers (>= 0: the ward's vision starts where every tower's area ends).
+-- at = the point the ward was cast on (a plant retry or PlantShort can put it off the spot). Once per ward: the
+-- dispenser path can announce the same plant twice.
+local function LaneObsLog(spot, at)
+	if spot == nil or spot.role ~= "lane" then
+		return
+	end
+	local loc = at or spot.location
+	if loc == nil then
+		return
+	end
+	local last = bot._laneObsLog
+	if last ~= nil and last.spot == spot and DotaTime() - last.t < 20 then
+		return
+	end
+	bot._laneObsLog = { spot = spot, t = DotaTime() }
+	local towers = Ward.OwnTowerList()
+	local nearest, margin = Ward.OwnTowerClearance(loc.x, loc.y, towers)
+	local need = 0
+	for _, tower in ipairs(towers) do
+		local dist = math.sqrt((tower.x - loc.x) ^ 2 + (tower.y - loc.y) ^ 2)
+		if nearest ~= nil and dist <= nearest then
+			need = Ward.OwnTowerGap(tower.range)
+		end
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s lane-obs planted lane=%s at=%.0f,%.0f ownTower=%.0f need=%.0f margin=%.0f",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			tostring(spot.lane or "?"),
+			loc.x,
+			loc.y,
+			nearest or 99999,
+			need,
+			margin or 99999
+		)
+	)
+end
+local function AnnounceWard(kind, spot, at)
 	spot = spot or wardSpot
 	RememberWard(kind, spot)
+	if kind == "observer" then
+		LaneObsLog(spot, at)
+	end
 	local role = spot and spot.role or nil
 	local wardLoc = spot and spot.location or nil
 	MatchTrace.Item(
@@ -355,7 +400,7 @@ CheckDispenserTry = function(via)
 				SpotLabel(spot)
 			)
 		)
-		AnnounceWard(kind, spot)
+		AnnounceWard(kind, spot, try.loc)
 		return
 	end
 	try.allObs, try.allSen = math.max(try.allObs, obs), math.max(try.allSen, sen)
@@ -882,7 +927,7 @@ function WardMode.WardThink()
 		then
 			if GetUnitToLocationDistance(bot, plantLoc) <= observerCastRange then
 				if observerWard:GetName() == "item_ward_observer" then
-					AnnounceWard("observer")
+					AnnounceWard("observer", nil, plantLoc)
 					WardMode.WardThinkActed = true
 					LogPlantTry("observer", observerWard, plantLoc)
 					pcall(MarkEarlyWard, wardSpot)
@@ -894,7 +939,7 @@ function WardMode.WardThink()
 					if DispenserPlant(observerWard, plantLoc, true) then
 						return
 					end
-					AnnounceWard("observer")
+					AnnounceWard("observer", nil, plantLoc)
 				end
 				wardSpot.plant_time_obs = DotaTime()
 				return
