@@ -780,7 +780,10 @@ end
 -- (game 051: every probe printed only after the hold, 1.1s to 3.3s after the order).
 function X.CastHoldTick()
 	pcall(X.SampleHp)
-	pcall(X.HoldTpInDanger)
+	local okHold, errHold = pcall(X.HoldTpInDanger)
+	if not okHold then
+		X.LogStepError("HoldTpInDanger", errHold)
+	end
 	pcall(X.TrackPhaseShift)
 	pcall(X.ShiftExit)
 	if bot._castHoldUntil ~= nil and X.HurtSincePhaseOrder() then
@@ -1378,7 +1381,10 @@ function X.AskDodgeHold()
 end
 function X.SkillsComplement()
 	pcall(X.SampleHp)
-	pcall(X.HoldTpInDanger)
+	local okHold, errHold = pcall(X.HoldTpInDanger)
+	if not okHold then
+		X.LogStepError("HoldTpInDanger", errHold)
+	end
 	pcall(X.TrackPhaseShift)
 	local okExit, exited = pcall(X.ShiftExit)
 	if okExit and exited then

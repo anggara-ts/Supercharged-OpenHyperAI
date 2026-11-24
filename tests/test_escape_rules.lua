@@ -77,6 +77,9 @@ T.test("escape rules: hit age without the Phase Shift's time (#191, games 073 / 
 	-- Game 074: creeps on her, shift at 6319.0 for 3.25s, TP rule at 6323.
 	T.near(R.HitAge(6323, 6318.9, 6319.0, 6322.25), 0.85, 0.001, "the shift's 3.25s do not count")
 	T.near(R.HitAge(6321, 6318.9, 6319.0, 6322.25), 0.1, 0.001, "inside the shift")
+	-- The hit stamped 0.5s into the shift (the damage read looks 0.5s back): the age starts at the shift end.
+	T.near(R.HitAge(6323, 6319.5, 6319.0, 6322.25), 0.75, 0.001, "a stamp inside the shift")
+	T.near(R.HitAge(6322, 6319.5, 6319.0, 6322.25), 0, 0.001, "still in the shift")
 	-- A shift long after the hit: a plain age.
 	T.near(R.HitAge(20, 10, 15, 17.5), 10, 0.001, "shift started 5s after the hit")
 	-- A hit after an old shift: a plain age.

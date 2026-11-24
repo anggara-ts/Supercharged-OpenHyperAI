@@ -294,17 +294,14 @@ end
 -- her, so a plain "hit in the last 1.5s" is false exactly when the shift ends and the TP rule looks again (games 073
 -- and 074: both TPs came the think after a full shift). hitAt: the last hit (nil: none); shiftAt / shiftEnd: the
 -- last shift's order time and its end (nil: no shift). The shift counts when it started at most TP_HOLD_HIT_AGE
--- after the hit. Returns the age in seconds, or nil.
+-- after the hit, and for a hit stamped inside the shift (the stamp runs every think and the damage read looks 0.5s
+-- back, so it can land after the shift order): then the age starts at the shift's end. Returns the age in seconds,
+-- or nil.
 function EscapeRules.HitAge(now, hitAt, shiftAt, shiftEnd)
 	if hitAt == nil then
 		return nil
 	end
-	if
-		shiftAt ~= nil
-		and shiftEnd ~= nil
-		and shiftAt >= hitAt - 0.1
-		and shiftAt - hitAt <= EscapeRules.TP_HOLD_HIT_AGE
-	then
+	if shiftAt ~= nil and shiftEnd ~= nil and hitAt <= shiftEnd and shiftAt - hitAt <= EscapeRules.TP_HOLD_HIT_AGE then
 		return math.max(0, shiftAt - hitAt) + math.max(0, now - math.max(shiftEnd, hitAt))
 	end
 	return now - hitAt
