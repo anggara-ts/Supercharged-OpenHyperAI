@@ -47,7 +47,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[3])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 44,310 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 22,753 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -59,12 +59,12 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_hurricane_pike",
 	"item_black_king_bar",
 	"item_greater_crit",
-	"item_satanic",
 	"item_aghanims_shard",
+	"item_satanic",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 37,747 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 31,408 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -78,11 +78,11 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_black_king_bar",
 	"item_greater_crit",
 	"item_satanic",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
 	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 10,707 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,246 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -93,15 +93,15 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_maelstrom",
 	"item_orchid",
 	"item_mjollnir",
-	"item_invis_sword",
 	"item_bloodthorn",
 	"item_black_king_bar",
+	"item_greater_crit",
 	"item_satanic",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
 	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 46,006 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 39,650 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -117,13 +117,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_bloodthorn",
 	"item_black_king_bar",
 	"item_ultimate_scepter_2",
-	"item_greater_crit",
+	"item_desolator",
 	"item_hurricane_pike",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
 -- One pair of boots in this build (user rule; tools/boots-check.js).
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 21,238 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 18,232 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -138,9 +138,9 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_ultimate_scepter",
 	"item_bloodthorn",
 	"item_black_king_bar",
+	"item_sheepstick",
 	"item_ultimate_scepter_2",
-	"item_greater_crit",
-	"item_hurricane_pike",
+	"item_desolator",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }

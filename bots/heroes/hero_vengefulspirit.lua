@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 2, 1, 1, 2, 1, 6, 1, 2, 2, 3, 6, 3, 3, 3, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 55,341 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 44,686 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -22,17 +22,16 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_magic_wand",
 	"item_tranquil_boots",
 	"item_aether_lens",
-	"item_aghanims_shard",
+	"item_force_staff",
 	"item_ultimate_scepter",
 	"item_specialists_array",
-	"item_hydras_breath",
-	"item_vladmir",
 	"item_ancient_janggo",
-	"item_ultimate_scepter_2",
-	"item_blink",
+	"item_hydras_breath",
+	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 61,417 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 47,862 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -44,15 +43,15 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_aether_lens",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_vladmir",
 	"item_ancient_janggo",
+	"item_specialists_array",
 	"item_blink",
-	"item_ultimate_scepter_2",
 	"item_hydras_breath",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 -- Hydra's Breath (user call; Dotabuff 44%, #4 of matches): +30 agility, 30% of attacks also hit 3 more enemies in a cone.
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 14,301 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 10,225 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -68,14 +67,14 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_dragon_lance",
 	"item_manta",
 	"item_hydras_breath",
-	"item_butterfly",
 	"item_ultimate_scepter_2",
 	"item_monkey_king_bar",
-	"item_skadi",
+	"item_black_king_bar",
+	"item_greater_crit",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 33,389 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 19,155 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -93,13 +92,11 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_butterfly",
 	"item_greater_crit",
 	"item_ultimate_scepter_2",
-	"item_travel_boots",
-	"item_moon_shard",
 	"item_skadi",
 	"item_aghanims_shard",
-	"item_travel_boots_2",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 14,945 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 12,059 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -117,8 +114,8 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_hydras_breath",
 	"item_butterfly",
 	"item_ultimate_scepter_2",
+	"item_skadi",
 	"item_satanic",
-	"item_invis_sword",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }

@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 2, 5, 4, 4, 2, 6, 2, 4, 4, 2, 6, 5, 5, 5, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 41,093 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 48,120 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -28,28 +28,29 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_basher",
 	"item_aghanims_shard",
 	"item_satanic",
-	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
-	"item_travel_boots",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 3,504 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,547 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
 	"item_double_branches",
-	"item_magic_stick",
+	"item_circlet",
+	"item_slippers",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_phase_boots",
 	"item_bfury",
 	"item_black_king_bar",
 	"item_basher",
-	"item_monkey_king_bar",
 	"item_aghanims_shard",
+	"item_dragon_lance",
 	"item_satanic",
+	"item_abyssal_blade",
 	"item_travel_boots",
+	"item_maelstrom",
+	"item_mjollnir",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
@@ -92,7 +93,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 4,338 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,946 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -105,13 +106,13 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	"item_basher",
 	"item_aghanims_shard",
+	"item_dragon_lance",
 	"item_satanic",
 	"item_abyssal_blade",
-	"item_travel_boots",
-	"item_diffusal_blade",
+	"item_maelstrom",
+	"item_mjollnir",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
-	"item_travel_boots_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

@@ -24,7 +24,7 @@ else
 end
 local sUtility = RandomInt(1, 2) == 1 and "item_heavens_halberd" or "item_pipe"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 145,840 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 100,880 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -39,14 +39,14 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_consecrated_wraps",
 	"item_heart",
 	"item_shivas_guard",
-	"item_ultimate_scepter",
 	"item_ultimate_scepter_2",
+	"item_wind_waker",
 	"item_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 105,650 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 61,653 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -58,18 +58,19 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_boots",
 	-- Radiance: bought in nearly every Necrophos game (Dotabuff, last patch); Veil was not.
 	"item_radiance",
-	"item_consecrated_wraps",
+	"item_aghanims_shard",
 	"item_travel_boots",
 	sUtility,
 	"item_heart",
 	"item_ultimate_scepter",
 	"item_ultimate_scepter_2",
+	"item_wind_waker",
 	"item_kaya_and_sange",
-	"item_aghanims_shard",
+	"item_blink",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 24,079 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 11,925 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -81,39 +82,18 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_boots",
 	"item_radiance",
 	"item_travel_boots",
+	"item_consecrated_wraps",
 	"item_heart",
-	"item_black_king_bar",
 	"item_shivas_guard",
 	"item_ultimate_scepter",
-	"item_wind_waker",
 	"item_ultimate_scepter_2",
 	"item_lotus_orb",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 7,344 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 5,481 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
-	"item_tango",
-	"item_double_branches",
-	"item_magic_stick",
-	"item_circlet",
-	"item_null_talisman",
-	"item_magic_wand",
-	"item_arcane_boots",
-	"item_radiance",
-	"item_aghanims_shard",
-	"item_heart",
-	"item_ultimate_scepter",
-	"item_ultimate_scepter_2",
-	"item_lotus_orb",
-	"item_black_king_bar",
-	"item_wind_waker",
-	"item_blade_mail",
-	"item_moon_shard",
-}
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 3,947 matches (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_branches",
 	"item_magic_stick",
@@ -126,9 +106,30 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_ultimate_scepter",
 	"item_heart",
 	"item_ultimate_scepter_2",
+	"item_blink",
 	"item_lotus_orb",
 	"item_blade_mail",
-	"item_black_king_bar",
+	"item_moon_shard",
+}
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,015 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_branches",
+	"item_magic_stick",
+	"item_circlet",
+	"item_null_talisman",
+	"item_magic_wand",
+	"item_ring_of_basilius",
+	"item_arcane_boots",
+	"item_mekansm",
+	"item_radiance",
+	"item_aghanims_shard",
+	"item_guardian_greaves",
+	"item_heart",
+	"item_blink",
+	"item_lotus_orb",
+	"item_ultimate_scepter_2",
+	"item_blade_mail",
 	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

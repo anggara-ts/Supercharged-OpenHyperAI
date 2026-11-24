@@ -13,37 +13,40 @@ local tAllAbilityBuildList = { { 1, 3, 1, 3, 1, 6, 1, 3, 3, 2, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 224,077 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 186,559 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
-	"item_magic_stick",
+	"item_circlet",
+	"item_slippers",
 	"item_magic_wand",
+	"item_wraith_band",
 	"item_power_treads",
 	"item_mask_of_madness",
 	"item_manta",
 	"item_blink",
-	"item_butterfly",
 	"item_black_king_bar",
+	"item_butterfly",
 	"item_aghanims_shard",
-	"item_swift_blink",
 	"item_satanic",
+	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 11,682 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 10,107 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
 	"item_slippers",
+	"item_faerie_fire",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_yasha",
-	"item_ultimate_scepter",
+	"item_mask_of_madness",
 	"item_manta",
+	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_butterfly",
 	"item_aghanims_shard",
@@ -52,62 +55,68 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_hurricane_pike",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 2,994 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,595 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
-	"item_magic_stick",
+	"item_faerie_fire",
+	"item_slippers",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
 	"item_mask_of_madness",
 	"item_manta",
-	"item_blink",
+	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_butterfly",
-	"item_aghanims_shard",
 	"item_satanic",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
+	"item_maelstrom",
+	"item_mjollnir",
+	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 2,080 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,596 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_branches",
 	"item_circlet",
 	"item_magic_stick",
+	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_manta",
 	"item_ultimate_scepter",
+	"item_manta",
 	"item_butterfly",
 	"item_satanic",
 	"item_ultimate_scepter_2",
-	"item_soul_booster",
-	"item_shivas_guard",
+	"item_force_staff",
+	"item_greater_crit",
+	"item_hurricane_pike",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,838 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,466 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_double_branches",
-	"item_magic_stick",
 	"item_faerie_fire",
+	"item_circlet",
+	"item_slippers",
 	"item_magic_wand",
+	"item_wraith_band",
 	"item_power_treads",
 	"item_mask_of_madness",
 	"item_manta",
-	"item_ultimate_scepter",
-	"item_butterfly",
 	"item_black_king_bar",
-	"item_travel_boots",
+	"item_butterfly",
 	"item_satanic",
-	"item_ultimate_scepter_2",
-	"item_refresher",
+	"item_maelstrom",
+	"item_mjollnir",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

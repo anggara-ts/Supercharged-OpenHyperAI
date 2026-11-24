@@ -13,7 +13,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sTeamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 138,859 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 110,659 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -29,13 +29,13 @@ sRoleItemsBuyList["pos_3"] = {
 	-- Harpoon (Echo Sabre upgrade): 41% of his matches, #6 (Dotabuff, last patch).
 	"item_harpoon",
 	sTeamAuraItem,
+	"item_armlet",
 	"item_overwhelming_blink",
-	"item_ultimate_scepter_2",
-	"item_hand_of_midas",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 1,609 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,265 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -47,18 +47,15 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_phase_boots",
 	"item_echo_sabre",
 	"item_blink",
+	"item_harpoon",
 	"item_black_king_bar",
 	"item_basher",
 	sTeamAuraItem,
-	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
-	"item_travel_boots",
-	"item_overwhelming_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 5,976 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 5,590 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -73,7 +70,6 @@ sRoleItemsBuyList["pos_2"] = {
 	-- Harpoon (Echo Sabre upgrade): 41% of his matches, #6 (Dotabuff, last patch).
 	"item_harpoon",
 	"item_black_king_bar",
-	"item_basher",
 	sTeamAuraItem,
 	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
@@ -88,11 +84,11 @@ sRoleItemsBuyList["pos_2"] = {
 -- by minute 20, 64% and 44% (at pos 3 Echo Sabre is the earlier one: 68% against 50% by minute 16). Pos 5 has
 -- only 289 matches, so it follows pos 4; its own numbers agree (Blink and Bracer over 95%, Pavise 0.7%,
 -- Solar Crest 0.7%, Glimmer Cape 2.4%).
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 2,132 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,833 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
-	"item_gauntlets",
 	"item_double_branches",
+	"item_gauntlets",
 	"item_quelling_blade",
 	"item_circlet",
 	"item_phase_boots",
@@ -101,12 +97,12 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_black_king_bar",
 	"item_basher",
 	"item_abyssal_blade",
-	"item_nullifier",
+	"item_assault",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5 has 576 matches, built from pos 4 (2,132) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 403 matches, built from pos 4 (1,833) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

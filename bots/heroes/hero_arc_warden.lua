@@ -63,7 +63,7 @@ end
 -- after Midas) and Spirit Vessel from both mid lists (32 of 60,560 pos 2 matches). Hydra's Breath is not added:
 -- 32% of pos 1 and 26% of pos 2 matches, at ~33 min, under the ~35% bar used for adding an item.
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 5,012 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 3,598 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -86,7 +86,7 @@ sRoleItemsBuyList["pos_1"] = {
 }
 -- One list for pos 2 (maintainer, 2026-11-20: the data's list, not a Magical or Physical list picked at random;
 -- items by enemy lineup may come later). The talent tree still follows sMidBuildType.
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 82,550 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 58,499 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -105,9 +105,9 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3 has 621 matches, built from pos 2 (82,550) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3 has 536 matches, built from pos 2 (58,499) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,223 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,160 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -115,24 +115,22 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_circlet",
 	"item_faerie_fire",
 	"item_magic_wand",
+	"item_urn_of_shadows",
 	"item_boots",
+	"item_essence_distiller",
 	"item_hand_of_midas",
-	"item_maelstrom",
-	"item_orchid",
 	"item_ultimate_scepter",
-	"item_mjollnir",
 	"item_travel_boots",
-	"item_aghanims_shard",
-	"item_bloodthorn",
 	"item_sheepstick",
 	"item_ultimate_scepter_2",
+	"item_bloodthorn",
+	"item_manta",
+	"item_blink",
+	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_skadi",
-	"item_force_staff",
-	"item_hurricane_pike",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,031 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,950 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -143,16 +141,14 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_boots",
 	"item_hand_of_midas",
 	"item_maelstrom",
-	"item_orchid",
-	"item_mjollnir",
 	"item_ultimate_scepter",
 	"item_travel_boots",
-	"item_aghanims_shard",
-	"item_bloodthorn",
-	"item_skadi",
-	"item_ultimate_scepter_2",
+	"item_sheepstick",
+	"item_essence_distiller",
 	"item_force_staff",
+	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

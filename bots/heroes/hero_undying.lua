@@ -17,12 +17,12 @@ local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
 -- One pair of boots in this build (user rule; tools/boots-check.js).
 -- No Boots of Travel: this build's Guardian Greaves / Boots of Bearing are its one pair of boots.
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 78,496 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 78,025 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
-	"item_magic_stick",
 	"item_enchanted_mango",
+	"item_magic_stick",
 	"item_branches",
 	"item_magic_wand",
 	"item_ring_of_basilius",
@@ -32,14 +32,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_guardian_greaves",
 	"item_ultimate_scepter",
 	"item_glimmer_cape",
-	"item_ultimate_scepter_2",
-	"item_heart",
 	"item_crimson_guard",
-	"item_shivas_guard",
+	"item_heart",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 74,134 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 68,662 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -49,18 +48,18 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_ring_of_basilius",
 	"item_arcane_boots",
-	"item_mekansm",
+	"item_headdress",
 	"item_glimmer_cape",
 	"item_guardian_greaves",
-	"item_pipe",
-	"item_ultimate_scepter_2",
+	"item_ultimate_scepter",
+	"item_force_staff",
 	"item_crimson_guard",
-	"item_heart",
-	"item_holy_locket",
+	"item_consecrated_wraps",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 1,285 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,477 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -72,55 +71,54 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_arcane_boots",
 	"item_headdress",
 	"item_blade_mail",
+	"item_mekansm",
+	"item_aghanims_shard",
 	"item_guardian_greaves",
 	"item_ultimate_scepter",
 	"item_heart",
-	"item_harpoon",
 	"item_ultimate_scepter_2",
-	"item_vanguard",
-	"item_octarine_core",
-	"item_crimson_guard",
-	"item_aghanims_shard",
+	"item_pipe",
+	"item_shivas_guard",
+	"item_lotus_orb",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 3,174 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 6,918 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_gauntlets",
 	"item_quelling_blade",
 	"item_enchanted_mango",
-	"item_soul_ring",
 	"item_magic_wand",
+	"item_soul_ring",
 	"item_phase_boots",
-	"item_blink",
-	"item_blade_mail",
+	"item_harpoon",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_aghanims_shard",
+	"item_shivas_guard",
 	"item_ultimate_scepter_2",
-	"item_consecrated_wraps",
-	"item_overwhelming_blink",
 	"item_phylactery",
+	"item_lotus_orb",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 55,337 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 62,472 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
-	"item_double_branches",
 	"item_gauntlets",
+	"item_double_branches",
 	"item_magic_stick",
 	"item_magic_wand",
 	"item_soul_ring",
 	"item_phase_boots",
-	"item_consecrated_wraps",
 	"item_blade_mail",
+	"item_aghanims_shard",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_aghanims_shard",
+	"item_shivas_guard",
 	"item_ultimate_scepter_2",
-	"item_harpoon",
-	"item_crimson_guard",
+	"item_consecrated_wraps",
+	"item_pipe",
 	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

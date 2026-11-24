@@ -26,7 +26,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 66,410 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 41,832 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -35,47 +35,47 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_bracer",
 	"item_magic_wand",
 	"item_soul_ring",
-	"item_power_treads",
+	"item_arcane_boots",
 	"item_hand_of_midas",
 	"item_blink",
 	"item_ultimate_scepter",
 	"item_heart",
 	"item_sheepstick",
 	"item_ultimate_scepter_2",
+	"item_sange_and_yasha",
+	"item_basher",
 	"item_abyssal_blade",
-	"item_kaya_and_sange",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 3,580 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,243 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
-	"item_double_branches",
 	"item_gauntlets",
+	"item_branches",
 	"item_quelling_blade",
-	"item_circlet",
+	"item_magic_stick",
 	"item_bracer",
 	"item_magic_wand",
-	"item_power_treads",
+	"item_arcane_boots",
 	"item_hand_of_midas",
 	"item_blink",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_heart",
-	"item_overwhelming_blink",
 	"item_ultimate_scepter_2",
-	"item_moon_shard",
 	"item_aether_lens",
+	"item_overwhelming_blink",
 	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 33,673 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 24,131 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
-	"item_double_branches",
 	"item_gauntlets",
+	"item_double_branches",
 	"item_quelling_blade",
 	"item_circlet",
-	"item_bracer",
 	"item_magic_wand",
 	"item_soul_ring",
 	"item_arcane_boots",
@@ -85,12 +85,11 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_black_king_bar",
 	"item_heart",
 	"item_ultimate_scepter_2",
-	"item_overwhelming_blink",
 	"item_kaya_and_sange",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 117,353 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 95,242 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -105,13 +104,12 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_ultimate_scepter",
 	"item_sheepstick",
 	"item_ultimate_scepter_2",
-	"item_lotus_orb",
 	"item_glimmer_cape",
-	"item_overwhelming_blink",
+	"item_lotus_orb",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 123,696 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 94,361 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	-- Arcane Boots instead of Tranquil Boots, and Blink Dagger instead of
 	-- Spirit Vessel: Arcane 71% (#2), Blink 64% (#3) of his matches (Dotabuff, last patch).
@@ -127,9 +125,9 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_ultimate_scepter",
 	"item_sheepstick",
 	"item_ultimate_scepter_2",
-	"item_pipe",
+	"item_heart",
+	"item_lotus_orb",
 	"item_force_staff",
-	"item_solar_crest",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }

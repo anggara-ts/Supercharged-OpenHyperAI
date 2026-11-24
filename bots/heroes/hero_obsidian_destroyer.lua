@@ -17,7 +17,7 @@ else
 	nAbilityBuildList = tAllAbilityBuildList[2]
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 18,664 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 5,339 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -36,11 +36,9 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_sheepstick",
 	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
-	"item_travel_boots",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 229,094 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 118,752 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -62,7 +60,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 5,010 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,575 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -76,52 +74,49 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_blink",
 	"item_hurricane_pike",
 	"item_black_king_bar",
-	"item_aghanims_shard",
 	"item_sheepstick",
 	"item_ultimate_scepter_2",
-	"item_swift_blink",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 3,218 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,182 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_branches",
-	"item_circlet",
 	"item_mantle",
+	"item_circlet",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_witch_blade",
+	"item_meteor_hammer",
 	-- Blink Dagger: #2 by matches played (Dotabuff, last patch). Force Staff still comes as part of Pike.
 	"item_blink",
-	"item_force_staff",
 	"item_hurricane_pike",
 	"item_sheepstick",
-	"item_moon_shard",
-	"item_aether_lens",
+	"item_devastator",
 	"item_aghanims_shard",
+	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 2,217 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,434 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
-	"item_double_branches",
-	"item_circlet",
+	"item_branches",
 	"item_mantle",
+	"item_circlet",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_witch_blade",
+	"item_meteor_hammer",
 	-- Blink Dagger: #2 by matches played (Dotabuff, last patch). Force Staff still comes as part of Pike.
 	"item_blink",
-	"item_force_staff",
-	"item_aghanims_shard",
+	"item_hurricane_pike",
 	"item_sheepstick",
-	"item_devastator",
 	"item_moon_shard",
-	"item_aether_lens",
+	"item_devastator",
+	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

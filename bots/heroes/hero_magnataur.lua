@@ -23,30 +23,26 @@ local nAbilityBuildList = tAllAbilityBuildList[sRole] or { 1, 3, 2, 2, 2, 6, 2, 
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sTeamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 110,685 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 86,355 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
 	"item_quelling_blade",
-	"item_gauntlets",
 	"item_bracer",
 	"item_magic_wand",
 	"item_power_treads",
 	"item_blink",
-	"item_ultimate_scepter",
+	"item_harpoon",
 	"item_black_king_bar",
 	sTeamAuraItem,
-	"item_aghanims_shard",
 	"item_refresher",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
-	"item_shivas_guard",
 	"item_overwhelming_blink",
+	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 3,730 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,512 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -59,17 +55,15 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_echo_sabre",
 	"item_blink",
 	"item_harpoon",
-	"item_lesser_crit",
 	"item_black_king_bar",
 	"item_greater_crit",
 	sTeamAuraItem,
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
+	"item_overwhelming_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 52,024 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 43,244 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -84,16 +78,14 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_aghanims_shard",
-	"item_travel_boots",
 	"item_refresher",
 	"item_ultimate_scepter_2",
 	"item_greater_crit",
 	"item_overwhelming_blink",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
 -- No Boots of Travel: this build's Guardian Greaves / Boots of Bearing are its one pair of boots.
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 39,111 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 30,513 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -105,14 +97,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_blink",
 	"item_force_staff",
 	"item_aghanims_shard",
-	"item_ultimate_scepter",
 	"item_refresher",
 	"item_harpoon",
-	"item_ultimate_scepter_2",
 	"item_mekansm",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 24,887 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 18,793 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -123,13 +114,12 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_arcane_boots",
 	"item_blink",
 	"item_force_staff",
+	"item_aether_lens",
 	"item_aghanims_shard",
-	"item_ultimate_scepter",
 	"item_refresher",
-	"item_ultimate_scepter_2",
-	"item_harpoon",
-	"item_mekansm",
+	"item_cyclone",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = {

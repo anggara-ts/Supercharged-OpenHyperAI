@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 3, 1, 2, 3, 3, 6, 3, 2, 2, 2, 6, 1, 1, 1, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 38,080 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 30,100 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -24,14 +24,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_blink",
 	"item_cyclone",
 	"item_ultimate_scepter",
+	"item_force_staff",
 	"item_lotus_orb",
-	"item_black_king_bar",
 	"item_wind_waker",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 33,051 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 23,112 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -43,14 +43,14 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_blink",
 	"item_cyclone",
 	"item_ultimate_scepter",
-	"item_lotus_orb",
 	"item_force_staff",
+	"item_lotus_orb",
 	"item_wind_waker",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 756 matches, built from pos 3 (11,455) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 567 matches, built from pos 3 (8,415) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.
@@ -65,16 +65,13 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_blink",
 	"item_desolator",
 	"item_black_king_bar",
-	"item_travel_boots",
 	"item_echo_sabre",
 	"item_silver_edge",
-	"item_overwhelming_blink",
 	"item_harpoon",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 7,047 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 5,523 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.
@@ -90,14 +87,13 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_echo_sabre",
-	"item_ultimate_scepter_2",
-	"item_assault",
-	"item_overwhelming_blink",
 	"item_harpoon",
+	"item_overwhelming_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 11,455 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,415 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.
@@ -112,14 +108,11 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_blink",
 	"item_desolator",
 	"item_black_king_bar",
-	"item_travel_boots",
 	"item_echo_sabre",
 	"item_silver_edge",
-	"item_overwhelming_blink",
 	"item_harpoon",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

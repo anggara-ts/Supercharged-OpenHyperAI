@@ -27,29 +27,31 @@ if sRole == "pos_3" then
 	)
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 3,179 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,741 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_gauntlets",
-	"item_magic_stick",
+	"item_quelling_blade",
+	"item_circlet",
 	"item_bracer",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_aghanims_shard",
-	"item_sange",
 	"item_ultimate_scepter",
+	"item_sange",
+	"item_aghanims_shard",
 	"item_sange_and_yasha",
+	"item_buckler",
 	"item_heart",
+	"item_assault",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_consecrated_wraps",
-	"item_shivas_guard",
-	"item_abyssal_blade",
+	"item_crimson_guard",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 109,210 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 96,536 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -60,39 +62,36 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_soul_ring",
 	"item_vanguard",
 	"item_power_treads",
+	"item_consecrated_wraps",
 	"item_blade_mail",
 	"item_aghanims_shard",
-	"item_ultimate_scepter",
 	sHalberd,
 	"item_heart",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_shivas_guard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 2,997 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,230 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_gauntlets",
-	"item_magic_stick",
+	"item_quelling_blade",
+	"item_circlet",
 	"item_bracer",
 	"item_magic_wand",
-	"item_soul_ring",
 	"item_power_treads",
-	"item_blade_mail",
 	"item_ultimate_scepter",
-	"item_sange",
 	"item_aghanims_shard",
 	"item_sange_and_yasha",
 	"item_heart",
-	"item_black_king_bar",
 	"item_ultimate_scepter_2",
+	"item_vanguard",
 	"item_assault",
+	"item_crimson_guard",
+	"item_shivas_guard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 3,755 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,980 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_branches",
@@ -100,20 +99,19 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_magic_stick",
 	"item_bracer",
 	"item_magic_wand",
-	"item_power_treads",
 	"item_vanguard",
-	"item_blade_mail",
+	"item_power_treads",
 	"item_aghanims_shard",
+	"item_blade_mail",
 	"item_crimson_guard",
 	"item_ultimate_scepter",
 	"item_heart",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_black_king_bar",
-	"item_pipe",
+	"item_consecrated_wraps",
+	"item_shivas_guard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,499 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,188 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_branches",
@@ -127,12 +125,10 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_blade_mail",
 	"item_crimson_guard",
 	"item_heart",
-	"item_ultimate_scepter",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
 	"item_consecrated_wraps",
-	"item_shivas_guard",
+	"item_ultimate_scepter",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 -- Drop the skipped Halberd slot (false) so the list has no holes.
 for _, list in pairs(sRoleItemsBuyList) do

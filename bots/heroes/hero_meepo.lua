@@ -17,64 +17,62 @@ local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 -- and before the Shard: by minute 24, 61% of pos 2 Meepos have Blink and 16% the Shard (Shard 38% in all).
 -- Pos 3 gets Sange and Yasha too (94% of its matches; it was missing from that list).
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 5,550 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 5,447 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
-	"item_circlet",
-	"item_double_branches",
+	"item_double_circlet",
+	"item_branches",
 	"item_quelling_blade",
-	"item_slippers",
 	"item_wraith_band",
 	"item_power_treads",
 	"item_sange_and_yasha",
 	"item_blink",
 	"item_skadi",
-	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_butterfly",
+	"item_aghanims_shard",
 	"item_swift_blink",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_dragon_lance",
+	"item_diffusal_blade",
+	"item_disperser",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 28,121 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 28,954 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
-	"item_circlet",
-	"item_double_branches",
+	"item_double_circlet",
+	"item_branches",
 	"item_quelling_blade",
-	"item_slippers",
 	"item_wraith_band",
 	"item_power_treads",
+	"item_dragon_lance",
 	"item_sange_and_yasha",
 	"item_blink",
-	"item_aghanims_shard",
 	"item_skadi",
-	"item_ultimate_scepter",
-	"item_swift_blink",
-	"item_ultimate_scepter_2",
-	"item_sheepstick",
-	"item_moon_shard",
-	"item_heart",
-}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 1,566 matches (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_3"] = {
-	"item_tango",
-	"item_circlet",
-	"item_double_branches",
-	"item_quelling_blade",
-	"item_slippers",
-	"item_wraith_band",
-	"item_power_treads",
-	"item_sange_and_yasha",
-	"item_blink",
 	"item_aghanims_shard",
-	"item_skadi",
 	"item_ultimate_scepter",
-	"item_butterfly",
+	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
 	"item_diffusal_blade",
 	"item_disperser",
 	"item_swift_blink",
+	"item_moon_shard",
+}
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,897 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_3"] = {
+	"item_tango",
+	"item_double_circlet",
+	"item_branches",
+	"item_quelling_blade",
+	"item_wraith_band",
+	"item_power_treads",
+	"item_sange_and_yasha",
+	"item_blink",
+	"item_skadi",
+	"item_aghanims_shard",
+	"item_diffusal_blade",
+	"item_armlet",
+	"item_disperser",
+	"item_ultimate_scepter_2",
 }
 sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_3"]
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_3"]

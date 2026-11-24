@@ -38,7 +38,7 @@ end
 local sCrimsonGuardOrHalberd = { "item_heavens_halberd", "item_crimson_guard" }
 local sUtility = sCrimsonGuardOrHalberd[RandomInt(1, #sCrimsonGuardOrHalberd)]
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 4,180 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,889 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -51,36 +51,33 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_ultimate_scepter",
 	"item_hurricane_pike",
 	"item_aghanims_shard",
+	"item_black_king_bar",
 	sUtility,
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_monkey_king_bar",
-	"item_devastator",
 	"item_sheepstick",
+	"item_monkey_king_bar",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 15,412 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 14,696 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_faerie_fire",
+	"item_mantle",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_dragon_lance",
 	"item_ultimate_scepter",
 	"item_hurricane_pike",
 	"item_ancient_janggo",
+	"item_orchid",
 	"item_black_king_bar",
 	"item_bloodthorn",
-	"item_ultimate_scepter_2",
-	"item_sheepstick",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 14,679 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 15,200 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -95,15 +92,14 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_orchid",
 	"item_witch_blade",
 	"item_bloodthorn",
-	"item_ultimate_scepter_2",
-	"item_pipe",
 	"item_aghanims_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 491 matches, built from pos 2 (5,890) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 327 matches, built from pos 2 (4,545) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
-	"item_circlet",
 	"item_double_branches",
+	"item_circlet",
 	"item_mantle",
 	"item_faerie_fire",
 	"item_null_talisman",
@@ -118,13 +114,13 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_blink",
 	"item_moon_shard",
 	"item_sphere",
-	"item_mage_slayer",
+	"item_sheepstick",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 5,890 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,545 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
-	"item_circlet",
 	"item_double_branches",
+	"item_circlet",
 	"item_mantle",
 	"item_faerie_fire",
 	"item_null_talisman",
@@ -139,7 +135,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_blink",
 	"item_moon_shard",
 	"item_sphere",
-	"item_mage_slayer",
+	"item_sheepstick",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_ultimate_scepter", "item_magic_wand", "item_cyclone", "item_magic_wand" }

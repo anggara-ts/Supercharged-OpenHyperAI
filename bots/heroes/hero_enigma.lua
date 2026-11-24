@@ -36,14 +36,15 @@ if sRole == "pos_5" then
 end
 local sTeamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 38,831 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 16,153 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_magic_stick",
 	"item_ring_of_regen",
-	"item_ancient_janggo",
+	"item_headdress",
 	"item_magic_wand",
+	"item_ancient_janggo",
 	"item_tranquil_boots",
 	"item_blink",
 	"item_black_king_bar",
@@ -55,7 +56,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 23,977 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 16,407 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -68,13 +69,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_black_king_bar",
 	"item_ultimate_scepter",
 	"item_refresher",
-	"item_octarine_core",
 	"item_ultimate_scepter_2",
+	"item_octarine_core",
 	"item_hand_of_midas",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 12,489 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 8,635 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -94,14 +95,15 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 506 matches, built from pos 3 (38,831) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 305 matches, built from pos 3 (16,153) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 2,980 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 1,940 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
+	"item_blood_grenade",
 	"item_double_branches",
-	"item_magic_stick",
 	"item_faerie_fire",
+	"item_ring_of_regen",
 	"item_magic_wand",
 	"item_tranquil_boots",
 	"item_blink",
@@ -110,6 +112,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter",
 	"item_refresher",
 	"item_ultimate_scepter_2",
+	"item_overwhelming_blink",
 	"item_hand_of_midas",
 	"item_aghanims_shard",
 	"item_moon_shard",

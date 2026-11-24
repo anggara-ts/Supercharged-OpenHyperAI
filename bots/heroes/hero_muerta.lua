@@ -13,7 +13,7 @@ local tAllAbilityBuildList = { { 1, 2, 1, 3, 1, 6, 1, 3, 3, 3, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 30,825 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 23,593 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -29,14 +29,14 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_black_king_bar",
 	"item_blink",
 	"item_greater_crit",
-	"item_aghanims_shard",
 	"item_swift_blink",
 	"item_moon_shard",
 	"item_travel_boots",
+	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 8,036 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 7,458 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -54,22 +54,21 @@ sRoleItemsBuyList["pos_2"] = {
 	-- Veil turns her damage magical and she stands in fights; she needs the spell immunity.
 	"item_black_king_bar",
 	"item_greater_crit",
-	"item_travel_boots",
+	"item_satanic",
 	"item_swift_blink",
-	"item_hydras_breath",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 1,319 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,080 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
-	"item_magic_stick",
-	"item_magic_wand",
+	"item_circlet",
+	"item_mantle",
 	"item_null_talisman",
+	"item_magic_wand",
 	"item_falcon_blade",
 	"item_power_treads",
 	"item_mjollnir",
@@ -78,36 +77,36 @@ sRoleItemsBuyList["pos_3"] = {
 	-- Veil turns her damage magical and she stands in fights; she needs the spell immunity.
 	"item_black_king_bar",
 	"item_greater_crit",
-	"item_monkey_king_bar",
-	"item_swift_blink",
 	"item_travel_boots",
+	"item_satanic",
+	"item_hydras_breath",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 3,609 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,429 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_branches",
 	"item_magic_stick",
-	"item_circlet",
-	"item_null_talisman",
+	"item_faerie_fire",
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_rod_of_atos",
 	"item_force_staff",
 	"item_ultimate_scepter",
 	"item_gungir",
-	"item_black_king_bar",
+	"item_greater_crit",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
+	"item_octarine_core",
 	"item_sheepstick",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 2,052 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,894 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -117,13 +116,12 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_rod_of_atos",
+	"item_force_staff",
 	"item_ultimate_scepter",
-	"item_dragon_lance",
 	"item_blink",
 	"item_black_king_bar",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_hydras_breath",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }

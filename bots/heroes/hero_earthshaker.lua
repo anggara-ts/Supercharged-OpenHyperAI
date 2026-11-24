@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 1, 2, 3, 1, 1, 6, 1, 3, 3, 3, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 2,481 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,451 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -23,40 +23,39 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_magic_wand",
 	"item_power_treads",
 	"item_blink",
-	"item_kaya",
 	"item_ultimate_scepter",
 	"item_aghanims_shard",
-	"item_yasha_and_kaya",
 	"item_black_king_bar",
-	"item_refresher",
+	"item_octarine_core",
 	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
 	"item_cyclone",
+	"item_invis_sword",
 	"item_wind_waker",
 	"item_moon_shard",
 }
 -- Mid: Dotabuff has Blink, Shard, Yasha and Kaya, Arcane Boots, Scepter, BKB, Octarine and
 -- Refresher on top; the carry list (Midas, Satanic, Daedalus, Abyssal) is outside its top 25.
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 94,498 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 117,832 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_quelling_blade",
 	"item_magic_wand",
-	"item_power_treads",
 	"item_blink",
+	"item_power_treads",
 	"item_kaya",
-	"item_aghanims_shard",
 	"item_ultimate_scepter",
 	"item_yasha_and_kaya",
 	"item_black_king_bar",
-	"item_refresher",
+	"item_octarine_core",
 	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
 	"item_greater_crit",
+	"item_aghanims_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 106,196 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 89,553 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -75,12 +74,11 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	"item_octarine_core",
 	"item_ultimate_scepter_2",
-	"item_overwhelming_blink",
 	"item_cyclone",
 	"item_wind_waker",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 90,171 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 77,261 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -95,14 +93,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_cyclone",
 	"item_yasha_and_kaya",
 	"item_refresher",
-	"item_travel_boots",
 	"item_wind_waker",
-	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
 	"item_mekansm",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 36,942 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 32,308 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -113,15 +110,13 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_arcane_boots",
 	"item_blink",
 	"item_aghanims_shard",
-	"item_kaya",
-	"item_cyclone",
 	"item_yasha_and_kaya",
+	"item_cyclone",
 	"item_refresher",
-	"item_travel_boots",
 	"item_wind_waker",
-	"item_ultimate_scepter_2",
 	"item_glimmer_cape",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_travel_boots", "item_quelling_blade", "item_abyssal_blade", "item_magic_wand" }
