@@ -884,9 +884,51 @@ function RuneMode.RiverPickupTry(id, spawn)
 		mode = bot:GetActiveMode(),
 		itemMode = false,
 		others = false,
+		spawn = spawn,
 	}
 	bot:Action_PickUpRune(id)
 	return true
+end
+-- Has this bot let go of the rune at spot `id` of the spawn at `spawn` (RuneMode.RiverReleaseDesire)? The water
+-- stay doesn't hold it there again for that spawn.
+function RuneMode.Released(id, spawn)
+	local done = bot._riverReleaseDone
+	return done ~= nil and done[spawn .. ":" .. id] == true
+end
+-- A release (RuneRules.ReleaseStep) runs from GetDesire, so the timer and the result line run while another mode
+-- (the item mode, laning) has the bot: 0 while it lasts, nil once it ended. [SHy-RUNE] river-release-end taken=.
+function RuneMode.RiverReleaseDesire()
+	local release = bot._riverRelease
+	if release == nil then
+		return nil
+	end
+	if bot:GetActiveMode() == BOT_MODE_ITEM then
+		release.itemMode = true
+	end
+	local now = DotaTime()
+	local step, taken = RuneRules.ReleaseStep(release, now, RawGetRuneStatus(release.id) == RUNE_STATUS_AVAILABLE)
+	if step == "hold" and bot:IsAlive() then
+		return BOT_MODE_DESIRE_NONE
+	end
+	bot._riverRelease = nil
+	bot._riverReleaseDone = bot._riverReleaseDone or {}
+	bot._riverReleaseDone[tostring(release.spawn) .. ":" .. release.id] = true
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.1f %s river-release-end spot=%d taken=%s held=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			release.id,
+			taken and "yes" or "no",
+			now - release.t0,
+			release.itemMode and "yes" or "no",
+			bot:GetGold() - release.gold,
+			GetUnitToLocationDistance(bot, release.loc),
+			ModeTag(bot:GetActiveMode())
+		)
+	)
+	return nil
 end
 local function OtherHeroAtSpot(loc)
 	for _, list in ipairs({ UNIT_LIST_ALLIED_HEROES, UNIT_LIST_ENEMY_HEROES }) do
@@ -941,6 +983,32 @@ function RuneMode.RiverPickupCheck()
 			worked == "no" and "yes" or "no"
 		)
 	)
+	-- After a failed order on the spot: let go for Valve's item mode (RuneMode.RiverReleaseDesire).
+	local spot = GetRuneSpawnLocation(pickup.id)
+	local spotDist = GetUnitToLocationDistance(bot, spot)
+	if RuneRules.ReleaseStarts(worked, spotDist, not gone) then
+		bot._riverRelease = {
+			id = pickup.id,
+			spawn = pickup.spawn,
+			loc = spot,
+			t0 = DotaTime(),
+			gold = bot:GetGold(),
+			itemMode = false,
+		}
+		pcall(
+			print,
+			string.format(
+				"[SHy-RUNE] t=%.1f %s river-release why=pickup-failed spot=%d type=%s dist=%d others=%s for=%ds",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				pickup.id,
+				tostring(pickup.type),
+				spotDist,
+				tostring(pickup.others),
+				RuneRules.RELEASE_FOR
+			)
+		)
+	end
 end
 -- Leftover rune (RuneRules.IsLeftover: available, type -1, spot in vision, 10s+ into its cycle; river or jungle).
 -- One pick-up order (game 062: it took the rune every time), then stand on the spot with no orders for up to 3s so
@@ -1233,6 +1301,18 @@ function GetDesire()
 			return RIVER_PICKUP_TRY_DESIRE
 		end
 	end
+	-- A release after a failed pick-up order (RuneMode.RiverReleaseDesire): before GetDesireRaw, so neither the water
+	-- stay nor the bounty return holds the bot on the rune meanwhile.
+	if bot._riverRelease ~= nil then
+		local okR, releaseDesire = pcall(RuneMode.RiverReleaseDesire)
+		if not okR then
+			bot._riverRelease = nil
+		elseif releaseDesire ~= nil then
+			runeWhy = "river-release"
+			RuneMode.RuneDbg(releaseDesire)
+			return releaseDesire
+		end
+	end
 	-- A leftover-rune hold (RuneMode.LeftoverDesire): before GetDesireRaw, so no other rune rule (the bounty
 	-- passing's 0.97 from #99 included) lifts the bot above the item mode while it stands on the spot.
 	if bot._leftover ~= nil then
@@ -1377,7 +1457,8 @@ function GetDesireRaw()
 				SpawnHoldEnd("empty")
 				return give(BOT_MODE_DESIRE_NONE, "water-empty")
 			end
-			if sinceSpawn <= 5 and spotDist <= 300 then
+			-- Not after a release (a failed pick-up order let go of this spawn's rune, RuneMode.RiverReleaseDesire).
+			if sinceSpawn <= 5 and spotDist <= 300 and not RuneMode.Released(bot._waterWalk.id, bot._waterWalk.t0) then
 				SpawnHoldEnd("on-spot")
 				if bot._waterStayLogged ~= bot._waterWalk.t0 then
 					bot._waterStayLogged = bot._waterWalk.t0

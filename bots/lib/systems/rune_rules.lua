@@ -129,6 +129,34 @@ function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
 	return oldDesire
 end
 
+-- Release after a failed pick-up order at a river spot (#32, game 080, 0:00-0:15): at the bottom spot the order never
+-- worked (7 of 7 `river-pickup-try id=1 worked=no`, games 070-080), and then the 5s `water-stay` (0.60) and the
+-- bounty return (0.60) kept Winter Wyvern and Io standing on the rune with Valve's item mode never starting
+-- (`water-walk-end ... status=up type=5 itemMode=no`); the item mode took it at 0:21 (`mode=m21/0.90`). So after a
+-- `worked=no` with the bot on the spot and the rune up, the rune mode lets go (desire 0, under every mode, the item
+-- mode's 0.90 included) for RELEASE_FOR seconds and logs whether the rune went. A worked=unsure / yes keeps the stay.
+-- Unverified why the item mode does not start there: the 0.60 stay was already under its 0.90, and in game 080 it did
+-- not start under laning (0.27) either, so the release may not be enough on its own; the result line shows it.
+RuneRules.RELEASE_FOR = 3
+RuneRules.RELEASE_RADIUS = 300
+
+-- Start a release? worked: the try's verdict ("no" / "unsure" / "yes"); dist: bot to the spot; up: the rune reads up.
+function RuneRules.ReleaseStarts(worked, dist, up)
+	return worked == "no" and up == true and (dist or math.huge) <= RuneRules.RELEASE_RADIUS
+end
+
+-- One step of a release (release = { t0 = start }): "hold" (keep the desire at 0) or "end" plus taken (true when the
+-- rune is gone).
+function RuneRules.ReleaseStep(release, now, up)
+	if not up then
+		return "end", true
+	end
+	if now - release.t0 >= RuneRules.RELEASE_FOR then
+		return "end", false
+	end
+	return "hold"
+end
+
 -- Which river spot the water walk tries first (#32, game 078, 0:00): both teams tried the top spot (RUNE_POWERUP_1)
 -- first, so both mids went top and nobody went bottom; Io (Dire) took the top spot 1981 away with the bottom one 1694
 -- away (`river-walk-near spot=0 dist=1981`). Maintainer: "usually bots take top river horn bounty and dire bottom".
