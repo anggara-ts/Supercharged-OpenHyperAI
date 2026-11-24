@@ -111,23 +111,54 @@ end)
 T.test("relocate: rescue a ganked ally", function()
 	local R = load()
 	local function check(over)
-		local o = { hp = 0.6, dps = 0.05, delay = 3.5, damaged = true, enemies = 3, alliesThere = 0 }
+		local o = { hp = 0.6, dps = 0.03, delay = 3.5, damaged = true, enemies = 3, alliesThere = 0 }
 		for k, v in pairs(over or {}) do
 			o[k] = v
 		end
 		return R.RescueCheck(o)
 	end
 	local ok, why, ttd = check()
-	T.ok(ok, "3 on 1, 12s of HP left: go")
+	T.ok(ok, "3 on 1, 20s of HP left: go")
 	T.eq(why, "go")
-	T.near(ttd, 12, 0.01)
+	T.near(ttd, 20, 0.01)
 	T.eq(select(2, check({ damaged = false })), "no-gank", "not hit by a hero")
 	T.eq(select(2, check({ enemies = 1 })), "no-gank", "one enemy")
 	T.eq(select(2, check({ enemies = 2, alliesThere = 1 })), "no-gank", "2 on 2: not outnumbered")
 	-- 0.3 HP at 0.08/s: 3.75s left, under the 3.5s delay + 1s.
 	T.eq(select(2, check({ hp = 0.3, dps = 0.08 })), "too-late", "dies before Io lands")
 	T.ok(check({ enemies = 5 }), "a 5-man gank is still a gank: the numbers are NumbersOk's call")
-	T.ok(check({ dps = 0 }), "not losing HP yet")
+	T.ok(check({ hp = 0.9, dps = 0 }), "not losing HP yet, healthy")
+	T.eq(select(2, check({ hp = 0.74, dps = 0 })), "too-late", "no rate under 80%: game 073 t=2768, dead in 4s")
+end)
+
+-- The rescue casts of games 071-074 (hp, ttd at the cast, delay) and whether the target was alive 4s after the cast.
+T.test("relocate: rescue verdicts on the games 071-074 casts", function()
+	local R = load()
+	local function go(hp, ttd, delay)
+		return (
+			R.RescueCheck({
+				hp = hp,
+				dps = ttd ~= nil and hp / ttd or 0,
+				delay = delay,
+				damaged = true,
+				enemies = 3,
+				alliesThere = 0,
+			})
+		)
+	end
+	-- died 2-4s after the cast, before or as Io landed
+	T.ok(not go(0.37, 7.0, 3.5), "071 t=584 Winter Wyvern, dead in 3s")
+	T.ok(not go(0.64, 12.5, 3.5), "071 t=916 Undying, dead in 2s")
+	T.ok(not go(0.39, 5.7, 3.0), "073 t=2689 Dark Willow, dead in 2s")
+	T.ok(not go(0.74, nil, 3.0), "073 t=2768 Dark Willow, no rate, dead in 4s")
+	T.ok(not go(0.91, 12.2, 3.5), "074 t=365 Winter Wyvern, dead in 4s")
+	-- lived
+	T.ok(go(0.89, 70.3, 3.25), "071 t=2223 Winter Wyvern")
+	T.ok(go(0.90, 20.1, 3.5), "073 t=520 Phantom Assassin")
+	T.ok(go(0.82, nil, 3.5), "074 t=772 Dark Willow, no rate")
+	T.ok(go(0.98, nil, 3.25), "074 t=1354 Dark Willow, no rate")
+	-- the delay talent (-2s) shortens what the ally must last
+	T.ok(go(0.6, 8, R.CastDelay(3, true)), "1s delay: 8s of HP is enough")
 end)
 
 T.test("relocate: rescue partner", function()

@@ -23,6 +23,11 @@ RelocateRules.FOCUS_HP = 0.45
 RelocateRules.LOW_HP = 0.2
 -- After the return the ally goes back with Io only when healed this far.
 RelocateRules.RETURN_KEEP_HP = 0.7
+-- An order is re-sent every think until the cooldown shows the cast; after this long it counts as lost. Games 075-078:
+-- 34 lost orders, all after the difficulty layer (#234) came into the build (none in 070, 072-074; one in 071). Its
+-- reaction hold sends a cast only when the same order is asked again within 0.6s, and Io asked once; a hold plus a
+-- skip roll can last ~2.6s at Easy, so the wait is longer than that.
+RelocateRules.ORDER_WAIT = 3.0
 
 -- The cast delay at Relocate level 1-3, minus the talent when it is trained (game file values above).
 function RelocateRules.CastDelay(level, talent)
@@ -97,7 +102,8 @@ end
 
 -- Shortly before the return: does the tethered ally go back with Io? o.allyAlive, o.tetherUp, o.allyHp (ratio),
 -- o.alliesAtOrigin (allied heroes near the spot they return to, not counting Io and the ally), o.enemiesAtOrigin
--- (visible enemy heroes there). Returns "keep" (both go back), "break" (break the tether so the ally stays home) or
+-- (enemy heroes there: the visible ones, or more when the last-seen info since Io left says so; by then the spot is
+-- often fogged because the allies there died: games 071 t=1164 and 073 t=1272). Returns "keep" (both go back), "break" (break the tether so the ally stays home) or
 -- "none" (no tethered ally to decide for), and why.
 function RelocateRules.ReturnDecision(o)
 	if not o.allyAlive or not o.tetherUp then
@@ -120,6 +126,18 @@ RelocateRules.RESCUE_MIN_DIST = 3000
 RelocateRules.PARTNER_MIN_HP = 0.7
 -- The ganked ally must still be alive this long after the cast delay (it is what we are going for).
 RelocateRules.RESCUE_SURVIVE_MARGIN = 1.0
+-- A gank speeds up after it starts (more heroes join, the disables chain), so the time to die read from the last
+-- 1.25s is too long. Games 071-074, the 11 rescue casts: 7 targets died, 5 of them 2-4s after the cast (before or as
+-- Io landed) with ttd 12.5, 12.2, 7.0, 5.7 and none; the 4 that lived had ttd 70.3, 20.1 or none at 82%+ HP. A
+-- rescue goes only when ttd / RESCUE_RAMP still covers the cast delay + RESCUE_SURVIVE_MARGIN (3.5s delay: ttd 13.5+;
+-- 3.0s: 12+), which skips all 5 early deaths and keeps all 4 survivors.
+RelocateRules.RESCUE_RAMP = 3
+-- No damage rate (not losing HP over the window, or too few samples): go only at this HP or more (game 073 t=2768:
+-- 74% with no rate, dead 4s after the cast; 82% and 98% lived).
+RelocateRules.RESCUE_NO_RATE_HP = 0.8
+-- A too-late verdict on an ally holds this long: the rate read flips within 1-2s (games 071 582 -> 584 and 073
+-- 2688 -> 2689: too-late, then a cast on the same ally, which died anyway).
+RelocateRules.RESCUE_TOO_LATE_HOLD = 3.0
 
 -- Every offensive Relocate (rescue and the far-teamfight join) lands only when our side after the landing (Io, the
 -- tethered partner, allied heroes near the landing point) + this margin >= the enemy heroes seen near it
@@ -135,7 +153,9 @@ end
 -- o.alliesThere (allied heroes near it, not counting it). Returns ok, why ("go" | "no-gank" | "too-late"), ttd (nil
 -- when not losing HP). The numbers after the landing are NumbersOk's job.
 --   a gank: hit by a hero, 2+ enemy heroes, and they outnumber it and its allies there;
---   it lives through the delay + RESCUE_SURVIVE_MARGIN at the HP it is losing.
+--   it lives through the delay + RESCUE_SURVIVE_MARGIN even when the damage speeds up RESCUE_RAMP times; with no
+--   damage rate it needs RESCUE_NO_RATE_HP. o.delay is CastDelay's (Valve datafeed hero_id=91, wisp_relocate
+--   cast_delay 3.5 / 3.25 / 3.0, special_bonus_unique_wisp_relocate_delay -2).
 function RelocateRules.RescueCheck(o)
 	local ttd = nil
 	if o.dps ~= nil and o.dps > 0 then
@@ -145,7 +165,11 @@ function RelocateRules.RescueCheck(o)
 	if not o.damaged or o.enemies < 2 or o.enemies <= alliesThere + 1 then
 		return false, "no-gank", ttd
 	end
-	if ttd ~= nil and ttd < o.delay + RelocateRules.RESCUE_SURVIVE_MARGIN then
+	if ttd == nil then
+		if o.hp < RelocateRules.RESCUE_NO_RATE_HP then
+			return false, "too-late", nil
+		end
+	elseif ttd < RelocateRules.RESCUE_RAMP * (o.delay + RelocateRules.RESCUE_SURVIVE_MARGIN) then
 		return false, "too-late", ttd
 	end
 	return true, "go", ttd
