@@ -44,9 +44,13 @@ function ChatRules.SayDecision(bot, text, key)
 	return on
 end
 
--- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game (game 075: t=-80, about
--- 9s after the bots' first "I will play position N" lines).
-ChatRules.WELCOME_START = -80
+-- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game: at -0:30, after the bots'
+-- "I will play position N" lines (t=-89 to -80) have settled ("send welcome message (bot version etc) at -0:30. now it's
+-- crowded with bot position", maintainer 2026-11-24). It was -80, right with the position lines.
+ChatRules.WELCOME_START = -30
+-- Whether the first position line waits for the welcome's version line (maintainer 2026-11-23: version first). Off
+-- since the welcome moved to -0:30 (2026-11-24): the position lines go out at once, the welcome comes later on its own.
+ChatRules.POSITION_WAITS_FOR_WELCOME = false
 -- The first position line waits at most this many seconds for the team's welcome version line, counted from the
 -- welcome's start (or from the bot's first try, when that is later), so a missing welcome never blocks it.
 ChatRules.WELCOME_FIRST_WAIT = 5
@@ -56,6 +60,9 @@ ChatRules.WELCOME_FIRST_WAIT = 5
 -- line was said; firstTryAt: when the bot first wanted to say its line; welcomeStart and now: DotaTime(). Returns
 -- true while it waits, else false and why it stopped waiting: "welcome" or "timeout".
 function ChatRules.PositionLineWaits(versionSaid, firstTryAt, welcomeStart, now)
+	if not ChatRules.POSITION_WAITS_FOR_WELCOME then
+		return false, "off"
+	end
 	if versionSaid then
 		return false, "welcome"
 	end
