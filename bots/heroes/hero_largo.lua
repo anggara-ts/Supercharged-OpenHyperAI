@@ -185,7 +185,8 @@ local rhapsody = {
 	lastSituation = nil,
 }
 -- X.ReadShard's last reading (hasShard= on the croak-cast line).
-local shardRead = { has = false, mod = false, kv = 0, item = "none", logged = nil }
+local shardRead =
+	{ has = false, mod = false, kv = 0, item = "none", seenItem = false, latched = false, at = nil, logged = nil }
 
 -- [SHy-LARGO] lines, at most one per `key` every `interval` seconds.
 local logAt = {}
@@ -210,6 +211,7 @@ end
 
 function X.SkillsComplement()
 	local now = DotaTime()
+	X.ReadShard(now)
 	local isSinging = X.TrackRhapsody(now)
 	local canUseAbility = not Fu.CanNotUseAbility(bot)
 	local canStrum = isSinging and X.CanStrum()
@@ -842,27 +844,64 @@ end
 -- false) went on to t=6392. Fu.HasAghanimsShard reads modifier_item_aghanims_shard, and the bot API does not seem to
 -- see that modifier: game 078, the human Leshrac's Shard left his stash at t=1684 (consumed), and the modifier list
 -- ([SHy-HUMAN] mods add=, NumModifiers / GetModifierName) never showed it; game 017, Techies had the Shard barrel
--- and HasAghanimsShard stayed false. The API has HasScepter but no Shard call ([SHy-API] dump). So this also reads
--- the Encore's repeat_buff, which the Shard turns from 0 to 1 (datafeed hero_id=155), the way Doom reads
--- can_target_ancient. Unverified until a game: the shard-read line says which source answered, and whether the
--- Shard still sits in a slot unconsumed (item=).
-function X.ReadShard()
+-- and HasAghanimsShard stayed false. The API has HasScepter but no Shard call ([SHy-API] dump). Two more reads:
+--   kv:      the Encore's repeat_buff, which the Shard turns from 0 to 1 (datafeed hero_id=155), the way Doom reads
+--            can_target_ancient (whether the API applies the Shard to it is not proven: no Largo had a Scepter in
+--            games 071-079 to show it for double_song);
+--   latched: the Shard item was seen in one of his slots (a Shard bought away from the shop waits in the stash) and
+--            is now in none of them and not on the courier, so it was consumed.
+-- Read every 0.5s; the shard-read line says which source answered whenever the reading changes.
+local SHARD_ITEM = "item_aghanims_shard"
+function X.CourierHasShard()
+	local courier = bot.theCourier
+	if courier == nil then
+		return false
+	end
+	local ok, found = pcall(function()
+		for slot = 0, 8 do
+			local item = courier:GetItemInSlot(slot)
+			if item ~= nil and item:GetName() == SHARD_ITEM then
+				return true
+			end
+		end
+		return false
+	end)
+	return ok and found
+end
+function X.ReadShard(now)
+	if shardRead.at ~= nil and now - shardRead.at < 0.5 then
+		return shardRead.has
+	end
+	shardRead.at = now
 	shardRead.mod = Fu.HasAghanimsShard(bot)
 	shardRead.kv = encoreAbility:GetSpecialValueInt("repeat_buff") or 0
-	local slot = bot:FindItemSlot("item_aghanims_shard")
+	local slot = bot:FindItemSlot(SHARD_ITEM)
 	shardRead.item = (slot ~= nil and slot >= 0) and ("slot" .. slot) or "none"
-	shardRead.has = shardRead.mod or shardRead.kv > 0
-	local key = string.format("%s/%s/%d/%s", Bool(shardRead.has), Bool(shardRead.mod), shardRead.kv, shardRead.item)
+	if shardRead.item ~= "none" then
+		shardRead.seenItem = true
+	elseif shardRead.seenItem and not shardRead.latched and not X.CourierHasShard() then
+		shardRead.latched = true
+	end
+	shardRead.has = shardRead.mod or shardRead.kv > 0 or shardRead.latched
+	local key = string.format(
+		"%s/%s/%d/%s/%s",
+		Bool(shardRead.has),
+		Bool(shardRead.mod),
+		shardRead.kv,
+		shardRead.item,
+		Bool(shardRead.latched)
+	)
 	if key ~= shardRead.logged then
 		shardRead.logged = key
 		LogLargo(
 			"shard-read",
 			0,
-			"shard-read hasShard=%s mod=%s repeatBuff=%d item=%s",
+			"shard-read hasShard=%s mod=%s repeatBuff=%d item=%s latched=%s",
 			Bool(shardRead.has),
 			Bool(shardRead.mod),
 			shardRead.kv,
-			shardRead.item
+			shardRead.item,
+			Bool(shardRead.latched)
 		)
 	end
 	return shardRead.has
@@ -922,7 +961,7 @@ function X.ConsiderCroakOfGenius()
 			break
 		end
 	end
-	local hasShard = X.ReadShard()
+	local hasShard = shardRead.has
 	-- A magic hero in cast range with no buff (for the Shard upkeep, no fight needed): the most magical / pure spells.
 	local magicAlly, magicKit = nil, LargoRules.MAGIC_KIT - 1
 	if hasShard then

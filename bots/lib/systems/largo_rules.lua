@@ -107,9 +107,10 @@ LargoRules.TOP_UP_STRUMS = 5
 LargoRules.TOP_UP_MP = 0.4
 -- Once the song is on (s.singing), the top-up goes on until the group is nearly full: a looser bar than the one that
 -- starts it. Game 074: 35 of 74 top-up songs went off as idle within 5s (t=987-990, 1209-1213: held=3.3-3.4, so the
--- reason was gone by the first strum, and the 3s idle tail ended the song). One bar both started and ended the song:
--- 3 strums missing was 222 HP on two heroes at 30 a strum (t=1146 song-change why=top-up lowest=0.88), so one strum
--- ended it. The start bar is now 5 strums; the song, once on, heals to 90% / under 2 strums missing.
+-- reason was gone within about 0.3s of the toggle-on, and the 3s idle tail ended the song). One bar both started and
+-- ended the song, so a group just across it flips it: 3 strums missing was 222 HP on two heroes at 30 a strum (t=1146
+-- song-change why=top-up lowest=0.88). Which value crossed back in those cases is not logged; the toggle lines now
+-- carry lowest= / missing= / mp=. The start bar is now 5 strums; once on, the song heals to 90% / under 2 strums.
 LargoRules.TOP_UP_KEEP_HP = 0.9
 LargoRules.TOP_UP_KEEP_STRUMS = 2
 LargoRules.TOP_UP_KEEP_MP = 0.3
