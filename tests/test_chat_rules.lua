@@ -17,6 +17,14 @@ T.test("chat rules: dates read as D Mon YYYY", function()
 	T.eq(R.FormatDate(nil), nil)
 end)
 
+T.test("chat rules: the welcome comes at -0:30 and the position lines don't wait for it", function()
+	local R = load()
+	T.eq(R.WELCOME_START, -30, "welcome at -0:30 (maintainer 2026-11-24)")
+	local waits, by = R.PositionLineWaits(false, -89, R.WELCOME_START, -89)
+	T.eq(waits, false, "position line goes at once")
+	T.eq(by, "off")
+end)
+
 T.test("chat rules: a Workshop copy shows the release, a git build shows dev and the commit date", function()
 	local R = load()
 	local version, date =
@@ -115,12 +123,4 @@ T.test("chat rules: decision lines only while !debug is on", function()
 	T.eq(R.SayDecision(bot, nil, "say_push_top"), false, "nil text")
 	Utils.DebugMode, Utils.GameStates = oldDebug, oldStates
 	T.eq(R.IsDebugChat(nil), false)
-end)
-
-T.test("chat rules: the welcome comes at -0:30 and the position lines don't wait for it", function()
-	local R = load()
-	T.eq(R.WELCOME_START, -30, "welcome at -0:30 (maintainer 2026-11-24)")
-	local waits, by = R.PositionLineWaits(false, -89, R.WELCOME_START, -89)
-	T.eq(waits, false, "position line goes at once")
-	T.eq(by, "off")
 end)
