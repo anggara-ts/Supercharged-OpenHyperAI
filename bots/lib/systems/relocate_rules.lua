@@ -25,9 +25,12 @@ RelocateRules.LOW_HP = 0.2
 RelocateRules.RETURN_KEEP_HP = 0.7
 -- An order is re-sent every think until the cooldown shows the cast; after this long it counts as lost. Games 075-078:
 -- 34 lost orders, all after the difficulty layer (#234) came into the build (none in 070, 072-074; one in 071). Its
--- reaction hold sends a cast only when the same order is asked again within 0.6s, and Io asked once; a hold plus a
--- skip roll can last ~2.6s at Easy, so the wait is longer than that.
-RelocateRules.ORDER_WAIT = 3.0
+-- reaction hold sends a cast only when the same order is asked again within 0.6s, and Io asked once. Each skip roll
+-- holds the cast for its reaction delay + 1s, then a new decision waits its reaction delay again: two skips in a row
+-- take 4.4s at Easy (0.8s delay, 35% skip: ~12% of orders) and 3.2s at Medium, so the wait is 5s. A pending
+-- offensive order is re-checked every think meanwhile (RescueCheck, the ally alive, no enemy near Io); three skips
+-- at Easy (~4%) still log as lost.
+RelocateRules.ORDER_WAIT = 5.0
 
 -- The cast delay at Relocate level 1-3, minus the talent when it is trained (game file values above).
 function RelocateRules.CastDelay(level, talent)
