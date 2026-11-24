@@ -17,6 +17,14 @@ T.test("chat rules: dates read as D Mon YYYY", function()
 	T.eq(R.FormatDate(nil), nil)
 end)
 
+T.test("chat rules: the welcome comes at -1:00 and the position lines don't wait for it", function()
+	local R = load()
+	T.eq(R.WELCOME_START, -60, "welcome at -1:00 (maintainer 2026-11-24)")
+	local waits, by = R.PositionLineWaits(false, -89, R.WELCOME_START, -89)
+	T.eq(waits, false, "position line goes at once")
+	T.eq(by, "off")
+end)
+
 T.test("chat rules: a Workshop copy shows the release, a git build shows dev and the commit date", function()
 	local R = load()
 	local version, date =
@@ -50,8 +58,8 @@ end)
 T.test("chat rules: the welcome line gets the version and the date", function()
 	local R = load()
 	T.eq(
-		R.FillWelcomeLine("Supercharged OpenHyperAI {version} (update: {date})", "v0.4", "22 Nov 2026"),
-		"Supercharged OpenHyperAI v0.4 (update: 22 Nov 2026)"
+		R.FillWelcomeLine("Supercharged OpenHyperAI {version} ({date})", "v0.4", "22 Nov 2026"),
+		"Supercharged OpenHyperAI v0.4 (22 Nov 2026)"
 	)
 	T.eq(R.FillWelcomeLine("100% {other}", "v0.4", "d"), "100% {other}", "other text and placeholders stay")
 	local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
@@ -61,7 +69,9 @@ end)
 
 T.test("chat rules: the first position line waits for the welcome's version line, not for ever", function()
 	local R = load()
-	local start, wait = R.WELCOME_START, R.WELCOME_FIRST_WAIT
+	-- The wait is off since 2026-11-24 (ChatRules.POSITION_WAITS_FOR_WELCOME); its rule is still tested with it on.
+	R.POSITION_WAITS_FOR_WELCOME = true
+	local start, wait = -80, R.WELCOME_FIRST_WAIT
 	T.ok(wait > 0 and wait <= 10, "a short wait")
 	-- Game 075: the bots tried at t=-89, the version line came at t=-80.
 	T.eq(R.PositionLineWaits(false, -89, start, -89), true, "before the welcome starts")
@@ -75,6 +85,7 @@ T.test("chat rules: the first position line waits for the welcome's version line
 	-- A bot that loads after the welcome's start (e.g. at t=-30) waits from its own first try.
 	T.eq(R.PositionLineWaits(false, -30, start, -30 + wait - 0.1), true, "late load, still in the wait")
 	T.eq(R.PositionLineWaits(false, -30, start, -30 + wait), false, "late load, timed out")
+	R.POSITION_WAITS_FOR_WELCOME = false
 	-- The welcome and the bots read the same constant and the same team note.
 	local laning = T.read("bots/mode_laning_generic.lua")
 	T.ok(laning:find("local WELCOME_START = ChatRules.WELCOME_START", 1, true) ~= nil, "the welcome has its own start")

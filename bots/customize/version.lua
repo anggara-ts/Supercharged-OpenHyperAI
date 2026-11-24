@@ -3,7 +3,7 @@
 -- the number is then "<commit date YYYY.MM.DD>-<short sha>", plus "+dirty" when tracked files other than
 -- bots/customize/general.lua had local changes. Without it (Workshop copies) the static release number below is used.
 -- Release format: YYYY.MM.DD-NNN; `release` is that release's tag. The /release skill sets both. The start-of-game
--- welcome shows "<release> (update: <date of the number>)" in a Workshop copy, "dev <number>" in a git build
+-- welcome shows "<release> (<date of the number>)" in a Workshop copy, "dev <number>" in a git build
 -- (bots/lib/systems/chat_rules.lua WelcomeVersion).
 local Version = {
 	number = "2026.11.23-230",

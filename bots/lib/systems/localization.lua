@@ -17,7 +17,7 @@ local strings = {
 		-- the Workshop page. No command hints (!pos, !Xpos Y, !sp, !debug; maintainer 2026-11-23). {version} and {date}:
 		-- bots/lib/systems/chat_rules.lua WelcomeVersion.
 		welcome = {
-			"Supercharged OpenHyperAI {version} (update: {date})",
+			"Supercharged OpenHyperAI {version} ({date})",
 			"Feedback and known limitations: see the bot script's Workshop page.",
 		},
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
@@ -271,7 +271,7 @@ local strings = {
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（更新：{date}）",
+			"Supercharged OpenHyperAI {version}（{date}）",
 			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
 		},
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
@@ -492,7 +492,7 @@ local strings = {
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version} (обновление: {date})",
+			"Supercharged OpenHyperAI {version} ({date})",
 			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
 		},
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
@@ -748,7 +748,7 @@ local strings = {
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（更新：{date}）",
+			"Supercharged OpenHyperAI {version}（{date}）",
 			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
 		},
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
