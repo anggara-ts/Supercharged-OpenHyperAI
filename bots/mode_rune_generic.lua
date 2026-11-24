@@ -556,9 +556,11 @@ function RuneMode.WaterWalk()
 		return "walk"
 	end
 	bot._waterDone = bot._waterDone or {}
+	-- The team's own spot first (RuneRules.RiverSpotOrder): Radiant top, Dire bottom.
+	local spotOrder = RuneRules.RiverSpotOrder(GetTeam() == TEAM_DIRE, RUNE_POWERUP_1, RUNE_POWERUP_2)
 	for _, spawnTime in ipairs(WATER_AT) do
 		if now >= spawnTime - 8 and now <= spawnTime + 4 then
-			for _, id in ipairs({ RUNE_POWERUP_1, RUNE_POWERUP_2 }) do
+			for _, id in ipairs(spotOrder) do
 				local key = spawnTime .. ":" .. id
 				local loc = GetRuneSpawnLocation(id)
 				if
@@ -571,6 +573,19 @@ function RuneMode.WaterWalk()
 				then
 					bot._waterDone[key] = true
 					bot._waterWalk = { id = id, loc = loc, t0 = spawnTime }
+					-- [SHy-RUNE] river-walk-pick spot= own=1|0 (the team's own spot) dist= spawn=: once per walk.
+					pcall(
+						print,
+						string.format(
+							"[SHy-RUNE] t=%.0f %s river-walk-pick spot=%d own=%d dist=%d spawn=%d",
+							now,
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							id,
+							id == spotOrder[1] and 1 or 0,
+							GetUnitToLocationDistance(bot, loc),
+							spawnTime
+						)
+					)
 					return "walk"
 				end
 			end
@@ -1034,6 +1049,37 @@ function RuneMode.LeftoverDesire()
 	hold.phase = phase
 	return phase == "hold" and LEFTOVER_HOLD_DESIRE or LEFTOVER_TRY_DESIRE
 end
+-- [SHy-RUNE] spots b1= b2= p1= p2=: where GetRuneSpawnLocation puts the four rune spots, once per team at the first
+-- think (#32, game 078: from the logged distances the API's bounty 2 is near 550,-4650; the next game compares it
+-- with where the runes really spawn).
+function RuneMode.LogSpots()
+	if RuneMode._spotsLogged or not IsTeamLogger() then
+		return
+	end
+	RuneMode._spotsLogged = true
+	local parts = {}
+	for _, pair in ipairs({
+		{ "b1", RUNE_BOUNTY_1 },
+		{ "b2", RUNE_BOUNTY_2 },
+		{ "p1", RUNE_POWERUP_1 },
+		{ "p2", RUNE_POWERUP_2 },
+	}) do
+		local okL, loc = pcall(GetRuneSpawnLocation, pair[2])
+		parts[#parts + 1] = pair[1]
+			.. "="
+			.. ((okL and loc ~= nil) and string.format("%.0f,%.0f", loc.x, loc.y) or "err")
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s spots team=%s %s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			table.concat(parts, " ")
+		)
+	)
+end
 function RuneMode.RuneWatch()
 	local now = DotaTime()
 	if now < 0 or now < (RuneMode._runeWatchAt or -999) or not IsTeamLogger() then
@@ -1160,6 +1206,7 @@ function RuneMode.GoldCycleStep()
 	return true
 end
 function GetDesire()
+	pcall(RuneMode.LogSpots)
 	pcall(RuneMode.RuneWatch)
 	pcall(RuneMode.RiverPickupCheck)
 	if bot._goldCycle ~= nil and DotaTime() < 15 then

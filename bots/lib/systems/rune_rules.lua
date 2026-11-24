@@ -129,6 +129,17 @@ function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
 	return oldDesire
 end
 
+-- Which river spot the water walk tries first (#32, game 078, 0:00): both teams tried the top spot (RUNE_POWERUP_1)
+-- first, so both mids went top and nobody went bottom; Io (Dire) took the top spot 1981 away with the bottom one 1694
+-- away (`river-walk-near spot=0 dist=1981`). Maintainer: "usually bots take top river horn bounty and dire bottom".
+-- Radiant tries the top spot first, Dire the bottom one; then the other spot. top / bottom: the two rune ids.
+function RuneRules.RiverSpotOrder(isDire, top, bottom)
+	if isDire then
+		return { bottom, top }
+	end
+	return { top, bottom }
+end
+
 -- A takeover claims the rune for the team (#32, game 069 40:18-40:22: during a Roshan take Vengeful Spirit took a rune
 -- over from Puck, Puck took it back from her, then Zeus from her: each takeover lost to the Roshan mode, nobody picked it
 -- up). Claims are shared by the team's bots (this module is one table per team VM), keyed by team and rune id: an

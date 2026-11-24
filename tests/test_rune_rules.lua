@@ -345,3 +345,13 @@ T.test("rune rules: the lotus hold pauses for retreat and resumes while the spaw
 	T.near(stood, R.LOTUS_STAND_WAIT, 0.15, "stood= is ring time only")
 	T.near(held, 5.5, 0.15, "held= counts the pause (wall time for the cap)")
 end)
+
+T.test("rune rules: the team's own river spot first", function()
+	local R = load()
+	-- Game 078, 0:00: both mids went to the top spot; Radiant tries top first, Dire bottom first.
+	local top, bottom = 0, 1
+	T.eq(R.RiverSpotOrder(false, top, bottom)[1], top, "Radiant: top first")
+	T.eq(R.RiverSpotOrder(false, top, bottom)[2], bottom, "Radiant: then bottom")
+	T.eq(R.RiverSpotOrder(true, top, bottom)[1], bottom, "Dire: bottom first")
+	T.eq(R.RiverSpotOrder(true, top, bottom)[2], top, "Dire: then top")
+end)
