@@ -251,16 +251,63 @@ end
 -- No TP channel (3s, 7.42 items_all.txt item_tpscroll AbilityChannelTime) while Spirit Siphon drains her or an
 -- enemy hero that hit her in the last 2s stands within TP_HOLD_RANGE (#36, game 067, 4:05: TP at 23% HP with Death
 -- Prophet 82 away, dead at 4:08 inside the channel). Damage does not stop a channel, so the hitter just keeps
--- hitting for the 3s. 750 = the Siphon's break distance. Returns hold, why ("siphoned" | "hit-near" | nil).
+-- hitting for the 3s. 750 = the Siphon's break distance.
+-- units (#191, optional): the non-hero threats, a table with
+--   exitOrb: her exit Orb is in flight and the Jaunt is ready (a Jaunt gets her out at once; game 073 t=2379 and 074
+--     t=6323: a TP at 0.09 / 0.14 HP the think after the shift, with the exit Orb out);
+--   roshan: Roshan next to her is on her (game 073 t=2379: TP in the pit, dead in the channel);
+--   towerAge / unitAge: seconds since an enemy tower / creeps last hit her, the Phase Shift's time not counted
+--     (EscapeRules.HitAge); creeps hold only under TP_HOLD_UNIT_HP (game 074 t=6323: 0.14 -> 0.02 in the channel
+--     among 4 creeps), a tower at any HP;
+--   hp: her HP share.
+-- Returns hold, why ("siphoned" | "hit-near" | "exit-orb" | "roshan" | "tower" | "units" | nil).
 EscapeRules.TP_HOLD_RANGE = EscapeRules.SIPHON_BREAK
-function EscapeRules.HoldTp(siphoned, hitterDist)
+EscapeRules.TP_HOLD_HIT_AGE = 1.5
+EscapeRules.TP_HOLD_UNIT_HP = 0.5
+function EscapeRules.HoldTp(siphoned, hitterDist, units)
 	if siphoned then
 		return true, "siphoned"
 	end
 	if hitterDist ~= nil and hitterDist <= EscapeRules.TP_HOLD_RANGE then
 		return true, "hit-near"
 	end
+	units = units or {}
+	if units.exitOrb == true then
+		return true, "exit-orb"
+	end
+	if units.roshan == true then
+		return true, "roshan"
+	end
+	if units.towerAge ~= nil and units.towerAge <= EscapeRules.TP_HOLD_HIT_AGE then
+		return true, "tower"
+	end
+	if
+		units.unitAge ~= nil
+		and units.unitAge <= EscapeRules.TP_HOLD_HIT_AGE
+		and (units.hp or 1) < EscapeRules.TP_HOLD_UNIT_HP
+	then
+		return true, "units"
+	end
 	return false, nil
+end
+-- How long ago a hit was, not counting a Phase Shift that started after it (#191). Inside the shift nothing can hit
+-- her, so a plain "hit in the last 1.5s" is false exactly when the shift ends and the TP rule looks again (games 073
+-- and 074: both TPs came the think after a full shift). hitAt: the last hit (nil: none); shiftAt / shiftEnd: the
+-- last shift's order time and its end (nil: no shift). The shift counts when it started at most TP_HOLD_HIT_AGE
+-- after the hit. Returns the age in seconds, or nil.
+function EscapeRules.HitAge(now, hitAt, shiftAt, shiftEnd)
+	if hitAt == nil then
+		return nil
+	end
+	if
+		shiftAt ~= nil
+		and shiftEnd ~= nil
+		and shiftAt >= hitAt - 0.1
+		and shiftAt - hitAt <= EscapeRules.TP_HOLD_HIT_AGE
+	then
+		return math.max(0, shiftAt - hitAt) + math.max(0, now - math.max(shiftEnd, hitAt))
+	end
+	return now - hitAt
 end
 
 -- Phase Shift at low HP while being hit (#36, game 067, 42:07-42:16: Tombstone zombies held her at 1-6% HP for 9s

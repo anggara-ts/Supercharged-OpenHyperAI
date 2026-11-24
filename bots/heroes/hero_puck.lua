@@ -539,6 +539,8 @@ function X.EscapeShiftJaunt(orderAt, since, duration)
 			bot._phaseExitHow = "orb"
 			bot._orbCastAt = DotaTime()
 			bot._exitOrbAt = DotaTime()
+			-- No TP while it flies (#191): the TP rule runs before this script in the next think.
+			bot._noTpUntil = math.max(bot._noTpUntil or -999, DotaTime() + 1.0)
 			X.LogEscapeAction("orb", "phase-exit", point)
 			X.ReleasePhaseHold()
 			bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
@@ -785,11 +787,15 @@ function X.CastHoldTick()
 		bot._castHoldUntil = nil
 	end
 end
--- No TP while siphoned or next to a hero that is hitting her (EscapeRules.HoldTp, #36 game 067 4:05). Runs first in
+-- No TP while siphoned or next to a hero that is hitting her (EscapeRules.HoldTp, #36 game 067 4:05), while Roshan,
+-- an enemy tower or (under 50% HP) creeps are hitting her, or while her exit Orb is in flight with the Jaunt ready
+-- (#191, games 073 t=2379 and 074 t=6323: TPs at 0.09 and 0.14 HP the think after a full shift). Runs first in
 -- every think, before the returns for the shift, the cast hold and silence (silence stops spells, not the TP).
 -- The item think runs the TP rule before this script, so the window rolls 1s ahead of the last check.
--- [SHy-PUCK] tp-hold why=siphoned|hit-near hitter= dist= hp=, at most once per 3s.
+-- [SHy-PUCK] tp-hold why=siphoned|hit-near|exit-orb|roshan|tower|units hitter= dist= hp= unitAge= towerAge=, when
+-- the why changes or at most once per 3s.
 function X.HoldTpInDanger()
+	local now = DotaTime()
 	local siphoned = bot:HasModifier("modifier_death_prophet_spirit_siphon_slow")
 	local hitter, hitterDist = nil, nil
 	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, EscapeRules.TP_HOLD_RANGE, true, BOT_MODE_NONE) or {}) do
@@ -800,26 +806,67 @@ function X.HoldTpInDanger()
 			end
 		end
 	end
-	local hold, why = EscapeRules.HoldTp(siphoned, hitterDist)
+	-- The last hits by creeps and by an enemy tower (kept across the shift, EscapeRules.HitAge).
+	if bot:WasRecentlyDamagedByCreep(0.5) or X.UnitAttackers() > 0 then
+		bot._puckUnitHitAt = now
+	end
+	if bot:WasRecentlyDamagedByTower(0.5) then
+		bot._puckTowerHitAt = now
+	end
+	-- Roshan within 700 of her attacking her (he is in the neutral creep list; whether his hits count for
+	-- WasRecentlyDamagedByCreep is unverified, so his attack target is read too).
+	local roshanNear = false
+	for _, creep in pairs(bot:GetNearbyNeutralCreeps(700) or {}) do
+		if Fu.IsRoshan(creep) then
+			roshanNear = true
+			if creep:GetAttackTarget() == bot then
+				bot._puckUnitHitAt = now
+			end
+		end
+	end
+	local shiftAt = bot._phaseOrderAt
+	local shiftEnd = shiftAt ~= nil and shiftAt + phaseShiftAbility:GetSpecialValueFloat("duration") or nil
+	local unitAge = EscapeRules.HitAge(now, bot._puckUnitHitAt, shiftAt, shiftEnd)
+	local towerAge = EscapeRules.HitAge(now, bot._puckTowerHitAt, shiftAt, shiftEnd)
+	local hold, why = EscapeRules.HoldTp(siphoned, hitterDist, {
+		exitOrb = X.ExitOrbOut(),
+		roshan = roshanNear and unitAge ~= nil and unitAge <= EscapeRules.TP_HOLD_HIT_AGE,
+		towerAge = towerAge,
+		unitAge = unitAge,
+		hp = Fu.GetHP(bot),
+	})
 	if not hold then
 		return false
 	end
-	bot._noTpUntil = math.max(bot._noTpUntil or -999, DotaTime() + 1.0)
-	if DotaTime() >= (bot._tpHoldLogAt or -999) then
-		bot._tpHoldLogAt = DotaTime() + 3
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 1.0)
+	-- Own log fields: bot._tpHoldLogAt belongs to the generic TP rule's [SHy-TP] tp-hold line.
+	if why ~= bot._puckTpHoldWhy or now >= (bot._puckTpHoldLogAt or -999) then
+		bot._puckTpHoldWhy = why
+		bot._puckTpHoldLogAt = now + 3
 		pcall(
 			print,
 			string.format(
-				"[SHy-PUCK] t=%.0f tp-hold why=%s hitter=%s dist=%d hp=%.2f",
-				DotaTime(),
+				"[SHy-PUCK] t=%.0f tp-hold why=%s hitter=%s dist=%d hp=%.2f unitAge=%.1f towerAge=%.1f",
+				now,
 				tostring(why),
 				hitter ~= nil and (string.gsub(hitter:GetUnitName(), "npc_dota_hero_", "")) or "-",
 				hitterDist or -1,
-				Fu.GetHP(bot)
+				Fu.GetHP(bot),
+				unitAge or -1,
+				towerAge or -1
 			)
 		)
 	end
 	return true
+end
+-- Her exit Orb (thrown at a shift's end, bot._exitOrbAt) is in flight and the Jaunt to it is ready: no TP, the
+-- Jaunt is the way out (X.ExitOrbJaunt).
+function X.ExitOrbOut()
+	local thrownAt = bot._exitOrbAt
+	if thrownAt == nil or DotaTime() - thrownAt > (X.OrbFlightTime() or 2.6) + 0.2 then
+		return false
+	end
+	return etherealJauntAbility:IsFullyCastable() and not bot:IsRooted() and X.OrbInFlight() ~= nil
 end
 -- HP samples (every 0.2s, the last 1.5s) for the HP drop over the last second (X.HpLoss).
 function X.SampleHp()
@@ -1009,14 +1056,19 @@ function X.OffensiveRiftBlocked(branch)
 end
 -- The enemy tower within 1600 that is hitting her: it targets her, or it hit her in the last second with no allied
 -- lane creep or other allied hero inside its range to take the shots. Returns tower, distance, range (its attack
--- range from the handle) or nil.
+-- range from the handle), or nil and a note for the tower-check line (out | tanked | other | none).
+-- Fu.IsValidBuilding, not Fu.IsValid: Fu.IsValid is false for every building, so from the first build of this rule
+-- (game 072) to game 079 no tower was ever found, and no tower-escape or tower-hop line printed (078 t=493: the
+-- laning log had the mid T1 on her at 0.56 HP, holders=0, and no tower-escape line).
 function X.TowerOnHer()
+	local note = "none"
 	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if Fu.IsValid(tower) then
+		if Fu.IsValidBuilding(tower) then
 			local range = tower:GetAttackRange()
 			local dist = GetUnitToUnitDistance(bot, tower)
 			if dist <= range + EscapeRules.TOWER_MARGIN then
 				local onHer = tower:GetAttackTarget() == bot
+				note = "other"
 				if not onHer and bot:WasRecentlyDamagedByTower(1.0) then
 					local tanked = #Fu.GetAlliesNearLoc(tower:GetLocation(), range) > 1
 					for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
@@ -1026,14 +1078,54 @@ function X.TowerOnHer()
 						end
 					end
 					onHer = not tanked
+					note = tanked and "tanked" or note
 				end
 				if onHer then
 					return tower, dist, range
 				end
+			elseif note == "none" then
+				note = "out"
 			end
 		end
 	end
-	return nil
+	return nil, note
+end
+-- Diagnostic (#191, items 16-17 never printed in games 074-079): hit by a tower in the last second and no
+-- tower-escape order this think. found=no: X.TowerOnHer found no tower on her (note: out | tanked | other | none);
+-- found=yes: why the escape gave no order (hp-ok: over 65% HP and not falling fast; hero-hit: the walk waits for the
+-- hero rules). At most once per 3s.
+-- [SHy-PUCK] t= tower-check found=yes|no why= tower= dist= range= hp= loss=
+function X.LogTowerCheck(found, why, tower, dist, range, loss)
+	if DotaTime() < (bot._towerCheckLogAt or -999) then
+		return
+	end
+	bot._towerCheckLogAt = DotaTime() + 3
+	pcall(
+		print,
+		string.format(
+			"[SHy-PUCK] t=%.0f tower-check found=%s why=%s tower=%s dist=%.0f range=%.0f hp=%.2f loss=%.2f",
+			DotaTime(),
+			found and "yes" or "no",
+			tostring(why),
+			tower ~= nil and tostring(tower:GetUnitName()) or "-",
+			dist or -1,
+			range or -1,
+			Fu.GetHP(bot),
+			loss or 0
+		)
+	)
+end
+-- A Lua error in one of the tower steps (they run in pcall, which dropped the error unseen): [SHy-ERROR] once per
+-- distinct message, at most 3.
+local towerErrors = {}
+function X.LogStepError(name, err)
+	local key = name .. ": " .. tostring(err)
+	if towerErrors[key] or #towerErrors >= 3 then
+		return
+	end
+	towerErrors[key] = true
+	towerErrors[#towerErrors + 1] = key
+	pcall(print, string.format("[SHy-ERROR] t=%.1f puck %s", DotaTime(), key))
 end
 -- [SHy-PUCK] tower-escape via=walk|rift|orb-jaunt|orb-hop why=hit|behind-tower dist= out= hp= loss= tower=, when
 -- the way changes or once per 3s.
@@ -1066,6 +1158,10 @@ end
 function X.TowerEscape(canCast)
 	local tower, dist, range = X.TowerOnHer()
 	if tower == nil then
+		-- dist holds the note when no tower was found.
+		if bot:WasRecentlyDamagedByTower(1.0) then
+			X.LogTowerCheck(false, dist, nil, nil, nil, X.HpLoss())
+		end
 		return false
 	end
 	local now = DotaTime()
@@ -1084,6 +1180,7 @@ function X.TowerEscape(canCast)
 	end
 	local via = EscapeRules.TowerEscape(true, Fu.GetHP(bot), loss, out, orbJauntReady, riftReady, riftDistance)
 	if via == nil then
+		X.LogTowerCheck(true, "hp-ok", tower, dist, range, loss)
 		return false
 	end
 	local towerAt = tower:GetLocation()
@@ -1108,6 +1205,7 @@ function X.TowerEscape(canCast)
 	-- walk: past the edge plus 150, held from the modes' Thinks for this think and the next few. Not while a hero is
 	-- hitting her too: her shift / Orb / Rift rules answer that, and the TP stays held.
 	if bot:WasRecentlyDamagedByAnyHero(1.0) then
+		X.LogTowerCheck(true, "hero-hit", tower, dist, range, loss)
 		return false
 	end
 	X.LogTowerEscape(via, "hit", tower, dist, out, loss)
@@ -1138,7 +1236,7 @@ function X.TowerHop(canCast)
 	local homeDist = GetUnitToLocationDistance(bot, home)
 	local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
 	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if Fu.IsValid(tower) then
+		if Fu.IsValidBuilding(tower) then
 			local towerAt = tower:GetLocation()
 			local range = tower:GetAttackRange()
 			local towerDist = GetUnitToUnitDistance(bot, tower)
@@ -1325,7 +1423,9 @@ function X.SkillsComplement()
 	end
 	-- An enemy tower hitting her: out of its range first, even silenced (a walk needs no spell).
 	local okT, towerActed = pcall(X.TowerEscape, canCast)
-	if okT and towerActed then
+	if not okT then
+		X.LogStepError("TowerEscape", towerActed)
+	elseif towerActed then
 		return
 	end
 	if not canCast then
@@ -1333,11 +1433,15 @@ function X.SkillsComplement()
 	end
 	pcall(X.AskDodgeHold)
 	local okTj, towerJaunted = pcall(X.TowerOrbJaunt)
-	if okTj and towerJaunted then
+	if not okTj then
+		X.LogStepError("TowerOrbJaunt", towerJaunted)
+	elseif towerJaunted then
 		return
 	end
 	local okHop, hopped = pcall(X.TowerHop, canCast)
-	if okHop and hopped then
+	if not okHop then
+		X.LogStepError("TowerHop", hopped)
+	elseif hopped then
 		return
 	end
 	local okE, exitJaunted = pcall(X.ExitOrbJaunt)

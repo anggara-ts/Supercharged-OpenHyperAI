@@ -57,6 +57,81 @@ T.test("escape rules: no TP while siphoned or next to a hitter (game 067, 4:05)"
 	T.eq((R.HoldTp(false, nil)), false, "nobody hit her")
 end)
 
+T.test("escape rules: no TP while Roshan, a tower or creeps hit her, or with the exit Orb out (#191)", function()
+	local R = load()
+	T.eq(select(2, R.HoldTp(false, nil, { exitOrb = true, hp = 0.14 })), "exit-orb", "game 074 t=6323: exit Orb out")
+	T.eq(select(2, R.HoldTp(false, nil, { roshan = true, hp = 0.09 })), "roshan", "game 073 t=2379: in the pit")
+	T.eq(select(2, R.HoldTp(false, nil, { towerAge = 0.4, hp = 0.9 })), "tower", "a tower hit her, any HP")
+	T.eq((R.HoldTp(false, nil, { towerAge = 2.0, hp = 0.9 })), false, "the tower hit is old")
+	T.eq(select(2, R.HoldTp(false, nil, { unitAge = 0.7, hp = 0.14 })), "units", "game 074 t=6323: 4 creeps on her")
+	T.eq((R.HoldTp(false, nil, { unitAge = 0.7, hp = 0.8 })), false, "creeps at 80% HP: TP is fine")
+	T.eq((R.HoldTp(false, nil, { unitAge = 2.0, hp = 0.1 })), false, "out of the creeps for 2s")
+	T.eq((R.HoldTp(false, nil, {})), false, "nothing on her")
+	T.eq(select(2, R.HoldTp(false, 82, { exitOrb = true })), "hit-near", "a hero hitter comes first")
+end)
+
+T.test("escape rules: hit age without the Phase Shift's time (#191, games 073 / 074)", function()
+	local R = load()
+	T.eq(R.HitAge(10, nil, nil, nil), nil, "never hit")
+	T.near(R.HitAge(10, 9, nil, nil), 1, 0.001, "no shift")
+	-- Game 074: creeps on her, shift at 6319.0 for 3.25s, TP rule at 6323.
+	T.near(R.HitAge(6323, 6318.9, 6319.0, 6322.25), 0.85, 0.001, "the shift's 3.25s do not count")
+	T.near(R.HitAge(6321, 6318.9, 6319.0, 6322.25), 0.1, 0.001, "inside the shift")
+	-- A shift long after the hit: a plain age.
+	T.near(R.HitAge(20, 10, 15, 17.5), 10, 0.001, "shift started 5s after the hit")
+	-- A hit after an old shift: a plain age.
+	T.near(R.HitAge(20, 19, 10, 12.5), 1, 0.001, "hit after the shift")
+end)
+
+T.test("puck: an enemy tower on her is found (#191: Fu.IsValid is false for buildings)", function()
+	T.stub.reset({ hero = "npc_dota_hero_puck", slot = 2 })
+	local ok, X = T.stub.load("bots/heroes/hero_puck")
+	T.ok(ok, "hero_puck loads: " .. tostring(X))
+	local bot = T.stub.bot
+	local here = bot:GetLocation()
+	local function tower(dx, target)
+		local unit = T.stub.newUnit({
+			name = "npc_dota_badguys_tower1_mid",
+			team = TEAM_DIRE,
+			loc = Vector(here.x + dx, here.y, 0),
+			hero = false,
+		})
+		unit.IsBuilding = function()
+			return true
+		end
+		unit.GetAttackRange = function()
+			return 700
+		end
+		unit.GetAttackTarget = function()
+			return target
+		end
+		return unit
+	end
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local onHer = tower(400, bot)
+	T.eq(Fu.IsValid(onHer), false, "Fu.IsValid rejects a building (the old check)")
+	T.eq(Fu.IsValidBuilding(onHer), true, "Fu.IsValidBuilding takes it")
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { onHer } or {}
+	end
+	local found, dist, range = X.TowerOnHer()
+	T.ok(found == onHer, "the tower targeting her is found")
+	T.near(dist, 400, 1, "its distance")
+	T.eq(range, 700, "its range")
+	local far = tower(2000, bot)
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { far } or {}
+	end
+	local none, note = X.TowerOnHer()
+	T.eq(none, nil, "a tower 2000 away is not on her")
+	T.eq(note, "out", "note out")
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { tower(400, nil) } or {}
+	end
+	local _, noteOther = X.TowerOnHer()
+	T.eq(noteOther, "other", "a tower in range on nobody")
+end)
+
 T.test("escape rules: Phase Shift at low HP while hit (game 067, 42:07; game 068)", function()
 	local R = load()
 	T.eq(R.LowHpPhase(0.05, 0, false, 3), "low-hp-units", "zombies attacking her")
