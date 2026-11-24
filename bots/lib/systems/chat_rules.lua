@@ -115,4 +115,19 @@ function ChatRules.FillWelcomeLine(line, versionText, dateText)
 	return filled
 end
 
+-- Does a bot answer a chat line with small talk / trash talk (Fu.Chat.GetReplyString)? Only an enemy human's all chat
+-- (maintainer, game 080: "sending team chat make them reply trashtalk to ally"; "enemy bot can reply with trashtalk
+-- when human chat-all"). A bot's line, team chat and an ally's all chat get none: false and why (bot / ally).
+-- Commands and their replies are handled before this.
+ChatRules.SMALLTALK_SKIP_LOG_GAP = 30
+function ChatRules.SmallTalkReply(senderIsBot, teamOnly, senderIsEnemy)
+	if senderIsBot then
+		return false, "bot"
+	end
+	if teamOnly or not senderIsEnemy then
+		return false, "ally"
+	end
+	return true, nil
+end
+
 return ChatRules

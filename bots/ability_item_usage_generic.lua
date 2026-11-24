@@ -1001,10 +1001,28 @@ function Usage.SetReplyHumanTime(chatEvent)
 	if chatText ~= "-都来守家" or Fu.Role.IsAllyMemberID(senderPlayerId) then
 		Fu.Role.SetLastChatString(chatText)
 	end
-	if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsEnemyMemberID(senderPlayerId)) then
+	-- Small talk only for an enemy human's all chat (ChatRules.SmallTalkReply; game 080: the bots answered the
+	-- maintainer's team chat with trash talk). [SHy-CHAT] smalltalk-skip why=ally, once per 30s.
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local reply, skipWhy = ChatRules.SmallTalkReply(
+		IsPlayerBot(senderPlayerId),
+		chatEvent.team_only,
+		Fu.Role.IsEnemyMemberID(senderPlayerId)
+	)
+	if reply then
 		humanChatString = chatText
 		humanChatTime = DotaTime()
-		replyToAllChat = not chatEvent.team_only
+		replyToAllChat = true
+	elseif skipWhy == "ally" and DotaTime() >= (Usage._smallTalkSkipLogAt or -999) then
+		Usage._smallTalkSkipLogAt = DotaTime() + ChatRules.SMALLTALK_SKIP_LOG_GAP
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s smalltalk-skip why=ally team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(chatEvent.team_only)
+			)
+		)
 	end
 end
 -- [SHy-BUYBACK]: every buyback with its reason, and a support's skipped one (once per 10s).

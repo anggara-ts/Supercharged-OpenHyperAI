@@ -122,3 +122,15 @@ T.test("chat rules: decision lines only while !chatty is on, not with !debug", f
 	Utils.DebugMode, Utils.GameStates = oldDebug, oldStates
 	T.eq(R.IsDebugChat(nil), false)
 end)
+
+-- Game 080, maintainer: "sending team chat make them reply trashtalk to ally"; "enemy bot can reply with trashtalk
+-- when human chat-all".
+T.test("chat rules: small talk only for an enemy human's all chat", function()
+	local R = load()
+	T.eq(R.SmallTalkReply(false, false, true), true, "enemy human, all chat: reply")
+	T.eq(select(2, R.SmallTalkReply(false, true, false)), "ally", "ally's team chat: none")
+	T.eq(R.SmallTalkReply(false, true, false), false)
+	T.eq(select(2, R.SmallTalkReply(false, false, false)), "ally", "ally's all chat: none")
+	T.eq(select(2, R.SmallTalkReply(true, false, true)), "bot", "a bot's line: none")
+	T.eq(R.SmallTalkReply(false, nil, true), true, "team_only missing: all chat")
+end)
