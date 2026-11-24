@@ -147,6 +147,31 @@ T.test("strength: TeamTotal counts an unread or stale hero as unknown, not 0", f
 	T.eq(R.TeamTotal(ids, { [15] = { value = 100, at = 0 }, [16] = { value = 50, at = 0 } }, 200, nil), 150, "no age")
 end)
 
+T.test("strength: TeamTotal keeps up to maxStale stale enemy reads at their last value (game 081)", function()
+	local R = rules()
+	local ids = { 1, 2, 3, 4, 5 }
+	local reads = {}
+	for _, pid in ipairs(ids) do
+		reads[pid] = { value = 6000, at = 1000 }
+	end
+	-- One hero unseen for 3 minutes: counted with its last items, not unknown.
+	reads[5].at = 820
+	local total, stale = R.TeamTotal(ids, reads, 1000, 120, 2)
+	T.eq(total, 30000, "one stale hero counts")
+	T.eq(stale, 1, "one stale")
+	reads[4].at = 800
+	total, stale = R.TeamTotal(ids, reads, 1000, 120, 2)
+	T.eq(total, 30000, "two stale heroes count")
+	T.eq(stale, 2)
+	reads[3].at = 700
+	total, stale = R.TeamTotal(ids, reads, 1000, 120, 2)
+	T.eq(total, nil, "three stale heroes: unknown")
+	T.eq(stale, 3)
+	reads[3] = nil
+	T.eq(R.TeamTotal(ids, reads, 1000, 120, 2), nil, "a hero never seen: unknown")
+	T.eq(R.DEFAULTS.maxStaleHeroes, 2, "default")
+end)
+
 T.test("strength: lane pick - open high ground first, else the weakest outer building", function()
 	local R = rules()
 	-- Game 074: Dire's mid T3 and ranged barracks down (mid target = melee barracks), top T1 at 30%.
