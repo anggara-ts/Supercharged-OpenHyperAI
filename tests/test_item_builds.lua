@@ -137,12 +137,14 @@ T.test("Ember Spirit pos 3, 4 and 5 have their own lists", function()
 end)
 
 -- #9: Io's item table had only pos 1, 4 and 5, so a pos 2 or pos 3 Io got whichever list pairs() met first
--- (bots/lib/hero/hero_builder.lua). Each position now has its own list from the Stratz data.
+-- (bots/lib/hero/hero_builder.lua). Each position now has its own list from the Stratz data. The marker items follow
+-- the data (7.42, week of 19 Nov 2026: pos 3 ends with Mekansm, so a support list is told apart by Holy Locket and
+-- Glimmer Cape, which only the pos 4/5 lists buy).
 T.test("Io has its own buy list in every position", function()
 	local own = {
-		[1] = { has = "item_helm_of_the_dominator", lacks = "item_mekansm" },
-		[2] = { has = "item_octarine_core", lacks = "item_helm_of_the_dominator" },
-		[3] = { has = "item_heart", lacks = "item_helm_of_the_dominator" },
+		[1] = { has = "item_maelstrom", lacks = "item_mekansm" },
+		[2] = { has = "item_wind_waker", lacks = "item_helm_of_the_dominator" },
+		[3] = { has = "item_octarine_core", lacks = "item_maelstrom" },
 		[4] = { has = "item_mekansm", lacks = "item_black_king_bar" },
 		[5] = { has = "item_mekansm", lacks = "item_black_king_bar" },
 	}
@@ -151,7 +153,8 @@ T.test("Io has its own buy list in every position", function()
 		T.ok(indexOf(list, own[slot].has) ~= nil, "Io pos " .. slot .. " has " .. own[slot].has)
 		T.eq(indexOf(list, own[slot].lacks), nil, "Io pos " .. slot .. " " .. own[slot].lacks)
 		if slot == 2 or slot == 3 then
-			T.eq(indexOf(list, "item_mekansm"), nil, "Io pos " .. slot .. " is not the support list")
+			T.eq(indexOf(list, "item_holy_locket"), nil, "Io pos " .. slot .. " is not the support list")
+			T.eq(indexOf(list, "item_glimmer_cape"), nil, "Io pos " .. slot .. " is not the support list")
 		end
 	end
 end)
