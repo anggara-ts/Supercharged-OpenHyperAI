@@ -178,7 +178,7 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
 
 1. The game runs a copy of the build in `dota 2 beta/game/dota/scripts/vscripts/bots`, made by
    `node tools/export-bots.js --test-game` (`/prepare-game` runs it): the bot scripts of `HEAD`, the uncommitted
-   test lineup and a `bots/customize/build_info.lua` for that commit, nothing else. Editing or switching branches in
+   test lineup, a `bots/customize/build_info.lua` for that commit and `LICENSE`, nothing else. Editing or switching branches in
    the clone during a game changes nothing in it; run the export again after a change. (An old dev setup links
    `vscripts/bots` to the clone; the tool refuses to write through a link, so rename it, e.g. `bots-dev`.)
    Start a Custom Lobby, server **Local Host**, bots set to **Local Dev Script** (Valve

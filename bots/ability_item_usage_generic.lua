@@ -25,6 +25,7 @@ local LastHitOverlay = require(GetScriptDirectory() .. "/lib/systems/last_hit_ov
 -- Logs switched off once their feature works (the TP diag lines, game 029).
 local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local AboutRules = require(GetScriptDirectory() .. "/lib/systems/about_rules")
 local BotBuild = dofile(GetScriptDirectory() .. "/heroes/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
 local CurseLog = require(GetScriptDirectory() .. "/lib/systems/curse_log")
@@ -919,6 +920,18 @@ function Usage.SetReplyHumanTime(chatEvent)
 		end
 		return
 	end
+	-- `!about` (#215): the team's first bot answers it from its own think (Usage.AnswerAboutRequest); no chat reply.
+	if AboutRules.IsCommand(chatText) then
+		AboutRules.Note(
+			Fu.Role,
+			chatText,
+			IsPlayerBot(senderPlayerId),
+			chatEvent.team_only,
+			Fu.Role.IsAllyMemberID(senderPlayerId),
+			GameTime()
+		)
+		return
+	end
 	if chatText ~= "-都来守家" or Fu.Role.IsAllyMemberID(senderPlayerId) then
 		Fu.Role.SetLastChatString(chatText)
 	end
@@ -957,11 +970,173 @@ local function BuybackSkipLog(why, ancientHp, remaining)
 	bot._buybackSkipLogAt = DotaTime()
 	BuybackLog("skip", why, ancientHp, remaining)
 end
+-- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version (the welcome's
+-- text: AboutRules.VersionOf, from bots/customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
+-- think, which also runs while the hero is dead; bots/lib/systems/about_rules.lua has the rules.
+function Usage.AnswerAboutRequest()
+	if
+		Fu.Role.AboutRequest == nil
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or bot:GetPlayerID() ~= AboutRules.FirstBotId(GetTeamPlayers(GetTeam()), IsPlayerBot)
+	then
+		return
+	end
+	local result, request = AboutRules.Decide(Fu.Role, GameTime())
+	if result == "none" then
+		return
+	end
+	local versionOk, versionModule = pcall(require, GetScriptDirectory() .. "/customize/version")
+	local version = AboutRules.VersionOf(versionOk and versionModule or nil)
+	local said = "-"
+	if result == "answer" then
+		local line = AboutRules.Line(Localization.Get("say_about"), version)
+		said = pcall(function()
+			bot:ActionImmediate_Chat(line, request.allChat == true)
+		end) and "yes" or "error"
+	end
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s about team=%s result=%s chat=%s said=%s version=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			result,
+			request.allChat and "all" or "team",
+			said,
+			(string.gsub(version, " ", "_"))
+		)
+	)
+end
+-- A human of the team pinging our fountain area PingStreak.COUNT times in a row (#215): the bot that reads the last
+-- ping says PingStreak.Line() in team chat, at most once per PingStreak.COOLDOWN seconds per team. Called from
+-- BuybackUsageThink before its 2s throttle (GetMostRecentPing keeps only the last ping), every 0.1s per bot; every
+-- bot of the team feeds the same streak (bots/lib/systems/ping_streak.lua).
+function Usage.WatchFountainPings()
+	local now = GameTime()
+	if
+		now < (bot._fountainPingAt or -1)
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or Fu.IsMeepoClone(bot)
+	then
+		return
+	end
+	bot._fountainPingAt = now + 0.1
+	-- Required here, not at the top: the require block is where most open PRs add lines.
+	local PingStreak = require(GetScriptDirectory() .. "/lib/systems/ping_streak")
+	local team = GetTeam()
+	local shared = PingStreak.Team(team)
+	if shared.slots == nil or now >= shared.slotsAt or now < shared.slotsAt - 5 then
+		-- The humans' team slots (GetTeamMember takes a slot 1-5), re-read every 5s.
+		shared.slots, shared.slotsAt = {}, now + 5
+		for slot, playerId in ipairs(GetTeamPlayers(team)) do
+			if not IsPlayerBot(playerId) then
+				shared.slots[#shared.slots + 1] = { slot = slot, id = playerId }
+			end
+		end
+	end
+	local fountain = Fu.GetTeamFountain()
+	-- Our fountain building: `dota_fountain` in the allied building list (nearest the spawn point, within 3000),
+	-- looked up every 5s until found, then kept for the team. Game 077: Fu.GetTeamFountain() is the spawn point, ~1040
+	-- from the building, so 6 pings on the building itself counted nothing.
+	if shared.building == nil and (now >= (shared.buildingLookAt or -999) or now < shared.buildingLookAt - 5) then
+		shared.buildingLookAt = now + 5
+		local bestDist = 3000
+		for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
+			if unit ~= nil and not unit:IsNull() and unit:GetUnitName() == "dota_fountain" then
+				local loc = unit:GetLocation()
+				local dist = math.sqrt((loc.x - fountain.x) ^ 2 + (loc.y - fountain.y) ^ 2)
+				if dist <= bestDist then
+					shared.building, bestDist = loc, dist
+				end
+			end
+		end
+		if shared.building ~= nil then
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s fountain-building team=%s at=%.0f,%.0f from-spawn=%.0f",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					team == TEAM_RADIANT and "radiant" or "dire",
+					shared.building.x,
+					shared.building.y,
+					bestDist
+				)
+			)
+		end
+	end
+	local building = shared.building
+	for _, human in ipairs(shared.slots) do
+		local member = GetTeamMember(human.slot)
+		local ping = member ~= nil and not member:IsNull() and member:GetMostRecentPing() or nil
+		if ping ~= nil and ping.location ~= nil then
+			local state = shared.humans[human.id]
+			if state == nil then
+				state = { count = 0 }
+				shared.humans[human.id] = state
+			end
+			local seenBefore = state.seen
+			local done = PingStreak.Step(
+				state,
+				ping.time,
+				ping.location.x,
+				ping.location.y,
+				fountain.x,
+				fountain.y,
+				now,
+				building and building.x,
+				building and building.y
+			)
+			-- [SHy-CHAT] fountain-ping (game 078): one line per new ping that is near the fountain or ends a running count, so
+			-- the next game shows how far a streak got. Each ping is read once per team (state.seen), so this prints at
+			-- most once per ping.
+			if state.seen ~= seenBefore and (state.near or (state.prevCount or 0) > 0) then
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s fountain-ping team=%s human=%d count=%d near=%s gap=%s old=%s at=%.0f,%.0f",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						done and PingStreak.COUNT or (state.count or 0),
+						tostring(state.near),
+						state.gap ~= nil and string.format("%.1f", state.gap) or "-",
+						tostring(state.old),
+						ping.location.x,
+						ping.location.y
+					)
+				)
+			end
+			if done then
+				local said = "throttled"
+				if PingStreak.Allow(shared, now) then
+					said = pcall(function()
+						bot:ActionImmediate_Chat(PingStreak.Line(), false)
+					end) and "yes" or "error"
+				end
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s egg team=%s human=%d said=%s",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						said
+					)
+				)
+			end
+		end
+	end
+end
 local function ConsiderBuyback()
 	if Fu.IsMeepoClone(bot) then
 		return
 	end
 	Usage.SetTalkMessage()
+	Usage.AnswerAboutRequest()
 	if bot:GetLevel() <= 15 or bot:HasModifier("modifier_arc_warden_tempest_double") or not Fu.Role.ShouldBuyBack() then
 		return
 	end
@@ -11261,6 +11436,7 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
 		bot.lastBuybackFrameProcessTime = DotaTime()
 	end

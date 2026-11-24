@@ -13,6 +13,7 @@ local skipHumanWait = false
 local MatchupsData = require(GetScriptDirectory() .. "/lib/data/matchups_data")
 local Role = require(GetScriptDirectory() .. "/lib/systems/role")
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local AboutRules = require(GetScriptDirectory() .. "/lib/systems/about_rules")
 local TeamNames = require(GetScriptDirectory() .. "/lib/data/team_names")
 local CaptainMode = require(GetScriptDirectory() .. "/lib/hero/captain_mode")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
@@ -1044,6 +1045,18 @@ function SelectHeroChatCallback(senderId, text, teamOnly)
 		if Localization.Supported(text) then
 			HandleLocaleSetting(text)
 		end
+	end
+	-- `!about` (#215): noted on the shared Role table; the team's first bot answers it (ability_item_usage_generic.lua).
+	if AboutRules.IsCommand(text) then
+		AboutRules.Note(
+			Role,
+			text,
+			IsPlayerBot(senderId),
+			teamOnly,
+			GetTeamForPlayer(senderId) == GetTeam(),
+			GameTime()
+		)
+		return
 	end
 	if isChatCommand(lowerText) then
 		handleChatCommand(lowerText, senderId, teamOnly)
