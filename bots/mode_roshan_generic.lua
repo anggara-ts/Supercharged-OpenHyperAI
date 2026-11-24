@@ -992,3 +992,13 @@ do
 	GetDesire = Perf.Wrap("roshan.GetDesire", GetDesire)
 	Think = Perf.Wrap("roshan.Think", Think)
 end
+-- Strength push (#12, bots/lib/systems/strength_push.lua): while a strength push waits for the Aegis (Roshan first),
+-- the Roshan desire of its bots is raised when the mode passed its safety checks but would not call the take itself.
+-- Log [SHy-ROSH] strength-boost.
+do
+	local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	local roshanGetDesire = GetDesire
+	GetDesire = function(...)
+		return StrengthPush.RoshanDesire(bot, roshanGetDesire(...))
+	end
+end
