@@ -12,6 +12,7 @@ end
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
 local HeroDisplayNames = require(GetScriptDirectory() .. "/lib/data/hero_display_names")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local function getHeroDisplayName(unit)
 	if unit == nil then
 		return ""
@@ -36,7 +37,7 @@ local function sayModeChat(chatKey, target, cooldown)
 		if target then
 			line = string.gsub(line, "{target}", getHeroDisplayName(target))
 		end
-		bot:ActionImmediate_Chat(line, false)
+		ChatRules.SayDecision(bot, line, chatKey)
 	end
 end
 local PING_MAX_AGE = 8

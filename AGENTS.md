@@ -144,6 +144,10 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   never add a global (several heroes once shared a global `HasBlink` / `CanBKB` and ran each other's copy).
 - `GetTeamMember(i)` takes a team **slot** 1..5, not a player ID from `GetTeamPlayers()`.
 - Guard handles that may be nil (stolen spells, optional items) before calling methods on them.
+- Bot chat stays short (maintainer, 2026-11-23): a line that narrates a decision ("Going for X", "Pushing top",
+  "Defend mid", lotus / shrine) goes through `ChatRules.SayDecision` (`bots/lib/systems/chat_rules.lua`), which says
+  it only while the team's `!debug` chat mode is on. Plain `ActionImmediate_Chat` is for the welcome, the position
+  line, replies to commands and human chat, and kill / gg banter.
 - **Dota facts come from game data, not memory**: ability values, target types, radii and item data from the
   installed game files (`scripts/npc` inside the VPKs) or the Valve datafeed
   (`https://www.dota2.com/datafeed/herodata?language=english&hero_id=N`). Cite the source in a comment when it
