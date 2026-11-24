@@ -182,12 +182,14 @@ function X.CreepAggro(bot)
 end
 
 -- [SHy-ROAM] snipe-skip why=creep-aggro: a snipe / creep hit not taken, or a hold ended, because creeps hit the bot.
--- at=offer (team roam), new (a new overlay hit), hold (a running hold let go). src= attackers|damage. Every 5s per bot.
+-- at=offer (team roam), new (a new overlay hit), hold (a running hold let go). src= attackers|damage. Every 5s per bot
+-- and at= (a frequent offer skip must not hide the rarer hold line).
 function X.LogAggroSkip(bot, at, rule, aggro)
-	if DotaTime() < (bot._lhAggroLogAt or -99) then
+	bot._lhAggroLogAt = bot._lhAggroLogAt or {}
+	if DotaTime() < (bot._lhAggroLogAt[at] or -99) then
 		return
 	end
-	bot._lhAggroLogAt = DotaTime() + 5
+	bot._lhAggroLogAt[at] = DotaTime() + 5
 	pcall(
 		print,
 		string.format(
