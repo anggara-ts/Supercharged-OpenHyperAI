@@ -30,7 +30,58 @@ RelocateRules.RETURN_KEEP_HP = 0.7
 -- take 4.4s at Easy (0.8s delay, 35% skip: ~12% of orders) and 3.2s at Medium, so the wait is 5s. A pending
 -- offensive order is re-checked every think meanwhile (RescueCheck, the ally alive, no enemy near Io); three skips
 -- at Easy (~4%) still log as lost.
+-- Counted over the thinks where Io could cast (castable, not silenced / stunned / hexed / busy with its own order):
+-- game 083 t=3056 (Unfair, no difficulty layer) logged a loss with disabled=true at the end (Puck's Waning Rift at
+-- t=3054), so the time under a disable was counted as a lost order.
 RelocateRules.ORDER_WAIT = 5.0
+-- A pending order is given up after this long in all, disables included (`relocate-order-dropped why=disabled`).
+RelocateRules.ORDER_MAX_PENDING = 10.0
+-- In games 081 and 083 every one of 29 casts went out on the first order (sends=1). An order still not cast after
+-- this much free time is held against other orders: a short cast hold (bot._castHoldUntil: the Lua mode Thinks and
+-- the item think's own orders pause), renewed with each re-send, at most ORDER_HOLD_MAX in all. Game 083 t=3051-3056:
+-- 25 sends, no cast, Io's action was an attack (push mode) when the order was called lost; whether another order
+-- replaced the cast is unverified, the hold tests it (`relocate-cast ... held=` > 0 with the cast going out).
+RelocateRules.ORDER_HOLD_AFTER = 0.5
+RelocateRules.ORDER_HOLD_STEP = 0.25
+RelocateRules.ORDER_HOLD_MAX = 2.0
+
+-- What happens to an order not cast yet. p: kind ("save" | "rescue" | "join"), allySave (the save is for the
+-- tethered ally, not Io), allyAlive, selfNeeded (SaveNeeded for Io itself), targetAlive (the ally a rescue / join
+-- goes to), enemyNear (an enemy hero near Io), tooLate (RescueCheck says too late), free (s Io could cast
+-- meanwhile), total (s since the first order). Returns "lost" | "disabled" | a drop reason ("ally-dead",
+-- "target-dead", "enemy-near", "too-late") | nil (send it again). A save goes on whatever Io is doing; one for an
+-- ally that died meanwhile goes on only when Io needs it itself (game 083 t=3054: Wyvern died while Io's save for
+-- her waited, and Io at 30% HP under 4 heroes still needed it).
+function RelocateRules.PendingVerdict(p)
+	if p.free > RelocateRules.ORDER_WAIT then
+		return "lost"
+	end
+	if p.total > RelocateRules.ORDER_MAX_PENDING then
+		return "disabled"
+	end
+	if p.kind == "save" then
+		if p.allySave and not p.allyAlive and not p.selfNeeded then
+			return "ally-dead"
+		end
+		return nil
+	end
+	if not p.targetAlive then
+		return "target-dead"
+	end
+	if p.enemyNear then
+		return "enemy-near"
+	end
+	if p.tooLate then
+		return "too-late"
+	end
+	return nil
+end
+
+-- Whether this re-send also holds other orders off (see ORDER_HOLD_AFTER): free = s Io could cast since the first
+-- order, held = s of hold already used on it.
+function RelocateRules.HoldWanted(free, held)
+	return free >= RelocateRules.ORDER_HOLD_AFTER and held < RelocateRules.ORDER_HOLD_MAX
+end
 
 -- The cast delay at Relocate level 1-3, minus the talent when it is trained (game file values above).
 function RelocateRules.CastDelay(level, talent)

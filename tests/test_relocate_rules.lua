@@ -200,3 +200,48 @@ T.test("relocate: numbers after the landing", function()
 	T.ok(R.NumbersOk(2, 1), "1v1 rescue: go")
 	T.ok(R.NumbersOk(1, 2), "Io alone against 2: go (margin 1)")
 end)
+
+T.test("relocate: a pending order is lost, dropped or sent again", function()
+	local R = load()
+	local function verdict(over)
+		local p = {
+			kind = "save",
+			allySave = true,
+			allyAlive = true,
+			selfNeeded = false,
+			targetAlive = true,
+			enemyNear = false,
+			tooLate = false,
+			free = 0.2,
+			total = 0.2,
+		}
+		for k, v in pairs(over or {}) do
+			p[k] = v
+		end
+		return R.PendingVerdict(p)
+	end
+	T.eq(verdict(), nil, "a fresh save is sent again")
+	T.eq(verdict({ free = 5.1, total = 5.1 }), "lost", "5s with Io able to cast and no cast: lost")
+	-- Game 083 t=3054-3056: Puck's Waning Rift silenced Io at the end; disabled time is not lost time.
+	T.eq(verdict({ free = 3.0, total = 6.0 }), nil, "3s free + 3s silenced: still waiting")
+	T.eq(verdict({ free = 3.0, total = 10.5 }), "disabled", "over 10s in all: given up as disabled")
+	T.eq(verdict({ allyAlive = false }), "ally-dead", "the ally the save was for died, Io is fine")
+	T.eq(verdict({ allyAlive = false, selfNeeded = true }), nil, "the ally died, Io needs the save itself")
+	T.eq(verdict({ allySave = false, allyAlive = false }), nil, "Io's own save goes on when the partner dies")
+	T.eq(verdict({ enemyNear = true, tooLate = true }), nil, "a save ignores the offensive drop reasons")
+	T.eq(verdict({ kind = "rescue", targetAlive = false }), "target-dead")
+	T.eq(verdict({ kind = "join", enemyNear = true }), "enemy-near")
+	T.eq(verdict({ kind = "rescue", tooLate = true }), "too-late")
+	T.eq(verdict({ kind = "join", tooLate = false }), nil, "a join still worth it is sent again")
+	T.eq(verdict({ kind = "join", targetAlive = false, free = 6 }), "lost", "a lost order is called lost first")
+end)
+
+T.test("relocate: hold other orders off a slow order, briefly", function()
+	local R = load()
+	-- Games 081 and 083: every cast went out on the first order, so the hold never starts for those.
+	T.ok(not R.HoldWanted(0, 0), "first order: no hold")
+	T.ok(not R.HoldWanted(0.4, 0), "under 0.5s free: no hold")
+	T.ok(R.HoldWanted(0.5, 0), "0.5s free and not cast: hold")
+	T.ok(R.HoldWanted(3.0, 1.9), "still under the 2s cap")
+	T.ok(not R.HoldWanted(3.0, 2.0), "2s of hold used: no more")
+end)

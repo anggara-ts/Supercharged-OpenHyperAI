@@ -602,16 +602,70 @@ end
 local function unitAlive(unit)
 	return unit ~= nil and not unit:IsNull() and unit:IsAlive()
 end
+-- What kept a pending order from being sent this think, or nil when Io could cast: the parts of Fu.CanNotUseAbility
+-- one by one ("own" = Io busy with an order or cast of its own), so the order lines show which one it was.
+local function castBlock()
+	if not relocateAbility:IsFullyCastable() then
+		return "nocast"
+	end
+	if bot:IsSilenced() then
+		return "silenced"
+	end
+	if bot:IsStunned() then
+		return "stunned"
+	end
+	if bot:IsHexed() then
+		return "hexed"
+	end
+	if bot:IsNightmared() then
+		return "nightmared"
+	end
+	if bot:IsCastingAbility() or bot:IsUsingAbility() or bot:IsChanneling() or Fu.HasQueuedAction(bot) then
+		return "own"
+	end
+	if Fu.CanNotUseAbility(bot) then
+		return "other"
+	end
+	return nil
+end
+-- "silenced:3,own:2" from a count table, "-" when empty (sorted, so lines compare across games).
+local function countText(counts)
+	local keys = {}
+	for key in pairs(counts or {}) do
+		keys[#keys + 1] = tostring(key)
+	end
+	if #keys == 0 then
+		return "-"
+	end
+	table.sort(keys)
+	local parts = {}
+	for _, key in ipairs(keys) do
+		parts[#parts + 1] = key .. ":" .. tostring(counts[key])
+	end
+	return table.concat(parts, ",")
+end
+-- The order hold (RelocateRules.ORDER_HOLD_AFTER) ends with the order: cast, lost or dropped.
+local function releaseOrderHold(state)
+	if state ~= nil and state.holdUntil ~= nil then
+		if bot._castHoldUntil == state.holdUntil then
+			bot._castHoldUntil = nil
+		end
+		state.holdUntil = nil
+	end
+end
 local function logOrderDropped(state, why)
 	print(
 		string.format(
-			"[SHy-WISP] t=%.0f wisp relocate-order-dropped why=%s kind=%s to=%s sends=%d waited=%.1f",
+			"[SHy-WISP] t=%.0f wisp relocate-order-dropped why=%s kind=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s",
 			DotaTime(),
 			why,
 			state.why,
 			state.toName or "fountain",
 			state.sends or 0,
-			DotaTime() - state.orderAt
+			DotaTime() - state.orderAt,
+			state.free or 0,
+			state.held or 0,
+			countText(state.blocked)
 		)
 	)
 end
@@ -624,6 +678,7 @@ local function issueRelocate(plan)
 		and relocateState.kind ~= "save"
 	then
 		logOrderDropped(relocateState, "save-first")
+		releaseOrderHold(relocateState)
 		relocateState = nil
 	end
 	bot:Action_UseAbilityOnLocation(relocateAbility, plan.target)
@@ -633,30 +688,56 @@ local function issueRelocate(plan)
 		plan.sends = 1
 		plan.lastTickAt = plan.orderAt
 		plan.maxGap = 0
+		-- Seconds Io could cast since the first order, seconds of order hold used, ticks not sent by cause, and Io's
+		-- action type seen before each re-send (6 = still our cast, anything else replaced it).
+		plan.free = 0
+		plan.held = 0
+		plan.blocked = {}
+		plan.acts = {}
 		relocateState = plan
 	end
 end
--- Why an order still waiting to go out is given up, or nil to send it again. A save always goes on (its own rule
--- decided it; the cast is what saves them). An offensive one stops when the ally it goes to died, an enemy hero came
--- near Io (Io's own danger comes first), or the rescue became too late (RescueCheck, the verdict held as usual).
-local function pendingDropWhy(state)
-	if state.kind == "save" then
-		return nil
-	end
-	if not unitAlive(state.toUnit) then
-		return "target-dead"
-	end
-	if enemyHeroCount(bot, 1200) > 0 then
-		return "enemy-near"
-	end
-	if state.kind == "rescue" then
+-- RelocateRules.PendingVerdict for an order still waiting to go out: "lost" / "disabled" / a drop reason, or nil to
+-- send it again. A save goes on unless the ally it was for died; an offensive one stops when the ally it goes to died,
+-- an enemy hero came near Io (Io's own danger comes first), or the rescue became too late (RescueCheck, the verdict
+-- held as usual).
+local function pendingVerdict(state, now)
+	local offensive = state.kind ~= "save"
+	local tooLate = false
+	if state.kind == "rescue" and unitAlive(state.toUnit) then
 		local _, why = rescueCheck(state.toUnit, state.delay)
-		if why == "too-late" then
-			rescueTooLateUntil[state.toUnit:GetPlayerID()] = DotaTime() + RelocateRules.RESCUE_TOO_LATE_HOLD
-			return "too-late"
-		end
+		tooLate = why == "too-late"
 	end
-	return nil
+	local allySave = string.sub(state.why or "", 1, 5) == "ally-"
+	local allyAlive = unitAlive(state.ally)
+	local selfNeeded = false
+	local selfWhy
+	if allySave and not allyAlive then
+		selfNeeded, selfWhy = RelocateRules.SaveNeeded(
+			Fu.GetHP(bot),
+			RelocateRules.LossRate(selfSamples),
+			state.delay,
+			enemyHeroCount(bot, 1200)
+		)
+	end
+	local verdict = RelocateRules.PendingVerdict({
+		kind = state.kind,
+		allySave = allySave,
+		allyAlive = allyAlive,
+		selfNeeded = selfNeeded,
+		targetAlive = unitAlive(state.toUnit),
+		enemyNear = offensive and enemyHeroCount(bot, 1200) > 0,
+		tooLate = tooLate,
+		free = state.free or 0,
+		total = now - state.orderAt,
+	})
+	if verdict == "too-late" then
+		rescueTooLateUntil[state.toUnit:GetPlayerID()] = now + RelocateRules.RESCUE_TOO_LATE_HOLD
+	elseif verdict == nil and selfNeeded then
+		-- The ally died; the order goes on as Io's own save (the cast line shows why=self-...).
+		state.why = "self-" .. tostring(selfWhy)
+	end
+	return verdict
 end
 local function heroesNear(listType, loc, radius, skipA, skipB)
 	local count = 0
@@ -689,6 +770,7 @@ local function returnLeft(state, now)
 	return state.returnAt - now, "timer"
 end
 local function clearRelocate()
+	releaseOrderHold(relocateState)
 	relocateState = nil
 	TeamMemory.Set(bot:GetTeam(), "wispRelocate", nil)
 end
@@ -704,6 +786,7 @@ local function relocateTick()
 	if not state.confirmed then
 		if relocateAbility:GetCooldownTimeRemaining() > 0 then
 			state.confirmed = true
+			releaseOrderHold(state)
 			state.teleportAt = now + state.delay
 			state.resultAt = state.teleportAt + 1
 			state.returnAt = state.teleportAt + RelocateRules.RETURN_TIME
@@ -721,7 +804,7 @@ local function relocateTick()
 			end
 			print(
 				string.format(
-					"[SHy-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f ours=%s enemies=%s partner=%s to=%s sends=%d waited=%.1f",
+					"[SHy-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f ours=%s enemies=%s partner=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s acts=%s",
 					now,
 					state.why,
 					state.allyName,
@@ -734,7 +817,11 @@ local function relocateTick()
 					state.allyName,
 					state.toName or "fountain",
 					state.sends or 0,
-					now - state.orderAt
+					now - state.orderAt,
+					state.free or 0,
+					state.held or 0,
+					countText(state.blocked),
+					countText(state.acts)
 				)
 			)
 			if state.kind == "save" then
@@ -755,23 +842,36 @@ local function relocateTick()
 		-- Not cast yet. The order is sent again every think (games 075-078: sent once, it was held by the difficulty
 		-- layer's reaction delay, which needs the same order again within 0.6s, and never went out; a mode or item
 		-- order in between can replace it too). gap= is the longest stretch without a think (no re-send possible).
-		state.maxGap = math.max(state.maxGap or 0, now - (state.lastTickAt or now))
+		-- Only the thinks where Io could cast count toward ORDER_WAIT (free=); the others are counted by cause.
+		local dt = now - (state.lastTickAt or now)
+		state.maxGap = math.max(state.maxGap or 0, dt)
 		state.lastTickAt = now
-		if now - state.orderAt > RelocateRules.ORDER_WAIT then
+		local block = castBlock()
+		if block == nil then
+			state.free = (state.free or 0) + dt
+		else
+			state.blocked[block] = (state.blocked[block] or 0) + 1
+		end
+		local verdict = pendingVerdict(state, now)
+		if verdict == "lost" then
 			local okAction, action = pcall(function()
 				return bot:GetCurrentActionType()
 			end)
 			print(
 				string.format(
-					"[SHy-WISP] t=%.0f wisp relocate-order-lost why=%s ally=%s sends=%d waited=%.1f gap=%.1f castable=%s disabled=%s mode=%s action=%s",
+					"[SHy-WISP] t=%.0f wisp relocate-order-lost why=%s ally=%s sends=%d waited=%.1f free=%.1f gap=%.1f held=%.1f blocked=%s acts=%s castable=%s block=%s mode=%s action=%s",
 					now,
 					state.why,
 					state.allyName,
 					state.sends or 0,
 					now - state.orderAt,
+					state.free or 0,
 					state.maxGap,
+					state.held or 0,
+					countText(state.blocked),
+					countText(state.acts),
 					tostring(relocateAbility:IsFullyCastable()),
-					tostring(Fu.CanNotUseAbility(bot)),
+					block or "none",
 					tostring(bot:GetActiveMode()),
 					okAction and tostring(action) or "?"
 				)
@@ -779,26 +879,41 @@ local function relocateTick()
 			clearRelocate()
 			return false
 		end
-		if state.kind ~= "save" then
+		-- A save replaces an offensive order still waiting (logged as save-first) before its own drop reasons.
+		if verdict ~= "disabled" and state.kind ~= "save" then
 			local savePlan = considerRelocateSave()
 			if savePlan ~= nil then
 				issueRelocate(savePlan)
 				return true
 			end
 		end
-		local dropWhy = pendingDropWhy(state)
-		if dropWhy ~= nil then
-			logOrderDropped(state, dropWhy)
+		if verdict ~= nil then
+			logOrderDropped(state, verdict)
 			clearRelocate()
 			return false
 		end
-		if relocateAbility:IsFullyCastable() and not Fu.CanNotUseAbility(bot) then
+		if block == nil then
+			-- Io's action before the re-send: 6 (BOT_ACTION_TYPE_USE_ABILITY) while our order still stands.
+			local okAction, action = pcall(function()
+				return bot:GetCurrentActionType()
+			end)
+			local actKey = okAction and tostring(action) or "?"
+			state.acts[actKey] = (state.acts[actKey] or 0) + 1
 			bot:Action_UseAbilityOnLocation(relocateAbility, state.target)
 			state.sends = (state.sends or 0) + 1
 			-- No TP order from the item think in the same frame (it would replace this one).
 			bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 0.5)
+			if RelocateRules.HoldWanted(state.free, state.held) then
+				-- No mode or item order until the next re-send (the item think calls X.CastHoldTick meanwhile).
+				if state.holdUntil ~= nil then
+					state.held = state.held + math.min(dt, RelocateRules.ORDER_HOLD_STEP)
+				end
+				state.holdUntil = now + RelocateRules.ORDER_HOLD_STEP
+				bot._castHoldUntil = state.holdUntil
+			end
 			return true
 		end
+		-- Not sent (a disable, or Io busy with an order of its own): a hold set by the last re-send runs out by itself.
 		return false
 	end
 	if now < state.teleportAt then
@@ -1037,4 +1152,10 @@ local function minionThink(minion)
 	end
 end
 local X = buildHeroExport(heroConfig, skillsComplement, minionThink)
+-- While a Relocate order is held against other orders (RelocateRules.ORDER_HOLD_AFTER) the item think runs this
+-- instead of SkillsComplement: the HP samples and the re-send go on.
+function X.CastHoldTick()
+	sampleHp()
+	guardedRelocateTick()
+end
 return X
