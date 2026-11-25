@@ -2,6 +2,7 @@
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 -- Kiting lives there now, shared with the per-think hook for heroes on Valve's attack mode.
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local AttackHelpers = {}
 local bot = GetBot()
 -- #227: the team danger map (isolated-target bonus).
@@ -213,6 +214,8 @@ function AttackMode.GetDesire()
 		end
 	end
 	attackTarget.unit = bestTarget or AttackHelpers.GetWeakestNearbyHero(true, attackRange + 700)
+	-- The human's focus / gank target (#222, bots/lib/systems/human_orders.lua), when it is reachable within ~2s.
+	attackTarget.unit = HumanOrders.FocusTarget(bot, attackRange) or attackTarget.unit
 	if Fu.IsValidHero(attackTarget.unit) then
 		attackTarget.id = attackTarget.unit:GetPlayerID()
 		attackTarget.location = attackTarget.unit:GetLocation()
@@ -511,7 +514,8 @@ function AttackMode.GetDesire()
 				end
 				for i = 1, 5 do
 					local teammate = GetTeamMember(i)
-					if teammate and teammate == allyHero then
+					-- Only a human's ping (#222): a bot's own pings were followed too.
+					if teammate and teammate == allyHero and not teammate:IsBot() then
 						local ping = teammate:GetMostRecentPing()
 						if ping ~= nil and ping.normal_ping and GameTime() < ping.time + 5.5 then
 							local enemiesNearPing = Fu.GetEnemiesNearLoc(ping.location, 300)

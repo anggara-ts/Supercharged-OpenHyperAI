@@ -1,5 +1,5 @@
 -- Match trace. [OHA-DEV] console print (+ optional file append).
--- Files: C:/Users/ANGGARA/Documents/OpenHyperAI/match-trace-p<id>.log
+-- Files: match-trace-p<id>.log, relative to the game's working directory (fallback: the bots folder).
 -- Toggle: Customize.MatchTrace = true/false
 -- Extra detail: Customize.MatchTraceVerbose = true
 -- File writes are disabled: Dota bot sandbox usually blocks io.open.
@@ -43,7 +43,7 @@ local buildLine = string.format(
 
 local fileReady = {}
 local lastKindAt = {}
-local LOG_DIR = "C:/Users/ANGGARA/Documents/OpenHyperAI/"
+local LOG_DIR = ""
 
 local function ModeName(mode)
 	local names = {}

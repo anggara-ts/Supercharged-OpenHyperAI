@@ -9,10 +9,13 @@ then
 end
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local CustomizeGeneral = require(GetScriptDirectory() .. "/customize/general")
 local FarmDefend = require(GetScriptDirectory() .. "/lib/systems/farm_defend")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local FarmRules = require(GetScriptDirectory() .. "/lib/systems/farm_rules")
+-- Human orders (#222): a camp the human pinged (bots/lib/systems/human_orders.lua).
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local bot = GetBot()
 local FarmMode = {}
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
@@ -846,6 +849,12 @@ function GetDesire()
 			return 0
 		end
 	end
+	-- A camp the human pinged (#222): this bot was picked to clear it; farm's camp code below does it.
+	local orderCamp, orderDesire = HumanOrders.FarmCamp(bot)
+	if orderCamp ~= nil then
+		SetPreferredCamp(orderCamp, "human-order")
+		return orderDesire
+	end
 	local ok, desire = pcall(GetDesireHelper)
 	if not ok then
 		if IsDebug then
@@ -1016,7 +1025,7 @@ function GetDesire()
 		local modeName = Localization.Get(localeKey) or localeKey
 		local message = Localization.Get("say_not_defending")
 		if message then
-			bot:ActionImmediate_Chat(string.format(message, modeName), false)
+			ChatRules.SayDecision(bot, string.format(message, modeName), "say_not_defending")
 		end
 	end
 	return desire
@@ -1040,9 +1049,9 @@ function GetDesireHelper()
 		if FarmDefend.ClaimDecisionChat("leave_farm_defend") then
 			local chatLines = Localization.Get("say_leave_farm_defend")
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, "leave_farm")
 			end
 		end
 		return BOT_MODE_DESIRE_VERYLOW
@@ -1057,9 +1066,9 @@ function GetDesireHelper()
 		if FarmDefend.ClaimDecisionChat("leave_farm_base") then
 			local chatLines = Localization.Get("say_base_defend")
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, "leave_farm")
 			end
 		end
 		return BOT_MODE_DESIRE_NONE
@@ -1586,9 +1595,9 @@ function GetDesireHelper()
 				if FarmDefend.ClaimDecisionChat(chatKind) then
 					local chatLines = Localization.Get(chatKey)
 					if type(chatLines) == "table" and #chatLines > 0 then
-						bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+						ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], "leave_farm")
 					elseif type(chatLines) == "string" then
-						bot:ActionImmediate_Chat(chatLines, false)
+						ChatRules.SayDecision(bot, chatLines, "leave_farm")
 					end
 				end
 				return BOT_MODE_DESIRE_LOW
@@ -1688,6 +1697,10 @@ function Think()
 		end
 	end
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- The human's camp (#222): walk to it without stopping for lane creeps; at the camp the code below clears it.
+	if HumanOrders.FarmThink(bot) then
 		return
 	end
 	-- Enemy-half withdraw (GetDesireHelper): walk to our nearest tower, no stopping for creeps.
@@ -2164,4 +2177,14 @@ do
 	local Perf = require(GetScriptDirectory() .. "/lib/systems/perf")
 	GetDesire = Perf.Wrap("farm.GetDesire", GetDesire)
 	Think = Perf.Wrap("farm.Think", Think)
+end
+-- Strength push (#12, bots/lib/systems/strength_push.lua): a bot raised by a strength push window keeps farm at or
+-- under 0.70 for the second the mark is fresh, so it walks to the lane instead of the next camp (game 074 45:30-47:00:
+-- four bots farmed camps with Dire's mid high ground open). Log [SHy-FARM] yield-strength-push.
+do
+	local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	local farmGetDesire = GetDesire
+	GetDesire = function(...)
+		return StrengthPush.FarmCap(bot, farmGetDesire(...))
+	end
 end

@@ -144,6 +144,11 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   never add a global (several heroes once shared a global `HasBlink` / `CanBKB` and ran each other's copy).
 - `GetTeamMember(i)` takes a team **slot** 1..5, not a player ID from `GetTeamPlayers()`.
 - Guard handles that may be nil (stolen spells, optional items) before calling methods on them.
+- Bot chat stays short (maintainer, 2026-11-23): a line that narrates a decision ("Going for X", "Pushing top",
+  "Defend mid", lotus / shrine) goes through `ChatRules.SayDecision` (`bots/lib/systems/chat_rules.lua`), which says
+  it only while the team's `!chatty` chat mode is on. There is no `!debug` command (maintainer, 2026-11-24: "we
+  have logger anyway"): technical output goes to `[SHy-*]` log lines, not chat. Plain `ActionImmediate_Chat` is for
+  the welcome, the position line, replies to commands and human chat, and kill / gg banter.
 - **Dota facts come from game data, not memory**: ability values, target types, radii and item data from the
   installed game files (`scripts/npc` inside the VPKs) or the Valve datafeed
   (`https://www.dota2.com/datafeed/herodata?language=english&hero_id=N`). Cite the source in a comment when it
@@ -174,7 +179,7 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
 
 1. The game runs a copy of the build in `dota 2 beta/game/dota/scripts/vscripts/bots`, made by
    `node tools/export-bots.js --test-game` (`/prepare-game` runs it): the bot scripts of `HEAD`, the uncommitted
-   test lineup and a `bots/customize/build_info.lua` for that commit, nothing else. Editing or switching branches in
+   test lineup, a `bots/customize/build_info.lua` for that commit and `LICENSE`, nothing else. Editing or switching branches in
    the clone during a game changes nothing in it; run the export again after a change. (An old dev setup links
    `vscripts/bots` to the clone; the tool refuses to write through a link, so rename it, e.g. `bots-dev`.)
    Start a Custom Lobby, server **Local Host**, bots set to **Local Dev Script** (Valve
@@ -321,6 +326,7 @@ game, an outdated mechanic, or an idea that has a better alternative. Not every 
 | `/review-game` | the game ended: `after-game.js`, tracker, PR comments, findings, issues, next lineup |
 | `/merge-pr` | a PR is READY TO MERGE: mute proven logs, tick checks, squash-merge, tick issue items |
 | `/goodnight` | the maintainer is away: fix every open, unresolved issue in priority order, one ready PR each, build the next game |
+| `/patch-update` | Valve shipped a Dota patch: triage the notes, refresh game data, items, abilities, builds, map, API dump, test game, release |
 | `/release` | a release: next version, release notes from the PRs merged since the last tag (dry run by default), then version files, tag and GitHub release on "publish" |
 
 ## Working notes for AI agents
@@ -355,8 +361,9 @@ came with (or a small `docs/` PR).
   its own command; never chain `<check> | tail && git commit` (the chain sees tail's exit code).
 - **Local test settings.** The maintainer's uncommitted `bots/customize/general.lua` keeps `Weak_Hero_Cap = 5` while
   testing (shipped default 1): remind the maintainer to set it back when a test series ends.
-- **After every Dota patch** check the `[SHy-API]` dump for changes, and whether outposts and watchers work for
-  bots again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[SHy-OUTPOST] capture-off`;
+- **After every Dota patch** run [`/patch-update`](.claude/skills/patch-update/SKILL.md) (sources:
+  `docs/PATCH_UPDATE.md`): it diffs the `[SHy-API]` dump. Also check whether outposts and watchers work for bots
+  again (since 7.42 they can't: `ability_capture` / `ability_lamp_use` are gone, `[SHy-OUTPOST] capture-off`;
   #111, discussion #50); remind the maintainer to re-implement them when Valve fixes it.
 
 ## Things not to do

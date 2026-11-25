@@ -271,15 +271,23 @@ local function installHeroInfo(Fu)
 		end
 		return loneDruid
 	end
+	-- The newest ping among the team's humans (#222: it was the first human's only); without any ping, the first
+	-- human and its empty ping (time 0).
 	function Fu.GetHumanPing()
-		local ping = nil
+		local bestMember, bestPing = nil, nil
 		for i = 1, #GetTeamPlayers(GetTeam()) do
 			local member = GetTeamMember(i)
 			if member ~= nil and not member:IsBot() then
-				return member, member:GetMostRecentPing()
+				local ping = member:GetMostRecentPing()
+				if
+					bestMember == nil
+					or ping ~= nil and ping.time ~= nil and ping.time > ((bestPing or {}).time or 0)
+				then
+					bestMember, bestPing = member, ping
+				end
 			end
 		end
-		return nil, ping
+		return bestMember, bestPing
 	end
 	function Fu.FindEnemyUnit(unitNamePattern)
 		for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMIES)) do
