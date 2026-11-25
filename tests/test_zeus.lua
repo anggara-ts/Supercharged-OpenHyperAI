@@ -160,3 +160,59 @@ T.test("zeus: nimbus-result why=finish reads the target's death from its player 
 	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
 	T.ok(line ~= nil and string.find(line, "cast=false", 1, true) ~= nil, "the stub never puts Nimbus on cooldown")
 end)
+
+-- PR #136 verify item 7 (game 083): the "no cast on a target the allies are finishing" half is checked here, not
+-- by a log rule (a cast line can't say both targetHp and allies break it at once).
+T.test("zeus: the finish pick leaves a target under 15% to an ally hitting it", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	enemy._hp = 100 -- 10% of 1000
+	local ally = Stub.teams[TEAM_RADIANT][1]
+	ally._loc = enemy._loc + Vector(300, 0, 0)
+	ally.GetAttackTarget = function()
+		return enemy
+	end
+	Stub.time = 100
+	local target, allies = X.NimbusFinishTarget()
+	T.eq(target, nil, "an ally within 600 attacks it: no finish cast")
+	T.eq(allies, 0, "no target, no count")
+	local skipped = false
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "nimbus-skip why=ally-finishing rule=finish", 1, true) then
+			skipped = string.find(line, "allies=1", 1, true) ~= nil
+				and string.find(line, "targetHp=0.10", 1, true) ~= nil
+		end
+	end
+	T.ok(skipped, "the skip line names the target's HP and one ally")
+	-- The ally walks off: nobody finishes it, the cloud goes.
+	ally.GetAttackTarget = function()
+		return nil
+	end
+	ally._loc = enemy._loc + Vector(9000, 0, 0)
+	Stub.time = 110
+	target, allies = X.NimbusFinishTarget()
+	T.eq(target, enemy, "nobody on it: finish cast")
+	T.eq(allies, 0, "no ally hitting")
+end)
+
+-- Game 083: ally-fight casts get the result line too (target, death time, stuns after the cast).
+T.test("zeus: nimbus-result why=ally-fight prints 3 s after an ally-fight cast", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][2]
+	enemy._hp = 400
+	X.RecordNimbusFinish(enemy, 2, "ally-fight")
+	Stub.time = 3.5
+	X.ThinkNimbusFinishResult()
+	local line = nil
+	for _, printed in ipairs(Stub.printed) do
+		if string.find(printed, "nimbus-result why=ally-fight", 1, true) then
+			line = printed
+		end
+	end
+	T.ok(line ~= nil, "the line prints with why=ally-fight")
+	T.ok(
+		line ~= nil and string.find(line, "allies=2", 1, true) ~= nil,
+		"the allies count at the cast: " .. tostring(line)
+	)
+	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
+end)

@@ -870,8 +870,10 @@ function X.ConsiderD()
 				local targetHp = Fu.GetHP(target)
 				local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
 				-- The allies are killing it (#47, game 068): no cast here either, or the finish skip falls through.
+				-- Counted for every cast, not only under 15%: the cast line printed allies=0 for all 9 ally-fight
+				-- casts of game 083 because the count was skipped above 15%.
 				local alliesHitting = 0
-				if hold == nil and targetHp < NIMBUS_ALLY_FINISH_HP then
+				if hold == nil then
 					alliesHitting = X.NimbusAlliesHitting(target, NIMBUS_ALLY_FINISH_RANGE)
 					if X.NimbusAllyFinishing(targetHp, alliesHitting) then
 						X.LogNimbusAllyFinishing("ally-fight", target, targetHp, alliesHitting)
@@ -879,6 +881,7 @@ function X.ConsiderD()
 					end
 				end
 				if hold == nil then
+					X.RecordNimbusFinish(target, alliesHitting, "ally-fight")
 					return BOT_ACTION_DESIRE_HIGH,
 						target:GetExtrapolatedLocation(1.0),
 						"ally-fight",
@@ -997,14 +1000,16 @@ function X.NimbusFinishTarget()
 	end
 	return best, bestAllies
 end
--- Remembers a finish cast for the nimbus-result why=finish line (kept while an earlier order has not gone through).
-function X.RecordNimbusFinish(target, allies)
+-- Remembers a finish or ally-fight cast for the nimbus-result why=finish|ally-fight line (kept while an earlier
+-- order has not gone through). why: "finish" (default) or "ally-fight".
+function X.RecordNimbusFinish(target, allies, why)
 	if nimbusFinishCast ~= nil and not nimbusAbility:IsCooldownReady() then
 		return
 	end
 	local pid = target:GetPlayerID()
 	local okDeaths, deaths = pcall(GetHeroDeaths, pid)
 	nimbusFinishCast = {
+		why = why or "finish",
 		target = target,
 		targetName = target:GetUnitName(),
 		pid = pid,
@@ -1015,9 +1020,11 @@ function X.RecordNimbusFinish(target, allies)
 		stuns = 0,
 	}
 end
--- NIMBUS_FINISH_RESULT_AFTER seconds after a finish cast: did the target die, when (diedAfter, seconds after the
--- cast; under the first bolt's 2.5 s means the allies killed it), and how often it was stunned after the cast
--- (a bolt mini-stuns for 0.35 s, datafeed; another stun would count too). cast=false: the order never went out.
+-- NIMBUS_FINISH_RESULT_AFTER seconds after a finish or ally-fight cast: did the target die, when (diedAfter, seconds
+-- after the cast; under the first bolt's 2.5 s means the allies killed it), and how often it was stunned after the
+-- cast (a bolt mini-stuns for 0.35 s, datafeed; another stun would count too). cast=false: the order never went out.
+-- Ally-fight casts get the line too (#47, game 083): 10 of the 14 casts of games 071, 073 and 083 on a target at
+-- 50% HP or less were followed by its death within 2 s, and whether a bolt struck first is not in the log yet.
 function X.ThinkNimbusFinishResult()
 	local cast = nimbusFinishCast
 	if cast == nil then
@@ -1058,8 +1065,9 @@ function X.ThinkNimbusFinishResult()
 	local died = X.NimbusAllyDied(cast.deaths, deathsNow, not dead)
 	print(
 		string.format(
-			"[SHy-ZEUS] t=%.0f zuus nimbus-result why=finish target=%s alive=%s targetHp=%.2f->%.2f allies=%d stuns=%d stunnedAfter=%.1f diedAfter=%.1f cast=%s",
+			"[SHy-ZEUS] t=%.0f zuus nimbus-result why=%s target=%s alive=%s targetHp=%.2f->%.2f allies=%d stuns=%d stunnedAfter=%.1f diedAfter=%.1f cast=%s",
 			DotaTime(),
+			cast.why or "finish",
 			cast.targetName or "none",
 			tostring(not died),
 			cast.hp,
