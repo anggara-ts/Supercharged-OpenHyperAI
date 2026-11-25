@@ -745,6 +745,12 @@ local function ChainHold(self, ability, target, targetKind)
 		return false
 	end
 	local ok, hold = pcall(ChainRules.OnCast, self, ability, target, targetKind)
+	if not ok and not ChainRules.errorPrinted then
+		-- Once per game: a broken hook would silently remove the rule.
+		ChainRules.errorPrinted = true
+		local hero = (string.gsub(tostring(self:GetUnitName()), "npc_dota_hero_", ""))
+		pcall(print, string.format("[SHy-CHAIN] t=%.0f %s error where=cast err=%s", DotaTime(), hero, tostring(hold)))
+	end
 	return ok and hold == true
 end
 local function GuardCast(method, targetKind)

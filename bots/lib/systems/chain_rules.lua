@@ -7,23 +7,25 @@
 --     disable needs to land (its cast point + delay + travel + walk into range + MARGIN) is refused. The bot
 --     attacks that hero instead, and the hero file orders the disable again on a later think; it goes through
 --     once the time left is down to what it needs.
---   * A disable that goes through reserves the hero for the team (Chain.claims) until it lands: a second bot whose
---     own disable would land in that window holds it too. Bots that ordered at the same moment used to stun
---     together; now the second one waits for the first stun to end.
+--   * A unit-target disable that goes through (or a point one into a running stun) reserves the hero for the team
+--     (Chain.claims) until it lands: a second bot whose own disable would land in that window holds it too. Bots
+--     that ordered at the same moment used to stun together; now the second one waits for the first stun to end.
 --   * Most hero files never order a disable on a hero Fu.IsDisabled already calls disabled (they wait for the
 --     stun to end, then pay their own cast point). For a bot that holds a disable on a hero, Fu.IsDisabled
 --     (general_utils/hero_state.lua) calls that hero free once the time left is down to the bot's need, so the
 --     file orders the disable in time (Chain.ReleaseEarly). Only for that bot, that hero, while the hold lives.
--- No hold on a channelling hero (the stun ends the TP / channel), while the bot retreats or is below 30% HP, or
--- for longer than HOLD_CAP. Only stuns and hexes count as disabled (roots, silences and slows leave the hero able
+-- No hold on a channelling hero (the stun ends the TP / channel), while the bot retreats or is below 30% HP, from
+-- farther than HOLD_RANGE / attack range + ATTACK_BUFFER (the attack order would walk it in), or for longer than
+-- HOLD_CAP. Only stuns and hexes count as disabled (roots, silences and slows leave the hero able
 -- to act or blink), and only a time left read from a listed modifier counts: an unread time means no hold.
 -- Cost: one GetName per targeted cast order; the rest only for a listed disable on an enemy hero. No scan of
 -- nearby units; Fu.IsDisabled pays one compare (Chain.live) while no bot holds.
 --
--- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= src=" (throttled), "... cast hero= spell= left=
--- need= gap= held= real=" (a disable cast into a running disable, once per bot, spell and hero every 3s),
+-- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= dist= src=" (throttled), "... cast hero= spell=
+-- left= need= gap= dist= held= real= why=" (a disable cast into a running disable, once per bot, spell and hero
+-- every 3s; why=held after a hold, chain without one, blocked / far / cap when the rule did not wait),
 -- "... unknown hero= spell= mods=" (stunned or hexed but no listed modifier: the list misses a name), "... off"
--- (the time left did not count down: the rule switches itself off for the game).
+-- (the time left did not count down: the rule switches itself off for the game), "... error" (once per game).
 local Chain = {}
 
 Chain.MARGIN = 0.25 -- s: turn to face the target plus order latency (the ability think runs every 1-3 frames)
@@ -33,6 +35,10 @@ Chain.HOLD_CAP = 4 -- s: one hold never lasts longer
 Chain.CLAIM_GRACE = 0.3 -- s: a reservation counts this long past its landing time, then the modifier read rules
 Chain.CLAIM_MAX = 2.5 -- s: a reservation never lasts longer (a cancelled cast)
 Chain.LOW_HP = 0.3
+-- No hold when the bot stands farther from the hero than this or its attack range + ATTACK_BUFFER: the hold's attack
+-- order would walk it in from Fissure / Torrent / Ice Path range.
+Chain.HOLD_RANGE = 700
+Chain.ATTACK_BUFFER = 350
 Chain.POINT_MATCH = 300 -- a point cast counts for the bot's target when it is this close to the point
 Chain.LOG_GAP = 3
 
@@ -419,7 +425,12 @@ function Chain.OnCast(bot, ability, target, kind)
 		return false
 	end
 	local heldFor = (stamp ~= nil and stamp.passedAt == nil) and (now - stamp.startedAt) or 0
-	if Chain.Decide(left, need, heldFor, blocked) == "hold" then
+	local far = false
+	if left ~= nil and distance ~= nil then
+		local attackRange = call(bot, "GetAttackRange") or 0
+		far = distance > math.max(Chain.HOLD_RANGE, attackRange + Chain.ATTACK_BUFFER)
+	end
+	if Chain.Decide(left, need, heldFor, blocked or far) == "hold" then
 		if stamp == nil or stamp.passedAt ~= nil then
 			-- A new hold (a stamp that already let its disable through ends here).
 			ClearStamp(bot)
@@ -434,7 +445,7 @@ function Chain.OnCast(bot, ability, target, kind)
 		if Throttled(botName .. "|hold|" .. spellName, now) then
 			print(
 				string.format(
-					"[SHy-CHAIN] t=%.0f %s hold hero=%s spell=%s left=%s need=%s gap=%s src=%s mod=%s",
+					"[SHy-CHAIN] t=%.0f %s hold hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f src=%s mod=%s",
 					now,
 					short(botName),
 					short(heroName),
@@ -442,6 +453,7 @@ function Chain.OnCast(bot, ability, target, kind)
 					Fmt(left),
 					Fmt(need),
 					Fmt(left - need),
+					distance or -1,
 					src,
 					tostring(modName or "-")
 				)
@@ -452,17 +464,22 @@ function Chain.OnCast(bot, ability, target, kind)
 		pcall(bot.Action_AttackUnit, bot, hero, false)
 		return true
 	end
-	-- The order goes through. A cast into a running disable (after a hold or not) is a chain: log it.
+	-- The order goes through. A cast into a running disable is a chain: log it. why=held after a hold of this bot,
+	-- chain without one; blocked / far / cap: a cast the rule let through without waiting.
 	if left ~= nil and Throttled(botName .. "|cast|" .. spellName .. "|" .. heroName, now) then
 		local why = "chain"
 		if blocked then
 			why = "blocked"
+		elseif far then
+			why = "far"
 		elseif heldFor >= Chain.HOLD_CAP then
 			why = "cap"
+		elseif heldFor > 0 then
+			why = "held"
 		end
 		print(
 			string.format(
-				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s held=%s real=%s src=%s why=%s",
+				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f held=%s real=%s src=%s why=%s",
 				now,
 				short(botName),
 				short(heroName),
@@ -470,6 +487,7 @@ function Chain.OnCast(bot, ability, target, kind)
 				Fmt(left),
 				Fmt(need),
 				Fmt(left - need),
+				distance or -1,
 				Fmt(heldFor),
 				stamp and stamp.checked or "?",
 				tostring(src),
@@ -484,8 +502,11 @@ function Chain.OnCast(bot, ability, target, kind)
 		stamp.untilAt = now + need + 0.5
 	end
 	-- Reserve the hero until this disable lands (the caster's own order re-issued every think keeps its first one).
+	-- Unit-target orders only, or a point order into a running stun: a skillshot on a free hero can miss, and its
+	-- reservation (up to 2.3s for Torrent) would hold a teammate's sure Hex for nothing.
 	local claim = claims[heroName]
-	if claim == nil or claim.caster ~= botName or now > claim.landsAt + Chain.CLAIM_GRACE then
+	local reserves = kind == "entity" or modLeft ~= nil
+	if reserves and (claim == nil or claim.caster ~= botName or now > claim.landsAt + Chain.CLAIM_GRACE) then
 		local landsAt = now + need - Chain.MARGIN
 		claims[heroName] = {
 			caster = botName,

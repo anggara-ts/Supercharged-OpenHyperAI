@@ -37,6 +37,9 @@ local function fakeHero(props)
 		attacks = {},
 	}
 	unit._loc = props.loc
+	function unit:GetLocation()
+		return self._loc
+	end
 	function unit:GetUnitName()
 		return self.name
 	end
@@ -292,4 +295,63 @@ T.test("chain: Fu.IsDisabled calls a held hero free only for the holding bot", f
 	Chain.stamps[Stub.teams[TEAM_RADIANT][2]] = { hero = enemy:GetUnitName(), need = 0.25, untilAt = 602 }
 	Stub.time = 600.6
 	T.eq(Fu.IsDisabled(enemy), true, "another bot's hold does not change this bot's answer")
+end)
+
+T.test("chain: a skillshot on a free hero reserves nothing; a point cast into a stun does", function()
+	local _, Chain = load()
+	local lina = fakeHero({ name = "npc_dota_hero_lina", team = TEAM_RADIANT, loc = Vector(0, 0, 0) })
+	local lion = fakeHero({ name = "npc_dota_hero_lion", team = TEAM_RADIANT, loc = Vector(300, 0, 0) })
+	local axe = fakeHero({ name = "npc_dota_hero_axe", team = TEAM_DIRE, loc = Vector(500, 0, 0) })
+	local lsa = fakeAbility("lina_light_strike_array", 0.45, {
+		light_strike_array_delay_time = 0.5,
+		light_strike_array_stun_duration = 1.6,
+	}, 700)
+	local hex = fakeAbility("lion_voodoo", 0, { duration = 2.4 })
+	lina.target = axe
+	T.eq(Chain.OnCast(lina, lsa, Vector(500, 0, 0), "location"), false, "LSA on a free hero goes")
+	T.eq(Chain.claims[TEAM_RADIANT]["npc_dota_hero_axe"], nil, "no reservation: it can miss")
+	T.eq(Chain.OnCast(lion, hex, axe, "entity"), false, "the teammate's Hex goes through")
+end)
+
+T.test("chain: no hold from farther than HOLD_RANGE (the attack order would walk the bot in)", function()
+	local _, Chain = load()
+	local kunkka = fakeHero({ name = "npc_dota_hero_kunkka", team = TEAM_RADIANT, loc = Vector(0, 0, 0) })
+	local axe = fakeHero({ name = "npc_dota_hero_axe", team = TEAM_DIRE, loc = Vector(1200, 0, 0) })
+	local torrent = fakeAbility("kunkka_torrent", 0.4, { delay = 1.6, stun_duration = 1.4 }, 1300)
+	kunkka.target = axe
+	stun(axe, 4.0)
+	T.eq(Chain.OnCast(kunkka, torrent, Vector(1200, 0, 0), "location"), false, "goes through")
+	T.eq(#kunkka.attacks, 0, "no attack order")
+	T.eq(#lines("[SHy-CHAIN] t=600 kunkka cast hero=axe spell=kunkka_torrent"), 1, "cast line")
+	T.eq(#lines("why=far"), 1, "why=far")
+end)
+
+T.test("chain: the cast guard refuses a held order before the engine sees it", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_sven", time = 600 })
+	local engine = { n = 0 }
+	CDOTA_Bot_Script.Action_UseAbilityOnEntity = function()
+		engine.n = engine.n + 1
+	end
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	local Chain = require(GetScriptDirectory() .. "/lib/systems/chain_rules")
+	Chain.Reset()
+	local axe = fakeHero({ name = "npc_dota_hero_axe", team = TEAM_DIRE, loc = bot._loc + Vector(500, 0, 0) })
+	local bolt = fakeAbility("sven_storm_bolt", 0.2, { bolt_speed = 1000, bolt_stun_duration = 1.5 })
+	bolt.IsHidden = function()
+		return false
+	end
+	local attacks = {}
+	bot.Action_AttackUnit = function(_, target)
+		attacks[#attacks + 1] = target
+	end
+	stun(axe, 2.5)
+	bot:Action_UseAbilityOnEntity(bolt, axe)
+	T.eq(engine.n, 0, "held: the engine got no cast order")
+	T.eq(#attacks, 1, "an attack order instead")
+	T.eq(#lines("[SHy-CHAIN] t=600 sven hold hero=axe spell=sven_storm_bolt"), 1, "hold line")
+	axe.stunned, axe.mods = false, {}
+	Stub.time = 600.5
+	bot:Action_UseAbilityOnEntity(bolt, axe)
+	T.eq(engine.n, 1, "free hero: the order reaches the engine")
+	T.eq(#lines("error where="), 0, "no hook error")
 end)

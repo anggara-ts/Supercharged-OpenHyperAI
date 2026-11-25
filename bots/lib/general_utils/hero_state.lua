@@ -300,6 +300,12 @@ local function installHeroState(Fu)
 				if ok and free then
 					return false
 				end
+				if not ok and not chainRules.errorPrinted then
+					chainRules.errorPrinted = true
+					print(
+						string.format("[SHy-CHAIN] t=%.0f - error where=isdisabled err=%s", DotaTime(), tostring(free))
+					)
+				end
 			end
 			return unit:IsRooted() or unit:IsStunned() or unit:IsHexed() or unit:IsNightmared() or Fu.IsTaunted(unit)
 		else
