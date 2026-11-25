@@ -460,6 +460,10 @@ function X.SkillsComplement()
 	if X.ConsiderPostBlastSign() then
 		bot._signBlastAt = bot._blastAt
 		X.LogTechies("post-blast-sign", 0, bot:GetLocation())
+		-- Only one sign at a time (datafeed hero_id=105): this one replaces any other and takes the 60s cooldown, so a
+		-- spot the standing-sign rule holds is dropped (it must not log minefield-sign-placed for this cast).
+		bot._signSpot = nil
+		bot._lastSign = { location = bot:GetLocation(), untilTime = DotaTime() + 240 }
 		bot:Action_UseAbilityOnLocation(minefieldSignAbility, bot:GetLocation())
 		return
 	end
@@ -1504,6 +1508,10 @@ end
 -- cooldown 60s, aura_radius 1000 (mines inside deal 15% more damage), lasts 240s. The old code re-rolled a random spot
 -- up to 3100 away every think, so he walked to a new point each think and never planted it (#48). Now the spot is the
 -- middle of the biggest group of his mines (3 or more within the aura) within 1600 of him, kept until planted or 20s.
+-- Datafeed hero_id=105 (2026-11-25): techies_minefield_sign ability_is_granted_by_scepter=true, max_level 1, cast range
+-- 10, cast point 1.25, cooldown 60, lifetime 240; only one sign at a time, and it is destroyed after its 10s minefield.
+-- Game 084: no spot line in 27 minutes with Scepter, while the post-blast sign (same hidden/castable checks) was cast 7
+-- times, so the ability was there. `minefield-sign-skip` says which check stops this rule.
 function X.ConsiderMineFieldSign()
 	-- Minefield Sign stays hidden without Scepter but still reports castable. Ordering it
 	-- then is refused by the server and freezes Techies in place every think.
@@ -1517,10 +1525,21 @@ function X.ConsiderMineFieldSign()
 			bot._lastSign = { location = bot:GetLocation(), untilTime = DotaTime() + 240 }
 			bot._signSpot = nil
 		end
+		local why = "not-castable"
+		if not proximityMinesAbility:IsTrained() then
+			why = "mines-untrained"
+		elseif minefieldSignAbility:IsHidden() then
+			why = "hidden"
+		elseif minefieldSignAbility:GetCooldownTimeRemaining() > 0 then
+			why = "cooldown"
+		end
+		X.LogSignSkip(why)
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	-- Not while retreating or with an enemy hero near him: the cast point is 1.25s.
-	local busy = Fu.IsRetreating(bot) or #Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200) > 0
+	local retreating = Fu.IsRetreating(bot)
+	local enemiesNear = #Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
+	local busy = retreating or enemiesNear > 0
 	local held = bot._signSpot
 	if held ~= nil then
 		if not busy and DotaTime() < held.untilTime and #Fu.GetEnemiesNearLoc(held.location, 1200) == 0 then
@@ -1529,7 +1548,11 @@ function X.ConsiderMineFieldSign()
 		X.LogTechies("minefield-sign-drop", held.mines, held.location)
 		bot._signSpot = nil
 	end
-	if busy or DotaTime() < (bot._signSearchAt or -999) then
+	if busy then
+		X.LogSignSkip(retreating and "retreating" or "enemy-near", string.format(" enemies=%d", enemiesNear))
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	if DotaTime() < (bot._signSearchAt or -999) then
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	bot._signSearchAt = DotaTime() + 2
@@ -1538,7 +1561,7 @@ function X.ConsiderMineFieldSign()
 		auraRadius = 1000
 	end
 	local mines = Fu.GetTechiesMinesInLoc(bot:GetLocation(), 1600)
-	local best, bestCount = nil, 2
+	local best, bestCount, biggest = nil, 2, 0
 	for _, mine in ipairs(mines) do
 		local group = {}
 		for _, other in ipairs(mines) do
@@ -1546,11 +1569,14 @@ function X.ConsiderMineFieldSign()
 				group[#group + 1] = other
 			end
 		end
+		biggest = math.max(biggest, #group)
 		if #group > bestCount then
 			best, bestCount = group, #group
 		end
 	end
+	local mineCounts = string.format(" near=%d cluster=%d all=%d", #mines, biggest, #Fu.GetTechiesMines())
 	if best == nil then
+		X.LogSignSkip("few-mines", mineCounts)
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	local location = Fu.GetCenterOfUnits(best)
@@ -1558,6 +1584,7 @@ function X.ConsiderMineFieldSign()
 		location = best[1]:GetLocation()
 	end
 	if #Fu.GetEnemiesNearLoc(location, 1200) > 0 then
+		X.LogSignSkip("enemy-at-spot", mineCounts)
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	-- His last sign lasts 240s (game files): no second one over the same mines while it stands.
@@ -1567,6 +1594,7 @@ function X.ConsiderMineFieldSign()
 		and DotaTime() < last.untilTime
 		and Fu.GetLocationToLocationDistance(last.location, location) < auraRadius
 	then
+		X.LogSignSkip("recent-sign", mineCounts)
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	bot._signSpot = { location = location, mines = bestCount, untilTime = DotaTime() + 20 }
@@ -1633,6 +1661,35 @@ function X.MineTriangle(center, radius)
 		end
 	end
 	return spots
+end
+-- [SHy-TECHIES] minefield-sign-skip: why the standing Minefield Sign rule picked no spot. Only with Scepter, or when
+-- the sign is not hidden without one (an API surprise). A new reason prints at once (5s apart at least), the same
+-- reason again after 30s.
+function X.LogSignSkip(why, extra)
+	local scepter = bot:HasScepter()
+	local hidden = minefieldSignAbility:IsHidden()
+	if not scepter and hidden then
+		return
+	end
+	local now = DotaTime()
+	local lastAt = bot._signSkipLogAt or -999
+	if now < lastAt + 5 or (why == bot._signSkipWhy and now < lastAt + 30) then
+		return
+	end
+	bot._signSkipLogAt, bot._signSkipWhy = now, why
+	pcall(
+		print,
+		string.format(
+			"[SHy-TECHIES] t=%.0f techies minefield-sign-skip why=%s hidden=%s level=%d scepter=%s cd=%.0f%s",
+			now,
+			why,
+			tostring(hidden),
+			minefieldSignAbility:GetLevel(),
+			tostring(scepter),
+			minefieldSignAbility:GetCooldownTimeRemaining(),
+			extra or ""
+		)
+	)
 end
 -- [SHy-TECHIES]: mine combos and triangles, at most once per 5s per kind.
 function X.LogTechies(kind, mines, center)
