@@ -162,7 +162,7 @@ local function installMapInfo(Fu)
 	function Fu.IsLateGame()
 		return DotaTime() >= (Fu.IsModeTurbo() and 20 * 60 or 26 * 60)
 	end
-	function Fu.IsModeTurbo()
+	local function ScanForTurbo()
 		for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIES)) do
 			if unit ~= nil and unit:GetUnitName() == "npc_dota_courier" then
 				if unit:GetCurrentMovementSpeed() == 1100 then
@@ -171,6 +171,19 @@ local function installMapInfo(Fu)
 			end
 		end
 		return false
+	end
+	-- The answer of this frame is kept (#52): the early / mid / late game checks and the mode timers ask it 6 times
+	-- per bot per frame (counted in the tests' stub API), and every call read each allied unit on the map. Within a
+	-- frame (GameTime()) a new scan would say the same. Measured in games 083 and 084 (#251): 3.1% to 3.7% less script
+	-- time per frame. Kept per frame, not once per game: the answer comes from the courier's speed, and a scan while
+	-- no courier is on the allied list (before it spawns; while it is dead, unverified) says false.
+	local turboAt, turboNow = nil, false
+	function Fu.IsModeTurbo()
+		local now = GameTime()
+		if now ~= turboAt then
+			turboAt, turboNow = now, ScanForTurbo()
+		end
+		return turboNow
 	end
 	function Fu.CheckTimeOfDay()
 		local dayNightCycle = 600
