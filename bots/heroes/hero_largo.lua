@@ -294,8 +294,10 @@ function X.SkillsComplement()
 			-- sinceIdle=: seconds since the last idle or silent toggle-off (a top-up right after one is the on / off loop);
 			-- lastOff=: why the song went off last; lowestHero=: who the lowest is.
 			local situation = rhapsody.lastSituation
+			-- Its own throttle key: with one key for on and off, a toggle-on 0.5s after an off was not logged (games 081
+			-- t=1243 and 083 t=3054: rhapsody-on with no toggle-on line before it).
 			LogLargo(
-				"toggle",
+				"toggle-on",
 				1,
 				"rhapsody-toggle on why=%s song=%s second=%s mana=%d stacks=%d lowest=%.2f lowestHero=%s missing=%d healers=%d mp=%.2f sinceIdle=%.1f lastOff=%s",
 				rhapsodyWhy,
@@ -1554,7 +1556,7 @@ function X.RhapsodyThink(now)
 			rhapsody.toggleOrderAt = now
 			rhapsody.lastOffWhy = play
 			LogLargo(
-				"toggle",
+				"toggle-off",
 				1,
 				"rhapsody-toggle off why=%s target=%s play=%s held=%.1f stacks=%d strums=%d hits=%d mana=%d",
 				play,
@@ -1592,7 +1594,7 @@ function X.RhapsodyThink(now)
 		-- last=: what the song was for when its reason ended; reasonFor=: seconds of the song that had a reason;
 		-- lowest= / missing=: the group's HP now (an idle top-up should end with the group healed).
 		LogLargo(
-			"toggle",
+			"toggle-off",
 			1,
 			"rhapsody-toggle off why=%s last=%s held=%.1f reasonFor=%.1f strums=%d hits=%d mana=%d lowest=%.2f lowestHero=%s missing=%d mp=%.2f",
 			offWhy,
