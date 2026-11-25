@@ -6,8 +6,8 @@
 -- welcome shows "<release> (<date of the number>)" in a Workshop copy, "dev <number>" in a git build
 -- (bots/lib/systems/chat_rules.lua WelcomeVersion).
 local Version = {
-	number = "2026.11.25-243",
-	release = "v0.6",
+	number = "2026.11.25-245",
+	release = "v0.7",
 }
 Version.releaseNumber = Version.number
 
