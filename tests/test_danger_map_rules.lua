@@ -133,7 +133,131 @@ T.test("danger map: team snapshot from the last-seen info", function()
 	local enemy = GetUnitList(UNIT_LIST_ENEMY_HEROES)[1]
 	T.eq(DangerMap.Isolated(enemy), false, "four others next to it")
 	T.eq(DangerMap.AlliesNear(GetBot():GetLocation(), 1500, GetBot()), 4, "our four others")
-	local why, danger = DangerMap.FarmSkip(GetBot(), Vector(4700, 4800, 0), true)
+	local why, info = DangerMap.FarmSkip(GetBot(), Vector(4700, 4800, 0), true)
 	T.eq(why, "danger", "enemy camp with all five there")
-	T.eq(danger, 5, "danger")
+	T.eq(info.danger, 5, "danger")
+	T.eq(info.ownTower, -1, "no tower of ours in the stub")
+end)
+
+T.test("danger map: own-tower cover in the team snapshot", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich" })
+	-- One tier 2 tower of ours 707 from the spot, before the first snapshot reads the towers.
+	T.stub.towers[GetTeam()][TOWER_MID_2] = T.stub.newUnit({
+		name = "npc_dota_goodguys_tower2_mid",
+		team = GetTeam(),
+		loc = Vector(4200, 4300, 0),
+		hero = false,
+	})
+	local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
+	local spot = Vector(4700, 4800, 0)
+	T.eq(DangerMap.SeenDanger(spot), 5, "the five Dire heroes are visible")
+	local towerDist, covered, tower = DangerMap.OwnTower(spot)
+	T.near(towerDist, 707, 1, "tower distance")
+	T.eq(covered, true, "within 1800 of a tier 2 tower")
+	T.eq(tower and tower.tier, 2, "tier")
+	local why, info = DangerMap.FarmSkip(GetBot(), spot, false, true)
+	T.eq(why, "danger-seen", "a wave under our tower: five seen enemies still skip it")
+	T.near(info.ownTower, 707, 1, "ownTower in the numbers")
+	why = DangerMap.FarmSkip(GetBot(), spot, false, false)
+	T.eq(why, "danger", "a camp there: no tower cover")
+end)
+
+-- Game 084 t=1023-1029: Underlord (Radiant) at our mid T2, no enemy seen ([SHy-STUCK] enemies=0), skipped the wave
+-- ("farm-skip spot=wave why=danger danger=4 missing=4 allies=0 dist=845") and the mid lane front ("spot=lane2
+-- why=danger danger=4 missing=4 dist=361 alt=camp:none"), then left farm. Our mid T1 fell at t=960. Mid T2 at
+-- -2999,-2752: the game 062 withdraw point -3291,-3026 is the tower moved 400 toward our fountain (NearestOwnTower);
+-- the same back-step on mid T1 (-1524,-1507) gives -1229,-1237, which a defend call logged as at=-1234,-1232.
+-- The enemies' last-seen spots are not logged: SYNTHETIC, on the Dire half, unseen 12-30s.
+local G084_TOWERS = {
+	{ x = -2999, y = -2752, tier = 2 }, -- mid T2
+	{ x = -4623, y = -4160, tier = 3 }, -- mid T3 (withdraw point -4908,-4441 moved back 400)
+}
+local G084_BOT = { x = -2247, y = -2102 } -- [SHy-FLIP] t=1029 at=
+local G084_FRONT = { x = -1983, y = -1856 } -- 361 from the bot toward the Dire fountain
+local G084_MISSING = {
+	{ x = 1000, y = 1000, unseen = 15, speed = 300 },
+	{ x = 2000, y = 500, unseen = 20, speed = 300 },
+	{ x = 500, y = 2500, unseen = 12, speed = 300 },
+	{ x = -500, y = 1500, unseen = 30, speed = 300 },
+	{ x = 6000, y = 6000, unseen = 0, speed = 300 }, -- the fifth, seen at their fountain
+}
+
+T.test("danger map: game 084 Underlord - the wave at our mid T2 is kept with 4 enemies missing", function()
+	local R = rules()
+	local fx, fy = G084_FRONT.x, G084_FRONT.y
+	T.eq(R.Danger(G084_MISSING, fx, fy), 4, "danger=4 as logged")
+	T.eq(R.Missing(G084_MISSING), 4, "missing=4 as logged")
+	T.eq(R.Danger(G084_MISSING, fx, fy, nil, nil, R.SEEN_RECENT), 0, "none of them seen")
+	local towerDist, covered = R.OwnTowerCover(fx, fy, G084_TOWERS)
+	T.near(towerDist, 1355, 5, "front to mid T2")
+	T.eq(covered, true, "tier 2: within 1800")
+	local s = { danger = 4, seen = 0, missing = 4, allies = 0, farSide = false }
+	T.eq(R.FarmSkipWhy(s), "danger", "without the cover: skipped (game 084)")
+	s.covered = true
+	local why, kept = R.FarmSkipWhy(s)
+	T.eq(why, nil, "under our tower: farmed")
+	T.eq(kept, "own-tower", "kept by the tower")
+	s.seen = 3
+	T.eq(R.FarmSkipWhy(s), "danger-seen", "three seen enemies close it again")
+	s.seen, s.allies = 3, 1
+	T.eq(R.FarmSkipWhy(s), nil, "an ally there")
+	s.allies, s.strictness = 0, 0
+	T.eq(R.FarmSkipWhy(s), nil, "off")
+	-- The bot itself stands 995 from mid T2; a tier 1 tower covers only 1100.
+	T.eq(select(2, R.OwnTowerCover(G084_BOT.x, G084_BOT.y, { { x = -2999, y = -2752, tier = 1 } })), true, "995 < 1100")
+	T.eq(select(2, R.OwnTowerCover(fx, fy, { { x = -2999, y = -2752, tier = 1 } })), false, "a T1 1355 away: no")
+	T.eq(select(2, R.OwnTowerCover(fx, fy, {})), false, "no towers")
+end)
+
+T.test("danger map: skip hold - a skipped spot stays skipped 10s", function()
+	local R = rules()
+	local why, held = R.HoldSkip(nil, 100, "danger", false)
+	T.eq(why, "danger", "skipped now")
+	T.eq(held.untilT, 110, "held until")
+	why, held = R.HoldSkip(held, 105, nil, false)
+	T.eq(why, "danger", "not offered again at 105 (game 084: farm picked and dropped it every second)")
+	why, held = R.HoldSkip(held, 110.5, nil, false)
+	T.eq(why, nil, "free after 10s")
+	T.eq(held, nil, "entry cleared")
+	-- Skipped again: the hold runs from the last skip.
+	why, held = R.HoldSkip(nil, 200, "danger", false)
+	why, held = R.HoldSkip(held, 208, "danger", false)
+	why = R.HoldSkip(held, 215, nil, false)
+	T.eq(why, "danger", "10s from the last skip at 208")
+	-- A wave skipped outside the cover that walks under our tower: free at once.
+	why, held = R.HoldSkip(nil, 300, "danger", false)
+	why = R.HoldSkip(held, 302, nil, true)
+	T.eq(why, nil, "now under our tower")
+	-- Skipped under the cover (3 seen): the hold stays under the cover too.
+	why, held = R.HoldSkip(nil, 400, "danger-seen", true)
+	why = R.HoldSkip(held, 402, nil, true)
+	T.eq(why, "danger-seen", "held")
+end)
+
+T.test("danger map: no alternative - the safest wave by our towers", function()
+	local R = rules()
+	local best = R.SafestTowerWave({
+		{ key = "lane1", seen = 1, ownTower = 900, dist = 3000 },
+		{ key = "lane2", seen = 0, ownTower = 2400, dist = 500 },
+		{ key = "lane3", seen = 0, ownTower = 1500, dist = 5000 },
+	})
+	T.eq(best and best.key, "lane3", "fewest seen, then nearest to the tower")
+	best = R.SafestTowerWave({
+		{ key = "lane1", seen = 3, ownTower = 500, dist = 100 },
+		{ key = "lane2", seen = 0, ownTower = 3500, dist = 100 },
+	})
+	T.eq(best, nil, "3 seen, or too far from our towers")
+	best = R.SafestTowerWave({
+		{ key = "lane1", seen = 0, ownTower = 1000, dist = 4000 },
+		{ key = "lane2", seen = 0, ownTower = 1000, dist = 2000 },
+	})
+	T.eq(best and best.key, "lane2", "tie: nearest to the bot")
+	T.eq(R.SafestTowerWave({}), nil, "no lanes")
+	-- Where to wait: at the edge of the cover, on the line from the tower to the front.
+	local x, y = R.CoverPoint(G084_FRONT.x, G084_FRONT.y, -2999, -2752, R.COVER_DEEP)
+	T.eq(x, G084_FRONT.x, "front inside the cover: the front")
+	T.eq(y, G084_FRONT.y, "front y")
+	x, y = R.CoverPoint(0, 0, -3000, 0, 1800)
+	T.near(x, -1200, 0.01, "1800 from the tower toward the front")
+	T.near(y, 0, 0.01, "on the line")
 end)

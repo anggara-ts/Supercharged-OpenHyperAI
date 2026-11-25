@@ -5,7 +5,9 @@
 --   DangerMap.Danger(loc[, team])   enemies that could be within 1200 of loc in the next 5s
 --   DangerMap.Missing([team])       alive enemies unseen for 10s+
 --   DangerMap.Isolated(enemy)       seen within 3s and no other enemy could be within 1500 of it
---   DangerMap.FarmSkip(bot, loc, enemyCamp)   why the farm skips a spot (nil = keep), danger, missing, allies
+--   DangerMap.SeenDanger(loc)       like Danger, only the enemies seen in the last 2s
+--   DangerMap.OwnTower(loc)         our nearest living tower: distance, covers a lane wave there, the tower
+--   DangerMap.FarmSkip(bot, loc, enemyCamp, isWave)   why the farm skips a spot (nil = keep), and its numbers
 -- The last-seen info is read from the asking bot's team, so a snapshot is only rebuilt for GetTeam().
 local Rules = require(GetScriptDirectory() .. "/lib/systems/danger_map_rules")
 
@@ -22,26 +24,30 @@ local function FountainOf(team)
 	return 7023, 6450
 end
 
-local TOWER_IDS = nil
-local function LivingTowers(team)
-	TOWER_IDS = TOWER_IDS
+-- Lane towers with their tier; the two tier 4 towers only for the own-tower cover (FarSide reads the lane towers).
+local LANE_TOWERS, BASE_TOWERS = nil, nil
+local function LivingTowers(team, withBase)
+	LANE_TOWERS = LANE_TOWERS
 		or {
-			TOWER_TOP_1,
-			TOWER_TOP_2,
-			TOWER_TOP_3,
-			TOWER_MID_1,
-			TOWER_MID_2,
-			TOWER_MID_3,
-			TOWER_BOT_1,
-			TOWER_BOT_2,
-			TOWER_BOT_3,
+			{ TOWER_TOP_1, 1 },
+			{ TOWER_TOP_2, 2 },
+			{ TOWER_TOP_3, 3 },
+			{ TOWER_MID_1, 1 },
+			{ TOWER_MID_2, 2 },
+			{ TOWER_MID_3, 3 },
+			{ TOWER_BOT_1, 1 },
+			{ TOWER_BOT_2, 2 },
+			{ TOWER_BOT_3, 3 },
 		}
+	BASE_TOWERS = BASE_TOWERS or { { TOWER_BASE_1, 4 }, { TOWER_BASE_2, 4 } }
 	local list = {}
-	for _, id in ipairs(TOWER_IDS) do
-		local tower = GetTower(team, id)
-		if tower ~= nil and tower:IsAlive() then
-			local loc = tower:GetLocation()
-			list[#list + 1] = { x = loc.x, y = loc.y }
+	for _, ids in ipairs(withBase and { LANE_TOWERS, BASE_TOWERS } or { LANE_TOWERS }) do
+		for _, entry in ipairs(ids) do
+			local tower = entry[1] ~= nil and GetTower(team, entry[1]) or nil
+			if tower ~= nil and tower:IsAlive() then
+				local loc = tower:GetLocation()
+				list[#list + 1] = { x = loc.x, y = loc.y, tier = entry[2] }
+			end
 		end
 	end
 	return list
@@ -102,11 +108,12 @@ local function Rebuild(snap, team, now)
 		snap.towersUntil = now + DangerMap.TOWER_REFRESH
 		snap.ourTowers = LivingTowers(team)
 		snap.theirTowers = LivingTowers(enemyTeam)
-		snap.sideMemo = {}
+		snap.coverTowers = LivingTowers(team, true)
+		snap.sideMemo, snap.coverMemo = {}, {}
 	end
 	snap.enemies, snap.byPid, snap.allies = enemies, byPid, allies
 	snap.missing = Rules.Missing(enemies)
-	snap.memo = {}
+	snap.memo, snap.seenMemo = {}, {}
 	snap.at = now
 end
 
@@ -120,12 +127,13 @@ function DangerMap.Snapshot(team)
 	if fresh or team ~= GetTeam() then
 		return snap
 	end
-	snap = snap or { speeds = {}, dead = {}, respawnAt = {}, sideMemo = {}, memo = {} }
+	snap = snap or { speeds = {}, dead = {}, respawnAt = {}, sideMemo = {}, coverMemo = {}, memo = {}, seenMemo = {} }
 	DangerMap.byTeam[team] = snap
 	local ok, err = pcall(Rebuild, snap, team, now)
 	if not ok then
 		snap.at = now
-		snap.enemies, snap.byPid, snap.allies, snap.missing, snap.memo = snap.enemies or {}, snap.byPid or {}, {}, 0, {}
+		snap.enemies, snap.byPid, snap.allies, snap.missing = snap.enemies or {}, snap.byPid or {}, {}, 0
+		snap.memo, snap.seenMemo = {}, {}
 		if now >= (DangerMap.errorLogAt or -math.huge) then
 			DangerMap.errorLogAt = now + 30
 			pcall(print, string.format("[SHy-DANGER] t=%.0f team=%d rebuild-error %s", now, team, tostring(err)))
@@ -146,6 +154,38 @@ function DangerMap.Danger(loc, team)
 		snap.memo[key] = cached
 	end
 	return cached
+end
+
+-- Like Danger, counting only the enemies seen in the last Rules.SEEN_RECENT seconds (the count under our towers).
+function DangerMap.SeenDanger(loc)
+	local snap = DangerMap.Snapshot()
+	if snap == nil or loc == nil or snap.enemies == nil then
+		return 0
+	end
+	local key = math.floor(loc.x) * 100000 + math.floor(loc.y)
+	local cached = snap.seenMemo[key]
+	if cached == nil then
+		cached = Rules.Danger(snap.enemies, loc.x, loc.y, Rules.RADIUS, Horizon(), Rules.SEEN_RECENT)
+		snap.seenMemo[key] = cached
+	end
+	return cached
+end
+
+-- Our nearest living tower (T1-T4) to loc: distance (math.huge: none), whether it covers a lane wave at loc
+-- (Rules.OwnTowerCover) and the tower as { x =, y =, tier = } (nil: none).
+function DangerMap.OwnTower(loc)
+	local snap = DangerMap.Snapshot()
+	if snap == nil or loc == nil or snap.coverTowers == nil then
+		return math.huge, false, nil
+	end
+	local key = math.floor(loc.x) * 100000 + math.floor(loc.y)
+	local cached = snap.coverMemo[key]
+	if cached == nil then
+		local d, covered, tower = Rules.OwnTowerCover(loc.x, loc.y, snap.coverTowers)
+		cached = { d = d, covered = covered, tower = tower }
+		snap.coverMemo[key] = cached
+	end
+	return cached.d, cached.covered, cached.tower
 end
 
 function DangerMap.Missing(team)
@@ -190,20 +230,30 @@ function DangerMap.Isolated(enemy)
 	return entry ~= nil and Rules.Isolated(entry, snap.enemies)
 end
 
--- Why the farm skips the spot loc (nil = farm it), and the numbers behind it. enemyCamp: the spot is an enemy camp
--- (far side whatever the towers say).
-function DangerMap.FarmSkip(bot, loc, enemyCamp)
-	local danger = DangerMap.Danger(loc)
-	local missing = DangerMap.Missing()
-	local allies = DangerMap.AlliesNear(loc, Rules.ALLY_RADIUS, bot)
-	local why = Rules.FarmSkipWhy({
-		danger = danger,
-		missing = missing,
-		allies = allies,
+-- Why the farm skips the spot loc (nil = farm it), and the numbers behind it as a table { why =, kept =, danger =,
+-- seen =, missing =, allies =, ownTower = (distance, -1: no tower), covered = }. enemyCamp: the spot is an enemy
+-- camp (far side whatever the towers say). isWave: a lane wave or lane front, which our tower's cover can keep
+-- (only the seen enemies count there, Rules.FarmSkipWhy); kept = "own-tower" when that is what kept it.
+function DangerMap.FarmSkip(bot, loc, enemyCamp, isWave)
+	local towerDist, covered = DangerMap.OwnTower(loc)
+	local info = {
+		danger = DangerMap.Danger(loc),
+		seen = DangerMap.SeenDanger(loc),
+		missing = DangerMap.Missing(),
+		allies = DangerMap.AlliesNear(loc, Rules.ALLY_RADIUS, bot),
+		ownTower = towerDist < math.huge and towerDist or -1,
+		covered = isWave == true and covered,
+	}
+	info.why, info.kept = Rules.FarmSkipWhy({
+		danger = info.danger,
+		seen = info.seen,
+		missing = info.missing,
+		allies = info.allies,
 		farSide = enemyCamp or DangerMap.FarSide(loc),
+		covered = info.covered,
 		strictness = DangerMap.Strictness,
 	})
-	return why, danger, missing, allies
+	return info.why, info
 end
 
 return DangerMap
