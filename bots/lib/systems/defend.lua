@@ -39,7 +39,7 @@ local function arrayFind(self, callback, thisArg)
 	return nil
 end
 local Defend = {}
-local getDefendState, getGameState, getLaneState, getUnitLists, locationKey, locationRadiusKey, countRecentlySeenEnemies, isAliveBuilding, isBaseDefenseActive, isDefendingOtherLane, getWeightedEnemyCount, getMostThreatenedLane, getClosestPosition, noOtherTravelBootsDefender, getHighGroundWaitPoint, pingForDefense, localizationLoaded, Localization, humanPingSeconds, maxDefendDesire, ancientThreatRadius, baseDefenseSeconds, enemyCountCacheSeconds, lastSeenSeconds, ourTeam, threatLaneLock, baseDefenseUntil, travelBootsDefenderTime, enemyCountCache, stateCacheSeconds, gameStateCache, laneStateCache, unitListCache
+local getDefendState, getGameState, getLaneState, getUnitLists, locationKey, locationRadiusKey, countRecentlySeenEnemies, isAliveBuilding, isBaseDefenseActive, isDefendingOtherLane, getWeightedEnemyCount, getMostThreatenedLane, getClosestPosition, noOtherTravelBootsDefender, getHighGroundWaitPoint, pingForDefense, localizationLoaded, Localization, maxDefendDesire, ancientThreatRadius, baseDefenseSeconds, enemyCountCacheSeconds, lastSeenSeconds, ourTeam, threatLaneLock, baseDefenseUntil, travelBootsDefenderTime, enemyCountCache, stateCacheSeconds, gameStateCache, laneStateCache, unitListCache
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Dota = require(GetScriptDirectory() .. "/lib/dota/index")
 local Barracks = Dota.Barracks
@@ -51,6 +51,7 @@ local UnitType = Dota.UnitType
 local NativeOperators = require(GetScriptDirectory() .. "/lib/vendor/native_operators")
 local vectorAdd = NativeOperators.add
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local getLocationToLocationDistance = Utils.GetLocationToLocationDistance
 local CacheKeys = require(GetScriptDirectory() .. "/lib/systems/cache_keys")
 function getDefendState(bot)
@@ -1118,7 +1119,7 @@ function pingForDefense(bot, lane, desire, building, tier, alliesComing, enemyCo
 		vectorAdd(Fu.AdjustLocationWithOffsetTowardsFountain(building:GetLocation(), 850), RandomVector(50))
 	local retreatingAllies = Fu.GetRetreatingAlliesNearLoc(pingLocation, 1600)
 	if #retreatingAllies == 0 then
-		bot:ActionImmediate_Chat(Localization.Get("say_come_def"), false)
+		ChatRules.SayDecision(bot, Localization.Get("say_come_def"), "say_come_def")
 		bot:ActionImmediate_Ping(pingLocation.x, pingLocation.y, false)
 		defendPings.pingedTime = GameTime()
 		defendPings.lane = lane
@@ -1505,15 +1506,6 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	then
 		return DefNone(bot, "roshan-tormentor")
 	end
-	local pingDesire = 0
-	local pingingHuman, ping = Fu.GetHumanPing()
-	if pingingHuman and ping and not ping.normal_ping and DotaTime() > 0 then
-		local isNearTower, pingLane = Fu.IsPingCloseToValidTower(gameState.team, ping, 800, 5)
-		if isNearTower and lane == pingLane and GameTime() < ping.time + humanPingSeconds then
-			bot.laneToDefend = lane
-			pingDesire = maxDefendDesire
-		end
-	end
 	local building, healthScore, tier = unpack(Defend.GetFurthestBuildingOnLane(lane))
 	if not isAliveBuilding(building) then
 		return DefNone(bot, "no-building")
@@ -1724,12 +1716,6 @@ function Defend.GetDefendDesireHelper(bot, lane)
 		end
 		defendDesire = math.max(defendDesire, baseFloor.floor)
 	end
-	if pingDesire > 0 then
-		if pingDesire > defendDesire then
-			bot._defendWhy = "ping"
-		end
-		defendDesire = math.max(defendDesire, pingDesire)
-	end
 	if (#enemiesNearDefendLoc >= 4 or alliesNearCount >= 3) and not outnumbered then
 		defendDesire = math.max(defendDesire, maxDefendDesire)
 	end
@@ -1789,8 +1775,8 @@ if not localizationLoaded then
 end
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local FarmDefend = require(GetScriptDirectory() .. "/lib/systems/farm_defend")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
-humanPingSeconds = 5
 local defendRadius = 1600
 maxDefendDesire = 0.6
 ancientThreatRadius = 2600
@@ -1913,6 +1899,15 @@ function Defend.GetDefendDesire(bot, lane)
 	-- Refresh the base-siege latch every think (farm and the TP rules read it), also when the
 	-- helper returns early.
 	Defend.GetBaseSiege()
+	-- A human's defend order (#222, bots/lib/systems/human_orders.lua: `!def top`, a ping on our building or on an
+	-- enemy wave coming to it): before the group cap and the skirmish cut below.
+	local orderDesire = HumanOrders.DefendDesire(bot, lane)
+	if orderDesire ~= nil then
+		bot._defendWhy = "order"
+		bot.laneToDefend = lane
+		bot.defendDesire = orderDesire
+		return orderDesire
+	end
 	local desire = math.min(Defend.GetDefendDesireHelper(bot, lane), 1)
 	local why = bot._defendWhy or "?"
 	local defendLoc = getDefendState(bot).defendLoc or GetLaneFrontLocation(ourTeam, lane, 0)
@@ -2010,9 +2005,9 @@ function Defend.GetDefendDesire(bot, lane)
 			)
 			local chatLines = Localization.Get(chatKey)
 			if type(chatLines) == "table" and #chatLines > 0 then
-				bot:ActionImmediate_Chat(chatLines[RandomInt(1, #chatLines)], false)
+				ChatRules.SayDecision(bot, chatLines[RandomInt(1, #chatLines)], chatKey)
 			elseif type(chatLines) == "string" then
-				bot:ActionImmediate_Chat(chatLines, false)
+				ChatRules.SayDecision(bot, chatLines, chatKey)
 			end
 		end
 	end
@@ -2509,6 +2504,10 @@ local function LaneDefendThink(bot, lane, building, info)
 end
 function Defend.DefendThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- A forced defend order (#222): a far bot TPs first when that is clearly faster (game 077: they walked).
+	if HumanOrders.TravelThink(bot, "defend", lane) then
 		return
 	end
 	local now = DotaTime()

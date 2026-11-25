@@ -28,7 +28,7 @@ local function arraySome(self, callback, thisArg)
 	return false
 end
 local Push = {}
-local refreshThreatState, getGameState, getLocationState, getUnitState, discountLaneCost, getLaneTargetBuilding, humanPingSeconds, enemyAncient, lastThreatTick, teamPushLane, enemyHeroesAtAncient, enemyHeroesOnHighGround, laneFrontHasEnemies, wasDefendPinged, recentDefendTime, maxPushDesire, lockedPushLane, lockedPushLaneUntil, isBotOnlyGame, pushAfterDefendUntil, lastDefendDesire, pushAfterDefendSeconds, stateCacheSeconds, gameStateCache, locationStateCache, unitStateCache, ancientThreatRadius, laneTargetCache
+local refreshThreatState, getGameState, getLocationState, getUnitState, discountLaneCost, getLaneTargetBuilding, enemyAncient, lastThreatTick, teamPushLane, enemyHeroesAtAncient, enemyHeroesOnHighGround, laneFrontHasEnemies, wasDefendPinged, recentDefendTime, maxPushDesire, lockedPushLane, lockedPushLaneUntil, isBotOnlyGame, pushAfterDefendUntil, lastDefendDesire, pushAfterDefendSeconds, stateCacheSeconds, gameStateCache, locationStateCache, unitStateCache, ancientThreatRadius, laneTargetCache
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Dota = require(GetScriptDirectory() .. "/lib/dota/index")
 local Barracks = Dota.Barracks
@@ -46,6 +46,7 @@ local radiantFountainTpPoint = Utils.RadiantFountainTpPoint
 local direFountainTpPoint = Utils.DireFountainTpPoint
 local Cache = require(GetScriptDirectory() .. "/lib/systems/cache")
 local KillWindow = require(GetScriptDirectory() .. "/lib/systems/kill_window")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 -- Our base is being hit. A fresh kill must not pull the team away from it, since
 -- defend desire tops out at 0.6 and the kill floor is 0.91 or 0.99.
 local BASE_CREEP_RADIUS = 1600
@@ -136,7 +137,7 @@ function refreshThreatState(team)
 	laneFrontHasEnemies = {}
 	for _, lane in ipairs({ Lane.Top, Lane.Mid, Lane.Bot }) do
 		local laneFrontLocation = GetLaneFrontLocation(team, lane, 0)
-		laneFrontHasEnemies[lane] = Fu.Utils.CountEnemyHeroesNear(laneFrontLocation, 2200) >= 2
+		laneFrontHasEnemies[lane] = Push.LaneFrontBlocked(team, lane, laneFrontLocation)
 	end
 	local gameStates = Fu.Utils.GameStates
 	wasDefendPinged = gameStates ~= nil
@@ -144,6 +145,84 @@ function refreshThreatState(team)
 		and gameTime - gameStates.defendPings.pingedTime <= 5
 	recentDefendTime = (gameStates or {}).recentDefendTime or 0
 	teamPushLane = nil
+end
+-- Lane-front gate (#12, game 084 43:52-43:59; bots/lib/systems/tempo_rules.lua LaneFrontBlocks): 2+ enemy heroes
+-- within 2200 of the lane front block the lane's push only when they outnumber our heroes there (within 2200, or in
+-- that lane's push mode within 4000: walking in), or when we have fewer alive. It used to block on 2 enemies whatever
+-- our numbers. The ally count is read only with 2+ enemies there, at most once per second per lane.
+-- Logs (per team and lane, on change, repeated every 15s): [SHy-PUSH] push-gate why=lane-front-enemies / push-keep
+-- why=outnumber.
+local TempoRules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
+local LANE_FRONT_RADIUS = 2200
+local LANE_FRONT_WALK_IN = 4000
+local LANE_PUSH_MODE = {
+	[Lane.Top] = BotMode.PushTowerTop,
+	[Lane.Mid] = BotMode.PushTowerMid,
+	[Lane.Bot] = BotMode.PushTowerBot,
+}
+local laneFrontAllies, laneFrontLog = {}, {}
+local function CountLaneFrontAllies(lane, laneFrontLocation)
+	local count = 0
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES) or {}) do
+		if Fu.IsValidHero(ally) and not ally:IsIllusion() then
+			local dist = GetUnitToLocationDistance(ally, laneFrontLocation)
+			if
+				dist <= LANE_FRONT_RADIUS
+				or dist <= LANE_FRONT_WALK_IN and ally:GetActiveMode() == LANE_PUSH_MODE[lane]
+			then
+				count = count + 1
+			end
+		end
+	end
+	return count
+end
+local function LogLaneFront(team, lane, why, enemies, allies, aliveUs, aliveThem)
+	local now = DotaTime()
+	local byTeam = laneFrontLog[team] or {}
+	laneFrontLog[team] = byTeam
+	local last = byTeam[lane] or { why = nil, at = -999 }
+	local changed = last.why ~= why
+	if changed and now - last.at < 3 or not changed and (why == nil or now - last.at < 15) then
+		return
+	end
+	byTeam[lane] = { why = why, at = now }
+	if why == nil then
+		return
+	end
+	print(
+		string.format(
+			"[SHy-PUSH] t=%.0f %s %s lane=%d enemies=%d allies=%d alive=%d/%d",
+			now,
+			team == TEAM_DIRE and "dire" or "radiant",
+			why == "outnumber" and "push-keep why=outnumber"
+				or ("push-gate why=lane-front-enemies gate=" .. tostring(why)),
+			lane,
+			enemies,
+			allies,
+			aliveUs,
+			aliveThem
+		)
+	)
+end
+function Push.LaneFrontBlocked(team, lane, laneFrontLocation)
+	local enemies = Fu.Utils.CountEnemyHeroesNear(laneFrontLocation, LANE_FRONT_RADIUS)
+	if enemies < TempoRules.LANE_FRONT_MIN_ENEMIES then
+		LogLaneFront(team, lane, nil, enemies, 0, 0, 0)
+		return false
+	end
+	local now = DotaTime()
+	local byTeam = laneFrontAllies[team] or {}
+	laneFrontAllies[team] = byTeam
+	local cached = byTeam[lane]
+	if cached == nil or now - cached.at >= 1 or now < cached.at then
+		cached = { at = now, allies = CountLaneFrontAllies(lane, laneFrontLocation) }
+		byTeam[lane] = cached
+	end
+	local gameState = getGlobalGameState()
+	local aliveUs, aliveThem = gameState.aliveAllyCount or 0, gameState.aliveEnemyCount or 0
+	local blocked, why = TempoRules.LaneFrontBlocks(enemies, cached.allies, aliveUs, aliveThem)
+	LogLaneFront(team, lane, why, enemies, cached.allies, aliveUs, aliveThem)
+	return blocked
 end
 function getGameState()
 	local now = DotaTime()
@@ -326,13 +405,6 @@ function Push.GetPushDesireHelper(bot, lane)
 	end
 	if Fu.IsDoingRoshan(bot) and #Fu.GetAlliesNearLoc(locationState.roshanLocation, 2800) >= 3 then
 		return BotModeDesire.None
-	end
-	local pingingHuman, ping = Fu.GetHumanPing()
-	if pingingHuman ~= nil and ping ~= nil and not ping.normal_ping and DotaTime() > 0 then
-		local isPingNearTower, pingedLane = Fu.IsPingCloseToValidTower(GetOpposingTeam(), ping, 700, 5)
-		if isPingNearTower and lane == pingedLane and GameTime() < ping.time + humanPingSeconds then
-			return 0.6
-		end
 	end
 	local ourAncient = gameState.ourAncient
 	if Fu.IsValidBuilding(ourAncient) and Push.IsHealthyInsideFountain(bot) then
@@ -998,7 +1070,6 @@ function Push.IsAnyTargetBackdooredAt(bot, lane)
 end
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
-humanPingSeconds = 5
 enemyAncient = nil
 lastThreatTick = -1
 teamPushLane = nil
@@ -1064,6 +1135,7 @@ if not hasLocalization then
 	}
 end
 local FarmDefend = require(GetScriptDirectory() .. "/lib/systems/farm_defend")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local function getLocalizedLine(key)
 	local lines = Localization.Get(key)
 	if type(lines) == "table" and #lines > 0 then
@@ -1084,6 +1156,13 @@ function Push.GetPushDesire(bot, lane)
 	then
 		return BotModeDesire.None
 	end
+	-- A human's push order (#222, bots/lib/systems/human_orders.lua: `!push <lane>`, a ping on an enemy building or
+	-- its wave, of any ping type): before the level and lane checks below, which would refuse it.
+	local orderDesire = HumanOrders.PushDesire(bot, lane)
+	if orderDesire ~= nil then
+		bot.pushDesire = orderDesire
+		return orderDesire
+	end
 	if bot:GetLevel() < 6 then
 		return BotModeDesire.None
 	end
@@ -1093,10 +1172,17 @@ function Push.GetPushDesire(bot, lane)
 		local chatKey = lane == Lane.Top and "say_push_top" or (lane == Lane.Mid and "say_push_mid" or "say_push_bot")
 		local chatLine = getLocalizedLine(chatKey) or getLocalizedLine("say_leave_farm_push")
 		if chatLine then
-			bot:ActionImmediate_Chat(chatLine, false)
+			ChatRules.SayDecision(bot, chatLine, chatKey)
 		end
 	end
 	bot._lastPushChatDesire = desire
+	-- A bot carrying out a human's forced order elsewhere (#222): this lane stays under the order's desire, so a kill
+	-- push (0.99) does not pull it away (maintainer, game 078: the human insisting outranks the team's calls).
+	local orderCap = HumanOrders.CapForOrder(bot)
+	if orderCap ~= nil and desire > orderCap then
+		bot.pushDesire = orderCap
+		return orderCap
+	end
 	return desire
 end
 local function isAttackableBuilding(unit)
@@ -1225,6 +1311,10 @@ local function getAllyLaneTower(team, lane)
 end
 function Push.PushThink(bot, lane)
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- A forced push order (#222): a far bot TPs first when that is clearly faster (game 077: they walked).
+	if HumanOrders.TravelThink(bot, "push", lane) then
 		return
 	end
 	if Fu.TryDropTowerAggro(bot) then

@@ -25,14 +25,18 @@ local LastHitOverlay = require(GetScriptDirectory() .. "/lib/systems/last_hit_ov
 -- Logs switched off once their feature works (the TP diag lines, game 029).
 local function NoLog() end
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local AboutRules = require(GetScriptDirectory() .. "/lib/systems/about_rules")
 local BotBuild = dofile(GetScriptDirectory() .. "/heroes/" .. string.gsub(botName, "npc_dota_", ""))
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local CurseLog = require(GetScriptDirectory() .. "/lib/systems/curse_log")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
+local LaneTowerRules = require(GetScriptDirectory() .. "/lib/systems/lane_tower_rules")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 local ChargeTracker = require(GetScriptDirectory() .. "/lib/systems/charge_tracker")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
+local GlyphRules = require(GetScriptDirectory() .. "/lib/systems/glyph_rules")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/lib/systems/foreign_items")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
@@ -230,6 +234,40 @@ local function LevelUpAbilities()
 		return
 	end
 	local position = Fu.GetPosition(bot)
+	-- The first "I will play position N" waits until the team's welcome has said the version line (maintainer,
+	-- 2026-11-23: "print the bot version at the beginning of the game before ally bot state their position"), at most
+	-- ChatRules.WELCOME_FIRST_WAIT seconds after the welcome's start. A swap while it waits still reloads the build.
+	if
+		lastPosition == nil
+		and bot.announcedRole == nil
+		and bot.isBear == nil
+		and GetGameMode() ~= GAMEMODE_1V1MID
+		and GetGameState() == GAME_STATE_PRE_GAME
+	then
+		-- Required here, not at the top: the require block is where most open PRs add lines.
+		local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+		local now = DotaTime()
+		bot._playPosWait = bot._playPosWait or { at = now, position = position }
+		local versionSaid = (TeamMemory.Get(GetTeam(), "welcomeNext") or 1) > 1
+		local waits, by = ChatRules.PositionLineWaits(versionSaid, bot._playPosWait.at, ChatRules.WELCOME_START, now)
+		if waits then
+			goto positionLineDone
+		end
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s welcome-first waited=%.0f by=%s pos=%s",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				now - bot._playPosWait.at,
+				by,
+				tostring(position)
+			)
+		)
+		if bot._playPosWait.position ~= position then
+			-- The position changed while the line waited: the swap branch below reloads the build and says it.
+			lastPosition = bot._playPosWait.position
+		end
+	end
 	if lastPosition == nil then
 		lastPosition = position
 		if
@@ -255,6 +293,7 @@ local function LevelUpAbilities()
 			end)
 		end
 	end
+	::positionLineDone::
 	if bot:GetLevel() >= 30 and botName == "npc_dota_hero_bloodseeker" then
 		return
 	end
@@ -739,6 +778,7 @@ local chatReplyDelay = RandomInt(19, 56) / 10
 local killStreakEndedTime = -999
 local lastGold = 9999
 local lastKills = 999
+local saidFirstBloodAt = nil
 local lastDeaths = 0
 local killStreak = 0
 local replyCount = 0
@@ -747,20 +787,119 @@ local chatCallbackInstalled = false
 local humanChatTime = nil
 local humanChatString = nil
 local replyToAllChat = false
+-- Seconds between two heard-any lines of one sender.
+local HEARD_ANY_GAP = 0.5
+-- [SHy-CHAT] heard-any: every chat event from a human (maintainer, 2026-11-24: does an alt-clicked item, "Smoke of
+-- Deceit is ready", reach the chat callback at all?), at most one line per HEARD_ANY_GAP per sender (an event with no
+-- player_id prints from=?); and the chat event's key names once per distinct set of keys, in case an item alert has
+-- another shape. Only in the local match log.
+local function LogHeardAny(chatEvent)
+	local keys = {}
+	for key, value in pairs(chatEvent) do
+		keys[#keys + 1] = tostring(key) .. ":" .. type(value)
+	end
+	table.sort(keys)
+	local keySet = table.concat(keys, ",")
+	Usage._chatKeySets = Usage._chatKeySets or {}
+	if not Usage._chatKeySets[keySet] then
+		Usage._chatKeySets[keySet] = true
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s chat-event keys=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				keySet
+			)
+		)
+	end
+	local senderId = chatEvent.player_id
+	if senderId ~= nil and IsPlayerBot(senderId) then
+		return
+	end
+	local throttleKey = senderId ~= nil and senderId or "?"
+	Usage._heardAnyAt = Usage._heardAnyAt or {}
+	local now = GameTime()
+	if now < (Usage._heardAnyAt[throttleKey] or -999) + HEARD_ANY_GAP then
+		return
+	end
+	Usage._heardAnyAt[throttleKey] = now
+	local text = type(chatEvent.string) == "string" and chatEvent.string or tostring(chatEvent.string)
+	local nameOk, senderHero = false, nil
+	if senderId ~= nil then
+		nameOk, senderHero = pcall(GetSelectedHeroName, senderId)
+	end
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s heard-any from=%s team_only=%s len=%d text=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			nameOk
+					and type(senderHero) == "string"
+					and senderHero ~= ""
+					and (string.gsub(senderHero, "npc_dota_hero_", ""))
+				or (senderId ~= nil and tostring(senderId) or "?"),
+			tostring(chatEvent.team_only),
+			#text,
+			(string.gsub(text, "%c+", " ")):sub(1, 60)
+		)
+	)
+end
+-- A chat line asked for inside the chat callback, said from this bot's next think instead: an ActionImmediate_Chat
+-- from the callback itself says nothing (game 078: the old `!debug` switched the mode at t=700 but its "Verbose
+-- debug ON" never reached the chat; now used by the `!chatty` reply). { text =, allChat =, what = the log word }, or nil.
+local callbackChat = nil
 function Usage.SetTalkMessage()
 	local playerId = bot:GetPlayerID()
 	local gold = bot:GetGold()
 	local kills = GetHeroKills(playerId)
 	local deaths = GetHeroDeaths(playerId)
 	local turboGoldScale = GetGameMode() == GAMEMODE_TURBO and 2.0 or 1.0
-	if playerId == Fu.Role.GetReplyMemberID() and replyCount <= maxReplies then
-		if not chatCallbackInstalled and GetGameState() == GAME_STATE_GAME_IN_PROGRESS then
+	if callbackChat ~= nil then
+		local line = callbackChat
+		callbackChat = nil
+		local said = pcall(function()
+			bot:ActionImmediate_Chat(line.text, line.allChat)
+		end) and "yes" or "error"
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s %s said=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				line.what,
+				said
+			)
+		)
+	end
+	-- The chat callback carries every chat command (!push, !chatty, ...), so it does not depend on the reply count;
+	-- only the small-talk replies below stop after maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
+	-- re-pick of the reply member (Role.GetReplyMemberID) must not install a second one.
+	if playerId == Fu.Role.GetReplyMemberID() then
+		if
+			not chatCallbackInstalled
+			and Fu.Role.chatListenerId == nil
+			and GetGameState() == GAME_STATE_GAME_IN_PROGRESS
+		then
 			chatCallbackInstalled = true
+			Fu.Role.chatListenerId = playerId
 			InstallChatCallback(function(chatEvent)
 				Usage.SetReplyHumanTime(chatEvent)
 			end)
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s listener team=%s id=%d",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+					playerId
+				)
+			)
 		end
-		if humanChatString ~= nil and humanChatTime ~= nil and DotaTime() > humanChatTime + chatReplyDelay then
+		if
+			replyCount <= maxReplies
+			and humanChatString ~= nil
+			and humanChatTime ~= nil
+			and DotaTime() > humanChatTime + chatReplyDelay
+		then
 			local replyString = Fu.Chat.GetReplyString(humanChatString, replyToAllChat)
 			if replyString ~= nil then
 				if replyCount == maxReplies then
@@ -794,8 +933,16 @@ function Usage.SetTalkMessage()
 		then
 			local chatLine = Localization.Get("got_first_blood")[RandomInt(1, #Localization.Get("got_first_blood"))]
 			bot:ActionImmediate_Chat(chatLine, true)
+			saidFirstBloodAt = kills
 		end
-		if bot:IsAlive() and gold > lastGold + 300 * turboGoldScale and kills > lastKills then
+		-- One chat line per kill: first blood's bonus gold also passed the kill-gold check below, so the first blood got
+		-- two lines (maintainer, 2026-11-23).
+		if
+			bot:IsAlive()
+			and gold > lastGold + 300 * turboGoldScale
+			and kills > lastKills
+			and saidFirstBloodAt ~= kills
+		then
 			local chatLine = "?"
 			if Fu.Customize.Trash_Talk_Level and Fu.Customize.Trash_Talk_Level >= 2 then
 				-- A normal kill: one of our lines 3 times in 4, "?" once in 4 (#90; it was 2 in 9).
@@ -847,8 +994,33 @@ function Usage.SetTalkMessage()
 	lastGold = bot:GetGold()
 end
 function Usage.SetReplyHumanTime(chatEvent)
+	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
 	local senderPlayerId = chatEvent.player_id
+	-- [SHy-CHAT] heard: one line per `!` command that reached the team's chat callback (game 077: `!push` and
+	-- `!debug` were lost with no trace in the log), so a lost command shows by its missing line.
+	local commandWord = type(chatText) == "string" and chatText:match("^%s*(![^%s]*)") or nil
+	if commandWord ~= nil then
+		local nameOk, senderHero = pcall(GetSelectedHeroName, senderPlayerId)
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s heard cmd=%s from=%s team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				commandWord:lower(),
+				nameOk
+						and type(senderHero) == "string"
+						and senderHero ~= ""
+						and (string.gsub(senderHero, "npc_dota_hero_", ""))
+					or tostring(senderPlayerId),
+				tostring(chatEvent.team_only)
+			)
+		)
+	end
+	-- Human orders (#222): `!push top`, `!def mid`, `!rosh`, `!group`, `!stop` (bots/lib/systems/human_orders.lua).
+	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
+		return
+	end
 	if string.find(chatText, "!sp") or string.find(chatText, "!speak") then
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
@@ -856,31 +1028,69 @@ function Usage.SetReplyHumanTime(chatEvent)
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
+	-- `!debug` / `!verbose` are gone (maintainer, 2026-11-24: "i dont think we need !debug anymore, we have logger
+	-- anyway"): the [SHy-*] lines always print. Typing one does nothing; it returns here so it never reaches the small
+	-- talk below. Utils.DebugMode / IsDebug stay false, so the old log() calls stay silent.
 	if chatCommand == "!debug" or chatCommand == "!verbose" then
+		return
+	end
+	-- `!chatty` is the heroes' decision chat ("Pushing top!", "Taking lotus", ChatRules.SayDecision). Maintainer,
+	-- 2026-11-24: "chatty is for hero chat when doing actions".
+	if chatCommand == "!chatty" then
 		if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsAllyMemberID(senderPlayerId)) then
-			Fu.Utils.DebugMode = not Fu.Utils.DebugMode
-			IsDebug = Fu.Utils.DebugMode
 			Fu.Utils.GameStates = Fu.Utils.GameStates or {}
-			Fu.Utils.GameStates.verboseChat = Fu.Utils.DebugMode
-			local debugReply = Fu.Utils.DebugMode and Localization.Get("say_debug_on")
-				or Localization.Get("say_debug_off")
-			if type(debugReply) == "table" and #debugReply > 0 then
-				debugReply = debugReply[RandomInt(1, #debugReply)]
+			Fu.Utils.GameStates.chattyChat = not Fu.Utils.GameStates.chattyChat
+			local on = Fu.Utils.GameStates.chattyChat
+			local reply = Localization.Get(on and "say_chatty_on" or "say_chatty_off")
+			if type(reply) == "table" and #reply > 0 then
+				reply = reply[RandomInt(1, #reply)]
 			end
-			bot:ActionImmediate_Chat(
-				debugReply or (Fu.Utils.DebugMode and "Verbose debug ON." or "Verbose debug OFF."),
-				false
-			)
+			-- Said from this bot's next think (callbackChat): [SHy-CHAT] chatty on|off said=.
+			callbackChat = {
+				text = type(reply) == "string" and reply or (on and "chatty ON." or "chatty OFF."),
+				allChat = false,
+				what = on and "chatty on" or "chatty off",
+			}
 		end
+		return
+	end
+	-- `!about` (#215): the team's first bot answers it from its own think (Usage.AnswerAboutRequest); no chat reply.
+	if AboutRules.IsCommand(chatText) then
+		AboutRules.Note(
+			Fu.Role,
+			chatText,
+			IsPlayerBot(senderPlayerId),
+			chatEvent.team_only,
+			Fu.Role.IsAllyMemberID(senderPlayerId),
+			GameTime()
+		)
 		return
 	end
 	if chatText ~= "-都来守家" or Fu.Role.IsAllyMemberID(senderPlayerId) then
 		Fu.Role.SetLastChatString(chatText)
 	end
-	if not IsPlayerBot(senderPlayerId) and (chatEvent.team_only or Fu.Role.IsEnemyMemberID(senderPlayerId)) then
+	-- Small talk only for an enemy human's all chat (ChatRules.SmallTalkReply; game 080: the bots answered the
+	-- maintainer's team chat with trash talk). [SHy-CHAT] smalltalk-skip why=ally, once per 30s.
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local reply, skipWhy = ChatRules.SmallTalkReply(
+		IsPlayerBot(senderPlayerId),
+		chatEvent.team_only,
+		Fu.Role.IsEnemyMemberID(senderPlayerId)
+	)
+	if reply then
 		humanChatString = chatText
 		humanChatTime = DotaTime()
-		replyToAllChat = not chatEvent.team_only
+		replyToAllChat = true
+	elseif skipWhy == "ally" and DotaTime() >= (Usage._smallTalkSkipLogAt or -999) then
+		Usage._smallTalkSkipLogAt = DotaTime() + ChatRules.SMALLTALK_SKIP_LOG_GAP
+		print(
+			string.format(
+				"[SHy-CHAT] t=%.0f %s smalltalk-skip why=ally team_only=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(chatEvent.team_only)
+			)
+		)
 	end
 end
 -- [SHy-BUYBACK]: every buyback with its reason, and a support's skipped one (once per 10s).
@@ -912,11 +1122,173 @@ local function BuybackSkipLog(why, ancientHp, remaining)
 	bot._buybackSkipLogAt = DotaTime()
 	BuybackLog("skip", why, ancientHp, remaining)
 end
+-- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version (the welcome's
+-- text: AboutRules.VersionOf, from bots/customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
+-- think, which also runs while the hero is dead; bots/lib/systems/about_rules.lua has the rules.
+function Usage.AnswerAboutRequest()
+	if
+		Fu.Role.AboutRequest == nil
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or bot:GetPlayerID() ~= AboutRules.FirstBotId(GetTeamPlayers(GetTeam()), IsPlayerBot)
+	then
+		return
+	end
+	local result, request = AboutRules.Decide(Fu.Role, GameTime())
+	if result == "none" then
+		return
+	end
+	local versionOk, versionModule = pcall(require, GetScriptDirectory() .. "/customize/version")
+	local version = AboutRules.VersionOf(versionOk and versionModule or nil)
+	local said = "-"
+	if result == "answer" then
+		local line = AboutRules.Line(Localization.Get("say_about"), version)
+		said = pcall(function()
+			bot:ActionImmediate_Chat(line, request.allChat == true)
+		end) and "yes" or "error"
+	end
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s about team=%s result=%s chat=%s said=%s version=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			result,
+			request.allChat and "all" or "team",
+			said,
+			(string.gsub(version, " ", "_"))
+		)
+	)
+end
+-- A human of the team pinging our fountain area PingStreak.COUNT times in a row (#215): the bot that reads the last
+-- ping says PingStreak.Line() in team chat, at most once per PingStreak.COOLDOWN seconds per team. Called from
+-- BuybackUsageThink before its 2s throttle (GetMostRecentPing keeps only the last ping), every 0.1s per bot; every
+-- bot of the team feeds the same streak (bots/lib/systems/ping_streak.lua).
+function Usage.WatchFountainPings()
+	local now = GameTime()
+	if
+		now < (bot._fountainPingAt or -1)
+		or bot.isBear ~= nil
+		or bot:IsIllusion()
+		or bot:HasModifier("modifier_arc_warden_tempest_double")
+		or Fu.IsMeepoClone(bot)
+	then
+		return
+	end
+	bot._fountainPingAt = now + 0.1
+	-- Required here, not at the top: the require block is where most open PRs add lines.
+	local PingStreak = require(GetScriptDirectory() .. "/lib/systems/ping_streak")
+	local team = GetTeam()
+	local shared = PingStreak.Team(team)
+	if shared.slots == nil or now >= shared.slotsAt or now < shared.slotsAt - 5 then
+		-- The humans' team slots (GetTeamMember takes a slot 1-5), re-read every 5s.
+		shared.slots, shared.slotsAt = {}, now + 5
+		for slot, playerId in ipairs(GetTeamPlayers(team)) do
+			if not IsPlayerBot(playerId) then
+				shared.slots[#shared.slots + 1] = { slot = slot, id = playerId }
+			end
+		end
+	end
+	local fountain = Fu.GetTeamFountain()
+	-- Our fountain building: `dota_fountain` in the allied building list (nearest the spawn point, within 3000),
+	-- looked up every 5s until found, then kept for the team. Game 077: Fu.GetTeamFountain() is the spawn point, ~1040
+	-- from the building, so 6 pings on the building itself counted nothing.
+	if shared.building == nil and (now >= (shared.buildingLookAt or -999) or now < shared.buildingLookAt - 5) then
+		shared.buildingLookAt = now + 5
+		local bestDist = 3000
+		for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIED_BUILDINGS) or {}) do
+			if unit ~= nil and not unit:IsNull() and unit:GetUnitName() == "dota_fountain" then
+				local loc = unit:GetLocation()
+				local dist = math.sqrt((loc.x - fountain.x) ^ 2 + (loc.y - fountain.y) ^ 2)
+				if dist <= bestDist then
+					shared.building, bestDist = loc, dist
+				end
+			end
+		end
+		if shared.building ~= nil then
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s fountain-building team=%s at=%.0f,%.0f from-spawn=%.0f",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					team == TEAM_RADIANT and "radiant" or "dire",
+					shared.building.x,
+					shared.building.y,
+					bestDist
+				)
+			)
+		end
+	end
+	local building = shared.building
+	for _, human in ipairs(shared.slots) do
+		local member = GetTeamMember(human.slot)
+		local ping = member ~= nil and not member:IsNull() and member:GetMostRecentPing() or nil
+		if ping ~= nil and ping.location ~= nil then
+			local state = shared.humans[human.id]
+			if state == nil then
+				state = { count = 0 }
+				shared.humans[human.id] = state
+			end
+			local seenBefore = state.seen
+			local done = PingStreak.Step(
+				state,
+				ping.time,
+				ping.location.x,
+				ping.location.y,
+				fountain.x,
+				fountain.y,
+				now,
+				building and building.x,
+				building and building.y
+			)
+			-- [SHy-CHAT] fountain-ping (game 078): one line per new ping that is near the fountain or ends a running count, so
+			-- the next game shows how far a streak got. Each ping is read once per team (state.seen), so this prints at
+			-- most once per ping.
+			if state.seen ~= seenBefore and (state.near or (state.prevCount or 0) > 0) then
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s fountain-ping team=%s human=%d count=%d near=%s gap=%s old=%s at=%.0f,%.0f",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						done and PingStreak.COUNT or (state.count or 0),
+						tostring(state.near),
+						state.gap ~= nil and string.format("%.1f", state.gap) or "-",
+						tostring(state.old),
+						ping.location.x,
+						ping.location.y
+					)
+				)
+			end
+			if done then
+				local said = "throttled"
+				if PingStreak.Allow(shared, now) then
+					said = pcall(function()
+						bot:ActionImmediate_Chat(PingStreak.Line(), false)
+					end) and "yes" or "error"
+				end
+				print(
+					string.format(
+						"[SHy-CHAT] t=%.0f %s egg team=%s human=%d said=%s",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						team == TEAM_RADIANT and "radiant" or "dire",
+						human.id,
+						said
+					)
+				)
+			end
+		end
+	end
+end
 local function ConsiderBuyback()
 	if Fu.IsMeepoClone(bot) then
 		return
 	end
 	Usage.SetTalkMessage()
+	Usage.AnswerAboutRequest()
 	if bot:GetLevel() <= 15 or bot:HasModifier("modifier_arc_warden_tempest_double") or not Fu.Role.ShouldBuyBack() then
 		return
 	end
@@ -1462,6 +1834,9 @@ local function ConsiderItems()
 			itemName = nil
 		end
 		local ready = Fu.CanCastAbility(item)
+		if itemName == "item_ancient_janggo" or itemName == "item_boots_of_bearing" then
+			Usage.LogDrumCharges(item, ready)
+		end
 		if smokeFromBag and item ~= nil and not item:IsNull() then
 			local cooldown = item:GetCooldownTimeRemaining()
 			ready = not (type(cooldown) == "number" and cooldown > 0)
@@ -1641,6 +2016,28 @@ function Usage.WillBreakInvisible(unit)
 	end
 	return false
 end
+-- [SHy-ITEM] drum-charges (#9): once per game per bot and item, the first time the Drum / Boots of Bearing is off
+-- cooldown: what the API reads for its charges and whether it counts as castable (the 7.42 Drum has no charges; the
+-- old rule waited for one).
+function Usage.LogDrumCharges(item, castable)
+	local itemName = item:GetName()
+	bot._drumChargesLogged = bot._drumChargesLogged or {}
+	if bot._drumChargesLogged[itemName] or item:GetCooldownTimeRemaining() > 0 then
+		return
+	end
+	bot._drumChargesLogged[itemName] = true
+	pcall(
+		print,
+		string.format(
+			"[SHy-ITEM] t=%.0f %s drum-charges item=%s charges=%s castable=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			itemName,
+			tostring(item:GetCurrentCharges()),
+			tostring(castable)
+		)
+	)
+end
 Usage.ConsiderItemDesire = {}
 Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	-- Overwhelm is melee range (150) and pierces debuff immunity. A short
@@ -1683,30 +2080,87 @@ Usage.ConsiderItemDesire["item_abyssal_blade"] = function(item)
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Drum of Endurance / Boots of Bearing active (#9). The old rule cast only when going on a hero within 680 and
+-- returned at 0 charges, but the 7.42 Drum has no charges (ItemRequiresCharges is commented out in the game file),
+-- so it was probably never cast. Now: escape > fight > chase > push (bots/lib/systems/drum_rules.lua). Ally counts
+-- come from Fu.GetAllyList, which holds the bot itself (Arcane Boots below reads allyHeroes[2] as the first other
+-- ally). [SHy-ITEM] drum why= item= allies= target=, at most once per 3s per bot.
+local DrumRules = require(GetScriptDirectory() .. "/lib/systems/drum_rules")
+-- An enemy tower, barracks or Ancient (the API has IsTower and IsFort, barracks go by name).
+local function IsEnemyBuilding(unit)
+	if unit == nil or unit:IsNull() or not unit:IsAlive() or unit:GetTeam() == team then
+		return false
+	end
+	return unit:IsTower() or unit:IsFort() or string.find(unit:GetUnitName(), "rax", 1, true) ~= nil
+end
 Usage.ConsiderItemDesire["item_ancient_janggo"] = function(item)
-	if item:GetCurrentCharges() <= 0 and item:GetName() == "item_ancient_janggo" then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	local castRange = 680
-	local castType = "none"
-	local hEffectTarget = nil
-	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
-	if bot:HasModifier("modifier_nyx_assassin_vendetta") then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	if Fu.IsGoingOnSomeone(bot) then
-		if
-			Fu.IsValidHero(botTarget)
-			and Fu.CanCastOnMagicImmune(botTarget)
-			and Fu.IsInRange(bot, botTarget, castRange)
-		then
-			hEffectTarget = botTarget
-			castReason = "进攻:" .. Fu.Chat.GetNormName(hEffectTarget)
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+	-- Riki's passive invisibility and Glimmer's fade are not broken by an item cast.
+	local invisible = bot:IsInvisible()
+		and botName ~= "npc_dota_hero_riki"
+		and not bot:HasModifier("modifier_item_glimmer_cape_fade")
+	local allies = Fu.GetAllyList(bot, DrumRules.RADIUS)
+	local alliesOnBuilding = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and IsEnemyBuilding(ally:GetAttackTarget()) then
+			alliesOnBuilding = alliesOnBuilding + 1
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE
+	local enemies = Fu.GetNearbyHeroes(bot, DrumRules.RADIUS, true, BOT_MODE_NONE)
+	local attackingAllies = 0
+	for _, ally in pairs(allies) do
+		if Fu.IsValid(ally) and (ally:GetActiveMode() == BOT_MODE_ATTACK or Fu.IsValidHero(ally:GetAttackTarget())) then
+			attackingAllies = attackingAllies + 1
+		end
+	end
+	local targetDist, targetMovingAway = nil, false
+	local goingOn = Fu.IsGoingOnSomeone(bot)
+	if goingOn and Fu.IsValidHero(botTarget) and botTarget:CanBeSeen() then
+		targetDist = GetUnitToUnitDistance(bot, botTarget)
+		local ahead = botTarget:GetExtrapolatedLocation(0.5)
+		targetMovingAway = ahead ~= nil and GetUnitToLocationDistance(bot, ahead) > targetDist + 30
+	end
+	local why = DrumRules.Why({
+		vendetta = bot:HasModifier("modifier_nyx_assassin_vendetta"),
+		invisible = invisible,
+		retreating = Fu.IsRetreating(bot) or bot:GetActiveMode() == BOT_MODE_RETREAT,
+		hitByHero = bot:WasRecentlyDamagedByAnyHero(DrumRules.HIT_WITHIN),
+		inFight = attackingAllies >= DrumRules.MIN_ALLIES and #enemies >= 1,
+		allies = #allies,
+		enemies = #enemies,
+		goingOn = goingOn,
+		targetDist = targetDist,
+		attackRange = bot:GetAttackRange(),
+		targetMovingAway = targetMovingAway,
+		alliesOnBuilding = alliesOnBuilding,
+	})
+	if why == nil then
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if DotaTime() >= (bot._drumLogAt or -999) then
+		bot._drumLogAt = DotaTime() + 3
+		local targetName = "-"
+		if why == "chase" or why == "fight" then
+			targetName = Fu.IsValidHero(botTarget) and string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "") or "-"
+		elseif why == "push" then
+			local buildingTarget = bot:GetAttackTarget()
+			targetName = IsEnemyBuilding(buildingTarget) and buildingTarget:GetUnitName() or "ally-building"
+		end
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s drum why=%s item=%s allies=%d enemies=%d target=%s dist=%.0f",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				why,
+				item:GetName(),
+				#allies,
+				#enemies,
+				targetName,
+				targetDist or -1
+			)
+		)
+	end
+	return BOT_ACTION_DESIRE_HIGH, bot, "none", "drum:" .. why
 end
 Usage.ConsiderItemDesire["item_arcane_boots"] = function(item)
 	if bot:DistanceFromFountain() < 800 then
@@ -2208,8 +2662,16 @@ Usage.ConsiderItemDesire["item_blink"] = function(item)
 		return BOT_ACTION_DESIRE_HIGH, retreatLocation, "ground", nil
 	end
 	local attackingAllies = bot:GetNearbyHeroes(800, false, BOT_MODE_ATTACK)
+	-- Alchemist holding a brew (#34; bots/heroes/hero_alchemist.lua refreshes the field while brewing): a retreat blink
+	-- carries it away from every target and it blows up on him (game 063, 34:20, blink at 0.7s brewed).
+	local brewHold = bot._alchBrewingUntil ~= nil and DotaTime() < bot._alchBrewingUntil
+	if brewHold and Fu.IsRetreating(bot) and DotaTime() >= (bot._alchBlinkHoldLogAt or -999) then
+		bot._alchBlinkHoldLogAt = DotaTime() + 3
+		pcall(print, string.format("[SHy-ALCHEMIST] t=%.0f concoction hold cast=item_blink why=retreat", DotaTime()))
+	end
 	if
-		Fu.IsRetreating(bot)
+		not brewHold
+		and Fu.IsRetreating(bot)
 		and not Fu.IsRealInvisible(bot)
 		and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_MODERATE
 	then
@@ -4823,13 +5285,88 @@ Usage.ConsiderItemDesire["item_refresher"] = function(item)
 	local hEffectTarget = nil
 	local castReason = "刷新技能"
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
-	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
+	local heroName = string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")
+	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil then
+		if BotBuild.CanUseRefresherShard() then
+			Usage.LogRefresher(item, "hero-rule", heroName, -1)
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+		end
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if #enemyHeroes == 0 or not (Fu.IsGoingOnSomeone(bot) or Fu.IsInTeamFight(bot)) then
+		Fu.RefresherResetHold(bot)
+		return BOT_ACTION_DESIRE_NONE
+	end
+	-- #47 (maintainer, 2026-11-21): the ultimate in its refresh window; a useful spell (learned, not passive, not a
+	-- toggle, cooldown 8s+) still ready holds the refresh up to 1s so the hero casts it first; the mana gate is the
+	-- refresher and the ultimate (needed=). The other useful spells on cooldown are optional (optional=, their mana):
+	-- they come back too and are cast again if mana is left (maintainer, 2026-11-22: "zeus could refresher + wrath
+	-- only, refreshed nimbus is optional"). Fu.RefresherPlan, bots/lib/systems/refresher_rules.lua.
+	local plan = Fu.RefresherPlan(bot, item)
+	if plan.step == "go" then
+		Fu.RefresherResetHold(bot)
+		Usage.LogRefresher(item, "ult", heroName, plan.needed, plan.othersReady, plan.combo, plan.optional)
 		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 	end
-	if #enemyHeroes > 0 and (Fu.IsGoingOnSomeone(bot) or Fu.IsInTeamFight(bot)) and Fu.CanUseRefresherShard(bot) then
-		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
+	if plan.step == "hold" and plan.holdStarted then
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s refresher-hold others-ready=%d ready=%s mana=%d needed=%d optional=%d combo=%s",
+				DotaTime(),
+				heroName,
+				plan.othersReady,
+				plan.ready,
+				bot:GetMana(),
+				plan.needed,
+				plan.optional or 0,
+				plan.combo
+			)
+		)
+	elseif plan.step == "mana" and DotaTime() >= (bot._refresherSkipLogAt or -999) then
+		-- Only the mana is short (the ultimate is in its window): say so, every 10s at most.
+		bot._refresherSkipLogAt = DotaTime() + 10
+		pcall(
+			print,
+			string.format(
+				"[SHy-ITEM] t=%.0f %s refresher-skip why=mana item=%s mana=%d needed=%d optional=%d itemCost=%d others-ready=%d combo=%s",
+				DotaTime(),
+				heroName,
+				item:GetName(),
+				bot:GetMana(),
+				plan.needed,
+				plan.optional or 0,
+				item:GetManaCost(),
+				plan.othersReady,
+				plan.combo
+			)
+		)
 	end
 	return BOT_ACTION_DESIRE_NONE
+end
+-- One line per refresh: which rule, the mana before it and what it needed, the useful spells still ready and the
+-- combo it brings back; needed: the gate (refresher + ultimate), optional: the mana of the other spells it brings
+-- back (-1 / "-": a hero file's own rule).
+function Usage.LogRefresher(item, why, heroName, needed, othersReady, combo, optional)
+	local ultimate = Fu.GetUltimateAbility(bot)
+	pcall(
+		print,
+		string.format(
+			"[SHy-ITEM] t=%.0f %s refresher why=%s item=%s mana=%d needed=%d optional=%d itemCost=%d ult=%s ultCd=%.0f others-ready=%d combo=%s",
+			DotaTime(),
+			heroName,
+			why,
+			item:GetName(),
+			bot:GetMana(),
+			needed,
+			optional or -1,
+			item:GetManaCost(),
+			ultimate ~= nil and ultimate:GetName() or "-",
+			ultimate ~= nil and ultimate:GetCooldownTimeRemaining() or -1,
+			othersReady or -1,
+			combo or "-"
+		)
+	)
 end
 Usage.ConsiderItemDesire["item_refresher_shard"] = function(item)
 	return Usage.ConsiderItemDesire["item_refresher"](item)
@@ -9585,10 +10122,94 @@ function Usage.IsTargetedByEnemy(unit)
 	end
 	return false
 end
+-- Glyph of Fortification (#12). Only team slot 1 decides, and only when all five players are bots: every bot runs
+-- this every 2s and the Glyph is one team-wide resource, so one bot decides for the team; and with a human teammate
+-- the human keeps the shared Glyph for their own call (a bot spending it would take the charge from them). The rules
+-- (values, 7.42 sources) are in bots/lib/systems/glyph_rules.lua. Our own charge count is only valid because of this
+-- guard (no one else on the team casts).
+local GlyphState = { charges = nil, towerHp = {}, pending = nil, lastWaitLog = -100 }
+local GLYPH_TOWERS = {
+	{ id = TOWER_TOP_1, name = "top_1", tier = 1 },
+	{ id = TOWER_MID_1, name = "mid_1", tier = 1 },
+	{ id = TOWER_BOT_1, name = "bot_1", tier = 1 },
+	{ id = TOWER_TOP_2, name = "top_2", tier = 2 },
+	{ id = TOWER_MID_2, name = "mid_2", tier = 2 },
+	{ id = TOWER_BOT_2, name = "bot_2", tier = 2 },
+	{ id = TOWER_TOP_3, name = "top_3", tier = 3 },
+	{ id = TOWER_MID_3, name = "mid_3", tier = 3 },
+	{ id = TOWER_BOT_3, name = "bot_3", tier = 3 },
+	{ id = TOWER_BASE_1, name = "base_1", tier = 4 },
+	{ id = TOWER_BASE_2, name = "base_2", tier = 4 },
+}
+-- Distinct enemy heroes (by player ID, no illusions or clones) within radius of the unit.
+local function GlyphEnemiesNear(unit, radius)
+	local found, seen = {}, {}
+	for _, enemy in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES)) do
+		if Fu.IsValidHero(enemy) and not enemy:IsIllusion() and GetUnitToUnitDistance(unit, enemy) <= radius then
+			local id = enemy:GetPlayerID()
+			if not seen[id] then
+				seen[id] = true
+				found[#found + 1] = enemy
+			end
+		end
+	end
+	return found
+end
+-- Our heroes within ALLY_RADIUS of the tower that attack one of the enemies or were hit by one in the last 2s.
+local function GlyphAlliesFighting(tower, enemies)
+	local count, seen = 0, {}
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
+		if
+			Fu.IsValidHero(ally)
+			and not ally:IsIllusion()
+			and not seen[ally:GetPlayerID()]
+			and GetUnitToUnitDistance(ally, tower) <= GlyphRules.ALLY_RADIUS
+		then
+			local target = ally:GetAttackTarget()
+			for _, enemy in pairs(enemies) do
+				if target == enemy or enemy:GetAttackTarget() == ally or ally:WasRecentlyDamagedByHero(enemy, 2) then
+					seen[ally:GetPlayerID()] = true
+					count = count + 1
+					break
+				end
+			end
+		end
+	end
+	return count
+end
+local function GlyphTowerAttacked(tower)
+	if Usage.IsTargetedByEnemy(tower) then
+		return true
+	end
+	for _, creep in pairs(GetUnitList(UNIT_LIST_ENEMY_CREEPS)) do
+		if Fu.IsValid(creep) and creep:GetAttackTarget() == tower then
+			return true
+		end
+	end
+	return false
+end
+local function GlyphCast(why, building, name, enemies, allies)
+	bot:ActionImmediate_Glyph()
+	GlyphRules.Spend(GlyphState.charges, DotaTime())
+	GlyphState.pending = { building = building, name = name, why = why }
+	print(
+		string.format(
+			"[SHy-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d",
+			DotaTime(),
+			string.gsub(botName, "npc_dota_hero_", ""),
+			why,
+			name,
+			enemies,
+			allies,
+			building:GetHealth() / building:GetMaxHealth(),
+			team,
+			GlyphState.charges.charges
+		)
+	)
+end
 local function UseGlyphIfNeeded()
 	if
-		GetGlyphCooldown() > 0
-		or DotaTime() < 60
+		DotaTime() < 60
 		or bot ~= GetTeamMember(1)
 		or not GetTeamMember(2):IsBot()
 		or not GetTeamMember(3):IsBot()
@@ -9597,54 +10218,154 @@ local function UseGlyphIfNeeded()
 	then
 		return
 	end
-	local towerIds = {
-		TOWER_TOP_1,
-		TOWER_MID_1,
-		TOWER_BOT_1,
-		TOWER_TOP_2,
-		TOWER_MID_2,
-		TOWER_BOT_2,
-		TOWER_TOP_3,
-		TOWER_MID_3,
-		TOWER_BOT_3,
-		TOWER_BASE_1,
-		TOWER_BASE_2,
-	}
-	for _, towerId in pairs(towerIds) do
-		local tower = GetTower(team, towerId)
+	local now = DotaTime()
+	if GlyphState.charges == nil then
+		GlyphState.charges = GlyphRules.NewCharges()
+	end
+	GlyphRules.Tick(GlyphState.charges, now)
+	-- One tick (2s) after a cast: did the building get the Glyph, and what does GetGlyphCooldown read with 2 charges?
+	local pending = GlyphState.pending
+	if pending ~= nil then
+		GlyphState.pending = nil
+		print(
+			string.format(
+				"[SHy-GLYPH] t=%.0f %s glyph-result cast=%s tower=%s fortified=%s cd=%.1f charges=%d",
+				now,
+				string.gsub(botName, "npc_dota_hero_", ""),
+				pending.why,
+				pending.name,
+				tostring(
+					pending.building ~= nil
+						and not pending.building:IsNull()
+						and pending.building:HasModifier("modifier_fountain_glyph")
+				),
+				GetGlyphCooldown(),
+				GlyphState.charges.charges
+			)
+		)
+	end
+	-- HP samples for "its HP is falling" (taken every tick, also while the Glyph is on cooldown).
+	local towerHp = {}
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
+		if tower ~= nil and tower:GetHealth() > 0 then
+			towerHp[info.id] = tower:GetHealth()
+		end
+	end
+	local prevHp = GlyphState.towerHp
+	GlyphState.towerHp = towerHp
+	-- On cooldown: no cast, but the fight scan still runs so glyph-skip why=cooldown shows what the API reads.
+	local glyphCd = GetGlyphCooldown()
+	-- 1. Save a dying building (unchanged thresholds), first.
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
 		if
-			tower ~= nil
+			glyphCd <= 0
+			and tower ~= nil
 			and tower:GetHealth() > 0
-			and tower:GetHealth() / tower:GetMaxHealth() < 0.36
 			and tower:CanBeSeen()
-			and Usage.IsTargetedByEnemy(tower)
+			and GlyphRules.ShouldSave(
+				"tower",
+				tower:GetHealth() / tower:GetMaxHealth(),
+				Usage.IsTargetedByEnemy(tower),
+				tower:HasModifier("modifier_fountain_glyph")
+			)
 		then
-			bot:ActionImmediate_Glyph()
+			local enemies =
+				GlyphEnemiesNear(tower, (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN)
+			GlyphCast("save", tower, info.name, #enemies, GlyphAlliesFighting(tower, enemies))
 			return
 		end
 	end
-	local barracksIds = { BARRACKS_TOP_MELEE, BARRACKS_MID_MELEE, BARRACKS_BOT_MELEE }
-	for _, barracksId in pairs(barracksIds) do
-		local barracks = GetBarracks(team, barracksId)
+	local barracksList = {
+		{ id = BARRACKS_TOP_MELEE, name = "rax_top" },
+		{ id = BARRACKS_MID_MELEE, name = "rax_mid" },
+		{ id = BARRACKS_BOT_MELEE, name = "rax_bot" },
+	}
+	for _, info in ipairs(barracksList) do
+		local barracks = GetBarracks(team, info.id)
 		if
-			barracks ~= nil
+			glyphCd <= 0
+			and barracks ~= nil
 			and barracks:GetHealth() > 0
-			and barracks:GetHealth() / barracks:GetMaxHealth() < 0.5
-			and Usage.IsTargetedByEnemy(barracks)
+			and GlyphRules.ShouldSave(
+				"building",
+				barracks:GetHealth() / barracks:GetMaxHealth(),
+				Usage.IsTargetedByEnemy(barracks),
+				barracks:HasModifier("modifier_fountain_glyph")
+			)
 		then
-			bot:ActionImmediate_Glyph()
+			local enemies = GlyphEnemiesNear(barracks, 900)
+			GlyphCast("save", barracks, info.name, #enemies, GlyphAlliesFighting(barracks, enemies))
 			return
 		end
 	end
 	local ancient = GetAncient(team)
 	if
-		ancient ~= nil
+		glyphCd <= 0
+		and ancient ~= nil
 		and ancient:GetHealth() > 0
-		and ancient:GetHealth() / ancient:GetMaxHealth() < 0.5
-		and Usage.IsTargetedByEnemy(ancient)
+		and GlyphRules.ShouldSave(
+			"building",
+			ancient:GetHealth() / ancient:GetMaxHealth(),
+			Usage.IsTargetedByEnemy(ancient),
+			ancient:HasModifier("modifier_fountain_glyph")
+		)
 	then
-		bot:ActionImmediate_Glyph()
+		local enemies = GlyphEnemiesNear(ancient, 900)
+		GlyphCast("save", ancient, "ancient", #enemies, GlyphAlliesFighting(ancient, enemies))
 		return
+	end
+	-- 2. Fight under one of our towers (T2 and higher: multishot).
+	local aliveEnemies = Fu.GetNumOfAliveHeroes(true)
+	local need = GlyphRules.EnemiesNeeded(aliveEnemies)
+	if need == nil then
+		return
+	end
+	for _, info in ipairs(GLYPH_TOWERS) do
+		local tower = GetTower(team, info.id)
+		if info.tier >= 2 and tower ~= nil and tower:GetHealth() > 0 and tower:CanBeSeen() then
+			local enemies =
+				GlyphEnemiesNear(tower, (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN)
+			if #enemies >= need then
+				local allies = GlyphAlliesFighting(tower, enemies)
+				local ok, why = GlyphRules.ShouldFight({
+					tier = info.tier,
+					enemies = #enemies,
+					aliveEnemies = aliveEnemies,
+					allies = allies,
+					hit = GlyphRules.HpFalling(prevHp[info.id], tower:GetHealth()) or GlyphTowerAttacked(tower),
+					charges = GlyphState.charges.charges,
+					fortified = tower:HasModifier("modifier_fountain_glyph"),
+				})
+				if ok and glyphCd <= 0 then
+					GlyphCast("fight", tower, info.name, #enemies, allies)
+					return
+				end
+				-- A fight under the tower that did not get the Glyph: say why (at most every 10s).
+				if ok then
+					why = "cooldown"
+				end
+				if allies >= 1 and why ~= "fortified" and now - GlyphState.lastWaitLog >= 10 then
+					GlyphState.lastWaitLog = now
+					print(
+						string.format(
+							"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d cd=%.1f",
+							now,
+							string.gsub(botName, "npc_dota_hero_", ""),
+							why,
+							info.name,
+							#enemies,
+							allies,
+							tower:GetHealth() / tower:GetMaxHealth(),
+							team,
+							GlyphState.charges.charges,
+							glyphCd
+						)
+					)
+				end
+			end
+		end
 	end
 end
 -- [SHy-STUCK]: a live hero away from the fountain that has moved less than 300 in 8s while not
@@ -9797,27 +10518,59 @@ end
 -- tower longer and break a chase or a run. One order, then 2s before another; the mode's own
 -- next order carries on (move, chase). Any HP: the order alone moves the tower's aggro, even on a
 -- full-HP creep the hero cannot actually hit.
--- Logs [SHy-AGGRO] tower-deflect, and 0.8s later whether the tower switched target.
+-- Logs [SHy-AGGRO] tower-deflect, and 0.8s later one result line (Usage.WatchDeflectResult).
+local function DeathCount()
+	local ok, deaths = pcall(GetHeroDeaths, bot:GetPlayerID())
+	return ok and deaths or 0
+end
+-- One [SHy-AGGRO] tower-deflect result= line per attempt (#71): switched / still-on-me / left-range / died
+-- (LaneTowerRules.DeflectResult). It runs with the watchers at the top of ItemUsageThink, before the early returns that
+-- could skip it (the check used to sit inside DeflectTowerAggro, behind about nine of them), and is flushed before a
+-- new attempt. A death since the attempt counts from GetHeroDeaths, so a check that runs late after a respawn still
+-- says died. force: resolve now, even before the 0.8s.
+function Usage.WatchDeflectResult(force)
+	local tower = bot._deaggroTower
+	local now = DotaTime()
+	if tower == nil or bot._deaggroChecked or (not force and now - (bot._deaggroAt or -99) < 0.8) then
+		return
+	end
+	bot._deaggroChecked = true
+	local towerValid = Fu.IsValidBuilding(tower) and tower:IsAlive()
+	local dist, reach = 0, 0
+	local towerOnMe = false
+	if towerValid then
+		local okRange, rawRange = pcall(function()
+			return tower:GetAttackRange()
+		end)
+		reach = LaneTowerRules.Reach(okRange and rawRange or nil, tower:GetBoundingRadius(), bot:GetBoundingRadius())
+		dist = GetUnitToUnitDistance(bot, tower)
+		towerOnMe = tower:GetAttackTarget() == bot
+	end
+	local died = not bot:IsAlive() or DeathCount() > (bot._deaggroDeaths or 0)
+	local result = LaneTowerRules.DeflectResult(died, towerValid, dist, reach, towerOnMe)
+	if result == "still-on-me" then
+		bot._deaggroFailedAt = now
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-AGGRO] t=%.0f %s tower-deflect result=%s after=%.1f hp=%.2f dist=%d",
+			now,
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			result,
+			now - (bot._deaggroAt or now),
+			Fu.GetHP(bot),
+			math.floor(dist)
+		)
+	)
+end
 function Usage.DeflectTowerAggro()
 	local now = DotaTime()
-	if bot._deaggroTower ~= nil and now - (bot._deaggroAt or -99) >= 0.8 and not bot._deaggroChecked then
-		bot._deaggroChecked = true
-		local tower = bot._deaggroTower
-		local switched = Fu.IsValidBuilding(tower) and tower:GetAttackTarget() ~= bot
-		if not switched then
-			bot._deaggroFailedAt = now
-		end
-		pcall(
-			print,
-			string.format(
-				"[SHy-AGGRO] t=%.0f %s tower-deflect result=%s",
-				now,
-				(string.gsub(botName, "npc_dota_hero_", "")),
-				switched and "switched" or "still-on-me"
-			)
-		)
-	end
 	if not bot:IsAlive() or bot:IsInvulnerable() or now < (bot._deaggroAt or -99) + 2 then
+		return false
+	end
+	-- The laning mode is walking the bot out of the tower's range (#71 tower-exit): an attack order would stop it.
+	if bot._towerExitUntil ~= nil and now < bot._towerExitUntil then
 		return false
 	end
 	-- Walk out instead (game 034, 26:47-26:59: Phoenix kept getting a deflect order every 2s after
@@ -9845,9 +10598,12 @@ function Usage.DeflectTowerAggro()
 				end
 			end
 			if best ~= nil then
+				-- The previous attempt's result first, if nothing printed it yet.
+				Usage.WatchDeflectResult(true)
 				bot._deaggroAt = now
 				bot._deaggroTower = tower
 				bot._deaggroChecked = false
+				bot._deaggroDeaths = DeathCount()
 				pcall(
 					print,
 					string.format(
@@ -10765,8 +11521,11 @@ function ItemUsageThink()
 	pcall(Usage.DumpBotApi)
 	pcall(Usage.DumpHeroAbilities)
 	pcall(Usage.ProbeHiddenItems)
+	-- [SHy-CURSE]: right-clicks on enemies under Winter's Curse (log only).
+	pcall(CurseLog.Watch, bot)
 	pcall(Usage.LogHomeWalk)
 	pcall(Usage.WatchDodgeResults)
+	pcall(Usage.WatchDeflectResult)
 	PartEnd("watchers", tWatch)
 	local okQ, cleared = pcall(Usage.WatchStuckQueue)
 	if okQ and cleared then
@@ -11050,6 +11809,7 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
 		bot.lastBuybackFrameProcessTime = DotaTime()
 	end
