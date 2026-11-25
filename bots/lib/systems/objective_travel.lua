@@ -111,10 +111,10 @@ function ObjectiveTravel.GateSeconds(toNearGate, farGateToTarget, speed, channel
 	return toNearGate / speed + channel + 1 + farGateToTarget / speed
 end
 
--- Whether a Fiend's Gate does anything for this team: someone must be able to walk through it (the
--- warp ability, or a human player), or the Scepter puts a Pit of Malice at the far portal.
-function ObjectiveTravel.PortalWorthCasting(hasWarpAbility, humanPlayers, hasScepter)
-	return hasWarpAbility or (humanPlayers or 0) > 0 or hasScepter == true
+-- Whether anyone on the team can walk through a Fiend's Gate: the warp ability (gone from heroes in 7.42),
+-- or a human player. (A Scepter gate's Pit of Malice is decided in the Underlord hero file.)
+function ObjectiveTravel.PortalWalkable(hasWarpAbility, humanPlayers)
+	return hasWarpAbility == true or (humanPlayers or 0) > 0
 end
 
 -- Fastest way for unit to reach loc. Returns seconds, how ("walk" / "tp" / "gate"), and the
