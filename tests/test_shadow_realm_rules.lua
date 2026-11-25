@@ -502,18 +502,22 @@ end)
 
 T.test("dark willow: a jump-in with a second enemy near casts the realm", function()
 	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 0.9, false)
-	local enemies = {}
+	local near, jumper = nil, nil
 	for _, hero in ipairs(T.stub.heroes) do
 		if hero._team ~= bot._team then
-			enemies[#enemies + 1] = hero
+			if near == nil then
+				near = hero
+			elseif jumper == nil then
+				jumper = hero
+			end
 		end
 	end
-	enemies[1]._loc = bot._loc + Vector(800, 0, 0)
-	enemies[2]._loc = bot._loc + Vector(0, 1300, 0)
+	near._loc = bot._loc + Vector(800, 0, 0)
+	jumper._loc = bot._loc + Vector(0, 1300, 0)
 	X.SkillsComplement()
 	T.eq(#used, 0, "no realm: nobody jumped yet")
 	T.stub.time = T.stub.time + 0.1
-	enemies[2]._loc = bot._loc + Vector(0, 250, 0)
+	jumper._loc = bot._loc + Vector(0, 250, 0)
 	X.SkillsComplement()
 	T.eq(used[1], "dark_willow_shadow_realm", "the realm after the blink")
 	local line = printedWith("realm-cornered trigger=jump")
