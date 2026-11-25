@@ -42,6 +42,48 @@ local function printedLine(pattern)
 	return nil
 end
 
+T.test("hoodwink: Sharpshooter fires when its target died, and the result line says so", function()
+	local X = hoodwink()
+	local bot = Stub.bot
+	local release = bot:GetAbilityByName("hoodwink_sharpshooter_release")
+	release.IsFullyCastable = function()
+		return true
+	end
+	release.IsHidden = function()
+		return false
+	end
+	-- datafeed hero_id=123: arrow_speed 2200, arrow_range 3000, arrow_width 125, max_charge_time 3
+	local values = { arrow_speed = 2200, arrow_range = 3000, arrow_width = 125, max_charge_time = 3 }
+	local shooter = bot:GetAbilityByName("hoodwink_sharpshooter")
+	shooter.GetSpecialValueInt = function(_, key)
+		return values[key] or 0
+	end
+	shooter.GetSpecialValueFloat = function(_, key)
+		return values[key] or 0
+	end
+	local enemy = Stub.teams[GetOpposingTeam()][1]
+	enemy._alive = false
+	bot._sharpshooterTarget = enemy
+	bot.HasModifier = function(_, name)
+		return name == "modifier_hoodwink_sharpshooter_windup"
+	end
+	Stub.time = 600
+	T.eq(X.ThinkSharpshooterWindup(), true, "charging")
+	T.ok(not printedLine("sharpshooter%-release"), "not in the first half second")
+	Stub.time = 601
+	T.eq(X.ThinkSharpshooterWindup(), true, "released")
+	T.ok(printedLine("sharpshooter%-release why=target%-dead charge=1%.0 target=none .* range=3000"), "release line")
+	Stub.time = 602
+	X.ThinkSharpshooterResult(Stub.time)
+	T.ok(not printedLine("sharpshooter%-result"), "the bolt is still flying (3000 at 2200 + 0.5s)")
+	Stub.time = 603
+	X.ThinkSharpshooterResult(Stub.time)
+	T.ok(
+		printedLine("sharpshooter%-result why=target%-dead hit=none onTarget=false target=none targetDied=true"),
+		"result"
+	)
+end)
+
 T.test("planted trees: Sprout duration, spot checks, expiry", function()
 	Stub.reset({ hero = "npc_dota_hero_hoodwink", slot = 4 })
 	local P = require(GetScriptDirectory() .. "/lib/systems/planted_trees")

@@ -166,7 +166,7 @@ local ACORN_COMBO_MIN_ENEMY_DIST = 500
 local SAVE_ALLY_HP = 0.5
 local SAVE_RECENT_HIT = 2.5
 local sharpshooterWindup = nil -- { startedAt, target, targetPid, startFacing, reaims, released }
-local sharpshooterShot = nil -- { why, target, charge, releasedAt, checkUntil }
+local sharpshooterShot = nil -- { why, target, targetPid, charge, releasedAt, checkUntil }
 local sproutProbes = {} -- { location, during, afterAt }
 -- An enemy hero this close to a Sprout's cast spot is the one it was cast on, inside the ring. The ring's radius is
 -- not in the game data (planted_trees.lua): assumed, `bushwhack why=sprout` with its bushwhack-result tells.
@@ -215,6 +215,7 @@ function X.SkillsComplement()
 	-- Results of earlier casts (acorn-cast / acorn-lost, bushwhack-result, scurry-result) come before every gate, so
 	-- they print while she is stunned or casting too.
 	pcall(X.ThinkCastResults)
+	pcall(X.ThinkSharpshooterResult, DotaTime())
 	pcall(X.ProbeAcornTree)
 	pcall(X.ProbeSproutTrees)
 	if X.ThinkSharpshooterWindup() then
@@ -692,7 +693,6 @@ local function ScurrySpells()
 end
 function X.ThinkCastResults()
 	local now = DotaTime()
-	X.ThinkSharpshooterResult(now)
 	local acorn = acornPending
 	if acorn ~= nil then
 		if not acornShotAbility:IsCooldownReady() then
@@ -1519,8 +1519,9 @@ end
 local function HasSharpshooterDebuff(unit)
 	return Fu.IsValidHero(unit) and unit:HasModifier("modifier_hoodwink_sharpshooter_debuff")
 end
--- After a release: which enemy hero the bolt hit, or none once it has flown its range.
---   [SHy-HOODWINK] sharpshooter-result why= hit=<hero>|none onTarget= target= charge= after=
+-- After a release: which enemy hero the bolt hit, or none once it has flown its range. A target the bolt killed
+-- holds no debuff, so targetDied=true with hit=none may still be a hit.
+--   [SHy-HOODWINK] sharpshooter-result why= hit=<hero>|none onTarget= target= targetDied= charge= after=
 function X.ThinkSharpshooterResult(now)
 	local shot = sharpshooterShot
 	if shot == nil then
@@ -1541,14 +1542,20 @@ function X.ThinkSharpshooterResult(now)
 		return
 	end
 	sharpshooterShot = nil
+	local targetDied = false
+	if shot.targetPid ~= nil then
+		local okAlive, alive = pcall(IsHeroAlive, shot.targetPid)
+		targetDied = okAlive and alive == false
+	end
 	print(
 		string.format(
-			"[SHy-HOODWINK] t=%.0f hoodwink sharpshooter-result why=%s hit=%s onTarget=%s target=%s charge=%.1f after=%.2f",
+			"[SHy-HOODWINK] t=%.0f hoodwink sharpshooter-result why=%s hit=%s onTarget=%s target=%s targetDied=%s charge=%.1f after=%.2f",
 			now,
 			shot.why,
 			hit ~= nil and ShortName(hit) or "none",
 			tostring(hit ~= nil and hit == shot.target),
 			shot.target ~= nil and ShortName(shot.target) or "none",
+			tostring(targetDied),
 			shot.charge,
 			now - shot.releasedAt
 		)
@@ -1672,6 +1679,8 @@ function X.ThinkSharpshooterWindup()
 			sharpshooterShot = {
 				why = reason,
 				target = hasTarget and target or nil,
+				-- The hero aimed at, also when it died (why=target-dead): targetDied= on the result line.
+				targetPid = windup.targetPid,
 				charge = charge,
 				releasedAt = DotaTime(),
 				checkUntil = DotaTime() + flyFor + 0.5,
