@@ -125,9 +125,10 @@ function ShadowRealmRules.Cornered(o)
 	if o.enemiesNear >= ShadowRealmRules.CORNER_ENEMIES and o.alliesNear == 0 then
 		return "crowd"
 	end
-	-- A jump-in (Blink Dagger, Puck's Ethereal Jaunt, a leap) with a second enemy hero near and no more of ours than
-	-- of theirs: an initiation on her, not a lone harass the hit rule handles.
-	if o.jump and o.enemies >= 2 and o.enemies >= o.ourHeroes then
+	-- A jump-in (Blink Dagger, Puck's Ethereal Jaunt, a leap) with a second enemy hero near and more of theirs than of
+	-- ours (the AttackSkip "outnumbered"): an initiation on her, not a lone harass the hit rule handles, and not an
+	-- even fight, where a 5s escape walk would take her out of it.
+	if o.jump and o.enemies >= 2 and o.enemies > o.ourHeroes then
 		return "jump"
 	end
 	return nil

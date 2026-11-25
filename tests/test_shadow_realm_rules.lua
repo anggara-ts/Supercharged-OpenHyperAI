@@ -468,6 +468,7 @@ T.test("shadow realm: the cornered realm (#203, game 083 47:06)", function()
 	T.eq(cornered({ jump = true, enemies = 2 }), "jump", "a jump-in with a second enemy near")
 	T.eq(cornered({ jump = true, enemies = 1 }), nil, "a lone jump-in: the hit rule decides")
 	T.eq(cornered({ jump = true, enemies = 2, ourHeroes = 3 }), nil, "a jump-in into more of ours")
+	T.eq(cornered({ jump = true, enemies = 2, ourHeroes = 2 }), nil, "an even 2v2: no escape walk")
 	-- The jump-in.
 	T.eq(R.Jump(1162, 0.1, 200, 0.1), "jump", "Templar Assassin's blink from 1162")
 	T.eq(R.Jump(nil, nil, 300, 0.1), "appear", "out of the fog next to her")
@@ -522,4 +523,30 @@ T.test("dark willow: a jump-in with a second enemy near casts the realm", functi
 	T.eq(used[1], "dark_willow_shadow_realm", "the realm after the blink")
 	local line = printedWith("realm-cornered trigger=jump")
 	T.ok(line ~= nil and string.find(line, "kind=jump from=1300 to=250", 1, true) ~= nil, tostring(line))
+end)
+
+T.test("dark willow: two enemies of one name are not read as a jump", function()
+	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 0.9, false)
+	local first, second = nil, nil
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team then
+			if first == nil then
+				first = hero
+			elseif second == nil then
+				second = hero
+			end
+		end
+	end
+	-- Two Meepos: one 300 away, one 1100 away, neither moving.
+	first._name = "npc_dota_hero_meepo"
+	second._name = "npc_dota_hero_meepo"
+	first._loc = bot._loc + Vector(300, 0, 0)
+	second._loc = bot._loc + Vector(0, 1100, 0)
+	X.SkillsComplement()
+	T.stub.time = T.stub.time + 0.1
+	X.SkillsComplement()
+	T.stub.time = T.stub.time + 0.1
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm: nobody jumped")
+	T.eq(printedWith("realm-cornered"), nil, "no cornered line")
 end)

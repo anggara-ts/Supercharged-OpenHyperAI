@@ -327,6 +327,9 @@ function X.ConsiderShadowRealm()
 end
 -- Every think: the distance of each real enemy hero within 1600, for the jump-in trigger (ShadowRealmRules.Jump: an
 -- enemy within 450 that was 500+ farther 0.6s ago, or not seen in that time). A jump is kept in bot._dwJump.
+-- Keyed by the unit handle (weak keys, like channel_save.lua), not the name: two units of one name (Meepo, a Tempest
+-- Double, an illusion IsSuspiciousIllusion misses) would read each other's distance as a jump.
+local enemySeen = setmetatable({}, { __mode = "k" })
 function X.TrackEnemyJumps()
 	local now = DotaTime()
 	local trackedAgo = bot._dwTrackAt ~= nil and now - bot._dwTrackAt or nil
@@ -334,31 +337,26 @@ function X.TrackEnemyJumps()
 		return
 	end
 	bot._dwTrackAt = now
-	local seen = bot._dwSeen
-	if seen == nil then
-		seen = {}
-		bot._dwSeen = seen
-	end
 	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
 		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
-			local name = enemy:GetUnitName()
 			local dist = GetUnitToUnitDistance(bot, enemy)
-			local last = seen[name]
+			local last = enemySeen[enemy]
 			local kind = ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo)
 			if kind ~= nil then
-				bot._dwJump = { at = now, hero = name, kind = kind, from = last and last.dist or -1, dist = dist }
+				bot._dwJump =
+					{ at = now, hero = enemy:GetUnitName(), kind = kind, from = last and last.dist or -1, dist = dist }
 			end
 			if last == nil then
 				last = {}
-				seen[name] = last
+				enemySeen[enemy] = last
 			end
 			last.dist, last.at = dist, now
 		end
 	end
 end
 -- The cornered realm (ShadowRealmRules.Cornered): Spirit Breaker's charge on her with him within 1200, 3+ enemy
--- heroes within 900 and none of ours within 1200, or an enemy jump-in in the last 0.5s while not outnumbering
--- them. The charge modifier on the target: the 7.42 server modifier list has both
+-- heroes within 900 and none of ours within 1200, or an enemy jump-in in the last 0.5s with more of them than of
+-- us within 1200. The charge modifier on the target: the 7.42 server modifier list has both
 -- modifier_spirit_breaker_charge_of_darkness_target (it has a tooltip, "Charge of Darkness Target") and
 -- modifier_spirit_breaker_charge_of_darkness_vision; which one reads through HasModifier is unverified (mod=).
 -- Returns the trigger and the counts, or nil.
