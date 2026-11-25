@@ -137,7 +137,7 @@ function refreshThreatState(team)
 	laneFrontHasEnemies = {}
 	for _, lane in ipairs({ Lane.Top, Lane.Mid, Lane.Bot }) do
 		local laneFrontLocation = GetLaneFrontLocation(team, lane, 0)
-		laneFrontHasEnemies[lane] = Fu.Utils.CountEnemyHeroesNear(laneFrontLocation, 2200) >= 2
+		laneFrontHasEnemies[lane] = Push.LaneFrontBlocked(team, lane, laneFrontLocation)
 	end
 	local gameStates = Fu.Utils.GameStates
 	wasDefendPinged = gameStates ~= nil
@@ -145,6 +145,84 @@ function refreshThreatState(team)
 		and gameTime - gameStates.defendPings.pingedTime <= 5
 	recentDefendTime = (gameStates or {}).recentDefendTime or 0
 	teamPushLane = nil
+end
+-- Lane-front gate (#12, game 084 43:52-43:59; bots/lib/systems/tempo_rules.lua LaneFrontBlocks): 2+ enemy heroes
+-- within 2200 of the lane front block the lane's push only when they outnumber our heroes there (within 2200, or in
+-- that lane's push mode within 4000: walking in), or when we have fewer alive. It used to block on 2 enemies whatever
+-- our numbers. The ally count is read only with 2+ enemies there, at most once per second per lane.
+-- Logs (per team and lane, on change, repeated every 15s): [SHy-PUSH] push-gate why=lane-front-enemies / push-keep
+-- why=outnumber.
+local TempoRules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
+local LANE_FRONT_RADIUS = 2200
+local LANE_FRONT_WALK_IN = 4000
+local LANE_PUSH_MODE = {
+	[Lane.Top] = BotMode.PushTowerTop,
+	[Lane.Mid] = BotMode.PushTowerMid,
+	[Lane.Bot] = BotMode.PushTowerBot,
+}
+local laneFrontAllies, laneFrontLog = {}, {}
+local function CountLaneFrontAllies(lane, laneFrontLocation)
+	local count = 0
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES) or {}) do
+		if Fu.IsValidHero(ally) and not ally:IsIllusion() then
+			local dist = GetUnitToLocationDistance(ally, laneFrontLocation)
+			if
+				dist <= LANE_FRONT_RADIUS
+				or dist <= LANE_FRONT_WALK_IN and ally:GetActiveMode() == LANE_PUSH_MODE[lane]
+			then
+				count = count + 1
+			end
+		end
+	end
+	return count
+end
+local function LogLaneFront(team, lane, why, enemies, allies, aliveUs, aliveThem)
+	local now = DotaTime()
+	local byTeam = laneFrontLog[team] or {}
+	laneFrontLog[team] = byTeam
+	local last = byTeam[lane] or { why = nil, at = -999 }
+	local changed = last.why ~= why
+	if changed and now - last.at < 3 or not changed and (why == nil or now - last.at < 15) then
+		return
+	end
+	byTeam[lane] = { why = why, at = now }
+	if why == nil then
+		return
+	end
+	print(
+		string.format(
+			"[SHy-PUSH] t=%.0f %s %s lane=%d enemies=%d allies=%d alive=%d/%d",
+			now,
+			team == TEAM_DIRE and "dire" or "radiant",
+			why == "outnumber" and "push-keep why=outnumber"
+				or ("push-gate why=lane-front-enemies gate=" .. tostring(why)),
+			lane,
+			enemies,
+			allies,
+			aliveUs,
+			aliveThem
+		)
+	)
+end
+function Push.LaneFrontBlocked(team, lane, laneFrontLocation)
+	local enemies = Fu.Utils.CountEnemyHeroesNear(laneFrontLocation, LANE_FRONT_RADIUS)
+	if enemies < TempoRules.LANE_FRONT_MIN_ENEMIES then
+		LogLaneFront(team, lane, nil, enemies, 0, 0, 0)
+		return false
+	end
+	local now = DotaTime()
+	local byTeam = laneFrontAllies[team] or {}
+	laneFrontAllies[team] = byTeam
+	local cached = byTeam[lane]
+	if cached == nil or now - cached.at >= 1 or now < cached.at then
+		cached = { at = now, allies = CountLaneFrontAllies(lane, laneFrontLocation) }
+		byTeam[lane] = cached
+	end
+	local gameState = getGlobalGameState()
+	local aliveUs, aliveThem = gameState.aliveAllyCount or 0, gameState.aliveEnemyCount or 0
+	local blocked, why = TempoRules.LaneFrontBlocks(enemies, cached.allies, aliveUs, aliveThem)
+	LogLaneFront(team, lane, why, enemies, cached.allies, aliveUs, aliveThem)
+	return blocked
 end
 function getGameState()
 	local now = DotaTime()

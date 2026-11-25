@@ -1224,6 +1224,30 @@ function Retreat.ShouldRun()
 			local towerOnUs = tower:GetAttackTarget() == bot
 			local killable = teamDamage >= botTarget:GetHealth()
 			local lowTarget = Fu.GetHP(botTarget) < 0.25 and not towerOnUs
+			-- #12, game 084 1:21-1:34 (maintainer: "just dont dive t2 early game, the damage is too big"): the
+			-- killable / low-target exceptions hold for a tier-1 tower only (bots/lib/systems/tempo_rules.lua).
+			local TempoRules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
+			local towerTier = TempoRules.TowerTier(tower:GetUnitName())
+			if not TempoRules.EarlyDiveAllowed(towerTier, killable, lowTarget) and (killable or lowTarget) then
+				if DotaTime() >= (bot._antiDiveLogAt or -999) then
+					bot._antiDiveLogAt = DotaTime() + 5
+					pcall(
+						print,
+						string.format(
+							"[SHy-RETREAT] t=%.0f %s anti-dive why=tower-tier2 tier=%d target=%s hp=%.2f killable=%s low=%s towerOnUs=%s",
+							DotaTime(),
+							(string.gsub(botName, "npc_dota_hero_", "")),
+							towerTier or 0,
+							(string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "")),
+							Fu.GetHP(botTarget),
+							tostring(killable),
+							tostring(lowTarget),
+							tostring(towerOnUs)
+						)
+					)
+				end
+				return 2.88
+			end
 			if not killable and not lowTarget then
 				if DotaTime() >= (bot._antiDiveLogAt or -999) then
 					bot._antiDiveLogAt = DotaTime() + 5
