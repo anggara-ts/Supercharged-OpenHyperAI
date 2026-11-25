@@ -202,7 +202,8 @@ function X.OrbInFlight()
 	return nil
 end
 -- Alt-cast probe (#36, game 039, maintainer: "puck better alt-cast illusory orb so that it become straight"). Game
--- data (puck_illusory_orb, 7.42): POINT | ALT_CASTABLE, curve_orb 1, curve_strength 0.6; the alt-cast flies straight.
+-- files (puck_illusory_orb, hero definitions; not re-checked in the 7.42 VPK): POINT | ALT_CASTABLE, curve_orb 1,
+-- curve_strength 0.6. Datafeed: alt-cast launches the Orb straight ahead.
 -- The cast orders have no alt flag. Game 043 turned the autocast switch on (ToggleAutoCast, the closest the bot API
 -- has to the alt state) and the Orb still curved, by eye (docs/BOT_API_RUNTIME.md, discussion #50 item 2). This
 -- measures it: the switch flips after every Orb, so one game has casts in both states, and each Orb's positions
@@ -210,6 +211,8 @@ end
 -- [SHy-PUCK] orb-altcast before= after= behavior=: once, when the Orb is learned.
 -- [SHy-PUCK] orb-path alt= why= n= aim= dev= devAt= end= endAt= jaunt= land= how=: once per Orb, when it is gone.
 -- dev / end: largest and last offset from the aimed line (left +, right -); land: where a Jaunt in the flight put her.
+-- [SHy-PUCK] orb-unseen why= launched= how=: an Orb order with no Orb seen (never launched, or not in the list).
+-- Temporary: remove the switch flip and these lines once a game has answered #36.
 local orbAltProbed = false
 local orbAltFlipWanted = false
 local orbPath = nil
@@ -217,6 +220,19 @@ function X.FinishOrbPath(how)
 	local path = orbPath
 	orbPath = nil
 	if path == nil then
+		return
+	end
+	if path.n == 0 then
+		print(
+			string.format(
+				"[SHy-PUCK] t=%.0f puck orb-unseen why=%s launched=%s how=%s",
+				DotaTime(),
+				path.why,
+				tostring(path.launched == true),
+				how
+			)
+		)
+		orbAltFlipWanted = path.launched == true
 		return
 	end
 	orbAltFlipWanted = true
@@ -312,6 +328,15 @@ function X.TrackOrbPath()
 		return
 	end
 	path.sampledAt = now
+	-- The Orb's cooldown starts at the launch: measure from where she stands then (she may have walked into range).
+	if not path.launched and illusoryOrbAbility:GetCooldownTimeRemaining() > 0 then
+		path.launched = true
+		path.at = now
+		if path.n == 0 then
+			local here = bot:GetLocation()
+			path.sx, path.sy = here.x, here.y
+		end
+	end
 	local orbAt = X.OwnOrbLocation()
 	if orbAt ~= nil then
 		OrbPath.Add(path, orbAt.x, orbAt.y)
@@ -326,8 +351,10 @@ function X.TrackOrbPath()
 	-- The Orb flies 1950 / 750 = 2.6s (datafeed hero 13); an order that never went out shows no Orb at all.
 	if orbAt == nil and path.n > 0 then
 		X.FinishOrbPath("gone")
-	elseif now - path.at > 4 or orbAt == nil and path.n == 0 and now - path.at > 1 then
-		X.FinishOrbPath(path.n > 0 and "timeout" or "no-orb")
+	elseif now - path.at > 4 then
+		X.FinishOrbPath(path.n > 0 and "timeout" or (path.launched and "unseen" or "no-launch"))
+	elseif orbAt == nil and path.n == 0 and path.launched and now - path.at > 1 then
+		X.FinishOrbPath("unseen")
 	end
 end
 function X.DangerJaunt()

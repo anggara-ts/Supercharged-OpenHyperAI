@@ -1,7 +1,8 @@
 -- Illusory Orb path probe (#36, Puck): how far the Orb strays from the straight line she aimed along. Plain numbers
 -- in, so tests/test_orb_path_rules.lua can check them without the bot API.
--- Game data (puck_illusory_orb, 7.42): POINT | ALT_CASTABLE, curve_orb 1, curve_strength 0.6. A normal cast curves,
--- the alt-cast flies straight. Bots can't alt-cast (docs/BOT_API_RUNTIME.md, discussion #50 item 2); this measures it.
+-- Game files (puck_illusory_orb; read from the hero definitions, not re-checked in the 7.42 VPK): POINT | ALT_CASTABLE,
+-- curve_orb 1, curve_strength 0.6. Datafeed: alt-cast launches the Orb straight ahead. Bots can't alt-cast
+-- (docs/BOT_API_RUNTIME.md, discussion #50 item 2); this measures it.
 local OrbPath = {}
 
 -- Signed lateral offset of (px, py) from the line that starts at (sx, sy) and points at (ax, ay): positive on the left
