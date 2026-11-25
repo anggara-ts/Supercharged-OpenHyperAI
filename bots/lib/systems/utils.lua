@@ -650,7 +650,7 @@ function Utils.GetItemFromCountedInventory(bot, itemName, slotCount)
 end
 require(GetScriptDirectory() .. "/lib/vendor/json")
 Utils.DebugMode = false
-Utils.ScriptID = 3246316298
+Utils.ScriptID = 3843444501
 Utils.RadiantFountainTpPoint = Vector(-7172, -6652, 384)
 Utils.DireFountainTpPoint = Vector(6982, 6422, 392)
 Utils.RadiantRoshanLoc = Vector(-2984, 2349, 384)
@@ -949,13 +949,18 @@ function Utils.SetFrameProcessTime(bot)
 end
 function Utils.GetHumanPing()
 	-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review); same in the loops below.
+	-- The newest ping among the team's humans (#222: it was the first human's only).
+	local bestMember, bestPing = nil, nil
 	for slot = 1, #GetTeamPlayers(GetTeam()) do
 		local member = GetTeamMember(slot)
 		if member ~= nil and not member:IsBot() then
-			return member, member:GetMostRecentPing()
+			local ping = member:GetMostRecentPing()
+			if bestMember == nil or ping ~= nil and ping.time ~= nil and ping.time > ((bestPing or {}).time or 0) then
+				bestMember, bestPing = member, ping
+			end
 		end
 	end
-	return nil, nil
+	return bestMember, bestPing
 end
 function Utils.IsPingedByAnyPlayer(bot, maxAge, minDistance, maxDistance)
 	if not bot:IsAlive() then
