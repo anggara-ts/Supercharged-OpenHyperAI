@@ -53,3 +53,13 @@ T.test("ringmaster: when the whip cracks before the full channel", function()
 	T.eq(decide({ why = "farm", nearestNow = "none", nearestLater = "none" }), nil, "farm: full channel")
 	T.eq(decide({ why = "push", lowHp = true }), "lowhp", "push: low HP cracks")
 end)
+
+T.test("ringmaster: last-will Wheel before he dies", function()
+	local X = ringmaster()
+	-- hp ratio, hit by a hero in the last 2s, damage the enemies deal in 2s, his health, enemy heroes in the Wheel
+	T.eq(X.LastWillDue(0.2, true, 100, 300, 2), true, "under 25% and being hit")
+	T.eq(X.LastWillDue(0.2, false, 100, 300, 2), false, "under 25% but nobody is hitting him")
+	T.eq(X.LastWillDue(0.4, true, 900, 800, 1), true, "the burst kills him within 2s")
+	T.eq(X.LastWillDue(0.4, true, 300, 800, 2), false, "healthy enough")
+	T.eq(X.LastWillDue(0.1, true, 900, 100, 0), false, "no enemy hero where the Wheel stops")
+end)

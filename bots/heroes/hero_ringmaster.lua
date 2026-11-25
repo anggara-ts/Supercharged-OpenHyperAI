@@ -194,6 +194,10 @@ function X.SkillsComplement()
 	isAttacking = Fu.IsAttacking(bot)
 	hpRatio = abilityContext.hp
 	botTarget = abilityContext.target
+	local okL, lastWill = pcall(X.LastWillWheel)
+	if okL and lastWill then
+		return
+	end
 	whoopeeCushionDesire = X.ConsiderWhoopeeCushion()
 	if whoopeeCushionDesire > 0 then
 		X.LogSouvenir("whoopee_cushion", "cast-" .. whoopeeCushionWhy)
@@ -891,11 +895,13 @@ function X.WhipTick()
 	return true
 end
 -- Wheel casts: one line per Wheel that really went out (its cooldown started), with the rule that ordered it.
-function X.WheelOrdered(why)
+function X.WheelOrdered(why, extra)
 	if bot._wheelPending == nil then
-		bot._wheelPending = { why = why, at = DotaTime() }
+		bot._wheelPending = { why = why, at = DotaTime(), extra = extra or "" }
 	end
 end
+-- Wheel orders that put a cast hold on (released when the Wheel is out or dropped).
+local WHEEL_HOLD_REASONS = { combo = true, ["last-will"] = true }
 function X.WheelTick()
 	local pending = bot._wheelPending
 	if pending == nil then
@@ -908,20 +914,21 @@ function X.WheelTick()
 		pcall(
 			print,
 			string.format(
-				"[SHy-RINGMASTER] t=%.0f ringmaster wheel-cast why=%s after=%.2f",
+				"[SHy-RINGMASTER] t=%.0f ringmaster wheel-cast why=%s after=%.2f%s",
 				now,
 				pending.why,
-				now - pending.at
+				now - pending.at,
+				pending.extra
 			)
 		)
-		if pending.why == "combo" then
+		if WHEEL_HOLD_REASONS[pending.why] then
 			-- The combo held the mode Thinks for the Wheel's turn and cast point; the whip comes next.
 			bot._castHoldUntil = nil
 		end
 	elseif now - pending.at > 1.0 then
 		bot._wheelPending = nil
 		pcall(print, string.format("[SHy-RINGMASTER] t=%.0f ringmaster wheel-cast why=%s dropped=1", now, pending.why))
-		if pending.why == "combo" then
+		if WHEEL_HOLD_REASONS[pending.why] then
 			bot._castHoldUntil = nil
 		end
 	end
@@ -930,6 +937,65 @@ end
 function X.CastHoldTick()
 	pcall(X.WheelTick)
 	pcall(X.WhipTick)
+end
+-- Last will (maintainer, 2026-11-26: "ringmaster should still cast ult on last will before died (on low hp)").
+-- About to die = below 25% HP while a hero hit him in the last 2s, or the enemies near him deal his remaining HP
+-- within 2s (Fu.GetTotalEstimatedDamageToTarget estimates 5s, scaled by 2/5). Then the Wheel goes on the best
+-- enemy group at once, in any mode (retreat too), with no whip after it. The combo's 35% HP gate does not apply.
+function X.LastWillDue(hp, hitRecently, damage2s, health, enemiesInWheel)
+	if enemiesInWheel < 1 then
+		return false
+	end
+	return (hp < 0.25 and hitRecently) or damage2s >= health
+end
+function X.LastWillWheel()
+	if bot._wheelPending ~= nil or not Fu.CanCastAbility(wheelOfWonderAbility) then
+		return false
+	end
+	local castRange = Fu.GetProperCastRange(false, bot, wheelOfWonderAbility:GetCastRange())
+	local nearbyEnemies = bot:GetNearbyHeroes(math.min(1600, castRange + 300), true, BOT_MODE_NONE) or {}
+	if #nearbyEnemies == 0 then
+		return false
+	end
+	local hp = bot:GetHealth() / math.max(1, bot:GetMaxHealth())
+	local hitRecently = bot:WasRecentlyDamagedByAnyHero(2.0)
+	if hp >= 0.25 and not hitRecently then
+		return false
+	end
+	local damage2s = Fu.GetTotalEstimatedDamageToTarget(nearbyEnemies, bot) * 2 / 5
+	local mesmerizeRadius = wheelOfWonderAbility:GetSpecialValueInt("mesmerize_radius")
+	local minRange = wheelOfWonderAbility:GetSpecialValueInt("min_range")
+	local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, mesmerizeRadius, 0, 0)
+	local point = aoeLocation.targetloc
+	if aoeLocation.count < 1 then
+		local nearest = nil
+		for _, enemyHero in pairs(nearbyEnemies) do
+			if
+				Fu.IsValidHero(enemyHero)
+				and (nearest == nil or GetUnitToUnitDistance(bot, enemyHero) < GetUnitToUnitDistance(bot, nearest))
+			then
+				nearest = enemyHero
+			end
+		end
+		if nearest == nil then
+			return false
+		end
+		point = nearest:GetLocation()
+	end
+	-- datafeed: the Wheel rolls at least min_range (700); a closer point ends up that far out on the same line.
+	local stopPoint = point
+	if GetUnitToLocationDistance(bot, point) < minRange then
+		stopPoint = Fu.VectorTowards(bot:GetLocation(), point, minRange)
+	end
+	local enemiesInWheel = #Fu.GetEnemiesNearLoc(stopPoint, mesmerizeRadius)
+	if not X.LastWillDue(hp, hitRecently, damage2s, bot:GetHealth(), enemiesInWheel) then
+		return false
+	end
+	X.WheelOrdered("last-will", string.format(" hp=%.2f enemies=%d damage2s=%d", hp, enemiesInWheel, damage2s))
+	-- Hold the mode Thinks (retreat too) through the turn and cast point; X.WheelTick releases it.
+	bot._castHoldUntil = DotaTime() + 0.5
+	bot:Action_UseAbilityOnLocation(wheelOfWonderAbility, stopPoint)
+	return true
 end
 function X.ConsiderEscapeAct()
 	if not Fu.CanCastAbility(escapeActAbility) then
