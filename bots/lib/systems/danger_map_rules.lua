@@ -144,7 +144,7 @@ function Rules.FarmSkipWhy(s)
 	end
 	if s.covered then
 		if (s.seen or 0) >= Rules.DANGER_ANY then
-			return "danger-seen"
+			return "danger-visible"
 		end
 		local uncovered = Rules.FarmSkipWhy({
 			danger = s.danger,

@@ -395,7 +395,7 @@ local function LogDangerKeep(why, spot, loc, info)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DANGER] t=%.0f %s farm-keep why=%s spot=%s danger=%d seen=%d missing=%d ownTower=%.0f dist=%.0f",
+			"[SHy-DANGER] t=%.0f %s farm-keep why=%s spot=%s danger=%d visible=%d missing=%d ownTower=%.0f dist=%.0f",
 			DotaTime(),
 			ShortName(bot),
 			why,
@@ -465,7 +465,7 @@ local function LogDangerSkips(skips, clear, alt)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DANGER] t=%.0f %s farm-skip spot=%s why=%s danger=%d seen=%d missing=%d allies=%d ownTower=%.0f held=%s dist=%.0f alt=%s n=%d",
+			"[SHy-DANGER] t=%.0f %s farm-skip spot=%s why=%s danger=%d visible=%d missing=%d allies=%d ownTower=%.0f held=%s dist=%.0f alt=%s n=%d",
 			DotaTime(),
 			ShortName(bot),
 			first.key,
@@ -534,7 +534,7 @@ local function SafestTowerWave()
 		pcall(
 			print,
 			string.format(
-				"[SHy-DANGER] t=%.0f %s farm-keep why=no-alt spot=%s seen=%d missing=%d ownTower=%.0f wait=%.0f dist=%.0f",
+				"[SHy-DANGER] t=%.0f %s farm-keep why=no-alt spot=%s visible=%d missing=%d ownTower=%.0f wait=%.0f dist=%.0f",
 				DotaTime(),
 				ShortName(bot),
 				best.key,

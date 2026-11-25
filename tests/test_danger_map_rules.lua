@@ -156,7 +156,7 @@ T.test("danger map: own-tower cover in the team snapshot", function()
 	T.eq(covered, true, "within 1800 of a tier 2 tower")
 	T.eq(tower and tower.tier, 2, "tier")
 	local why, info = DangerMap.FarmSkip(GetBot(), spot, false, true)
-	T.eq(why, "danger-seen", "a wave under our tower: five seen enemies still skip it")
+	T.eq(why, "danger-visible", "a wave under our tower: five seen enemies still skip it")
 	T.near(info.ownTower, 707, 1, "ownTower in the numbers")
 	why = DangerMap.FarmSkip(GetBot(), spot, false, false)
 	T.eq(why, "danger", "a camp there: no tower cover")
@@ -198,7 +198,7 @@ T.test("danger map: game 084 Underlord - the wave at our mid T2 is kept with 4 e
 	T.eq(why, nil, "under our tower: farmed")
 	T.eq(kept, "own-tower", "kept by the tower")
 	s.seen = 3
-	T.eq(R.FarmSkipWhy(s), "danger-seen", "three seen enemies close it again")
+	T.eq(R.FarmSkipWhy(s), "danger-visible", "three seen enemies close it again")
 	s.seen, s.allies = 3, 1
 	T.eq(R.FarmSkipWhy(s), nil, "an ally there")
 	s.allies, s.strictness = 0, 0
@@ -229,9 +229,9 @@ T.test("danger map: skip hold - a skipped spot stays skipped 10s", function()
 	why = R.HoldSkip(held, 302, nil, true)
 	T.eq(why, nil, "now under our tower")
 	-- Skipped under the cover (3 seen): the hold stays under the cover too.
-	why, held = R.HoldSkip(nil, 400, "danger-seen", true)
+	why, held = R.HoldSkip(nil, 400, "danger-visible", true)
 	why = R.HoldSkip(held, 402, nil, true)
-	T.eq(why, "danger-seen", "held")
+	T.eq(why, "danger-visible", "held")
 end)
 
 T.test("danger map: no alternative - the safest wave by our towers", function()
