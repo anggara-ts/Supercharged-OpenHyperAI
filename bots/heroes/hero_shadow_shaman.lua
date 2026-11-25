@@ -135,14 +135,12 @@ local serpentWardAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "s
 local urnacondaAbility =
 	SafeAbility(bot:GetAbilityByName("shadow_shaman_urnaconda"), "shadow_shaman_urnaconda", "shadow_shaman")
 local talent3 = SafeAbility(bot:GetAbilityByName(sTalentList[3]), "sTalentList[3]", "shadow_shaman")
-local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "shadow_shaman")
 local etherShockDesire, etherShockTarget
 local hexDesire, hexTarget
 local shacklesDesire, shacklesTarget
 local serpentWardDesire, serpentWardLocation
 local urnacondaDesire, urnacondaLocation
 local aetherRange = 0
-local bonusDamage = 0
 local isAttacking
 local botLevel, mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
@@ -152,16 +150,12 @@ function X.SkillsComplement()
 	isAttacking = Fu.IsAttacking(bot)
 	local context = AbilityContext.Build(bot)
 	aetherRange = context.aetherRange
-	bonusDamage = 0
 	botLevel = context.level
 	mpRatio = context.mp
 	hpRatio = context.hp
 	botTarget = context.target
 	nearbyEnemies = context.enemies
 	nearbyAllies = context.allies
-	if talent7:IsTrained() then
-		bonusDamage = talent7:GetSpecialValueInt("value")
-	end
 	hexDesire, hexTarget = X.ConsiderW()
 	if hexDesire > 0 then
 		Fu.SetQueuePtToINT(bot, true)
@@ -201,7 +195,9 @@ function X.ConsiderQ()
 	local castRange = etherShockAbility:GetCastRange()
 	local castPoint = etherShockAbility:GetCastPoint()
 	local manaCost = etherShockAbility:GetManaCost()
-	local damage = etherShockAbility:GetSpecialValueInt("damage") + bonusDamage
+	-- Includes the talent once learned: special_bonus_unique_shadow_shaman_3 "+250" is linked into "damage"
+	-- (7.42 npc_dota_hero_shadow_shaman.txt); the talent's own "value" read 0 (#46).
+	local damage = etherShockAbility:GetSpecialValueInt("damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local enemiesInWideRange = Fu.GetNearbyHeroes(bot, castRange + 220, true, BOT_MODE_NONE)

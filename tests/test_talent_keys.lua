@@ -12,17 +12,9 @@ local Stub = T.stub
 local HERO_ABILITIES = assert(loadstring(T.read("tests/data/hero_abilities.lua"), "hero_abilities"))()
 
 -- Hero files with a "value" read on a unique talent that this fix does not touch yet: the file belongs to another
--- open PR, or the read is a new finding filed on #46. Remove a hero here when its read is fixed (the test XPASSes).
+-- open PR. Remove a hero here when its read is fixed (the test XPASSes).
 local PENDING = {
-	bounty_hunter = "talent 3 is Shadow Walk damage reduction, read as Shuriken Toss damage (new on #46)",
-	dawnbreaker = "Celestial Hammer range and speed talent (new on #46)",
-	dazzle = "Poison Touch damage talent (new on #46)",
-	lina = "Light Strike Array damage talent (new on #46)",
-	lion = "Finger of Death damage-per-kill talent (new on #46)",
 	omniknight = "Purification heal talent (file in PR #118)",
-	pugna = "Nether Blast damage talent (file in PR #158)",
-	shadow_shaman = "Ether Shock damage talent (new on #46)",
-	tidehunter = "Gush damage talent (file in PR #120)",
 }
 
 local function slotNames(hero)

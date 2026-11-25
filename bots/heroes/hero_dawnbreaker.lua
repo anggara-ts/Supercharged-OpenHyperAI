@@ -5,6 +5,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
+local TalentWatch = require(GetScriptDirectory() .. "/lib/systems/talent_watch")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -147,11 +148,6 @@ local celestialHammerAbility =
 local convergeAbility = SafeAbility(bot:GetAbilityByName("dawnbreaker_converge"), "dawnbreaker_converge", "dawnbreaker")
 local solarGuardianAbility =
 	SafeAbility(bot:GetAbilityByName("dawnbreaker_solar_guardian"), "dawnbreaker_solar_guardian", "dawnbreaker")
-local hammerCastRangeTalent = SafeAbility(
-	bot:GetAbilityByName("special_bonus_unique_dawnbreaker_celestial_hammer_cast_range"),
-	"special_bonus_unique_dawnbreaker_celestial_hammer_cast_range",
-	"dawnbreaker"
-)
 local fireWreathDesire, fireWreathLocation
 local celestialHammerDesire, celestialHammerLocation
 local convergeDesire
@@ -176,6 +172,7 @@ local function IsSolarGuardianInFlight()
 		or bot:HasModifier("modifier_dawnbreaker_solar_guardian_airtime")
 end
 function X.SkillsComplement()
+	TalentWatch.Tick(bot)
 	local context = AbilityContext.Build(bot)
 	isGoingOnSomeone = context.isEngaging
 	isRetreating = context.isRetreating
@@ -207,9 +204,6 @@ function X.SkillsComplement()
 	if celestialHammerDesire > 0 then
 		local projectileSpeed = celestialHammerAbility:GetSpecialValueInt("projectile_speed")
 		hammerLocation = celestialHammerLocation
-		if hammerCastRangeTalent:IsTrained() then
-			projectileSpeed = projectileSpeed * (1 + hammerCastRangeTalent:GetSpecialValueInt("value") / 100)
-		end
 		bot:Action_UseAbilityOnLocation(celestialHammerAbility, celestialHammerLocation)
 		hammerLandTime = DotaTime()
 			+ celestialHammerAbility:GetCastPoint()
@@ -347,15 +341,15 @@ function X.ConsiderCelestialHammer()
 	if not celestialHammerAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
+	-- "range" and "projectile_speed" include the +80% talent once learned:
+	-- special_bonus_unique_dawnbreaker_celestial_hammer_cast_range "+80%" is linked into both (7.42
+	-- npc_dota_hero_dawnbreaker.txt). The old talent "value" read 0, so it multiplied by 1 (#46);
+	-- [SHy-TALENT] checks that the percent link is in the read (talent_watch.lua).
 	local range = celestialHammerAbility:GetSpecialValueInt("range")
 	local castPoint = celestialHammerAbility:GetCastPoint()
 	local projectileSpeed = celestialHammerAbility:GetSpecialValueInt("projectile_speed")
 	local damage = celestialHammerAbility:GetSpecialValueInt("hammer_damage")
 	local mpRatio = bot:GetMana() / bot:GetMaxMana()
-	if hammerCastRangeTalent:IsTrained() then
-		range = range * (1 + hammerCastRangeTalent:GetSpecialValueInt("value") / 100)
-		projectileSpeed = projectileSpeed * (1 + hammerCastRangeTalent:GetSpecialValueInt("value") / 100)
-	end
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, range, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -446,10 +440,6 @@ function X.ConsiderConverge()
 	local range = celestialHammerAbility:GetSpecialValueInt("range")
 	local projectileSpeed = celestialHammerAbility:GetSpecialValueInt("projectile_speed")
 	botTarget = Fu.GetProperTarget(bot)
-	if hammerCastRangeTalent:IsTrained() then
-		range = range * (1 + hammerCastRangeTalent:GetSpecialValueInt("value") / 100)
-		projectileSpeed = projectileSpeed * (1 + hammerCastRangeTalent:GetSpecialValueInt("value") / 100)
-	end
 	if isGoingOnSomeone and hammerLocation ~= nil then
 		local alliesAround = Fu.GetNearbyHeroes(bot, range, false, BOT_MODE_NONE)
 		local enemiesAround = Fu.GetNearbyHeroes(bot, range, true, BOT_MODE_NONE)

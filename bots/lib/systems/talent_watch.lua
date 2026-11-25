@@ -14,11 +14,21 @@
 -- [SHy-TALENT] t= <hero> talent= ability= key= before= after= linked= included=yes|no|other|unknown
 --   talentValue= talentBonus= (the talent's own "value" and "bonus_<key>" reads, to settle the datafeed token)
 -- Each hero watches the talent its build learns at level 10 (seen in nearly every game) plus the talents the
--- scripts used to add by hand (#46).
+-- scripts used to add by hand (#46). Dawnbreaker watches a percent link ("+80%"): games 069-085 proved flat links
+-- only (axe, enigma, riki: included=yes, talentValue=0.00).
 local TalentWatch = {}
 
 -- hero -> what to watch: the talent, the ability and key it changes, and the linked bonus from the 7.42 hero files.
 TalentWatch.WATCH = {
+	-- projectile_speed: "1600" at every level, talent "+80%" = +1280 (7.42 npc_dota_hero_dawnbreaker.txt).
+	dawnbreaker = {
+		{
+			talent = "special_bonus_unique_dawnbreaker_celestial_hammer_cast_range",
+			ability = "dawnbreaker_celestial_hammer",
+			key = "projectile_speed",
+			linked = 1280,
+		},
+	},
 	axe = {
 		{ talent = "special_bonus_unique_axe_2", ability = "axe_berserkers_call", key = "radius", linked = 70 },
 		{
