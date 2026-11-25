@@ -1,4 +1,5 @@
 -- Shared bot system: utils.
+local FrameCache = require(GetScriptDirectory() .. "/lib/systems/frame_cache")
 local function objectEntries(object)
 	local result = {}
 	local count = 0
@@ -1395,13 +1396,27 @@ function Utils.HasAnyEffect(unit, ...)
 		return unit:HasModifier(modifierName)
 	end)
 end
-function Utils.IsModeTurbo()
+local function ScanForTurbo()
 	for _, unit in ipairs(GetUnitList(UnitType.Allies)) do
 		if unit and unit:GetUnitName() == "npc_dota_courier" and unit:GetCurrentMovementSpeed() == 1100 then
 			return true
 		end
 	end
 	return false
+end
+-- While FrameCache.turbo is on, the answer of this frame is kept (#52, bots/lib/systems/frame_cache.lua): the
+-- map-objective modes ask it 7 times per bot per frame (counted in the tests' stub API), and every call read each
+-- allied unit on the map. Within a frame (GameTime()) a new scan would say the same.
+local turboAt, turboNow = nil, false
+function Utils.IsModeTurbo()
+	if not FrameCache.turbo then
+		return ScanForTurbo()
+	end
+	local now = GameTime()
+	if now ~= turboAt then
+		turboAt, turboNow = now, ScanForTurbo()
+	end
+	return turboNow
 end
 function Utils.DetermineEnemyBotRole(bot)
 	local unitName = bot:GetUnitName()

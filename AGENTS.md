@@ -144,6 +144,19 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   never add a global (several heroes once shared a global `HasBlink` / `CanBKB` and ran each other's copy).
 - `GetTeamMember(i)` takes a team **slot** 1..5, not a player ID from `GetTeamPlayers()`.
 - Guard handles that may be nil (stolen spells, optional items) before calling methods on them.
+- **One nearby-hero question per frame** (#52, `bots/lib/systems/frame_cache.lua`): while the reuse is on,
+  `unit:GetNearbyHeroes` and `Fu.GetNearbyHeroes` ask the engine once per frame (one `GameTime()` value) for the same
+  unit, radius, enemy flag and mode, and every caller still gets a table of its own. `FrameCache.NearbyHeroes` is the
+  shared list: read it, never change it. A cache for anything a cast decision reads may not outlive the frame. In a
+  test, a unit that moves is seen once `Stub.time` moves too (a frame is `1 / 30`). Until #251 is decided the reuse
+  is on in some frames and off in others (next rule).
+- **A performance change is measured in a game** (maintainer, 2026-11-25: "the lua may call fewer API but overall
+  CPU usage (API engine vs Lua) should be measured"). Fewer engine calls are not proof, and neither are two games,
+  one before and one after: two games of one build differ by 7% to 12% in script time (#153). Put the change behind
+  a switch and let `bots/lib/systems/perf_ab.lua` run it against the old code on neighbouring frames of one game:
+  `[SHy-AB]` prints each variant's script time per frame, its difference from the old code and the standard error
+  of that difference. The `off` variant must be the old code with one test in front of it, and a build that still
+  has the switch is not merged.
 - Bot chat stays short (maintainer, 2026-11-23): a line that narrates a decision ("Going for X", "Pushing top",
   "Defend mid", lotus / shrine) goes through `ChatRules.SayDecision` (`bots/lib/systems/chat_rules.lua`), which says
   it only while the team's `!chatty` chat mode is on. There is no `!debug` command (maintainer, 2026-11-24: "we

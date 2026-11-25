@@ -19,6 +19,10 @@
 --   kb/s=                  Lua memory allocated by this bot's calls per game second (lower bound).
 -- and [SHy-PERFSUM] prints the same for every bot every 5 minutes, over budget or not: the sum of those lines is
 -- the whole game's script time, comparable between builds.
+--
+-- The same timed calls also feed bots/lib/systems/perf_ab.lua ([SHy-AB]), which switches the reuse of
+-- bots/lib/systems/frame_cache.lua from frame to frame and compares the script time per frame of each variant.
+local PerfAb = require(GetScriptDirectory() .. "/lib/systems/perf_ab")
 local Perf = {}
 local WINDOW = 10 -- seconds of game time per report
 local BUDGET = 0.020 -- seconds of our code per second of game time, per bot, before it prints
@@ -261,7 +265,9 @@ local detailRunning = false
 
 local function Finish(name, startedAt, kbBefore, ...)
 	local seconds = RealTime() - startedAt
-	Record(name, seconds, kbBefore ~= nil and (memoryKb() - kbBefore) or nil)
+	local kbDelta = kbBefore ~= nil and (memoryKb() - kbBefore) or nil
+	PerfAb.AfterCall(seconds, kbDelta)
+	Record(name, seconds, kbDelta)
 	return ...
 end
 
@@ -338,6 +344,8 @@ function Perf.Wrap(name, fn)
 		return fn
 	end
 	return function(...)
+		-- Ahead of the clock: the frame's variant is chosen before the call it times begins.
+		PerfAb.BeforeCall()
 		return Finish(name, RealTime(), memoryKb ~= nil and memoryKb() or nil, fn(...))
 	end
 end

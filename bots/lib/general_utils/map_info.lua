@@ -1,4 +1,5 @@
 -- Shared helper: map info.
+local FrameCache = require(GetScriptDirectory() .. "/lib/systems/frame_cache")
 local function installMapInfo(Fu)
 	local radiantFountain = Vector(-6619, -6336, 384)
 	local direFountain = Vector(6928, 6372, 392)
@@ -162,7 +163,7 @@ local function installMapInfo(Fu)
 	function Fu.IsLateGame()
 		return DotaTime() >= (Fu.IsModeTurbo() and 20 * 60 or 26 * 60)
 	end
-	function Fu.IsModeTurbo()
+	local function ScanForTurbo()
 		for _, unit in pairs(GetUnitList(UNIT_LIST_ALLIES)) do
 			if unit ~= nil and unit:GetUnitName() == "npc_dota_courier" then
 				if unit:GetCurrentMovementSpeed() == 1100 then
@@ -171,6 +172,21 @@ local function installMapInfo(Fu)
 			end
 		end
 		return false
+	end
+	-- While FrameCache.turbo is on, the answer of this frame is kept (#52, bots/lib/systems/frame_cache.lua): the
+	-- early / mid / late game checks and the mode timers ask it 6 times per bot per frame (counted in the tests'
+	-- stub API), and every call read each allied unit on the map. Within a frame (GameTime()) a new scan would say
+	-- the same.
+	local turboAt, turboNow = nil, false
+	function Fu.IsModeTurbo()
+		if not FrameCache.turbo then
+			return ScanForTurbo()
+		end
+		local now = GameTime()
+		if now ~= turboAt then
+			turboAt, turboNow = now, ScanForTurbo()
+		end
+		return turboNow
 	end
 	function Fu.CheckTimeOfDay()
 		local dayNightCycle = 600

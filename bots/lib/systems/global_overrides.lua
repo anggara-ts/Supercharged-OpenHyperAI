@@ -520,7 +520,20 @@ function CDOTA_Bot_Script:GetAttackTarget()
 	return originalGetAttackTarget(self)
 end
 local originalGetNearbyHeroes = CDOTA_Bot_Script.GetNearbyHeroes
+-- While FrameCache.lists is on, the engine is asked once per frame for the same unit, radius, enemy flag and mode
+-- (#52, bots/lib/systems/frame_cache.lua); every caller still gets a list of its own. Off, this is the wrapper from
+-- before: the switch costs it one test (bots/lib/systems/perf_ab.lua times both).
+local FrameCache = require(GetScriptDirectory() .. "/lib/systems/frame_cache")
+FrameCache.SetNearbyHeroesSource(function(unit, radius, isEnemy, botMode)
+	if not unit:CanBeSeen() then
+		return nil
+	end
+	return originalGetNearbyHeroes(unit, math.min(radius, 1600), isEnemy, botMode)
+end)
 function CDOTA_Bot_Script:GetNearbyHeroes(radius, isEnemy, botMode)
+	if FrameCache.lists then
+		return FrameCache.NearbyHeroesCopy(self, radius, isEnemy, botMode)
+	end
 	if not self:CanBeSeen() then
 		return nil
 	end
