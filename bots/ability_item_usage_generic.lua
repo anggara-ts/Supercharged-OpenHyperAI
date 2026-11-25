@@ -31,6 +31,7 @@ local Localization = require(GetScriptDirectory() .. "/lib/systems/localization"
 local CurseLog = require(GetScriptDirectory() .. "/lib/systems/curse_log")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
+local LaneTowerRules = require(GetScriptDirectory() .. "/lib/systems/lane_tower_rules")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 local ChargeTracker = require(GetScriptDirectory() .. "/lib/systems/charge_tracker")
@@ -10516,27 +10517,59 @@ end
 -- tower longer and break a chase or a run. One order, then 2s before another; the mode's own
 -- next order carries on (move, chase). Any HP: the order alone moves the tower's aggro, even on a
 -- full-HP creep the hero cannot actually hit.
--- Logs [SHy-AGGRO] tower-deflect, and 0.8s later whether the tower switched target.
+-- Logs [SHy-AGGRO] tower-deflect, and 0.8s later one result line (Usage.WatchDeflectResult).
+local function DeathCount()
+	local ok, deaths = pcall(GetHeroDeaths, bot:GetPlayerID())
+	return ok and deaths or 0
+end
+-- One [SHy-AGGRO] tower-deflect result= line per attempt (#71): switched / still-on-me / left-range / died
+-- (LaneTowerRules.DeflectResult). It runs with the watchers at the top of ItemUsageThink, before the early returns that
+-- could skip it (the check used to sit inside DeflectTowerAggro, behind about nine of them), and is flushed before a
+-- new attempt. A death since the attempt counts from GetHeroDeaths, so a check that runs late after a respawn still
+-- says died. force: resolve now, even before the 0.8s.
+function Usage.WatchDeflectResult(force)
+	local tower = bot._deaggroTower
+	local now = DotaTime()
+	if tower == nil or bot._deaggroChecked or (not force and now - (bot._deaggroAt or -99) < 0.8) then
+		return
+	end
+	bot._deaggroChecked = true
+	local towerValid = Fu.IsValidBuilding(tower) and tower:IsAlive()
+	local dist, reach = 0, 0
+	local towerOnMe = false
+	if towerValid then
+		local okRange, rawRange = pcall(function()
+			return tower:GetAttackRange()
+		end)
+		reach = LaneTowerRules.Reach(okRange and rawRange or nil, tower:GetBoundingRadius(), bot:GetBoundingRadius())
+		dist = GetUnitToUnitDistance(bot, tower)
+		towerOnMe = tower:GetAttackTarget() == bot
+	end
+	local died = not bot:IsAlive() or DeathCount() > (bot._deaggroDeaths or 0)
+	local result = LaneTowerRules.DeflectResult(died, towerValid, dist, reach, towerOnMe)
+	if result == "still-on-me" then
+		bot._deaggroFailedAt = now
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-AGGRO] t=%.0f %s tower-deflect result=%s after=%.1f hp=%.2f dist=%d",
+			now,
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			result,
+			now - (bot._deaggroAt or now),
+			Fu.GetHP(bot),
+			math.floor(dist)
+		)
+	)
+end
 function Usage.DeflectTowerAggro()
 	local now = DotaTime()
-	if bot._deaggroTower ~= nil and now - (bot._deaggroAt or -99) >= 0.8 and not bot._deaggroChecked then
-		bot._deaggroChecked = true
-		local tower = bot._deaggroTower
-		local switched = Fu.IsValidBuilding(tower) and tower:GetAttackTarget() ~= bot
-		if not switched then
-			bot._deaggroFailedAt = now
-		end
-		pcall(
-			print,
-			string.format(
-				"[SHy-AGGRO] t=%.0f %s tower-deflect result=%s",
-				now,
-				(string.gsub(botName, "npc_dota_hero_", "")),
-				switched and "switched" or "still-on-me"
-			)
-		)
-	end
 	if not bot:IsAlive() or bot:IsInvulnerable() or now < (bot._deaggroAt or -99) + 2 then
+		return false
+	end
+	-- The laning mode is walking the bot out of the tower's range (#71 tower-exit): an attack order would stop it.
+	if bot._towerExitUntil ~= nil and now < bot._towerExitUntil then
 		return false
 	end
 	-- Walk out instead (game 034, 26:47-26:59: Phoenix kept getting a deflect order every 2s after
@@ -10564,9 +10597,12 @@ function Usage.DeflectTowerAggro()
 				end
 			end
 			if best ~= nil then
+				-- The previous attempt's result first, if nothing printed it yet.
+				Usage.WatchDeflectResult(true)
 				bot._deaggroAt = now
 				bot._deaggroTower = tower
 				bot._deaggroChecked = false
+				bot._deaggroDeaths = DeathCount()
 				pcall(
 					print,
 					string.format(
@@ -11488,6 +11524,7 @@ function ItemUsageThink()
 	pcall(CurseLog.Watch, bot)
 	pcall(Usage.LogHomeWalk)
 	pcall(Usage.WatchDodgeResults)
+	pcall(Usage.WatchDeflectResult)
 	PartEnd("watchers", tWatch)
 	local okQ, cleared = pcall(Usage.WatchStuckQueue)
 	if okQ and cleared then
