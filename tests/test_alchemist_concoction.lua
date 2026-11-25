@@ -1329,3 +1329,57 @@ T.test("alchemist: no brew start on a hero inside her escape (game 069 t=2697)",
 	X.SkillsComplement()
 	T.eq(state.brewing, true, "brew after")
 end)
+
+-- #34, game 039 30:42: the forced throw at 5.0s filtered with Fu.CanCastOnNonMagicImmune, which rejects suspected
+-- illusions, so with only Phantom Lancer's illusions in range the brew blew up on him. Since #59 the forced throw
+-- takes a real hero, else the nearest illusion (the throw targets heroes, illusions included; the explosion is AoE).
+-- No game since had an illusion hero against Alchemist, so this stub run is the proof.
+local function makeIllusion(unit)
+	unit.HasModifier = function(_, modifier)
+		return modifier == "modifier_illusion"
+	end
+end
+
+T.test("alchemist: with only an illusion in range the forced throw takes the illusion (game 039 30:42)", function()
+	local X = load()
+	local state = startBrew(X, 3900)
+	state.enemy._alive = false
+	local illusion = Stub.teams[GetOpposingTeam()][2]
+	makeIllusion(illusion)
+	illusion._hp = 1000
+	illusion._loc = state.bot._loc + Vector(500, 0, 0)
+	for step = 1, 50 do
+		Stub.time = 3900 + step * 0.1
+		X.SkillsComplement()
+	end
+	T.eq(#state.orders, 1, "one throw order at 5.0s")
+	T.eq(state.orders[1].target, illusion, "at the illusion")
+	T.ok(
+		printedLine("concoction throw why=forced target=npc_dota_hero_%S+ dist=500 brewed=5.0s illusion=true"),
+		"forced throw line says illusion=true"
+	)
+	T.eq(printedLine("concoction throw why=no%-target"), nil, "no no-target line")
+end)
+
+T.test("alchemist: a real hero in range takes the brew before a nearer illusion", function()
+	local X = load()
+	local state = startBrew(X, 4000)
+	state.enemy._alive = false
+	local illusion = Stub.teams[GetOpposingTeam()][2]
+	makeIllusion(illusion)
+	illusion._hp = 1000
+	illusion._loc = state.bot._loc + Vector(300, 0, 0)
+	local realHero = Stub.teams[GetOpposingTeam()][3]
+	realHero._hp = 1000
+	realHero._loc = state.bot._loc + Vector(0, 650, 0)
+	for step = 1, 50 do
+		Stub.time = 4000 + step * 0.1
+		X.SkillsComplement()
+		if #state.orders > 0 then
+			break
+		end
+	end
+	T.ok(#state.orders >= 1, "thrown")
+	T.eq(state.orders[1].target, realHero, "at the real hero, not the illusion at 300")
+	T.eq(printedLine("illusion=true"), nil, "no throw at an illusion")
+end)
