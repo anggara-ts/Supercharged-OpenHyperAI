@@ -2210,6 +2210,19 @@ heroSpecificDesire["npc_dota_hero_puck"] = function()
 	return BOT_MODE_DESIRE_NONE
 end
 heroSpecificDesire["npc_dota_hero_ringmaster"] = function()
+	-- The Puck pattern (#49, game 085): 36 whips were cut 0.03-0.20s into the channel in Valve's attack and retreat
+	-- modes (no Think of ours there, so the cast hold can't pause them); the 38 in farm, defend and Roshan ran full.
+	-- The checks below never fired (no outpost mode in any [SHy-FLIP] line): the whip has no cast point and the
+	-- modifier is not seen. hero_ringmaster.lua asks for this hold before a whip or a Wheel
+	-- (bot._ringmasterHoldWantAt) and holds from the order until the whip cracks or the Wheel is out
+	-- (bot._castHoldUntil, at most ~3s). Desires are read about 3 times a second (game 085 [SHy-PERFSUM]: 961
+	-- outpost.GetDesire calls in 300s), so the Think's own hold lasts 0.35s past this read.
+	local now = DotaTime()
+	local wantAt = bot._ringmasterHoldWantAt
+	if (wantAt ~= nil and now - wantAt < 0.6) or now < (bot._castHoldUntil or -1) then
+		bot._outpostHoldUntil = now + 0.35
+		return BOT_DESIRE_OVERRIDE * 1.5
+	end
 	if highPriorityAbility == nil then
 		highPriorityAbility = bot:GetAbilityByName("ringmaster_tame_the_beasts")
 	end

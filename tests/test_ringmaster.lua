@@ -63,3 +63,61 @@ T.test("ringmaster: last-will Wheel before he dies", function()
 	T.eq(X.LastWillDue(0.4, true, 300, 800, 2), false, "healthy enough")
 	T.eq(X.LastWillDue(0.1, true, 900, 100, 0), false, "no enemy hero where the Wheel stops")
 end)
+
+T.test("ringmaster: why no last-will Wheel went out", function()
+	local X = ringmaster()
+	local function why(fields)
+		local s = {
+			learned = true,
+			cooldown = 0,
+			manaOk = true,
+			castable = true,
+			enemiesNear = 2,
+			enemiesInWheel = 1,
+		}
+		for key, value in pairs(fields) do
+			if value == "none" then
+				s[key] = nil
+			else
+				s[key] = value
+			end
+		end
+		return X.LastWillSkipWhy(s)
+	end
+	T.eq(why({}), nil, "nothing stops it")
+	T.eq(why({ learned = false, cooldown = 30 }), "unlearned", "not learned yet")
+	-- Game 085: 7 of 14 deaths came 6-56s after a Wheel (cooldown 90/80/70).
+	T.eq(why({ cooldown = 40, blocked = "disabled" }), "cd", "the cooldown is named before a block")
+	T.eq(why({ blocked = "whip" }), "whip", "the whip is channelling")
+	T.eq(why({ blocked = "disabled", manaOk = false }), "disabled", "stunned")
+	T.eq(why({ manaOk = false }), "mana", "no mana")
+	T.eq(why({ castable = false }), "uncastable", "the API says it can't be cast")
+	T.eq(why({ enemiesNear = 0, enemiesInWheel = 0 }), "no-enemy", "no enemy hero in range")
+	T.eq(why({ enemiesInWheel = 0 }), "empty", "no enemy hero where the Wheel stops")
+end)
+
+T.test("ringmaster: the outpost hold comes before a cast in Valve's modes", function()
+	local X = ringmaster()
+	-- Our own mode's Think is paused by the cast hold: cast at once.
+	T.eq(X.HoldStep(true, nil, 0.4), "cast", "our mode: no wait")
+	-- Valve's attack or retreat mode: ask for the hold, wait up to 0.4s, then cast anyway.
+	T.eq(X.HoldStep(false, nil, 0.4), "ask", "never asked")
+	T.eq(X.HoldStep(false, 0.1, 0.4), "wait", "asked 0.1s ago")
+	T.eq(X.HoldStep(false, 0.45, 0.4), "cast", "waited long enough")
+	T.eq(X.HoldStep(false, 0.8, 0.4), "ask", "an old ask is asked again")
+	-- The hold is shared by name between the hero file and the outpost mode.
+	local hero = T.read("bots/heroes/hero_ringmaster.lua")
+	local outpost = T.read("bots/mode_outpost_generic.lua")
+	T.ok(hero:find("_ringmasterHoldWantAt", 1, true) ~= nil, "the hero file asks for the hold")
+	T.ok(outpost:find("bot._ringmasterHoldWantAt", 1, true) ~= nil, "the outpost mode reads the ask")
+	T.ok(outpost:find("bot._castHoldUntil", 1, true) ~= nil, "the outpost mode holds while the cast hold is on")
+end)
+
+T.test("ringmaster: a whip order may walk into range before it counts as not started", function()
+	local X = ringmaster()
+	-- Game 085: 11 whips ordered 843-1453 away (cast range 700) timed out at 0.8s mid-walk.
+	T.near(X.WhipStartLimit(500, 700, 300), 0.8, 0.001, "in range: only the turn")
+	T.near(X.WhipStartLimit(1000, 700, 300), 1.8, 0.001, "300 to walk at 300 speed: 1s more")
+	T.near(X.WhipStartLimit(1453, 700, 300), 3.0, 0.001, "capped at 3s")
+	T.near(X.WhipStartLimit(900, 700, 0), 1.8, 0.001, "an unknown speed counts as 200")
+end)
