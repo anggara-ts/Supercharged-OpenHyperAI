@@ -1842,7 +1842,7 @@ function Item.AegisClaim(loc)
 	state.unit = pick ~= nil and pick.unit or nil
 	state.why = why
 	if state.unit ~= nil and not pick.human then
-		RoshanHoldTp(state.unit, "aegis-claim")
+		RoshanHoldTp(state.unit, "claimer")
 	end
 	return state.unit, why
 end
@@ -1894,6 +1894,11 @@ end
 local ROSHAN_RETURN_SECONDS = 30
 local ROSHAN_RETURN_RANGE = 1500
 local ROSHAN_DROP_WAIT = 3
+-- Game 083, 40:00: `room lost glimmer_cape why=gone` came a second after the drop, and the Glimmer Cape turned up
+-- in Largo's bag two seconds later (`[SHy-COURIER] t=2401 largo arrived glimmer_cape`): an item neither on the
+-- ground nor in the bag for a moment was counted as lost. It has to stay missing this long first.
+local ROSHAN_MISSING_GRACE = 3
+local ROSH_SLOT_FREE_SECONDS = 10
 -- Above Valve's item mode: it bid 1.00 at every Roshan drop in the logs (`[SHy-FLIP] ... item:1.00@` at the drop
 -- second, games 036, 040, 051, 070) and took the Aegis for whoever stood closest: game 051, 62:37, Medusa put her
 -- Scepter down for it and Keeper of the Light (item mode 1.00) took it the next second; game 069, 41:20, Vengeful
@@ -1967,10 +1972,19 @@ local function RoshanReturnTarget(bot)
 			end
 		end
 		local age = DotaTime() - entry.at
-		if found == nil and age > 1 then
-			-- A second after the drop order the item is on the ground; not there any more means taken.
-			RoshanReturnDone(bot, entry, bot:FindItemSlot(entry.name) >= 0, "gone")
+		local back = found == nil and age > 1 and bot:FindItemSlot(entry.name) >= 0
+		if found == nil and age > 1 and not back and entry.missingSince == nil then
+			entry.missingSince = DotaTime()
+		elseif found ~= nil then
+			entry.missingSince = nil
+		end
+		if back or (entry.missingSince ~= nil and DotaTime() - entry.missingSince >= ROSHAN_MISSING_GRACE) then
+			-- A second after the drop order the item is on the ground; not there any more and back in the bag means
+			-- picked up. Neither on the ground nor in the bag for ROSHAN_MISSING_GRACE means taken by someone else.
+			RoshanReturnDone(bot, entry, back, "gone")
 			table.remove(pending, index)
+		elseif found == nil and age > 1 then
+			entry.drop = nil
 		elseif age > ROSHAN_RETURN_SECONDS then
 			RoshanReturnDone(bot, entry, false, "timeout")
 			table.remove(pending, index)
@@ -2272,6 +2286,7 @@ function Item.TryPickupRoshanDrop(bot)
 	end
 	if best == nil or bestDist > RoshanDropRange(best.item:GetName()) then
 		-- Nothing left to claim: fetch what was dropped to make room.
+		bot._roshSlotFreeUntil = nil
 		local back = RoshanReturnTarget(bot)
 		if back == nil then
 			if bot._roshReturn ~= nil then
@@ -2328,6 +2343,31 @@ function Item.TryPickupRoshanDrop(bot)
 			-- The drop order is on its way: wait for the slot instead of dropping a second item.
 			return true
 		end
+		-- Not while retreating: it would leave with its item on the ground (game 084, Lina). The Aegis claim passes
+		-- on to an ally who can stay (RoshanDropRules.AegisClaimer, why=handover).
+		if bot:GetActiveMode() == BOT_MODE_RETREAT then
+			if DotaTime() >= (bot._roshRetreatSkipLogAt or -99) then
+				bot._roshRetreatSkipLogAt = DotaTime() + 10
+				RoshanRoomLog(bot, "skip", best.item:GetName(), " why=retreat")
+			end
+			return false
+		end
+		-- An item already put down for it that is still in a main slot: the drop order didn't go through (game 084,
+		-- 50:27: Weaver dropped a Wraith Band and, 3s later, a Magic Wand for one Aegis). The same item goes down
+		-- again instead of a second one.
+		for _, entry in ipairs(bot._roshReturn or {}) do
+			local slot = not entry.restore
+					and DotaTime() - entry.at <= ROSHAN_RETURN_SECONDS
+					and bot:FindItemSlot(entry.name)
+				or -1
+			if slot >= 0 and slot <= 5 then
+				RoshanRoomLog(bot, "drop-again", entry.name, string.format(" slot=%d", slot))
+				entry.at, entry.location = DotaTime(), bot:GetLocation()
+				bot._roshDropAt = DotaTime()
+				bot:Action_DropItem(bot:GetItemInSlot(slot), bot:GetLocation())
+				return true
+			end
+		end
 		local kind = bestKind
 		local item = nil
 		if kind == "aegis" then
@@ -2370,6 +2410,9 @@ function Item.TryPickupRoshanDrop(bot)
 			bot._roshAside = { name = item:GetName(), at = DotaTime() }
 		end
 		RoshanRemember(bot, item, { forAegis = kind == "aegis" })
+		-- No backpack item is swapped into the freed slot meanwhile (global_overrides.lua ActionImmediate_SwapItems;
+		-- game 083, 39:52: Largo swapped a Healing Lotus into it and dropped four items for one Aegis).
+		bot._roshSlotFreeUntil = DotaTime() + ROSH_SLOT_FREE_SECONDS
 		return true
 	end
 	if bestDist > 120 then

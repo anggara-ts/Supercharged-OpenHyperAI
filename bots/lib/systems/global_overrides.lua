@@ -957,6 +957,16 @@ function CDOTA_Bot_Script:ActionImmediate_SwapItems(slotA, slotB)
 	self._swapDespiteCooldown = nil
 	-- A branch parked for any other item gets pulled straight back, and that round trip
 	-- leaves it on cooldown. The grenade is the exception: it has to stay throwable.
+	-- #15: a main slot freed for a Roshan item stays free until the item is taken (bots/lib/systems/item.lua sets
+	-- _roshSlotFreeUntil; game 083, 39:52: Largo swapped a Healing Lotus into the slot freed for the Aegis and then
+	-- dropped four items for one Aegis).
+	if
+		DotaTime() < (self._roshSlotFreeUntil or -99)
+		and ((slotA >= 6 and slotA <= 8 and slotB <= 5) or (slotB >= 6 and slotB <= 8 and slotA <= 5))
+	then
+		LogGrenadeSwap(self, slotA, slotB, "blocked-roshan-room")
+		return nil
+	end
 	if SwapMovesBranchToBackpack(self, slotA, slotB) or SwapMovesBranchToBackpack(self, slotB, slotA) then
 		LogGrenadeSwap(self, slotA, slotB, "blocked-branch-rule")
 		return nil

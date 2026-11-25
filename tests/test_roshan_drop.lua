@@ -279,6 +279,34 @@ T.test("roshan drop: nothing is put down for the Aegis until the bot stands at i
 	T.eq(world.printed("room dropped magic_wand for=aegis .* dist=250 hp=1.00"), 1, "the line says how far")
 end)
 
+T.test("roshan drop: nothing is put down while retreating", function()
+	local unit, Item, world = scene(FULL_MAIN, {})
+	world.putOnGround("item_aegis")
+	unit.GetActiveMode = function()
+		return BOT_MODE_RETREAT
+	end
+	Stub.time = 2101
+	T.ok(not Item.TryPickupRoshanDrop(unit), "leaves it")
+	T.eq(#world.orders, 0, "no drop order")
+	T.eq(world.printed("room skip aegis why=retreat"), 1, "logged")
+end)
+
+T.test("roshan drop: a drop that didn't go through is repeated with the same item, not a second one", function()
+	-- Game 084, 50:27: Weaver dropped a Wraith Band and 3s later a Magic Wand for one Aegis.
+	local unit, Item, world = scene(FULL_MAIN, {})
+	world.putOnGround("item_aegis")
+	Stub.time = 3027
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "drop item_magic_wand", "the first drop")
+	world.pending = nil -- the order is lost
+	Stub.time = 3030.5
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "drop item_magic_wand", "the same item again")
+	T.eq(world.printed("room drop%-again magic_wand slot="), 1, "logged")
+	T.eq(world.printed("room dropped"), 1, "one item put aside")
+	T.ok((unit._roshSlotFreeUntil or -99) > Stub.time, "no swap into the freed slot meanwhile")
+end)
+
 T.test("roshan drop: with enemy heroes at our Ancient only Roshan items close by count", function()
 	-- Game 085, 59:00: team roam's ancient-threat gate skipped the whole Roshan drop desire (maxRange now).
 	local unit, Item, world = scene(FULL_MAIN, {})
@@ -380,7 +408,7 @@ T.test("aegis claim: no TP while it holds the claim; when it has to leave, the c
 	Stub.time = 1869
 	T.ok(Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "slot 3 first")
 	T.ok((team[3]._noTpUntil or -999) > Stub.time, "no TP while it holds the claim")
-	T.eq(printed("tp%-hold why=aegis%-claim"), 1, "logged")
+	T.eq(printed("tp%-hold why=claimer"), 1, "logged")
 	team[3].GetActiveMode = function()
 		return BOT_MODE_RETREAT
 	end
