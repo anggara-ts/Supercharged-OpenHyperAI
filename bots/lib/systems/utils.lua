@@ -949,13 +949,18 @@ function Utils.SetFrameProcessTime(bot)
 end
 function Utils.GetHumanPing()
 	-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review); same in the loops below.
+	-- The newest ping among the team's humans (#222: it was the first human's only).
+	local bestMember, bestPing = nil, nil
 	for slot = 1, #GetTeamPlayers(GetTeam()) do
 		local member = GetTeamMember(slot)
 		if member ~= nil and not member:IsBot() then
-			return member, member:GetMostRecentPing()
+			local ping = member:GetMostRecentPing()
+			if bestMember == nil or ping ~= nil and ping.time ~= nil and ping.time > ((bestPing or {}).time or 0) then
+				bestMember, bestPing = member, ping
+			end
 		end
 	end
-	return nil, nil
+	return bestMember, bestPing
 end
 function Utils.IsPingedByAnyPlayer(bot, maxAge, minDistance, maxDistance)
 	if not bot:IsAlive() then
@@ -1390,13 +1395,26 @@ function Utils.HasAnyEffect(unit, ...)
 		return unit:HasModifier(modifierName)
 	end)
 end
-function Utils.IsModeTurbo()
+local function ScanForTurbo()
 	for _, unit in ipairs(GetUnitList(UnitType.Allies)) do
 		if unit and unit:GetUnitName() == "npc_dota_courier" and unit:GetCurrentMovementSpeed() == 1100 then
 			return true
 		end
 	end
 	return false
+end
+-- The answer of this frame is kept (#52): the map-objective modes ask it 7 times per bot per frame (counted in the
+-- tests' stub API), and every call read each allied unit on the map. Within a frame (GameTime()) a new scan would say
+-- the same. Measured in games 083 and 084 (#251): 3.1% to 3.7% less script time per frame. Kept per frame, not once
+-- per game: the answer comes from the courier's speed, and a scan while no courier is on the allied list (before it
+-- spawns; while it is dead, unverified) says false.
+local turboAt, turboNow = nil, false
+function Utils.IsModeTurbo()
+	local now = GameTime()
+	if now ~= turboAt then
+		turboAt, turboNow = now, ScanForTurbo()
+	end
+	return turboNow
 end
 function Utils.DetermineEnemyBotRole(bot)
 	local unitName = bot:GetUnitName()
