@@ -31,7 +31,8 @@ const cp = require("child_process");
 const ROOT = path.join(__dirname, "..");
 // The repo folder whose content is vscripts/bots. Paths in a copy (the Map keys below) are relative to it.
 const BOTS_DIR = "bots/";
-// Repo files that go into every copy besides the bot scripts, at the top of the copy.
+// Repo files that go into every copy besides the bot scripts, at the top of the copy: the licence notice (MIT asks
+// for it in all copies, #215).
 const NOTICE_FILES = ["LICENSE"];
 // The local test lineup: in the working tree, and in a copy.
 const LINEUP_REPO_FILE = "bots/customize/general.lua";
