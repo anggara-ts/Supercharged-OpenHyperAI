@@ -1894,7 +1894,7 @@ end
 local ROSHAN_RETURN_SECONDS = 30
 local ROSHAN_RETURN_RANGE = 1500
 local ROSHAN_DROP_WAIT = 3
--- Game 083, 40:00: `room lost glimmer_cape why=gone` came a second after the drop, and the Glimmer Cape turned up
+-- Game 083, 39:59: `room lost glimmer_cape why=gone` came a second after the drop, and the Glimmer Cape turned up
 -- in Largo's bag two seconds later (`[SHy-COURIER] t=2401 largo arrived glimmer_cape`): an item neither on the
 -- ground nor in the bag for a moment was counted as lost. It has to stay missing this long first.
 local ROSHAN_MISSING_GRACE = 3
