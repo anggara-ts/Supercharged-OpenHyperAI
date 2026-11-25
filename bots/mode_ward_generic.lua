@@ -15,6 +15,8 @@ local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local localizationOk, Localization = pcall(require, GetScriptDirectory() .. "/lib/systems/localization")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+-- Supports stack camps on the minute (#229): runs inside this mode, see bots/lib/systems/stack.lua.
+local Stack = require(GetScriptDirectory() .. "/lib/systems/stack")
 if not localizationOk then
 	Localization = {
 		Get = function()
@@ -292,7 +294,15 @@ function GetDesire()
 		end
 		return BOT_MODE_DESIRE_NONE
 	end
+	-- A running stack (#229) keeps the mode; otherwise a stack may start when there is no ward to plant.
+	if Stack.IsActive(bot) then
+		return Stack.Desire(bot, false)
+	end
 	local desire = GetDesireHelper()
+	local stackDesire = Stack.Desire(bot, desire > 0)
+	if stackDesire > 0 then
+		return stackDesire
+	end
 	return RemapValClamped(Fu.GetHP(bot) * desire, 0, 1, BOT_MODE_DESIRE_NONE, desire)
 end
 function GetDesireHelper()
@@ -523,6 +533,15 @@ function Think()
 	end
 	DumpWards()
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	-- A stack (#229) runs here before the ward-spot bookkeeping: the give-up timers below would otherwise mark a
+	-- stale ward spot planted while the bot waits at the camp.
+	if Stack.IsActive(bot) then
+		bot._wardAtSpotSince = nil
+		bot._wardProgress = nil
+		bot._wardIdleSince = nil
+		Stack.Think(bot)
 		return
 	end
 	if
