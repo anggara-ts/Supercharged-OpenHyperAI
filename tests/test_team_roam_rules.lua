@@ -91,31 +91,26 @@ T.test("team roam rules: special units never above retreat when outnumbered", fu
 	T.eq(d, 0, "never negative")
 end)
 
-T.test("team roam rules: a priority Tombstone is not capped while the bot is healthy", function()
+T.test("team roam rules: only a nearly dead priority Tombstone escapes the outnumbered cap", function()
 	local R = rules()
-	local function capFor(why, tomb, hp, retreat, allies, enemies)
-		local exempt = R.SpecialUnitCapExempt(why, tomb, hp, retreat)
+	local function capFor(why, tomb, hp, hits, retreat, allies, enemies)
+		local exempt = R.SpecialUnitCapExempt(why, tomb, hp, hits)
 		return R.SpecialUnitCap(0.98, allies, enemies, retreat, exempt ~= nil), exempt
 	end
-	-- Game 067, t=2185: Zeus hp 0.98 retreat 0.39, Alchemist hp 1.00 retreat 0.38 (3 allies, 4 enemies): kept at 0.98.
-	local d, why = capFor(nil, true, 0.98, 0.39, 3, 4)
-	T.eq(d, 0.98, "Zeus 2185 keeps the Tombstone desire")
-	T.eq(why, "tombstone", "exempt why")
-	T.eq((capFor(nil, true, 1.00, 0.38, 3, 4)), 0.98, "Alchemist 2185")
-	-- Same Tombstone, Vengeful Spirit hp 0.64 retreat 0.70: retreat wants out, still capped to 0.65.
-	d, why = capFor(nil, true, 0.64, 0.70, 3, 4)
-	T.near(d, 0.65, 0.001, "Vengeful 2185 still capped")
+	-- Game 069 37:39: Axe on a full Tombstone (8 hits), 3 allies vs 4 enemies: capped (he stayed on it, three died).
+	local d, why = capFor(nil, true, 0.8, 8, 0.6, 3, 4)
+	T.ok(d < 0.98, "8 hits left: capped")
 	T.eq(why, nil, "not exempt")
-	-- t=3737 Primal Beast hp 0.44 retreat 0.17: exempt.
-	T.eq((capFor(nil, true, 0.44, 0.17, 2, 3)), 0.98, "Primal Beast 3737")
-	-- At or under 25% HP: capped.
-	T.ok((capFor(nil, true, 0.25, 0.17, 2, 3)) < 0.98, "25% HP capped")
-	-- Not a priority Tombstone (or PR #188 absent: nil): capped as before.
-	T.ok((capFor(nil, false, 0.98, 0.39, 3, 4)) < 0.98, "no priority: capped")
-	T.ok((capFor(nil, nil, 0.98, 0.39, 3, 4)) < 0.98, "flag unset: capped")
-	-- Retreat unknown: the cap does nothing anyway; exempt reads it as 0.
-	T.eq(R.SpecialUnitCapExempt(nil, true, 0.9, nil), "tombstone", "retreat unknown")
-	T.eq(R.SpecialUnitCapExempt("serpent-escape", nil, 0.1, 0.9), "serpent-escape", "serpent escape kept")
+	-- Game 068 t=506: Alchemist hp 0.97, 1 ally vs 3, 5 hits left: capped (no 2s hold any more).
+	T.ok((capFor(nil, true, 0.97, 5, 0.6, 1, 3)) < 0.98, "5 hits left: capped")
+	-- A nearly dead one keeps 0.98, whatever retreat wants, while the bot is above 40% HP.
+	d, why = capFor(nil, true, 0.7, 3, 0.8, 1, 3)
+	T.eq(d, 0.98, "3 hits left: exempt")
+	T.eq(why, "tombstone", "exempt why")
+	T.ok((capFor(nil, true, 0.39, 2, 0.8, 1, 3)) < 0.98, "under 40% HP: capped")
+	T.ok((capFor(nil, false, 0.9, 1, 0.6, 1, 3)) < 0.98, "no priority: capped")
+	T.eq(R.SpecialUnitCapExempt(nil, true, 0.9, nil), nil, "hits unknown: capped")
+	T.eq(R.SpecialUnitCapExempt("serpent-escape", nil, 0.1, nil), "serpent-escape", "serpent escape kept")
 end)
 
 T.test("team roam rules: which modes the overlay can hold, and the snipe's path", function()

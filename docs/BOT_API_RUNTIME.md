@@ -8,12 +8,17 @@ The list of known limitations (what bots can't do, why, and the workaround) is k
 [discussion #50](https://github.com/anggara-ts/Supercharged-OpenHyperAI/discussions/50); update it when a limitation is
 confirmed or disproved.
 
+See also: upstream's [`docs/BOT_API_REFERENCE.md`](https://github.com/forest0xia/dota2bot-OpenHyperAI/blob/pr-140-refactor/docs/BOT_API_REFERENCE.md)
+(forest0xia/dota2bot-OpenHyperAI, branch `pr-140-refactor`, written for 7.41a from the online docs). It is an
+unverified secondary source: its claims that matter to us are listed on #243 to be probed in a game.
+
 ## Key findings
 
 - **No vector-target order.** Abilities can only be cast with no target, on a unit, on a location or on a tree (plus the Push/Queue variants). A vector-targeted spell such as Muerta's Dead Shot cannot have its direction chosen.
 - **No alt-cast.** Cast orders have no alt flag. `ToggleAutoCast()` on an alt-castable ability flips the button's state (`GetAutoCastState()` reads it back), but bot casts ignore it: Puck's Illusory Orb and Grimstroke's Stroke of Fate still curved with it on (game 043). It works for real autocast abilities (Quill Spray, Frost Arrows). For Illusory Orb and Stroke of Fate, aiming at the full range and turning to face the point first were both tried: the path still curves (#36). Discussion #50 item 2.
 - `GetCurrentCharges`, `GetInitialCharges` and `GetSecondaryCharges` exist on abilities as well as items. On the Ward Dispenser the first is observers and the second sentries (game 032). Whether they return charges for charge-based abilities (Mirana's Leap, Techies' mines, ...) has not been tested; `bots/lib/systems/charge_tracker.lua` still tracks those itself.
 - `GetToggleState`, `IsInAbilityPhase`, `GetDamageType`, `GetTargetType/Team/Flags` are available on abilities.
+- **`GetRoshanKillTime()` is not on the `DotaTime()` clock** (game 084, #12): it read about 195s ahead for both kills. The kill at t~2097 (Aegis claimed at t=2099) was counted from 2292, so the "11 minutes after the kill" call came at t=2952 (2292 + 660). The kill at t~3016 (Aegis claimed at t=3018) gave `[SHy-ROSH] seen-alive since-kill=406` at t=3617, so a kill time of 3211. That fits `GameTime()`, which also counts the time before the horn, but it is unverified. `Fu.GetRoshanKillTime()` (`bots/lib/general_utils/map_info.lua`) keeps the `DotaTime()` of the first read of a new value instead, and logs `[SHy-ROSH] kill-time raw= dota= game= rawAhead=` once per kill to settle it.
 - Item management beyond buy/sell: `ActionImmediate_DisassembleItem`, `ActionImmediate_SetItemCombineLock`, `ActionImmediate_SwapItems`.
 - Shrines and runes have their own orders: `Action_UseShrine`, `Action_PickUpRune` (plus Push/Queue). `GetOutpost`, `GetShrine`, `GetShrineCooldown`, `IsShrineHealing`, `GetNearbyShrines` are available.
 - **A mode file replaces Valve's mode whole, even without `Think`.** Game 063 (#141): a `mode_item_generic.lua` that defined only `GetDesire` won the item mode 3.5-5.3s at a time on the river bounties and water runes, and nothing was picked up (`[SHy-ITEMMODE] result ... picked=no`); Valve's item `Think` did not run behind it. The file was removed.
@@ -21,6 +26,12 @@ confirmed or disproved.
   - `Action_ClearActions(true)` stops an attack wind-up: 70 of 70 stops held (`[SHy-LH] cancel-result stopped=yes method=clear`, #157).
   - The time left on an enemy hero's `modifier_teleporting` counts down with the clock (`[SHy-ALCHEMIST] tp-left ... real=yes`, 4 of 4, #122/#166), so it is the real remaining TP time.
   - `Action_PickUpRune` on a river rune spot: a water rune (type 7) was taken (`river-pickup-try worked=yes type=7`, 1 sample); the river bounty (type 5) was not, 0 of 4 (games 063-064). Valve's own item mode takes both (#149).
+  - `GetIncomingTrackingProjectiles()` on an enemy hero lists the projectiles our team has flying at it (caster on our team; `[SHy-ALCHEMIST] no-brew why=finish-hit ... proj=245`, game 065 t=3155: Alchemist's allies' shots at Clinkz, #122).
+  - **An enemy hero's cooldowns do not read.** `GetCooldownTimeRemaining()` on an enemy hero's ability returned 0 for a whole 68-minute game (game 067, Nyx Assassin, Clinkz, Dark Willow, Death Prophet and Undying on the other team): no `[SHy-ALCHEMIST] enemy-spell-cd` line, which prints any listed spell read above 0, and Nyx's Vendetta read ready 4s and 6s after it was cast (cooldown 80/70/60, datafeed hero 88). Enemy items read nothing either (game 068: no `enemy-spell-cd ... item=true` line in 60 minutes; Dark Willow's slots read 3s after her Eul's showed nothing), and `GetCooldown()` on an enemy ability or item handle gives no value (0 `cdSrc=api` in 235 `[SHy-ENEMYCD] seen` lines). Not settled: whether `GetItemInSlot` on an enemy returns nothing or the item's cooldown reads 0. `GetLevel()` and `GetMana()` on the same handles do read (learned levels, and Dark Willow at 3% mana was let through), except that the ability handle passed to the cast callback often reads level -1. Workaround: `bots/lib/systems/enemy_spell_tracker.lua` notes when the team sees a spell used (the cast callback, or its modifier on a visible hero) and applies the game-data cooldown from then (#122).
+  - **`InstallCastCallback(-1, fn)` reports enemy casts** (game 068, `[SHy-ENEMYCD] cast-callback ... team=enemy`): spells and items (t=5 Nyx Assassin `item_ward_sentry`, t=28 `wisp_spirits`, t=32 `dark_willow_bramble_maze`), allied casts too, and casts out of our vision (Clinkz's Skeleton Walk at the Dire fountain). `fn` gets one table with the keys `ability` (handle), `channel_start`, `location`, `player_id`, `unit`. It misses some casts: no call for Dark Willow's Shadow Realm at 918 and 1743, Nyx's Vendetta at 1749, and several Skeleton Walks (918, 1544, 1827, 2006, 2136, 2183, 2476) (#122).
+  - `WasRecentlyDamagedByHero(ally, 1.0)` on an enemy hero handle never read true: 33 of 33 reads in game 069, 9 of them with 1-3 allied heroes attacking that hero (`[SHy-ALCHEMIST] concoction start ... byHit=0`, no `ally-hit-read error=`). Not usable to tell whether our heroes are damaging an enemy. The tracker samples the enemy's HP instead (`EnemySpells.HealthLossRate`); `InstallDamageCallback` is untested (#122).
+  - `GetModifierRemainingDuration(GetModifierByName(name))` reads the time left of an enemy hero's own escape modifier, not only `modifier_teleporting`: Nyx Assassin's Vendetta read 47.3s left of the 50s buff (level 2, datafeed hero 88) 2.7s after she cast it (game 069 t=2754, `[SHy-ENEMYCD] ... via=modifier remaining=47.3 castAgo=2.7`; her own `vendetta-engage` line says t=2751; one sample, #122).
+  - A hero that vanishes from sight while its last spot is still in our vision is not a sign it used an invisibility spell: 0 of 11 such vanishes in game 068 were new casts (two were the observer's own deaths), so the tracker no longer counts them (#122).
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[SHy-API] slots`, #172, game 064).
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
@@ -76,6 +87,11 @@ since #110. Issue #109.
 - **UNIT_LIST**: `UNIT_LIST_ALL`=0, `UNIT_LIST_ALLIED_BUILDINGS`=5, `UNIT_LIST_ALLIED_CREEPS`=3, `UNIT_LIST_ALLIED_HEROES`=2, `UNIT_LIST_ALLIED_OTHER`=6, `UNIT_LIST_ALLIED_WARDS`=4, `UNIT_LIST_ALLIES`=1, `UNIT_LIST_ENEMIES`=7, `UNIT_LIST_ENEMY_BUILDINGS`=11, `UNIT_LIST_ENEMY_CREEPS`=9, `UNIT_LIST_ENEMY_HEROES`=8, `UNIT_LIST_ENEMY_OTHER`=12, `UNIT_LIST_ENEMY_WARDS`=10, `UNIT_LIST_NEUTRAL_CREEPS`=13, `UNIT_LIST_THINKERS`=14
 - **other**: `BOT_DESIRE_OVERRIDE`=1*, `DOTA_ABILITY_BEHAVIOR_NOT_LEARNABLE`=64, `GLYPH_COOLDOWN`=360, `SHRINE_BASE_1`=0, `SHRINE_BASE_2`=1, `SHRINE_BASE_3`=2, `SHRINE_JUNGLE_1`=3, `SHRINE_JUNGLE_2`=4
 
+## Chat and pings (#225)
+
+- **Chat from inside the chat callback (seen once, game 078, #225).** `bot:ActionImmediate_Chat` called inside the function given to `InstallChatCallback` said nothing: `!debug` switched the mode at t=700 (`[SHy-CHAT] heard cmd=!debug`, then 25 decision lines), but its reply never reached the chat, and the game printed no `CLocalize::FindSafe` echo of it. A line said from the bot's own think does show up. Queue anything said in reply to chat and say it from a think (`AboutRules.Note` for `!about` in #217, `callbackChat` in `ability_item_usage_generic.lua`).
+- **Human pings arrive spaced out (games 077-078, #225).** The times of the human's pings as `GetMostRecentPing` sees them came a median 1.5s apart, even when the human clicked fast (game 077: 51 gaps under 6s, the shortest 1.0s; game 078: 90th percentile 3.8s). Pings may be rate-limited or dropped by the game; this is not confirmed. `GetMostRecentPing` keeps only the last ping, so a reader that polls slower than that misses some.
+
 ## Names that come from our own scripts
 
 The dump reads the live tables, so it also lists what OpenHyperAI defines or replaces. These are **not** engine API:
@@ -83,6 +99,21 @@ The dump reads the live tables, so it also lists what OpenHyperAI defines or rep
 - Global functions defined by our scripts: `AttackUnits`, `ConsiderMove`, `GetAdjustedDesireValue`, `HandleIdleBotState`, `_HandleIdleBotStateInner`, `IsLanMode`, `LoadCustomize`, `OhaCastGuard`, `SafeAbility`, `SafeCall`, `ShouldSkipBotThink`, `UseAstralPull`, `UseCyclone`, `UseDispelMagic`, `UseHurlBoulder`, `UseWindWalk`, `VerifyLastSwap`.
 - Engine globals that our scripts wrap (the engine has them; ours adds checks or logging): `GetScriptDirectory`, `GetTeamPlayers`, `GetUnitToLocationDistance`, `GetUnitToUnitDistance`, `RandomFloat`, `next`, `print`.
 - Methods added to `CDOTA_Bot_Script` by `bots/lib/systems/global_overrides.lua`: `OriginalGetHealth`, `OriginalGetMaxHealth`, and `GetUnitToLocationDistance` as a method (the engine only has the global). It also wraps these engine methods: `ActionImmediate_SwapItems`, `ActionPush_UseAbility`, `Action_AttackUnit`, `Action_UseAbility`, `GetAbilityByName`, `GetAssignedLane`, `GetAttackRange`, `GetAttackTarget`, `GetCastRange`, `GetHealth`, `GetLocation`, `GetMagicResist`, `GetMana`, `GetMaxHealth`, `GetMaxMana`, `GetNearbyCreeps`, `GetNearbyHeroes`, `GetNearbyLaneCreeps`, `GetNearbyNeutralCreeps`, `GetNearbyTowers`, `GetTarget`, `GetUnitName`, `HasModifier`, `IsAttackImmune`, `IsChanneling`, `IsIllusion`, `IsInvulnerable`, `IsMagicImmune`, `IsUsingAbility`, `NumModifiers`, `WasRecentlyDamagedByAnyHero`.
+
+### Globals in the files the engine loads (#13)
+
+A global function written at the top level of a file the engine loads itself (`ability_item_usage_generic.lua`,
+`item_purchase_generic.lua`, `bot_generic.lua`, `hero_selection.lua`, `mode_*_generic.lua`) is **not** in the shared
+`_G`. The globals dump runs inside `ability_item_usage_generic.lua` from its own `ItemUsageThink`, walks `pairs(_G)`,
+and lists none of that file's own callbacks (`ItemUsageThink`, `AbilityUsageThink`, `BuybackUsageThink`), nor
+`ItemPurchaseThink`, `MinionThink` or the `GetDesireHelper` that eight mode files define; it does list the globals
+written by modules loaded with `require` (`ConsiderMove`, `SafeCall`, `VerifyLastSwap`). Same result in all 30 logs
+with the dump up to game 062 (n=167). The files do not share one private table either: in game 062 the
+`GetDesireHelper` of four different mode files each printed its own lines (`[SHy-TORMENTOR] ... stay` from
+`mode_assemble_with_humans_generic.lua`, `[SHy-FARM] ... enemy-camp`, `[SHy-ROAM] ... last-hit-skip`,
+`[SHy-WARD] ... objective-ward`); with one shared table, the last file loaded would have replaced the others. So the
+engine runs each of those files with its own environment, and a top-level helper there needs no `local` to stay
+apart. A global written by a `require`d module (`bots/lib/`, `bots/heroes/`) is shared by every bot and every file.
 
 ## Counts
 
