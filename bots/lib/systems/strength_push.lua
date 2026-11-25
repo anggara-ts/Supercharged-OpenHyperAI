@@ -506,7 +506,7 @@ local function TickTeam(bot)
 	if ok and now < state.cooldownUntil and not afterAegis then
 		ok, why = false, "cooldown"
 	end
-	local pick = ok and Rules.PickLane(LaneEntries(team)) or nil
+	local pick = ok and Rules.PickLane(LaneEntries(team), why) or nil
 	if ok and pick == nil then
 		ok, why = false, "no-target"
 	end
@@ -658,7 +658,7 @@ function StrengthPush.RoshanDesire(bot, desire)
 	if state == nil or not state.roshanFirstOn or now - state.lastTick > 2 * TICK_SECONDS + 1 then
 		return desire
 	end
-	if not Rules.ROSH_BOOSTABLE[bot._roshWhy or ""] then
+	if not Rules.ROSH_BOOSTABLE[Rules.RoshBase(bot._roshWhy)] then
 		return desire
 	end
 	if not bot:IsAlive() or bot:IsIllusion() or bot:GetLevel() < 6 or Fu.GetHP(bot) < MIN_HP then

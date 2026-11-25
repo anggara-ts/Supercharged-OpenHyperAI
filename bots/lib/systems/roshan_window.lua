@@ -19,6 +19,7 @@
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
+local StrengthRules = require(GetScriptDirectory() .. "/lib/systems/strength_rules")
 
 local RoshanWindow = {}
 RoshanWindow.Rules = Rules
@@ -39,6 +40,7 @@ local BASE_HERO_RADIUS = 2200
 local CALL_MIN_HP = 0.5
 -- The Roshan mode's reasons a call may raise: its checks passed and only the slow timer ramp (or the kill-window
 -- floor at VERYHIGH) holds the desire down. Not the human-team invite: with a human on the team the human decides.
+-- Matched without a "+..." suffix (#87 prints "timer+pressure").
 local RAISABLE = { ["timer"] = true, ["kill-window"] = true }
 
 local states = {}
@@ -84,10 +86,15 @@ local function AliveCount(team)
 	end
 	return count
 end
+-- In a fight or a job the peek must not pull it out of.
 local function Busy(member)
 	local mode = member:GetActiveMode()
 	return mode == BOT_MODE_ROSHAN
 		or mode == BOT_MODE_RETREAT
+		or mode == BOT_MODE_ATTACK
+		or mode == BOT_MODE_TEAM_ROAM
+		or mode == BOT_MODE_DEFEND_ALLY
+		or mode == BOT_MODE_EVASIVE_MANEUVERS
 		or mode == BOT_MODE_DEFEND_TOWER_TOP
 		or mode == BOT_MODE_DEFEND_TOWER_MID
 		or mode == BOT_MODE_DEFEND_TOWER_BOT
@@ -326,12 +333,16 @@ function RoshanWindow.Desire(bot, desire)
 	end
 	local now = DotaTime()
 	if IsPeeker(state, bot) then
+		-- Hurt or hit: let go at once, not at the next team tick (the retreat mode exempts a bot in Roshan mode).
+		if Fu.GetHP(bot) < PEEK_ABORT_HP or bot:WasRecentlyDamagedByAnyHero(1.0) then
+			return desire
+		end
 		return math.max(desire, UnderRetreat(bot, RoshanWindow.PEEK_DESIRE))
 	end
 	if
 		state.armed
 		and desire < RoshanWindow.CALL_DESIRE
-		and RAISABLE[bot._roshWhy or ""]
+		and RAISABLE[StrengthRules.RoshBase(bot._roshWhy)]
 		and Fu.GetHP(bot) >= CALL_MIN_HP
 		and not Fu.ShouldLeaveRoshanFight(bot)
 	then

@@ -416,3 +416,35 @@ T.test("strength: a late-even window ends on a lost fight, not on the missing le
 	T.eq(R.Cooldown("timeout"), 20, "lead windows unchanged")
 	T.ok(R.ROSH_PAST_SAFETY["rosh-window"], "the Roshan window call is a Roshan first")
 end)
+
+T.test("strength: a late-even window takes the weakest outer tower, not an open high ground", function()
+	local R = rules()
+	local lanes = {
+		{ lane = 1, tier = 2, hp = 0.8, allyDist = 4000 },
+		{ lane = 2, tier = 4, hp = 1.0, allyDist = 3000 },
+		{ lane = 3, tier = 1, hp = 1.0, allyDist = 4000 },
+	}
+	T.eq(R.PickLane(lanes).lane, 2, "a lead push goes up the open high ground")
+	T.eq(R.PickLane(lanes, "late-even").lane, 3, "late-even: the T1 first")
+	T.eq(
+		R.PickLane({ { lane = 2, tier = 4, hp = 1.0, allyDist = 3000 } }, "late-even").lane,
+		2,
+		"only the high ground left"
+	)
+end)
+
+T.test("strength: Roshan reasons with a suffix (#87 timer+pressure) count as their base reason", function()
+	local R = rules()
+	T.eq(R.RoshBase("timer+pressure"), "timer", "suffix dropped")
+	T.eq(R.RoshBase("even(5v5)"), "even(5v5)", "no suffix")
+	T.eq(R.RoshBase(nil), "", "nil")
+	local on, why = R.RoshanFirst({
+		aegis = false,
+		roshAlive = true,
+		contested = false,
+		whys = { "timer+pressure", "rosh-window", "timer+pressure" },
+		now = 100,
+	})
+	T.eq(on, true, "Roshan first with #87's timer+pressure reasons")
+	T.eq(why, "rosh-ok", "reason")
+end)

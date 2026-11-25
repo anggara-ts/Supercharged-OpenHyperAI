@@ -173,6 +173,8 @@ T.test("roshan window: an armed call raises a timer desire to the call strength 
 	T.eq(bot._roshWhy, "rosh-window", "reason for the strength push's Roshan first")
 	T.eq(W.EvenTakeOk(5, 5), true, "5 v 5 may take Roshan while armed")
 	T.eq(W.EvenTakeOk(4, 5), false, "not with fewer of ours")
+	bot._roshWhy = "timer+pressure"
+	T.eq(W.Desire(bot, 0.3), W.CALL_DESIRE, "#87 timer+pressure: raised too")
 	bot._roshWhy = "even(5v5)"
 	T.eq(W.Desire(bot, 0), 0, "a refusal stays a refusal")
 	bot._roshWhy = "human-invite"

@@ -173,20 +173,22 @@ end
 -- caller. An open enemy high ground (T3 down) comes first, then the weakest outer building (lowest tier, then lowest
 -- HP), and the lane closest to our cores breaks ties: cost = allyDist + 3000 * hp + 1500 * (tier - 1), minus 6000
 -- for an open high ground. Returns the chosen entry (nil without lanes).
-function StrengthRules.LaneCost(entry)
+-- kind "late-even" (StrengthRules.LateEven, #12): the weakest outer building first, an open high ground last
+-- (+1500 per tier, tier 4 included): an even team takes towers, it does not go up the high ground.
+function StrengthRules.LaneCost(entry, kind)
 	local tier = entry.tier or 1
 	local cost = (entry.allyDist or 0) + 3000 * (entry.hp or 1)
-	if tier >= 4 then
+	if tier >= 4 and kind ~= "late-even" then
 		cost = cost - 6000
 	else
 		cost = cost + 1500 * (tier - 1)
 	end
 	return cost
 end
-function StrengthRules.PickLane(lanes)
+function StrengthRules.PickLane(lanes, kind)
 	local best, bestCost = nil, math.huge
 	for _, entry in ipairs(lanes or {}) do
-		local cost = StrengthRules.LaneCost(entry)
+		local cost = StrengthRules.LaneCost(entry, kind)
 		if cost < bestCost then
 			best, bestCost = entry, cost
 		end
@@ -283,6 +285,10 @@ StrengthRules.ROSH_BOOSTABLE = {
 	["human-invite-expired"] = true,
 	["human-cooldown"] = true,
 }
+-- The Roshan mode's reason without a "+..." suffix: #87 reports a timer take with creep pressure as "timer+pressure".
+function StrengthRules.RoshBase(why)
+	return type(why) == "string" and (why:match("^[^+]+") or why) or ""
+end
 D.roshGiveUpIdle = 90 -- no ally in Roshan mode this long after Roshan first started: give up
 D.roshGiveUpMax = 150 -- give up after this long whatever happens (unless finishing)
 D.roshBlockSeconds = 180 -- after giving up, no Roshan first for this long
@@ -306,7 +312,7 @@ function StrengthRules.RoshanFirst(r)
 	local whys = r.whys or {}
 	local past, refusal = 0, nil
 	for _, why in ipairs(whys) do
-		if StrengthRules.ROSH_PAST_SAFETY[why] then
+		if StrengthRules.ROSH_PAST_SAFETY[StrengthRules.RoshBase(why)] then
 			past = past + 1
 		elseif refusal == nil then
 			refusal = why
