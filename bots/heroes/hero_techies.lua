@@ -1,6 +1,4 @@
 -- Techies: skill build, item build, and ability use for this hero.
--- Accidental globals made file-local (#13): every bot shares one Lua state, so these were shared.
-local MineLocation, MineLocationDistance
 local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
@@ -459,15 +457,27 @@ function X.SkillsComplement()
 	end
 	-- Scepter: Minefield Sign first (one per Blast Off), on himself (10 range): the triangle goes
 	-- around him, inside its radius, invulnerable and with +15% damage (Valve data).
-	if X.ConsiderPostBlastSign() then
+	local postBlastSign, postBlastEnemies = X.ConsiderPostBlastSign()
+	if postBlastSign then
 		bot._signBlastAt = bot._blastAt
-		X.LogTechies("post-blast-sign", 0, bot:GetLocation())
+		X.LogTechies(string.format("post-blast-sign enemies=%d", postBlastEnemies), 0, bot:GetLocation())
+		-- Only one sign at a time (datafeed hero_id=105): this one replaces any other and takes the 60s cooldown, so a
+		-- spot the standing-sign rule holds is dropped (it must not log minefield-sign-placed for this cast).
+		bot._signSpot = nil
+		bot._lastSign = { location = bot:GetLocation(), untilTime = DotaTime() + 240 }
 		bot:Action_UseAbilityOnLocation(minefieldSignAbility, bot:GetLocation())
 		return
 	end
 	local postMine = X.ConsiderPostBlastMines()
 	if postMine ~= nil then
+		X.NoteMineStack(bot._blastLoc or bot:GetLocation(), "post-blast")
 		X.OrderMine(postMine, "post-blast")
+		return
+	end
+	-- A finished 3-mine stack with 2+ enemy heroes around it: the Minefield Sign on it (Scepter).
+	local stackSign = X.ConsiderStackSign()
+	if stackSign ~= nil then
+		bot:Action_UseAbilityOnLocation(minefieldSignAbility, stackSign)
 		return
 	end
 	local madPlant, madLoc = X.ConsiderPostBlastMad()
@@ -555,6 +565,7 @@ function X.SkillsComplement()
 			end
 			if planted > 0 then
 				pcall(ChargeTracker.Issued, bot, proximityMinesAbility, nil, planted)
+				X.NoteMineStack(blastOffLocation, "blast")
 			end
 		end
 		X.LogTechies(
@@ -600,8 +611,12 @@ function X.SkillsComplement()
 		X.PlantMad(X.MadPlant(), plantLocation)
 		return
 	end
+	bot._mineStackCenter = nil
 	plantDesire, plantLocation = X.ConsiderProximityMines()
 	if plantDesire > 0 then
+		if bot._mineStackCenter ~= nil then
+			X.NoteMineStack(bot._mineStackCenter, "triangle")
+		end
 		X.OrderMine(plantLocation, X._mineKind or "mine")
 		return
 	end
@@ -1502,6 +1517,15 @@ function X.ConsiderBlastOff(ignoreMana)
 	end
 	return BOT_ACTION_DESIRE_NONE, 0
 end
+-- Minefield Sign (Scepter). 7.42 game files: cast range 10 (planted where Techies stands), cast point 1.25s,
+-- cooldown 60s, aura_radius 1000 (mines inside deal 15% more damage), lasts 240s. The old code re-rolled a random spot
+-- up to 3100 away every think, so he walked to a new point each think and never planted it (#48). Now the spot is the
+-- middle of the biggest group of his mines (3 or more within the aura) within 1600 of him, kept until planted or 20s.
+-- Datafeed hero_id=105 (2026-11-25): techies_minefield_sign ability_is_granted_by_scepter=true, max_level 1, cast range
+-- 10, cast point 1.25, cooldown 60, lifetime 240; only one sign at a time, and it is destroyed after its 10s minefield.
+-- Game 084: no spot line in 27 minutes with Scepter, while the post-blast sign (same hidden/castable checks) passed 7
+-- times (ordered; two sign units in the console), so the ability was there. `minefield-sign-skip` says which
+-- check stops this rule.
 function X.ConsiderMineFieldSign()
 	-- Minefield Sign stays hidden without Scepter but still reports castable. Ordering it
 	-- then is refused by the server and freezes Techies in place every think.
@@ -1510,28 +1534,86 @@ function X.ConsiderMineFieldSign()
 		or minefieldSignAbility:IsHidden()
 		or not minefieldSignAbility:IsFullyCastable()
 	then
+		if bot._signSpot ~= nil and minefieldSignAbility:GetCooldownTimeRemaining() > 0 then
+			X.LogTechies("minefield-sign-placed why=standing", bot._signSpot.mines, bot:GetLocation())
+			bot._lastSign = { location = bot:GetLocation(), untilTime = DotaTime() + 240 }
+			bot._signSpot = nil
+		end
+		local why = "not-castable"
+		if not proximityMinesAbility:IsTrained() then
+			why = "mines-untrained"
+		elseif minefieldSignAbility:IsHidden() then
+			why = "hidden"
+		elseif minefieldSignAbility:GetCooldownTimeRemaining() > 0 then
+			why = "cooldown"
+		end
+		X.LogSignSkip(why)
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
+	-- Not while retreating or with an enemy hero near him: the cast point is 1.25s.
+	local retreating = Fu.IsRetreating(bot)
+	local enemiesNear = #Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
+	local busy = retreating or enemiesNear > 0
+	local held = bot._signSpot
+	if held ~= nil then
+		if not busy and DotaTime() < held.untilTime and #Fu.GetEnemiesNearLoc(held.location, 1200) == 0 then
+			return BOT_ACTION_DESIRE_HIGH, held.location
+		end
+		X.LogTechies("minefield-sign-drop", held.mines, held.location)
+		bot._signSpot = nil
+	end
+	if busy then
+		X.LogSignSkip(retreating and "retreating" or "enemy-near", string.format(" enemies=%d", enemiesNear))
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	if DotaTime() < (bot._signSearchAt or -999) then
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	bot._signSearchAt = DotaTime() + 2
 	local auraRadius = minefieldSignAbility:GetSpecialValueInt("aura_radius")
-	local availableSpots = Techies.GetAvailableSpot()
-	MineLocation, MineLocationDistance = Techies.GetClosestSpot(bot, availableSpots)
-	if
-		MineLocation ~= nil
-		and GetUnitToLocationDistance(bot, MineLocation) <= bot:GetCurrentVisionRange()
-		and not X.IsEnemyCloserToWardLocation(MineLocation, MineLocationDistance)
-	then
-		for attempt = 0, 50 do
-			local candidateLocation = Fu.GetRandomLocationWithinDist(MineLocation, 0, auraRadius * 3 + 100)
-			if IsLocationPassable(candidateLocation) then
-				local minesNearby = Fu.GetTechiesMinesInLoc(candidateLocation, auraRadius)
-				if #minesNearby >= 3 then
-					return BOT_ACTION_DESIRE_HIGH, candidateLocation
-				end
+	if auraRadius <= 0 then
+		auraRadius = 1000
+	end
+	local mines = Fu.GetTechiesMinesInLoc(bot:GetLocation(), 1600)
+	local best, bestCount, biggest = nil, 2, 0
+	for _, mine in ipairs(mines) do
+		local group = {}
+		for _, other in ipairs(mines) do
+			if GetUnitToUnitDistance(mine, other) <= auraRadius then
+				group[#group + 1] = other
 			end
-			attempt = attempt + 1
+		end
+		biggest = math.max(biggest, #group)
+		if #group > bestCount then
+			best, bestCount = group, #group
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE, 0
+	local mineCounts = string.format(" near=%d cluster=%d all=%d", #mines, biggest, #Fu.GetTechiesMines())
+	if best == nil then
+		X.LogSignSkip("few-mines", mineCounts)
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	local location = Fu.GetCenterOfUnits(best)
+	if not IsLocationPassable(location) then
+		location = best[1]:GetLocation()
+	end
+	if #Fu.GetEnemiesNearLoc(location, 1200) > 0 then
+		X.LogSignSkip("enemy-at-spot", mineCounts)
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	-- His last sign lasts 240s (game files): no second one over the same mines while it stands.
+	local last = bot._lastSign
+	if
+		last ~= nil
+		and DotaTime() < last.untilTime
+		and Fu.GetLocationToLocationDistance(last.location, location) < auraRadius
+	then
+		X.LogSignSkip("recent-sign", mineCounts)
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
+	bot._signSpot = { location = location, mines = bestCount, untilTime = DotaTime() + 20 }
+	X.LogTechies("minefield-sign-spot", bestCount, location)
+	return BOT_ACTION_DESIRE_HIGH, location
 end
 -- Proximity Mines is charge based (3 charges, one every 15s). Charges left from the shared
 -- tracker (the API has no ability-charge read), or 3 before it has a count.
@@ -1593,6 +1675,159 @@ function X.MineTriangle(center, radius)
 		end
 	end
 	return spots
+end
+-- Minefield Sign on a finished 3-mine stack. Maintainer, 2026-11-26 (#161): "put the sign after 3-mines combo if the
+-- enemies around is 2+". The stack is the mine triangle he builds around a Blast Off landing or a disabled enemy
+-- (three mines 210 from the middle, 350 apart: mines cannot go closer, datafeed placement_radius 350). It counts as
+-- finished when three of his mines stand within 400 of its middle, within 8s of its first mine.
+-- Enemies: heroes seen in the last 3s within 1200 of the middle: the sign's minefield covers aura_radius 1000 around it
+-- and is set off by an enemy hero within trigger_radius 200 (datafeed hero_id=105), so 1200 is who can walk into it.
+-- The sign is planted where he stands (cast range 10) when every mine of the stack is inside its 1000 aura from there,
+-- otherwise at the middle of the stack. Not below 25% HP (1.25s cast point next to 2+ enemy heroes).
+function X.NoteMineStack(center, kind)
+	if center == nil then
+		return
+	end
+	local stack = bot._mineStack
+	if
+		stack ~= nil
+		and not stack.done
+		and DotaTime() - stack.at < 8
+		and Fu.GetLocationToLocationDistance(stack.center, center) < 400
+	then
+		return
+	end
+	bot._mineStack = { center = center, kind = kind, at = DotaTime() }
+end
+function X.EnemiesSeenNear(location, radius, seconds)
+	local count = 0
+	for _, playerId in pairs(GetTeamPlayers(GetOpposingTeam())) do
+		if IsHeroAlive(playerId) then
+			local info = GetHeroLastSeenInfo(playerId)
+			local seen = info ~= nil and info[1] or nil
+			if
+				seen ~= nil
+				and seen.time_since_seen <= seconds
+				and Fu.GetLocationToLocationDistance(location, seen.location) <= radius
+			then
+				count = count + 1
+			end
+		end
+	end
+	return count
+end
+-- One line per stack (stacks are a few per fight), only with Scepter.
+function X.LogStackSign(kind, why, stack, enemies, mines)
+	if not bot:HasScepter() then
+		return
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-TECHIES] t=%.0f techies %s why=%s stack=%s enemies=%d mines=%d hp=%.2f cd=%.0f scepter=true at=%.0f,%.0f",
+			DotaTime(),
+			kind,
+			why,
+			stack.kind or "?",
+			enemies,
+			mines,
+			Fu.GetHP(bot),
+			minefieldSignAbility:GetCooldownTimeRemaining(),
+			stack.center.x,
+			stack.center.y
+		)
+	)
+end
+function X.ConsiderStackSign()
+	local pending = bot._stackSignOrder
+	if pending ~= nil then
+		if minefieldSignAbility:GetCooldownTimeRemaining() > 0 then
+			X.LogStackSign("minefield-sign-placed", "stack", pending.stack, pending.enemies, pending.mines)
+			bot._lastSign = { location = bot:GetLocation(), untilTime = DotaTime() + 240 }
+			bot._signSpot = nil
+			bot._stackSignOrder = nil
+			return nil
+		end
+		if DotaTime() - pending.at > 3 then
+			X.LogStackSign("minefield-sign-skip", "stack-not-cast", pending.stack, pending.enemies, pending.mines)
+			bot._stackSignOrder = nil
+			return nil
+		end
+		return pending.onSelf and bot:GetLocation() or pending.stack.center
+	end
+	local stack = bot._mineStack
+	if stack == nil or stack.done then
+		return nil
+	end
+	local mines = Fu.GetTechiesMinesInLoc(stack.center, 400)
+	if #mines < 3 then
+		if DotaTime() - stack.at > 8 then
+			stack.done = true
+			X.LogStackSign("minefield-sign-skip", "stack-unfinished", stack, 0, #mines)
+		end
+		return nil
+	end
+	stack.done = true
+	local enemies = X.EnemiesSeenNear(stack.center, 1200, 3)
+	local why = nil
+	if not bot:HasScepter() then
+		return nil
+	elseif minefieldSignAbility:IsHidden() then
+		why = "stack-hidden"
+	elseif minefieldSignAbility:GetCooldownTimeRemaining() > 0 then
+		why = "stack-cooldown"
+	elseif not minefieldSignAbility:IsFullyCastable() then
+		why = "stack-not-castable"
+	elseif enemies < 2 then
+		why = "stack-few-enemies"
+	elseif Fu.GetHP(bot) < 0.25 then
+		why = "stack-low-hp"
+	end
+	if why ~= nil then
+		X.LogStackSign("minefield-sign-skip", why, stack, enemies, #mines)
+		return nil
+	end
+	local auraRadius = minefieldSignAbility:GetSpecialValueInt("aura_radius")
+	if auraRadius <= 0 then
+		auraRadius = 1000
+	end
+	local onSelf = true
+	for _, mine in ipairs(mines) do
+		if GetUnitToUnitDistance(bot, mine) > auraRadius - 50 then
+			onSelf = false
+		end
+	end
+	bot._stackSignOrder = { at = DotaTime(), stack = stack, enemies = enemies, mines = #mines, onSelf = onSelf }
+	return onSelf and bot:GetLocation() or stack.center
+end
+-- [SHy-TECHIES] minefield-sign-skip: why the standing Minefield Sign rule picked no spot. Only with Scepter, or when
+-- the sign is not hidden without one (an API surprise). A new reason prints at once (15s apart at least), the same
+-- reason again after 30s.
+function X.LogSignSkip(why, extra)
+	local scepter = bot:HasScepter()
+	local hidden = minefieldSignAbility:IsHidden()
+	if not scepter and hidden then
+		return
+	end
+	local now = DotaTime()
+	local lastAt = bot._signSkipLogAt or -999
+	if now < lastAt + 15 or (why == bot._signSkipWhy and now < lastAt + 30) then
+		return
+	end
+	bot._signSkipLogAt, bot._signSkipWhy = now, why
+	pcall(
+		print,
+		string.format(
+			"[SHy-TECHIES] t=%.0f techies minefield-sign-skip why=%s hidden=%s level=%d scepter=%s cd=%.0f%s",
+			now,
+			why,
+			tostring(hidden),
+			minefieldSignAbility:GetLevel(),
+			tostring(scepter),
+			minefieldSignAbility:GetCooldownTimeRemaining(),
+			extra or ""
+		)
+	)
 end
 -- [SHy-TECHIES]: mine combos and triangles, at most once per 5s per kind.
 function X.LogTechies(kind, mines, center)
@@ -1768,7 +2003,24 @@ function X.ConsiderPostBlastSign()
 	then
 		return false
 	end
-	return true
+	-- Maintainer, 2026-11-26 (#161): "the sign is too valuable for solo kill. make the sign optional in the combo. only
+	-- plant if there are 2+ enemies". Counted like the stack rule: enemy heroes seen in the last 3s within 1200 of
+	-- where he landed (1000 minefield area plus 200 trigger radius, datafeed hero_id=105). Fewer: no sign this Blast
+	-- Off, straight to the mines; logged once per Blast Off.
+	local enemies = X.EnemiesSeenNear(bot:GetLocation(), 1200, 3)
+	if enemies < 2 then
+		bot._signBlastAt = bot._blastAt
+		pcall(
+			print,
+			string.format(
+				"[SHy-TECHIES] t=%.0f techies minefield-sign-skip why=post-blast-solo enemies=%d scepter=true",
+				DotaTime(),
+				enemies
+			)
+		)
+		return false
+	end
+	return true, enemies
 end
 function X.ConsiderPostBlastMines()
 	if bot._blastAt == nil or bot._blastLoc == nil or DotaTime() - bot._blastAt > 3.5 then
@@ -1804,6 +2056,7 @@ function X.ConsiderProximityMines()
 		local spots = X.MineTriangle(botTarget:GetLocation(), 210)
 		if spots[1] ~= nil and GetUnitToLocationDistance(bot, spots[1]) <= castRange + 100 then
 			X.LogTechies("triangle", #spots, botTarget:GetLocation())
+			bot._mineStackCenter = botTarget:GetLocation()
 			return BOT_ACTION_DESIRE_HIGH, spots[1]
 		end
 	end
