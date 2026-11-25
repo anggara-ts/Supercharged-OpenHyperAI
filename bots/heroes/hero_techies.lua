@@ -1723,7 +1723,7 @@ function X.LogStackSign(kind, why, stack, enemies, mines)
 	pcall(
 		print,
 		string.format(
-			"[SHy-TECHIES] t=%.0f techies %s why=%s stack=%s enemies=%d mines=%d hp=%.2f cd=%.0f at=%.0f,%.0f",
+			"[SHy-TECHIES] t=%.0f techies %s why=%s stack=%s enemies=%d mines=%d hp=%.2f cd=%.0f scepter=true at=%.0f,%.0f",
 			DotaTime(),
 			kind,
 			why,
