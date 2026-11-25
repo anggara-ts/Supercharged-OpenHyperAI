@@ -147,9 +147,15 @@ function X.AllyItem(ally, name)
 	return ally:GetItemInSlot(slot)
 end
 -- Is the ally escaping (AllyEscapeRules, #238 game 083 44:51): an escape modifier on it, or an escape spell or item
--- cast in the last 1s or in its cast point now. Returns the modifier, or nil and the spell and how long ago
--- ("phase": in its cast point), or nil.
+-- cast in the last 1s or in its cast point now, or a Dark Willow whose own script has ordered an escape Shadow
+-- Realm (ally._dwRealm, set by hero_dark_willow.lua at the order, why=retreat|dodge; the realm buff only shows 0.3s
+-- later, game 083: mod=0.30, as long as the embrace's cast point). Returns the modifier, or nil and the spell and
+-- how long ago ("phase": in its cast point, "order": her script's order), or nil.
 function X.AllyEscaping(ally)
+	local realm = ally._dwRealm
+	if type(realm) == "table" and realm.why ~= nil and realm.why ~= "attack" then
+		return nil, "dark_willow_shadow_realm", "order"
+	end
 	for _, name in ipairs(AllyEscapeRules.MODIFIERS) do
 		if ally:HasModifier(name) then
 			return name
@@ -658,7 +664,8 @@ function X.EmbraceCastCheck()
 		end
 		return
 	end
-	if now - pending.at > 0.6 then
+	-- 1s: the 0.3s cast point plus a turn towards the ally.
+	if now - pending.at > 1.0 then
 		bot._wwEmbrace = nil
 		return
 	end

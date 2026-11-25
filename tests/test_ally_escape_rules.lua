@@ -129,3 +129,14 @@ T.test("winter wyvern: an embrace in its cast point stops when the ally starts e
 	T.ok(printedWith("embrace-cancel-result ally=dark_willow cast=no") ~= nil, "the result line")
 	T.eq(bot._wwEmbrace, nil, "done")
 end)
+
+T.test("winter wyvern: no embrace on a Dark Willow whose script just ordered an escape realm", function()
+	local _, X, willow = wyvern()
+	willow._dwRealm = { why = "attack" }
+	T.ok(X.EmbraceAlly(willow, "low-hp"), "an attack realm is not an escape")
+	willow._dwRealm = { why = "retreat" }
+	Stub.time = 2692
+	T.eq(X.EmbraceAlly(willow, "low-hp"), false, "an escape realm ordered: no embrace")
+	local line = printedWith("embrace-skip why=escaping")
+	T.ok(line ~= nil and string.find(line, "spell=dark_willow_shadow_realm ago=order", 1, true) ~= nil, tostring(line))
+end)
