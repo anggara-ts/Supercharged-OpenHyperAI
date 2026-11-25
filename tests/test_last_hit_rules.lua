@@ -274,3 +274,44 @@ T.test("ally swing: yield reasons", function()
 	s.coreSwing, s.class = true, nil
 	T.eq(R.YieldReason(s), nil, "not taken anyway: nothing to yield")
 end)
+
+T.test("wind-up yield: who stops for whom", function()
+	local R = rules()
+	T.eq(
+		R.WindupYield(2, 1, true),
+		"ally-swing",
+		"game 077 t=38: Io (2) for Phantom Assassin (1), whose hit kills first"
+	)
+	T.eq(R.WindupYield(1, 2, true), nil, "never for a higher position number: only one of the two stops")
+	T.eq(R.WindupYield(2, 1, false), nil, "a core keeps its swing when the other core's hit does not kill")
+	T.eq(R.WindupYield(5, 1, false), "core-swing", "a support never steals a core's creep")
+	T.eq(R.WindupYield(5, 4, false), nil, "a support's swing that does not kill: no yield")
+	T.eq(R.WindupYield(5, 4, true), "ally-swing", "the other support's hit kills first")
+	T.eq(R.WindupYield(4, 5, true), nil)
+	T.eq(R.WindupYield(3, 3, true), nil, "the same position (a human read as 2): nobody stops")
+	T.eq(R.WindupYield(5, nil, true), nil)
+end)
+
+T.test("wind-up yield: wait to the last look, then stop; decided swings only for these reasons", function()
+	local R = rules()
+	local s = { predictedHp = 30, ourHit = 45, incomingKills = false, remaining = 0.3, frameGap = 0.033, early = false }
+	T.eq((R.WindupDecision(s)), "release", "no yield: our hit kills, released")
+	s.yield = "core-swing"
+	T.eq((R.WindupDecision(s)), "wait", "an ally to yield to: keep looking")
+	s.remaining = 0.05
+	local decision, why = R.WindupDecision(s)
+	T.eq(decision, "cancel")
+	T.eq(why, "core-swing")
+	-- A backup whose core kills it first: its own reason first.
+	s.backup, s.incomingKills = true, true
+	T.eq(select(2, R.WindupDecision(s)), "core")
+	T.ok(
+		R.LastLook(0.32, 0.2) and not R.LastLook(0.33, 0.2),
+		"0.2s gap: the last look is 0.32s or less before the point"
+	)
+	T.ok(R.RECHECK_CANCEL["ally-swing"] and R.RECHECK_CANCEL["core-swing"] and R.RECHECK_CANCEL.core)
+	T.ok(
+		R.RECHECK_CANCEL["core-next"] and not R.RECHECK_CANCEL.survives,
+		"a decided release is never stopped for survives"
+	)
+end)

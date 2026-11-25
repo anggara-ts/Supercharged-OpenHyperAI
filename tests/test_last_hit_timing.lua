@@ -415,7 +415,11 @@ local function addSwinger(creep, props)
 	ally.GetAnimActivity = function()
 		return props.attacking and 1503 or 0
 	end
+	-- props.startAt: the swing started then and its cycle runs with the clock (attack speed 1).
 	ally.GetAnimCycle = function()
+		if props.startAt ~= nil then
+			return GameTime() - props.startAt
+		end
 		return props.cycle or 0.1
 	end
 	ally.GetAttackPoint = function()
@@ -557,4 +561,141 @@ T.test("ally swing: a backup behind a core in a team slot counts its pending hit
 	Timing.Tick(bot)
 	T.eq(state.orders[1], "attack", "the backup swing after the core's hit")
 	Fu.GetPosition = getPosition
+end)
+
+-- The wind-up yield (#71, game 077 t=38 and games 083-085): the bot's own swing is stopped for an ally.
+local function rangedBot(bot)
+	-- Ranged, slow projectile: the creep at 100 (less the 39 offset) takes 61 / 250 = 0.244s to reach.
+	bot.GetAttackRange = function()
+		return 600
+	end
+	bot.GetAttackProjectileSpeed = function()
+		return 250
+	end
+end
+
+local function withPositions(Fu, bot, myPos, ally, allyPos, fn)
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and myPos or hero == ally and allyPos or getPosition(hero)
+	end
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	local ok, err = pcall(fn)
+	print = mutedPrint
+	Fu.GetPosition = getPosition
+	if not ok then
+		error(err, 0)
+	end
+end
+
+local function windupYieldLines(why)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "yield why=" .. why .. " at=windup", 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("wind-up yield: a core stops its swing for a lower-position core's swing that kills first", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1600
+	rangedBot(bot)
+	-- Game 077 t=38: Io (position 2) and Phantom Assassin (position 1) swung at one creep together.
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = Stub.time }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 2, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
+		state.activity = 1503
+		frames(Timing, bot, creep, 3, 45)
+		T.eq(bot._lhTiming.phase, "windup", "our hit would kill, but the ally's lands first: waiting, not released")
+		local count = untilOrder(Timing, bot, creep, state, 45)
+		T.ok(count < 15, "stopped inside the 0.5s wind-up (frame " .. count .. ")")
+		T.eq(state.orders[1], "clear", "our swing stopped")
+		T.eq(bot._lhTiming.phase, "hold", "holding after the stop")
+		T.eq(windupYieldLines("ally-swing"), 1, "[SHy-LH] yield why=ally-swing at=windup")
+	end)
+end)
+
+T.test("wind-up yield: never for a higher position number (one of two heroes yields, never both)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1650
+	rangedBot(bot)
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = Stub.time }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 1, ally, 2, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
+		state.activity = 1503
+		frames(Timing, bot, creep, 20, 45)
+		T.eq(#state.orders, 0, "position 1 keeps its swing")
+		T.eq(bot._lhTiming.phase, "decided", "released (others): as before")
+		T.eq(windupYieldLines("ally-swing"), 0)
+	end)
+end)
+
+T.test("wind-up yield: a decided support swing stops at the last look for a core's new swing", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1700
+	rangedBot(bot)
+	-- Games 083-085: the support released at its first look, then the core (cancelled, holding) swung again.
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		frames(Timing, bot, creep, 1, 45, false)
+		T.eq(bot._lhTiming.phase, "decided", "our hit kills: release decided at the first look")
+		props.attacking, props.startAt = true, Stub.time
+		frames(Timing, bot, creep, 5, 45, false)
+		T.eq(#state.orders, 0, "not before the last look")
+		local count = untilOrder(Timing, bot, creep, state, 45)
+		T.ok(count < 15, "stopped before our attack point (frame " .. count .. ")")
+		T.eq(state.orders[1], "clear", "the decided swing stopped")
+		T.eq(windupYieldLines("core-swing"), 1, "[SHy-LH] yield why=core-swing at=windup (the core's 20 does not kill)")
+	end)
+end)
+
+T.test("wind-up yield: a decided swing is not stopped when no ally swings (release stays a release)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1750
+	rangedBot(bot)
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		frames(Timing, bot, creep, 1, 45, false)
+		T.eq(bot._lhTiming.phase, "decided")
+		-- The creep heals out of one hit: a "survives" at the last look does not stop a decided release.
+		creep._hp = 80
+		frames(Timing, bot, creep, 20, 45, false)
+		T.eq(#state.orders, 0, "no stop")
+	end)
+end)
+
+T.test("wind-up yield: looks 0.2s apart still stop the swing before the attack point", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1800
+	rangedBot(bot)
+	bot._lhtGap = 0.2
+	bot._lhtFrameAt = Stub.time
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	local function look()
+		Stub.time = Stub.time + 0.2
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		Timing.Tick(bot)
+	end
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		look()
+		T.eq(bot._lhTiming.phase, "decided", "first look 0.1s into the 0.5s wind-up: released")
+		props.attacking, props.startAt = true, Stub.time
+		look()
+		T.eq(state.orders[1], "clear", "the next look (0.2s left, last look at a 0.2s gap) stops it")
+		T.ok(GameTime() < bot._lhTiming.cancelPointAt, "before the attack point")
+	end)
 end)

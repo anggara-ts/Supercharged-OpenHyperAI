@@ -156,6 +156,12 @@ function LastHitRules.CanTimeWindup(pointTime, frameGap)
 	return pointTime >= 2 * frameGap
 end
 
+-- The last look before the attack point: remaining seconds to it, frameGap seconds to the next look (a cancel ordered
+-- now still stops the swing; the next look may come after the release).
+function LastHitRules.LastLook(remaining, frameGap)
+	return remaining <= frameGap * 1.5 + 0.02
+end
+
 -- Wind-up check, every look while our attack on the creep winds up. s = {
 --   predictedHp, ourHit, incomingKills  as Classify, for the moment this hit lands;
 --   remaining  seconds left to the attack point (may be negative when the release is late);
@@ -171,10 +177,18 @@ end
 --   backup     a support's backup hit behind its core: when the core's hit (or anything else) kills it first, the
 --              swing is stopped ("cancel", "core") instead of released for nothing;
 --   coreNext   (backup) the core can still take it first (BackupCoreNext): stopped too ("cancel", "core-next").
+--   yield      (WindupYield) an allied hero's swing on this creep the bot leaves it to: "wait" until the last look,
+--              then "cancel", yield ("ally-swing" / "core-swing"), whether or not our hit would kill.
 function LastHitRules.WindupDecision(s)
 	if s.backup and (s.incomingKills or s.coreNext) then
-		if s.remaining <= s.frameGap * 1.5 + 0.02 then
+		if LastHitRules.LastLook(s.remaining, s.frameGap) then
 			return "cancel", s.incomingKills and "core" or "core-next"
+		end
+		return "wait", nil
+	end
+	if s.yield ~= nil then
+		if LastHitRules.LastLook(s.remaining, s.frameGap) then
+			return "cancel", s.yield
 		end
 		return "wait", nil
 	end
@@ -184,7 +198,7 @@ function LastHitRules.WindupDecision(s)
 	if s.incomingKills then
 		return "release", "others"
 	end
-	if s.remaining > s.frameGap * 1.5 + 0.02 then
+	if not LastHitRules.LastLook(s.remaining, s.frameGap) then
 		return "wait", nil
 	end
 	if s.early then
@@ -385,5 +399,33 @@ function LastHitRules.YieldReason(s)
 	end
 	return nil
 end
+
+-- Yield during our own wind-up (#71: game 077 t=38 Io (position 2) swung at the creep Phantom Assassin (position 1)
+-- took; games 083-085: 9 support backup swings released at the first look, then the core swung again and took the
+-- creep). The pick-time yield above does not apply once our swing winds up, so the wind-up watch asks this for every
+-- allied hero winding up on the creep (LastHitRules.SwingRemaining). myPos / allyPos: positions 1-5; allyKillsFirst:
+-- the allied swings landing before ours kill it (OthersKill's bySwing) and this ally's is one of them.
+-- Returns "ally-swing" (its hit kills it first: ours would land on a dead creep), "core-swing" (we are a support, it is
+-- a core: never steal the core's last hit, as at the pick) or nil. Only an ally with a lower position number counts:
+-- the two landing times come from different reads (our own wind-up clock, the ally's GetAnimCycle), so "who lands
+-- first" can come out the same way for both; by position only one of two heroes yields and they never both stop.
+function LastHitRules.WindupYield(myPos, allyPos, allyKillsFirst)
+	if allyPos == nil or myPos == nil or allyPos >= myPos then
+		return nil
+	end
+	if allyKillsFirst then
+		return "ally-swing"
+	end
+	if myPos >= 4 and allyPos <= 3 then
+		return "core-swing"
+	end
+	return nil
+end
+
+-- A swing whose release was decided ("decided": WindupDecision said release at an earlier look) is looked at again at
+-- the last look, and stopped only for these reasons: an ally takes the creep (the yields), or a backup's core does
+-- ("core", "core-next": games 083-085, the core cancelled, the support's backup decided "kills" at its first look and
+-- the core's next swing took the creep). Never for "survives": a release once decided stays a release.
+LastHitRules.RECHECK_CANCEL = { ["ally-swing"] = true, ["core-swing"] = true, core = true, ["core-next"] = true }
 
 return LastHitRules

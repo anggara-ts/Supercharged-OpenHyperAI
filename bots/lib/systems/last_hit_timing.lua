@@ -8,7 +8,8 @@
 --                our tower's next shot), lets the hit go when it kills, and cancels a hit that started early (the
 --                creep was within 1.5 of our hits) and would not kill, just before the attack point; then holds and
 --                attacks again at the right moment. Never cancels a hit that was sure when its wind-up started, a
---                deny or a harass hit (those never arm this).
+--                deny or a harass hit (those never arm this), except to yield the creep to an ally winding up on it
+--                (LastHitRules.WindupYield, [SHy-LH] yield ... at=windup) or, for a backup, to its core.
 -- The pure decisions are in last_hit_rules.lua. Logs: [SHy-LH] release / cancel / cancel-result and the per-minute
 -- [SHy-LH] minute summary. Other per-frame code (kiting #72, team roam's overlay #165) can ask X.IsTiming(bot) to keep
 -- its hands off while a last hit is being timed.
@@ -117,39 +118,46 @@ end
 
 -- The creep's HP when our hit lands in delay seconds: predictedHp, ourHit (our damage on it after armour),
 -- incomingKills (the other hits alone kill it first), swingKill (the allied swing that made incomingKills true, or
--- nil). Same sums as Fu.WillKillTarget, with the tower shot as a hit that lands first and the allied heroes' swings
--- landing before ours (X.AllySwings; exclude: a hero left out, e.g. the core whose own hit BackupFacts adds).
+-- nil), swings (X.AllySwings: every allied hero winding up on it, also those landing after ours). Same sums as
+-- Fu.WillKillTarget, with the tower shot as a hit that lands first and the allied heroes' swings landing before ours
+-- (exclude: a hero left out, e.g. the core whose own hit BackupFacts adds).
 function X.Predict(creep, damage, delay, towerShot, exclude)
 	towerShot = towerShot or 0
 	local effectiveHealth = creep:GetHealth() + creep:GetHealthRegen() * delay + 0.8
 	local incoming = Fu.GetTotalAttackWillRealDamage(creep, delay)
 	local ourHit = creep:GetActualIncomingDamage(damage, DAMAGE_TYPE_PHYSICAL)
-	local swingDamage, firstSwing = Rules.SwingDamage(X.AllySwings(GetBot(), creep, exclude), delay)
+	local swings = X.AllySwings(GetBot(), creep, exclude)
+	local swingDamage, firstSwing = Rules.SwingDamage(swings, delay)
 	local othersKill, bySwing = Rules.OthersKill(effectiveHealth, incoming, swingDamage)
 	local towerKills = towerShot > 0 and towerShot >= creep:GetHealth()
 	local swingKill = bySwing and not towerKills and firstSwing or nil
-	return effectiveHealth - incoming - swingDamage - towerShot, ourHit, othersKill or towerKills, swingKill
+	return effectiveHealth - incoming - swingDamage - towerShot, ourHit, othersKill or towerKills, swingKill, swings
 end
 
--- [SHy-LH] yield: once per creep and reason (at most every second per bot).
-local function logYield(bot, creep, why, swing, myDelay)
-	local seen = bot._lhtYieldSeen
+-- [SHy-LH] yield: once per creep, reason and stage (at = "pick": no swing of ours started; "windup": our swing is
+-- stopped for the ally), at most every second per bot and stage.
+local function logYield(bot, creep, why, swing, myDelay, at)
+	at = at or "pick"
+	bot._lhtYieldSeen = bot._lhtYieldSeen or {}
+	bot._lhtYieldLogAt = bot._lhtYieldLogAt or {}
+	local seen = bot._lhtYieldSeen[at]
 	if seen ~= nil and seen.creep == creep and seen.why == why then
 		return
 	end
-	if DotaTime() < (bot._lhtYieldLogAt or -99) then
+	if DotaTime() < (bot._lhtYieldLogAt[at] or -99) then
 		return
 	end
-	bot._lhtYieldSeen = { creep = creep, why = why }
-	bot._lhtYieldLogAt = DotaTime() + 1
+	bot._lhtYieldSeen[at] = { creep = creep, why = why }
+	bot._lhtYieldLogAt[at] = DotaTime() + 1
 	local ally = swing.ally
 	pcall(
 		print,
 		string.format(
-			"[SHy-LH] t=%.0f %s yield why=%s ally=%s human=%d pos=%d creep-hp=%d allyHit=%.0f allyEta=%.2f myEta=%.2f cycle=%.2f since=%.2f",
+			"[SHy-LH] t=%.0f %s yield why=%s at=%s ally=%s human=%d pos=%d creep-hp=%d allyHit=%.0f allyEta=%.2f myEta=%.2f cycle=%.2f since=%.2f",
 			DotaTime(),
 			heroName(bot),
 			why,
+			at,
 			heroName(ally),
 			ally:IsBot() and 0 or 1,
 			Fu.GetPosition(ally),
@@ -199,6 +207,28 @@ function X.Yield(bot, creep, class, swingKill, myDelay)
 	end
 	logYield(bot, creep, why, swingKill or core, myDelay)
 	return nil
+end
+
+-- Our own swing winds up on creep (or its release is decided) while allied heroes wind up on it too (swings:
+-- X.Predict's 5th value; swingKill its 4th; myDelay: when our hit lands): the ally the bot stops its swing for
+-- (LastHitRules.WindupYield: a lower position number only), and why, else nil. No scan of its own: the swings are the
+-- ones the prediction read.
+local function windupYield(bot, swings, swingKill, myDelay)
+	if swings == nil or #swings == 0 then
+		return nil, nil
+	end
+	local myPos = Fu.GetPosition(bot)
+	local why, yieldTo = nil, nil
+	for _, swing in ipairs(swings) do
+		local reason = Rules.WindupYield(myPos, Fu.GetPosition(swing.ally), swingKill ~= nil and swing.eta < myDelay)
+		if reason == "ally-swing" then
+			return reason, swing
+		end
+		if reason ~= nil and why == nil then
+			why, yieldTo = reason, swing
+		end
+	end
+	return why, yieldTo
 end
 
 -- A backup hit (the support behind its core): the core-swing yield before BackupDecision may say go. True when the
@@ -628,7 +658,8 @@ local function cancelSwing(bot, st, now, pointAt, predictedHp, ourHit, remaining
 	)
 end
 
-local function watchWindup(bot, st, now)
+-- recheck: the release was decided at an earlier look ("decided"); this look may only stop it (RECHECK_CANCEL).
+local function watchWindup(bot, st, now, recheck)
 	local pointTime = bot:GetAttackPoint() / math.max(0.1, bot:GetAttackSpeed())
 	if st.windupAt == nil then
 		-- Seen this frame, so it started at most one frame ago.
@@ -637,8 +668,10 @@ local function watchWindup(bot, st, now)
 	end
 	local remaining = st.windupAt + pointTime - now
 	local delay = math.max(0, remaining) + X.TravelTime(bot, st.creep)
-	local predictedHp, ourHit, incomingKills =
+	local predictedHp, ourHit, incomingKills, swingKill, swings =
 		X.Predict(st.creep, st.damage, delay, X.TowerShotBefore(bot, st.creep, delay))
+	-- An ally winding up on it that the bot leaves it to (#71, game 077 t=38): stopped at the last look.
+	local yieldWhy, yieldTo = windupYield(bot, swings, swingKill, delay)
 	local core = backupCoreOf(st)
 	local facts = nil
 	if core ~= nil then
@@ -660,7 +693,14 @@ local function watchWindup(bot, st, now)
 		early = st.early,
 		backup = core ~= nil,
 		coreNext = facts ~= nil and Rules.BackupCoreNext(facts),
+		yield = yieldWhy,
 	})
+	if recheck and not (decision == "cancel" and Rules.RECHECK_CANCEL[why]) then
+		return
+	end
+	if decision == "cancel" and yieldTo ~= nil and why == yieldWhy then
+		logYield(bot, st.creep, why, yieldTo, delay, "windup")
+	end
 	if facts ~= nil and (decision == "cancel" or decision == "release") then
 		-- state= the core's state, hold= its own hold (same creep, other unit, -), late= its hit too late (1), coreKill= its
 		-- hit kills when it lands (1).
@@ -859,6 +899,13 @@ function X.Tick(bot)
 	local swinging = bot:GetAnimActivity() == ATTACK_ACTIVITY and bot:GetAttackTarget() == creep
 	if phase == "decided" then
 		if swinging then
+			-- Looked at again only at the last look before the attack point: an ally or the backup's core may have
+			-- started a swing since the release was decided (games 083-085).
+			local pointTime = bot:GetAttackPoint() / math.max(0.1, bot:GetAttackSpeed())
+			local remaining = st.windupAt ~= nil and st.windupAt + pointTime - now or -1
+			if remaining > -X.FrameGap(bot) and Rules.LastLook(remaining, X.FrameGap(bot)) then
+				watchWindup(bot, st, now, true)
+			end
 			return true
 		end
 		-- The swing stopped before the release (another order, a disable): wait for the next one.
