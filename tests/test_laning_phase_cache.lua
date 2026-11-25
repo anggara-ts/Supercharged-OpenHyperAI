@@ -66,7 +66,9 @@ T.test("laning phase cache: a bot whose own flag changed says by=self", function
 	Cache.getGlobalGameState()
 	first.isInLanePhase = false
 	T.eq(Cache.getGlobalGameState().isLaningPhase, false, "the new flag")
-	T.ok(string.find(lastPhaseLine() or "", "by=self", 1, true) ~= nil, tostring(lastPhaseLine()))
+	local line = lastPhaseLine() or ""
+	T.ok(string.find(line, "laning-self own=false cached=true by=self", 1, true) ~= nil, line)
+	T.ok(string.find(line, "laning-own", 1, true) == nil, "not counted as a corrected read: " .. line)
 end)
 
 T.test("laning phase cache: push.lua and defend.lua read through Cache.OwnLaningPhase", function()

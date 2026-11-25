@@ -190,36 +190,40 @@ end
 Cache.CK = require(GetScriptDirectory() .. "/lib/systems/cache_keys")
 -- The game-state tables (here, and getGameState in push.lua and defend.lua) are shared by the team's five bots for
 -- 0.5s, but isLaningPhase is one bot's own flag: Fu.IsInLaningPhase() reads GetBot().isInLanePhase, which each bot's
--- laning mode sets (until 10:00-12:00 for most heroes, until 15:00 for the heroes on the override laning list such as
+-- laning mode sets (until 10:00 for most heroes, until 15:00 for the heroes on the override laning list such as
 -- Marci). Stored once, every bot read the flag of the bot that filled the table (#165, game 085 13:37-13:54: Lina's
 -- bottom push flipped between 0.99 and the "core off its lane in the laning phase" gate ten times in 17s, gated
 -- whenever Marci, still in her laning phase, had filled it). Called on every read: puts the calling bot's own flag on
--- the shared table and returns the table.
--- Log: [SHy-PHASE] laning-own own= cached= by= src= when the table held another value (at most every 30s per bot;
--- by= is the bot that read it before, by=self means the bot's own flag changed).
+-- the shared table and returns the table. Hot path: names are only built for the (throttled) log line.
+-- Log (at most every 30s per bot): [SHy-PHASE] laning-own own= cached= by=<hero> src= when the table held another
+-- bot's different flag; [SHy-PHASE] laning-self own= cached= src= when the bot's own flag changed between two reads.
+local function PhaseName(unit)
+	return unit ~= nil and (string.gsub(unit:GetUnitName(), "npc_dota_hero_", "")) or "?"
+end
 function Cache.OwnLaningPhase(state, src)
 	if state == nil then
 		return state
 	end
 	local bot = GetBot()
 	local own = Fu.IsInLaningPhase()
-	local name = bot ~= nil and string.gsub(bot:GetUnitName(), "npc_dota_hero_", "") or "?"
 	if state.isLaningPhase ~= own and bot ~= nil and DotaTime() >= (bot._laningOwnLogAt or -999) then
 		bot._laningOwnLogAt = DotaTime() + 30
+		local by = state._laningBy
 		print(
 			string.format(
-				"[SHy-PHASE] t=%.0f %s laning-own own=%s cached=%s by=%s src=%s",
+				"[SHy-PHASE] t=%.0f %s %s own=%s cached=%s by=%s src=%s",
 				DotaTime(),
-				name,
+				PhaseName(bot),
+				by == bot and "laning-self" or "laning-own",
 				tostring(own),
 				tostring(state.isLaningPhase),
-				state._laningBy == name and "self" or tostring(state._laningBy),
+				by == bot and "self" or PhaseName(by),
 				tostring(src)
 			)
 		)
 	end
 	state.isLaningPhase = own
-	state._laningBy = name
+	state._laningBy = bot
 	return state
 end
 function Cache.getGlobalGameState()
