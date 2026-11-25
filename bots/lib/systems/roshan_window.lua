@@ -109,6 +109,13 @@ local function UnderRetreat(bot, value)
 	return value
 end
 
+-- The peeker itself: its player ID and hero (a Spirit Bear shares Lone Druid's player ID; Meepo's clones his name).
+local function IsPeeker(state, bot)
+	return state.peekerId ~= nil
+		and state.peekerId == bot:GetPlayerID()
+		and bot:GetUnitName() == state.peekerUnit
+		and not Fu.IsMeepoClone(bot)
+end
 local function EndTrip(state, team, now, why, seen)
 	local peeker = MemberById(team, state.peekerId)
 	local pit = Fu.GetCurrentRoshanLocation()
@@ -141,13 +148,13 @@ local function UpdatePeek(state, team, now, seen, pit)
 			why = "dead"
 		elseif now > (state.tripDeadline or now) then
 			why = "timeout"
+		elseif Danger(peeker) then
+			why = "danger"
 		elseif pitVisible then
 			state.visibleSince = state.visibleSince or now
 			if now - state.visibleSince >= PEEK_SEE_HOLD then
 				why = "looked"
 			end
-		elseif Danger(peeker) then
-			why = "danger"
 		end
 		if not pitVisible then
 			state.visibleSince = nil
@@ -173,14 +180,17 @@ local function UpdatePeek(state, team, now, seen, pit)
 		local member = GetTeamMember(slot)
 		if member ~= nil and not member:IsNull() and member:IsAlive() and not member:IsIllusion() then
 			local pid = member:GetPlayerID()
+			local free = IsPlayerBot(pid)
+				and Fu.GetHP(member) >= PEEK_MIN_HP
+				and not member:WasRecentlyDamagedByAnyHero(3.0)
+				and not Busy(member)
 			candidates[#candidates + 1] = {
 				id = pid,
 				support = not Fu.IsCore(member),
 				dist = GetUnitToLocationDistance(member, pit),
-				ok = IsPlayerBot(pid) and Fu.GetHP(member) >= PEEK_MIN_HP and not member:WasRecentlyDamagedByAnyHero(
-					3.0
-				) and not Busy(member),
+				ok = free,
 				name = ShortName(member),
+				unitName = member:GetUnitName(),
 			}
 		end
 	end
@@ -191,6 +201,7 @@ local function UpdatePeek(state, team, now, seen, pit)
 		return
 	end
 	state.peekerId = pick.id
+	state.peekerUnit = pick.unitName
 	state.tripStart = now
 	state.tripDeadline = now + math.min(PEEK_TRIP_MAX, PEEK_TRIP_BASE + pick.dist / PEEK_WALK_SPEED)
 	state.visibleSince = nil
@@ -314,7 +325,7 @@ function RoshanWindow.Desire(bot, desire)
 		return desire
 	end
 	local now = DotaTime()
-	if state.peekerId ~= nil and state.peekerId == bot:GetPlayerID() then
+	if IsPeeker(state, bot) then
 		return math.max(desire, UnderRetreat(bot, RoshanWindow.PEEK_DESIRE))
 	end
 	if
@@ -368,7 +379,7 @@ end
 -- The peeker's walk (wrapped Think of the Roshan mode). Returns true when it gave the order.
 local function PeekThink(bot)
 	local state = states[GetTeam()]
-	if state == nil or state.peekerId == nil or state.peekerId ~= bot:GetPlayerID() then
+	if state == nil or not IsPeeker(state, bot) then
 		return false
 	end
 	local pit = Fu.GetCurrentRoshanLocation()
