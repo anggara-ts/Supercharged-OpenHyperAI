@@ -373,11 +373,11 @@ end
 -- throttle per bot; a change held back prints later), with the spot taken instead (alt=).
 -- Game 084 (t=1023-1029, Underlord at our mid T2, no enemy seen): a missing enemy's reach grows to 4500, so 4 missing
 -- enemies closed the wave under our own tower, and farm, assemble and push took turns 16 times in 20s. Now:
--- - a lane wave or front our tower covers (T1: 1100, T2 and deeper: 1800 from it; DangerMap.Rules.OwnTowerCover)
+-- - a lane wave or front our tower covers (T1: 1100, T2 and deeper: 1900 from it; DangerMap.Rules.OwnTowerCover)
 --   counts only the enemies seen in the last 2s ([SHy-DANGER] farm-keep why=own-tower);
 -- - a spot skipped for danger stays skipped 10s (DangerMap.Rules.HoldSkip; held=yes on farm-skip), by its name
 --   (wave, lane<N>, camp key), so the farm does not pick and drop it every think;
--- - with nothing left (every camp and lane front skipped) the bot waits for the safest wave by our towers
+-- - with nothing left (a wave or lane front skipped for danger, no camp) the bot waits for the safest wave by our towers
 --   (SafestTowerWave, [SHy-DANGER] farm-keep why=no-alt) instead of leaving farm.
 local DangerRules = DangerMap.Rules
 local dangerLogged, dangerLogAt = {}, -999
@@ -385,7 +385,7 @@ local dangerLogged, dangerLogAt = {}, -999
 local spotCache, spotCacheAt = {}, nil
 local skipHolds = {} -- spot name -> DangerRules.HoldSkip entry
 local keepLogAt = {} -- farm-keep throttle per reason
-local dangerSkippedNow = false -- a spot was skipped for danger in this desire (GetDesireHelper resets it)
+local waveSkippedNow = false -- a lane wave or lane front was skipped for danger in this desire (GetDesireHelper resets it)
 local NO_DANGER = { danger = 0, seen = 0, missing = 0, allies = 0, ownTower = -1, covered = false }
 local function LogDangerKeep(why, spot, loc, info)
 	if DotaTime() < (keepLogAt[why] or -999) then
@@ -432,7 +432,7 @@ local function SpotDangerWhy(loc, enemyCamp, holdKey, isWave)
 		why, skipHolds[holdKey] = DangerRules.HoldSkip(skipHolds[holdKey], DotaTime(), info.why, info.covered)
 	end
 	if why ~= nil then
-		dangerSkippedNow = true
+		waveSkippedNow = waveSkippedNow or isWave == true
 	elseif info.kept ~= nil then
 		LogDangerKeep(info.kept, holdKey or "-", loc, info)
 	end
@@ -1139,7 +1139,7 @@ function GetDesire()
 end
 function GetDesireHelper()
 	bot._farmExitReason = nil
-	dangerSkippedNow = false
+	waveSkippedNow = false
 	-- [SHy-CAMP] survey, once per team (site.lua keeps the flag).
 	Fu.Site.SurveyCamps(bot)
 	if preferredCamp == nil then
@@ -1661,15 +1661,17 @@ function GetDesireHelper()
 				end
 			end
 		end
-		-- Nothing left because the danger map skipped it (#227, game 084): wait for the safest wave by our towers at
-		-- a steady MODERATE (push and defend calls still win) instead of leaving farm and coming back every second.
+		-- Nothing left because the danger map skipped the waves (#227, game 084 alt=camp:none): wait for the safest wave
+		-- by our towers instead of leaving farm and coming back every second. VERYHIGH like the lane front above: the
+		-- push scaling in GetDesire already cuts it when the team pushes (game 084: 0.6 -> 0.24 at push 0.7), and a
+		-- MODERATE (0.35 -> 0.15) lost to the bot's own weak push (0.20), which did not hit the wave either.
 		-- Not gated on the active mode (Fu.Site.IsModeSuitableToFarm reads it): that would turn it on and off again.
-		if #laneCreeps == 0 and preferredCamp == nil and dangerSkippedNow and bot:GetHealth() > 200 then
+		if #laneCreeps == 0 and preferredCamp == nil and waveSkippedNow and bot:GetHealth() > 200 then
 			local waitAt = SafestTowerWave()
 			if waitAt ~= nil then
 				bot.farmLocation = waitAt
 				bot._farmExitReason = "danger_no_alt"
-				return BOT_MODE_DESIRE_MODERATE
+				return BOT_MODE_DESIRE_VERYHIGH
 			end
 		end
 	end

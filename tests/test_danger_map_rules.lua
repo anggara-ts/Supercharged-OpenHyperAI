@@ -153,7 +153,7 @@ T.test("danger map: own-tower cover in the team snapshot", function()
 	T.eq(DangerMap.SeenDanger(spot), 5, "the five Dire heroes are visible")
 	local towerDist, covered, tower = DangerMap.OwnTower(spot)
 	T.near(towerDist, 707, 1, "tower distance")
-	T.eq(covered, true, "within 1800 of a tier 2 tower")
+	T.eq(covered, true, "within 1900 of a tier 2 tower")
 	T.eq(tower and tower.tier, 2, "tier")
 	local why, info = DangerMap.FarmSkip(GetBot(), spot, false, true)
 	T.eq(why, "danger-visible", "a wave under our tower: five seen enemies still skip it")
@@ -190,7 +190,7 @@ T.test("danger map: game 084 Underlord - the wave at our mid T2 is kept with 4 e
 	T.eq(R.Danger(G084_MISSING, fx, fy, nil, nil, R.SEEN_RECENT), 0, "none of them seen")
 	local towerDist, covered = R.OwnTowerCover(fx, fy, G084_TOWERS)
 	T.near(towerDist, 1355, 5, "front to mid T2")
-	T.eq(covered, true, "tier 2: within 1800")
+	T.eq(covered, true, "tier 2: within 1900")
 	local s = { danger = 4, seen = 0, missing = 4, allies = 0, farSide = false }
 	T.eq(R.FarmSkipWhy(s), "danger", "without the cover: skipped (game 084)")
 	s.covered = true

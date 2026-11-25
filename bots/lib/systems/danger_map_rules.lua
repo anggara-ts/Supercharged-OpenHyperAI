@@ -26,7 +26,7 @@ Rules.ALLY_RADIUS = 1500 -- an ally within this of the spot: the farm is not alo
 -- counts only the enemies seen in the last SEEN_RECENT seconds: the tower and a short walk home cover the rest.
 Rules.TOWER_RANGE = 700
 Rules.COVER_T1 = Rules.TOWER_RANGE + 400 -- a tier 1 tower: inside its range and a step out
-Rules.COVER_DEEP = Rules.TOWER_RANGE + 1100 -- tier 2 and deeper: about 3.5s of walking (300) back into its range
+Rules.COVER_DEEP = Rules.TOWER_RANGE + 1200 -- tier 2 and deeper: about 4s of walking (300) back into its range
 Rules.SEEN_RECENT = 2 -- "seen": visible now, or stepped into the fog in the last 2s
 Rules.SKIP_HOLD = 10 -- a spot skipped for danger stays skipped this long after its last skip
 Rules.FALLBACK_TOWER_REACH = 3000 -- no-alternative fallback: a lane front at most this far from one of our towers
