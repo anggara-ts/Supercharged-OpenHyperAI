@@ -61,9 +61,14 @@ since #110. Issue #109.
   engine's own ability list printed when Rubick steals a spell, game 043). Since 7.42 none of them is in the
   `[SHy-API] abilities` dump (games 049-062, slots 0-35), and `GetAbilityByName("ability_capture")` /
   `("ability_lamp_use")` return nil. The game files still define all four. So bots can't capture outposts,
-  light watchers, or use Twin Gates or Underlord's Fiend's Gate with an ability. `[SHy-TRAVEL] warp-abilities`
-  checks the two warp names directly, and `[SHy-TRAVEL] gate-try` tries `Action_MoveToUnit`, `Action_UseShrine`
-  and `Action_AttackUnit` on a Twin Gate once per game.
+  light watchers, or use Twin Gates or Underlord's Fiend's Gate with an ability. Confirmed for Twin Gates: the #226
+  interaction probe walked a bot of each team to a gate (within ~140) and ordered `Action_MoveToUnit`,
+  `Action_AttackUnit` and `Action_UseShrine` on it; no order started a channel and the warp ability never came
+  (`[SHy-PROBE] interact kind=gate step=summary result=no why=never-came ... channel=false`, 4 tries in games
+  076-077). So the trip
+  planner never routes through a gate, and the same order probe planned in #53 was dropped. `[SHy-TRAVEL]
+  warp-abilities` checks the two warp names once per bot; if Valve gives heroes the ability back, the gate route in
+  `bots/lib/systems/objective_travel.lua` turns on by itself.
 
 ### Constants by group (game-mode, hero-pick and animation activity constants left out)
 
