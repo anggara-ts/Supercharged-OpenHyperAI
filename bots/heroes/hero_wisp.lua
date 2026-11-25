@@ -689,11 +689,14 @@ local function issueRelocate(plan)
 		plan.lastTickAt = plan.orderAt
 		plan.maxGap = 0
 		-- Seconds Io could cast since the first order, seconds of order hold used, ticks not sent by cause, and Io's
-		-- action type seen before each re-send (6 = still our cast, anything else replaced it).
+		-- action type seen before each re-send. acts: without the hold (the mode Think of this frame ran just before,
+		-- so it shows the mode's own order whether or not the cast stood); actsHeld: under the hold since the last
+		-- re-send (6 = our cast still stood, anything else replaced it although the Lua modes were held).
 		plan.free = 0
 		plan.held = 0
 		plan.blocked = {}
 		plan.acts = {}
+		plan.actsHeld = {}
 		relocateState = plan
 	end
 end
@@ -804,7 +807,7 @@ local function relocateTick()
 			end
 			print(
 				string.format(
-					"[SHy-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f ours=%s enemies=%s partner=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s acts=%s",
+					"[SHy-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f ours=%s enemies=%s partner=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s acts=%s actsHeld=%s",
 					now,
 					state.why,
 					state.allyName,
@@ -821,7 +824,8 @@ local function relocateTick()
 					state.free or 0,
 					state.held or 0,
 					countText(state.blocked),
-					countText(state.acts)
+					countText(state.acts),
+					countText(state.actsHeld)
 				)
 			)
 			if state.kind == "save" then
@@ -859,7 +863,7 @@ local function relocateTick()
 			end)
 			print(
 				string.format(
-					"[SHy-WISP] t=%.0f wisp relocate-order-lost why=%s ally=%s sends=%d waited=%.1f free=%.1f gap=%.1f held=%.1f blocked=%s acts=%s castable=%s block=%s mode=%s action=%s",
+					"[SHy-WISP] t=%.0f wisp relocate-order-lost why=%s ally=%s sends=%d waited=%.1f free=%.1f gap=%.1f held=%.1f blocked=%s acts=%s actsHeld=%s castable=%s block=%s mode=%s action=%s",
 					now,
 					state.why,
 					state.allyName,
@@ -870,6 +874,7 @@ local function relocateTick()
 					state.held or 0,
 					countText(state.blocked),
 					countText(state.acts),
+					countText(state.actsHeld),
 					tostring(relocateAbility:IsFullyCastable()),
 					block or "none",
 					tostring(bot:GetActiveMode()),
@@ -898,7 +903,8 @@ local function relocateTick()
 				return bot:GetCurrentActionType()
 			end)
 			local actKey = okAction and tostring(action) or "?"
-			state.acts[actKey] = (state.acts[actKey] or 0) + 1
+			local acts = (state.holdUntil ~= nil and now <= state.holdUntil) and state.actsHeld or state.acts
+			acts[actKey] = (acts[actKey] or 0) + 1
 			bot:Action_UseAbilityOnLocation(relocateAbility, state.target)
 			state.sends = (state.sends or 0) + 1
 			-- No TP order from the item think in the same frame (it would replace this one).

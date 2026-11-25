@@ -222,7 +222,7 @@ T.test("relocate: a pending order is lost, dropped or sent again", function()
 	end
 	T.eq(verdict(), nil, "a fresh save is sent again")
 	T.eq(verdict({ free = 5.1, total = 5.1 }), "lost", "5s with Io able to cast and no cast: lost")
-	-- Game 083 t=3054-3056: Puck's Waning Rift silenced Io at the end; disabled time is not lost time.
+	-- Game 083 t=3056: the lost line said disabled=true (cause unverified); disabled time is not lost time.
 	T.eq(verdict({ free = 3.0, total = 6.0 }), nil, "3s free + 3s silenced: still waiting")
 	T.eq(verdict({ free = 3.0, total = 10.5 }), "disabled", "over 10s in all: given up as disabled")
 	T.eq(verdict({ allyAlive = false }), "ally-dead", "the ally the save was for died, Io is fine")
