@@ -947,7 +947,8 @@ function MapObjectives.NoteLotusYield(bot, what, retreatDesire, dist, stand)
 		)
 	)
 end
--- [SHy-LOTUS] stand-end why=retreat: the spawn closed (end=window | cap) while the hold was paused for retreat. The spawn
+-- [SHy-LOTUS] stand-end why=retreat: the spawn closed (end=window | cap) or the bot was pushed beyond LOTUS_RESUME_DIST
+-- (end=far) while the hold was paused for retreat or after it came back from the pause. The spawn
 -- is skipped, but not "checked" for the team (LotusCheckedThisMark): nobody saw whether the lotus is there.
 function MapObjectives.LotusStandEnd(bot, ending, retreatDesire, mark)
 	bot._lotusSkipMark = mark
@@ -1072,7 +1073,7 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 		local loc, dist = MapObjectives.PickWisdomForBot(bot, locs)
 		local maxWalk = MapObjectives.MaxWalk(bot, true)
 		local arrive = MapObjectives.ArriveEarlyForDistance(dist, bot)
-		local inWisdom, etaW = MapObjectives.InMarkWindow(wInterval, arrive, RuneRules.WISDOM_STAY)
+		local inWisdom, etaW = MapObjectives.InMarkWindow(wInterval, arrive, RuneRules.WisdomStayAfter(dist))
 		local cantArrive = false
 		local windowEnd = false
 		-- Only go when the walk fits the window (it closes 8s after the mark). Game 039, 21:00: Tusk said
@@ -1240,11 +1241,13 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 				local retreatDesire = RetreatDesireNow(bot)
 				local capped = stand ~= nil and RuneRules.LotusHeld(stand, DotaTime()) >= RuneRules.LOTUS_HOLD_CAP
 				local open = window and (stand == nil or stand.result == nil)
-				local step = RuneRules.LotusYieldStep(state, retreatDesire, open, capped)
+				local far = type(dist) == "number" and dist > RuneRules.LOTUS_RESUME_DIST
+				local step = RuneRules.LotusYieldStep(state, retreatDesire, open, capped, far)
 				if step == "drop" then
 					bot._lotusYield = nil
 					beside = false
-					MapObjectives.LotusStandEnd(bot, capped and "cap" or "window", retreatDesire, spawnMark)
+					local ending = capped and "cap" or not open and "window" or "far"
+					MapObjectives.LotusStandEnd(bot, ending, retreatDesire, spawnMark)
 				elseif step == "yield-start" or step == "yield" then
 					bot._lotusYield = state
 					beside = false
@@ -1575,7 +1578,7 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		-- GetXPNeededToLevel), so the gain is read from the XP still needed to level and the level (RuneRules.XpGain).
 		local xp = { needed = bot:GetXPNeededToLevel(), level = bot:GetLevel() }
 		local interval = MapObjectives.WisdomInterval()
-		local mark = math.floor(math.max(0, now) / interval) * interval
+		local mark = RuneRules.WisdomStandMark(now, interval)
 		local standFrom = RuneRules.WisdomStandFrom(bot._wisdomStandSince, mark, now)
 		if bot._wisdomStandSince == nil or standFrom ~= bot._wisdomStandSince then
 			-- First think on the shrine, or the mark passed while standing: the clock and the XP baseline start
@@ -1680,7 +1683,7 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		take = { mark = mark, pool = loc, base = have }
 		bot._lotusTake = take
 	end
-	local step, after = RuneRules.LotusTakeStep(take, have, DotaTime())
+	local step, after, gap = RuneRules.LotusTakeStep(take, have, DotaTime())
 	if step == "leave" then
 		bot._lotusSkipMark = mark
 		bot._lotusSkipPool = loc
@@ -1689,10 +1692,11 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		pcall(
 			print,
 			string.format(
-				"[SHy-LOTUS] t=%.1f %s taken-leave after=%.1f value=%d",
+				"[SHy-LOTUS] t=%.1f %s taken-leave after=%.1f gap=%.1f value=%d",
 				DotaTime(),
 				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 				after or -1,
+				gap or -1,
 				have
 			)
 		)

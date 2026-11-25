@@ -865,17 +865,40 @@ end
 -- bounty (type 5, worked=no at every horn), and the horn bounty's worked=no stopped the 2:00 water try too. Io then
 -- stood on the bottom spot with the water rune up and no pick-up order, and Valve's item mode didn't take it either.
 local RIVER_PICKUP_TRY_DESIRE = 0.92
+-- Where the order never took the rune (RuneRules.RiverOrderWorks: river bounties, anything at the bottom spot) or it
+-- already failed for this rune type, the bot steps onto the spot and lets go at once, with no order
+-- (RuneRules.RiverTryPlan, RuneMode.StartRiverYield): no 1.5s held above the item mode, no walk off the spot.
 function RuneMode.RiverPickupTry(id, spawn)
 	bot._riverPickupTried = bot._riverPickupTried or {}
+	bot._riverYielded = bot._riverYielded or {}
 	local key = spawn .. ":" .. id
 	local okT, runeType = pcall(GetRuneType, id)
 	local typeKey = tostring(okT and runeType)
 	if
-		bot._riverPickupNo ~= nil and bot._riverPickupNo[typeKey]
-		or bot._riverPickupTried[key]
+		bot._riverPickupTried[key]
 		or bot._riverPickup ~= nil
+		or bot._riverRelease ~= nil
 		or GetRuneStatus(id) ~= RUNE_STATUS_AVAILABLE
 	then
+		return false
+	end
+	local stopped = bot._riverPickupNo ~= nil and bot._riverPickupNo[typeKey] == true
+	local orderWorks = RuneRules.RiverOrderWorks(id, okT and runeType or nil, RUNE_POWERUP_1, RUNE_WATER)
+	local spot = GetRuneSpawnLocation(id)
+	local plan = RuneRules.RiverTryPlan(
+		orderWorks,
+		stopped,
+		bot._riverYielded[key] == true,
+		GetUnitToLocationDistance(bot, spot)
+	)
+	if plan == "move" then
+		bot:Action_MoveToLocation(spot)
+		return false
+	elseif plan == "yield" then
+		bot._riverYielded[key] = true
+		RuneMode.StartRiverYield(id, spawn, okT and runeType or nil, spot)
+		return true
+	elseif plan == "none" then
 		return false
 	end
 	bot._riverPickupTried[key] = true
@@ -914,14 +937,19 @@ function RuneMode.RiverReleaseDesire()
 		return BOT_MODE_DESIRE_NONE
 	end
 	bot._riverRelease = nil
-	bot._riverReleaseDone = bot._riverReleaseDone or {}
-	bot._riverReleaseDone[tostring(release.spawn) .. ":" .. release.id] = true
+	-- A no-order release that didn't get the rune leaves the stay and the return on: the order runs after it
+	-- (RuneRules.RiverTryPlan) while the bot is still on the spot.
+	if taken or release.why ~= "no-order" then
+		bot._riverReleaseDone = bot._riverReleaseDone or {}
+		bot._riverReleaseDone[tostring(release.spawn) .. ":" .. release.id] = true
+	end
 	pcall(
 		print,
 		string.format(
-			"[SHy-RUNE] t=%.1f %s river-release-end spot=%d taken=%s held=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
+			"[SHy-RUNE] t=%.1f %s river-release-end why=%s spot=%d taken=%s held=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
 			now,
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			release.why or "pickup-failed",
 			release.id,
 			taken and "yes" or "no",
 			now - release.t0,
@@ -947,6 +975,36 @@ local function OtherHeroAtSpot(loc)
 		end
 	end
 	return false
+end
+-- Let go of a river rune at once, with no pick-up order (RuneRules.RiverTryPlan "yield"): desire 0 for YIELD_FOR
+-- seconds (RuneMode.RiverReleaseDesire) so Valve's item mode can take it from the spot.
+-- [SHy-RUNE] river-release why=no-order spot= type= dist= others= stopped= for=1s, then river-release-end why=no-order.
+function RuneMode.StartRiverYield(id, spawn, runeType, spot)
+	bot._riverRelease = {
+		id = id,
+		spawn = spawn,
+		loc = spot,
+		t0 = DotaTime(),
+		gold = bot:GetGold(),
+		itemMode = false,
+		why = "no-order",
+		duration = RuneRules.YIELD_FOR,
+	}
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.1f %s river-release why=no-order spot=%d type=%s dist=%d others=%s stopped=%s since=%.1f for=%ds",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			id,
+			tostring(runeType),
+			GetUnitToLocationDistance(bot, spot),
+			tostring(OtherHeroAtSpot(spot)),
+			tostring(bot._riverPickupNo ~= nil and bot._riverPickupNo[tostring(runeType)] == true),
+			DotaTime() - spawn,
+			RuneRules.YIELD_FOR
+		)
+	)
 end
 function RuneMode.RiverPickupCheck()
 	local pickup = bot._riverPickup

@@ -145,16 +145,53 @@ function RuneRules.ReleaseStarts(worked, dist, up)
 	return worked == "no" and up == true and (dist or math.huge) <= RuneRules.RELEASE_RADIUS
 end
 
--- One step of a release (release = { t0 = start }): "hold" (keep the desire at 0) or "end" plus taken (true when the
--- rune is gone).
+-- One step of a release (release = { t0 = start, duration = seconds, nil for RELEASE_FOR }): "hold" (keep the desire
+-- at 0) or "end" plus taken (true when the rune is gone).
 function RuneRules.ReleaseStep(release, now, up)
 	if not up then
 		return "end", true
 	end
-	if now - release.t0 >= RuneRules.RELEASE_FOR then
+	if now - release.t0 >= (release.duration or RuneRules.RELEASE_FOR) then
 		return "end", false
 	end
 	return "hold"
+end
+
+-- Where our pick-up order takes a river rune (#32, `river-pickup-try` lines, games 075-085): a water rune (type 7) at
+-- the top spot (RUNE_POWERUP_1): worked=yes 9, unsure 2, no 0. Never anything at the bottom spot (RUNE_POWERUP_2,
+-- id=1: worked=no 14 of 14, bounties and water runes), and never a river bounty (type 5) or an unknown type -1 at the
+-- top spot (worked=no 12, one unsure with others on the spot). There the order only cost time: the bot stood 1.5s on
+-- the rune held above the item mode, and in 5 of the 16 releases in games 081-085 it had walked 167-287 off the spot
+-- while the order ran (084 Tusk: `[SHy-STUCK] t=1 ... action=2 moved=63`); none of those 5 got the rune
+-- (`river-release-end taken=no`). Released on the spot (dist 0-72), the item mode took it 0.2-0.4s later, 10 of 11.
+-- topId / waterType: RUNE_POWERUP_1 / RUNE_WATER (nil when the API has no RUNE_WATER).
+function RuneRules.RiverOrderWorks(id, runeType, topId, waterType)
+	return id == topId and waterType ~= nil and runeType == waterType
+end
+-- The no-order release (`river-release why=no-order`): from within RIVER_YIELD_RADIUS of the spot, for YIELD_FOR
+-- seconds. Every take after a release on the spot came within 0.4s.
+RuneRules.RIVER_YIELD_RADIUS = 100
+RuneRules.YIELD_FOR = 1
+-- What the river pick-up step does on a spot with the rune up: "order" (Action_PickUpRune, released if it fails),
+-- "move" (step onto the spot first), "yield" (no order: let go at once for Valve's item mode) or "none".
+-- orderWorks: RiverOrderWorks; stopped: an order for this rune type already failed this game; yielded: this bot already
+-- let go of this spawn's rune without an order. Every quick item-mode take in games 081-085 came right after an order,
+-- so letting go without one is not proven to bring the item mode (game 080: Io stood at dist 0 in laning, 0.27, and it
+-- didn't come). When the no-order release ends with the rune still up, the order runs once (then the old release).
+function RuneRules.RiverTryPlan(orderWorks, stopped, yielded, dist)
+	if orderWorks and not stopped then
+		return "order"
+	end
+	if not yielded then
+		if (dist or math.huge) > RuneRules.RIVER_YIELD_RADIUS then
+			return "move"
+		end
+		return "yield"
+	end
+	if stopped then
+		return "none"
+	end
+	return "order"
 end
 
 -- Which river spot the water walk tries first (#32, game 078, 0:00): both teams tried the top spot (RUNE_POWERUP_1)
@@ -202,14 +239,37 @@ RuneRules.WISDOM_STAND = 220
 RuneRules.WISDOM_COVER = 3.5
 -- Seconds the shrine window stays open after the mark (the InMarkWindow stayAfter of the shrine trip).
 RuneRules.WISDOM_STAY = 8
+-- A bot already on the shrine (within WISDOM_STAND) when the window closes stays this much longer, to run its stand
+-- (WISDOM_COVER) out. Games 082-085: Winter Wyvern (082 t=428), Puck (083 t=2108), Tusk (084 t=428) and Wraith King
+-- (085 t=1268) reached the shrine at 139-140 as the window closed (`give-up why=window dist=139 late=8`) and walked off.
+-- Whether the XP is still there after the window is not in the game data; the stand's `taken|covered ... late=` (11-12)
+-- answers it. Some stands before a mark gained 203-679 XP (`taken ... late=417-419`, games 083-085), one +3 (082 t=839):
+-- creep XP can't be told apart, so this is unverified.
+RuneRules.WISDOM_LATE_STAND = RuneRules.WISDOM_COVER + 1
+-- The InMarkWindow stayAfter of a shrine trip for a bot this far from the shrine.
+function RuneRules.WisdomStayAfter(dist)
+	if (dist or math.huge) <= RuneRules.WISDOM_STAND then
+		return RuneRules.WISDOM_STAY + RuneRules.WISDOM_LATE_STAND
+	end
+	return RuneRules.WISDOM_STAY
+end
+-- The mark a stand on the shrine is for: the next mark from WISDOM_LOOKAHEAD seconds before it (a trip arrives up to
+-- ~25s early), else the last one. The stand used the last passed mark, so a bot on the shrine before a mark ran its
+-- 3.5s toward the previous mark and printed `taken ... late=419` (games 083-085: Phantom Assassin, Tusk, Lone Druid,
+-- Phoenix) before this mark's countdown began, and marked the previous mark claimed.
+RuneRules.WISDOM_LOOKAHEAD = 40
+function RuneRules.WisdomStandMark(now, interval)
+	return math.floor((math.max(0, now) + RuneRules.WISDOM_LOOKAHEAD) / interval) * interval
+end
 
 -- Can this shrine trip still make it? Returns "go" | "cant-arrive" | "window". etaW: seconds to the mark (negative
 -- after it). A bot already on the shrine never reads cant-arrive, and a window with under 1s left reads "window":
 -- game 068 t=428, Vengeful Spirit at dist=140 printed `cant-arrive travel=0 eta=-8` (travel 0.4s > 0s left).
+-- On the shrine the window runs WISDOM_LATE_STAND longer.
 function RuneRules.WisdomTrip(dist, travel, etaW)
 	local left = etaW + RuneRules.WISDOM_STAY
 	if dist <= RuneRules.WISDOM_STAND then
-		if left <= 0 then
+		if left + RuneRules.WISDOM_LATE_STAND <= 0 then
 			return "window"
 		end
 		return "go"
@@ -272,7 +332,9 @@ end
 -- 0.45s later. Live game 2026-11-23: a bot that took the lotus stood ~6s more (the pluck-stall clock restarted on the
 -- new charge, `do=hold` ... `do=stalled`). Now a stand ends LOTUS_MORE_WAIT after the last lotus taken when no other
 -- came. state: { base = lotus charges at the stand's start, lastRise, first } (kept per bot and mark).
--- Returns "wait" or "leave", and the seconds since the first lotus taken.
+-- Returns "wait" or "leave", the seconds since the first lotus taken and the seconds since the last one. A bot that
+-- takes several in a row stays more than 2s from the first (game 084 t=2706, Lone Druid's bear: `taken-leave after=3.3
+-- value=5`, five Healing Lotuses' worth): the time since the last one is what this rule bounds.
 RuneRules.LOTUS_MORE_WAIT = 1.0
 function RuneRules.LotusTakeStep(state, have, now)
 	if have < state.base then
@@ -284,7 +346,7 @@ function RuneRules.LotusTakeStep(state, have, now)
 		state.first = state.first or now
 	end
 	if state.lastRise ~= nil and now - state.lastRise >= RuneRules.LOTUS_MORE_WAIT then
-		return "leave", now - state.first
+		return "leave", now - state.first, now - state.lastRise
 	end
 	return "wait", nil
 end
@@ -409,12 +471,15 @@ end
 RuneRules.LOTUS_RESUME_DIST = 1600
 -- The yield is a pause, not the end (coordinator, 2026-11-23): the hold returns 0 while retreat asks for it, and comes
 -- back when retreat drops below the line while the spawn is still open (in its window, no taken / gone / cap). The spawn
--- is dropped only when it closes (window or cap) during a yield. state: { yielding } per bot and spawn. open: the
--- spawn's window still runs and it has no result; capped: the stand's wall-time cap ran out.
--- Returns "hold" | "yield-start" | "yield" | "resume" | "drop".
-function RuneRules.LotusYieldStep(state, retreatDesire, open, capped)
-	if state.yielding and (not open or capped) then
+-- is dropped only when it closes (window or cap) during a yield. state: { yielding, resumed } per bot and spawn. open:
+-- the spawn's window still runs and it has no result; capped: the stand's wall-time cap ran out; far: the bot is beyond
+-- LOTUS_RESUME_DIST. A resumed hold is dropped the same way: game 083 t=199, Zeus resumed from 1074 away and the cap
+-- only ended it at `held=18.4` (the stand's own cap step runs within LOTUS_NEAR); game 084 t=395, Pugna printed
+-- `hold-resume` 10562 away after a death. Returns "hold" | "yield-start" | "yield" | "resume" | "drop".
+function RuneRules.LotusYieldStep(state, retreatDesire, open, capped, far)
+	if (state.yielding or state.resumed) and (not open or capped or far) then
 		state.yielding = false
+		state.resumed = false
 		return "drop"
 	end
 	if RuneRules.LotusHoldYields(retreatDesire) then
@@ -426,6 +491,7 @@ function RuneRules.LotusYieldStep(state, retreatDesire, open, capped)
 	end
 	if state.yielding then
 		state.yielding = false
+		state.resumed = true
 		return "resume"
 	end
 	return "hold"

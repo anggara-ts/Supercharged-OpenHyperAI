@@ -150,8 +150,26 @@ T.test("rune rules: wisdom shrine trip and stand", function()
 	-- 7.42 game data: ability_xp_fountain radius 300; the shrine's RingRadius 100 stops a hero at ~140.
 	T.ok(R.WISDOM_STAND < R.WISDOM_RADIUS and R.WISDOM_STAND > 140, "stand distance reachable and inside the radius")
 	-- Game 068 t=428: Vengeful Spirit at dist=140, travel 0.4s, eta -8 read cant-arrive.
-	T.eq(R.WisdomTrip(140, 0.4, -8), "window", "on the shrine at the window end: window, not cant-arrive")
+	-- Games 082-085: four bots reached the shrine at 139-140 as the window closed (`give-up why=window late=8`). On the
+	-- shrine the window runs WISDOM_LATE_STAND longer, so the stand runs out.
+	T.eq(R.WisdomTrip(140, 0.4, -8), "go", "on the shrine at the window end: stay for the stand")
 	T.eq(R.WisdomTrip(140, 0.4, -5), "go", "on the shrine with 3s left: stay")
+	T.eq(R.WisdomTrip(140, 0.4, -12), "go", "on the shrine 12s after the mark: still standing")
+	T.eq(R.WisdomTrip(140, 0.4, -12.6), "window", "past the late stand: window")
+	T.eq(R.WisdomTrip(300, 1, -8), "window", "not on the shrine at the window end: window")
+	T.eq(R.WisdomStayAfter(140), R.WISDOM_STAY + R.WISDOM_LATE_STAND, "on the shrine: the longer window")
+	T.eq(R.WisdomStayAfter(2000), R.WISDOM_STAY, "elsewhere: the 8s window")
+	T.ok(R.WISDOM_LATE_STAND > R.WISDOM_COVER, "the late stand fits a whole stand")
+	-- The mark a stand is for: the next one from 40s before it (games 083-085: `taken ... late=419` before the mark).
+	T.eq(R.WisdomStandMark(836, 420), 840, "4s before the 14:00 mark: that mark")
+	T.eq(R.WisdomStandMark(844, 420), 840, "after the mark: that mark")
+	T.eq(R.WisdomStandMark(852, 420), 840, "12s after: still that mark")
+	T.eq(R.WisdomStandMark(700, 420), 420, "far from the next mark: the last one")
+	-- Phoenix, game 085: on the shrine from 835.5; the clock runs before the mark but nothing is done before it (the
+	-- caller needs now >= mark), and at the mark it restarts.
+	local mark = R.WisdomStandMark(835.5, 420)
+	T.ok(835.5 < mark, "before the mark: the stand waits for it")
+	T.eq(R.WisdomStandFrom(835.5, mark, 840.1), 840, "the mark passed: the stand counts from it")
 	T.eq(R.WisdomTrip(7225, 24, 8), "cant-arrive", "24s walk with 16s left")
 	T.eq(R.WisdomTrip(2000, 6, -7.5), "window", "under 1s left: the window, not the walk")
 	T.eq(R.WisdomTrip(2679, 7, 12), "go", "7s walk with 20s left")
@@ -211,9 +229,25 @@ T.test("rune rules: the lotus stand ends a second after the lotus is taken", fun
 	T.eq(R.LotusTakeStep(state, 0, 180), "wait", "no lotus yet")
 	T.eq(R.LotusTakeStep(state, 1, 181.5), "wait", "just taken: a second one may come 0.45s later")
 	T.eq(R.LotusTakeStep(state, 2, 182), "wait", "a second one came")
-	local step, after = R.LotusTakeStep(state, 2, 183)
+	local step, after, gap = R.LotusTakeStep(state, 2, 183)
 	T.eq(step, "leave", "nothing for 1s: leave")
 	T.eq(after, 1.5, "1.5s after the first lotus")
+	T.eq(gap, 1, "1s after the last one")
+	-- Game 084 t=2706, Lone Druid's bear took five lotuses' worth in a row: after= counts from the first, gap= from the
+	-- last.
+	local bear = { base = 0 }
+	local t = 2701.6
+	for value = 1, 5 do
+		T.eq(R.LotusTakeStep(bear, value, t), "wait", "lotus " .. value .. " taken: wait for another")
+		t = t + 0.45
+	end
+	local bstep, bafter, bgap
+	repeat
+		t = t + 0.1
+		bstep, bafter, bgap = R.LotusTakeStep(bear, 5, t)
+	until bstep == "leave"
+	T.ok(bafter > 2, "after= over 2 for five lotuses")
+	T.ok(bgap < 1.2, "gap= about 1s")
 	local eaten = { base = 2 }
 	T.eq(R.LotusTakeStep(eaten, 1, 190), "wait", "one eaten while standing is no lotus taken")
 	T.eq(eaten.base, 1, "the base follows it down")
@@ -334,6 +368,19 @@ T.test("rune rules: the lotus hold pauses for retreat and resumes while the spaw
 	T.eq(R.LotusYieldStep(window, 0.5, false, false), "drop", "the window closed while paused: dropped")
 	T.eq(R.LotusYieldStep({}, 0.18, true, true), "hold", "cap while holding: the stand's own cap result ends it")
 	T.eq(R.LotusYieldStep({}, nil, true, false), "hold", "no fresh retreat desire: hold")
+	-- Game 083 t=180-199, Zeus: yield, resume from 463 / 1074 away, and the cap only at held=18.4. A resumed hold is
+	-- dropped on the cap, the window end or beyond LOTUS_RESUME_DIST, like a paused one.
+	local zeus = {}
+	T.eq(R.LotusYieldStep(zeus, 0.36, true, false, false), "yield-start", "t=180 retreat 0.36")
+	T.eq(R.LotusYieldStep(zeus, 0.21, true, false, false), "resume", "t=180.8 back under the line")
+	T.eq(R.LotusYieldStep(zeus, 0.21, true, false, false), "hold", "resumed: holding")
+	T.eq(R.LotusYieldStep(zeus, 0.21, true, true, false), "drop", "the cap ran out after the resume: dropped")
+	T.eq(zeus.resumed, false, "the state is cleared")
+	local resumedClosed = { resumed = true }
+	T.eq(R.LotusYieldStep(resumedClosed, 0.1, false, false, false), "drop", "the window closed after a resume")
+	local pugna = { yielding = true }
+	T.eq(R.LotusYieldStep(pugna, 0, true, false, true), "drop", "game 084 t=395: 10562 away, no resume")
+	T.eq(R.LotusYieldStep({}, 0.1, true, false, true), "hold", "never paused: far doesn't matter (beside is 800)")
 
 	-- The ring clock pauses while yielding: 1s stood, a pause 181-184, back in the ring at 184: gone at 1.5s more.
 	local stand = R.NewLotusStand(180, 0)
@@ -373,4 +420,33 @@ T.test("rune rules: a failed river pick-up lets go of the spot (game 080)", func
 	step, taken = R.ReleaseStep(release, 1.7 + R.RELEASE_FOR, true)
 	T.eq(step, "end", "ends after RELEASE_FOR")
 	T.eq(taken, false, "taken=no")
+end)
+
+T.test("rune rules: no pick-up order where it never worked; let go at once (games 075-085)", function()
+	local R = load()
+	local top, bottom, bounty, water = 0, 1, 5, 7
+	-- `river-pickup-try`: water at the top spot worked (yes 9, unsure 2); nothing at the bottom spot (no 14 of 14);
+	-- bounties and type -1 never.
+	T.eq(R.RiverOrderWorks(top, water, top, water), true, "water rune, top spot: the order works")
+	T.eq(R.RiverOrderWorks(bottom, water, top, water), false, "water rune, bottom spot: never worked")
+	T.eq(R.RiverOrderWorks(top, bounty, top, water), false, "river bounty: never worked")
+	T.eq(R.RiverOrderWorks(top, -1, top, water), false, "unknown type: never worked")
+	T.eq(R.RiverOrderWorks(top, water, top, nil), false, "no RUNE_WATER in the API: no order")
+	-- The plan on a spot with the rune up.
+	T.eq(R.RiverTryPlan(true, false, false, 0), "order", "top water rune: the order")
+	T.eq(R.RiverTryPlan(false, false, false, 0), "yield", "horn bounty on the spot: let go at once")
+	T.eq(R.RiverTryPlan(false, false, false, 72), "yield", "game 084 Techies at 72: taken after the release")
+	-- Games 081-084: releases from 167-287 off the spot never got the rune.
+	T.eq(R.RiverTryPlan(false, false, false, 167), "move", "off the spot: step onto it first")
+	T.eq(R.RiverTryPlan(false, false, false, nil), "move", "no distance: step onto it")
+	T.eq(R.RiverTryPlan(false, false, true, 0), "order", "let go and still up: the order once, then the old release")
+	T.eq(R.RiverTryPlan(true, true, false, 0), "yield", "the order failed for this type before: let go instead")
+	T.eq(R.RiverTryPlan(true, true, true, 0), "none", "stopped and already let go: the old stay")
+	-- The no-order release is short; the old one keeps RELEASE_FOR.
+	local yield = { t0 = 0.2, duration = R.YIELD_FOR }
+	T.eq(R.ReleaseStep(yield, 0.6, true), "hold", "0.4s in")
+	local step, taken = R.ReleaseStep(yield, 0.2 + R.YIELD_FOR, true)
+	T.eq(step, "end", "ends after YIELD_FOR")
+	T.eq(taken, false, "not taken")
+	T.ok(R.YIELD_FOR < R.RELEASE_FOR, "shorter than the release after a failed order")
 end)
