@@ -1,14 +1,27 @@
 -- Pure rules for Largo (#198): plain values in and out, so tests/test_largo_rules.lua can check them without the
 -- bot API. Game data (Valve datafeed hero_id=155 and the 7.42 npc_dota_hero_largo.txt in pak01_dir.vpk):
 -- Amphibian Rhapsody is a toggle (cooldown 1.5, no mana) with rhythm_interval 1 (one beat a second),
--- rhythm_grace_period 0.4, max_stacks 5 of Groovin' (stack_duration 5: the stacks linger 5s after the song ends),
--- radius 800. The three songs cost 25/35/45 mana and share one 0.2s cooldown (AbilitySharedCooldown "largo_songs").
+-- rhythm_grace_period 0.4, max_stacks of Groovin' 4/5/6 by Rhapsody level since 7.42a (5 before; stack_duration 5:
+-- the stacks linger 5s after the song ends), radius 800. The three songs cost 25/35/45 mana and share one 0.2s cooldown (AbilitySharedCooldown "largo_songs").
 -- With Scepter (double_song 1) two songs can be strummed on one beat.
 local LargoRules = {}
 
 LargoRules.BEAT = 1
 LargoRules.GRACE = 0.4
 LargoRules.MAX_STACKS = 5
+-- The Groovin' cap by Rhapsody level when the ability's max_stacks reads 0: datafeed hero_id=155 (2026-11-26, 7.42a)
+-- max_stacks [4,5,6]. Games 081/082 (server 6993) still went 4 -> 5 stacks at level 1; game 083 (server 6996) stopped
+-- at 4: 102 level-1 strums read before=4 after=4 hit=miss against the old fixed cap of 5, two misses in a row moved a
+-- proven beat (reanchor=yes), the next beat lost a stack and the song went off as silent and came back (t=1657-1722,
+-- every 6s; 44 silent toggle-offs, 29 of 61 top-up songs under 5s).
+LargoRules.MAX_STACKS_BY_LEVEL = { 4, 5, 6 }
+-- The cap for a strum: the ability's own max_stacks when it reads, else the 7.42a value for its level, else MAX_STACKS.
+function LargoRules.MaxStacks(readValue, level)
+	if readValue ~= nil and readValue > 0 then
+		return readValue
+	end
+	return LargoRules.MAX_STACKS_BY_LEVEL[level or 0] or LargoRules.MAX_STACKS
+end
 LargoRules.SONG_SHARED_COOLDOWN = 0.2
 -- A strum goes out on the first think at or after the beat, never before it, and at most this late. Inside the
 -- grace either way: the game data does not say whether the 0.4s grace lies before, after or around the beat.
@@ -114,10 +127,20 @@ LargoRules.TOP_UP_MP = 0.4
 LargoRules.TOP_UP_KEEP_HP = 0.9
 LargoRules.TOP_UP_KEEP_STRUMS = 2
 LargoRules.TOP_UP_KEEP_MP = 0.3
+-- After a song ended with no reason (idle) or with no song going out (silent), no new top-up for this long. Games 081
+-- and 083: 5 top-up songs started 1.5-2.0s after an idle toggle-off: a camp's hit on Largo while farming (083
+-- t=1800-1801: lowest 0.98 -> 0.80, healers=1), the fight going on (083 t=1893-1895), allies walking in (081 t=1630,
+-- 083 t=3297), mana back over the bar (083 t=982-984). None urgent (the urgent and in-fight heals don't wait), and a
+-- wait under the 5s stack_duration keeps the lingering Groovin' stacks (datafeed hero_id=155).
+LargoRules.TOP_UP_REST = 3.5
 
--- The out-of-fight top-up: the lowest ally's HP ratio, the strums the group misses, Largo's mana ratio, and whether the
--- song is on already (then the KEEP bars: no on / idle-off loop around one threshold).
-function LargoRules.TopUpWanted(lowestHp, strumsNeeded, mpRatio, singing)
+-- The out-of-fight top-up: the lowest ally's HP ratio, the strums the group misses, Largo's mana ratio, whether the
+-- song is on already (then the KEEP bars: no on / idle-off loop around one threshold), and the seconds since the last
+-- idle or silent toggle-off (nil: none yet).
+function LargoRules.TopUpWanted(lowestHp, strumsNeeded, mpRatio, singing, sinceRestOff)
+	if not singing and sinceRestOff ~= nil and sinceRestOff < LargoRules.TOP_UP_REST then
+		return false
+	end
 	local hpBar = singing and LargoRules.TOP_UP_KEEP_HP or LargoRules.TOP_UP_HP
 	local strumBar = singing and LargoRules.TOP_UP_KEEP_STRUMS or LargoRules.TOP_UP_STRUMS
 	local mpBar = singing and LargoRules.TOP_UP_KEEP_MP or LargoRules.TOP_UP_MP
@@ -133,6 +156,7 @@ end
 --   objective   allies inside the radius hit Roshan or a Tormentor
 --   double      Scepter: two songs per beat
 --   singing     the song is on now (the top-up keeps going on the looser KEEP bars)
+--   sinceRestOff seconds since the last idle or silent toggle-off (a new top-up waits TOP_UP_REST)
 -- Returns first, second, why ("fight" | "vibes" | "time", second only with double), or nil when there is no reason.
 --   Good Vibrations (heal): someone below 30% first of all, below 50% above a fight, below 75% in a fight.
 --   Double Time (move speed, slow resistance): an escape, then a chase.
@@ -169,7 +193,7 @@ function LargoRules.ChooseSongs(s)
 		if hurtHp < 0.75 then
 			offer("vibes", 1.8, "hurt")
 		end
-	elseif LargoRules.TopUpWanted(hurtHp, strumsNeeded, s.mpRatio or 0, s.singing) then
+	elseif LargoRules.TopUpWanted(hurtHp, strumsNeeded, s.mpRatio or 0, s.singing, s.sinceRestOff) then
 		-- After a fight: top the group up while the mana lasts, stop when it is full.
 		offer("vibes", 1.5, "top-up")
 	end
@@ -370,6 +394,25 @@ function LargoRules.DispelPullOk(allyFighting, distToTarget, attackRange, pullDi
 		return false
 	end
 	return true
+end
+
+-- The save lick (pulls a retreating ally pull_distance_ally 375 toward Largo, datafeed hero_id=155). Game 081 35:07
+-- (maintainer: "largo licked me to near enemy when i run away"): t=2107 lick-cast target=vengefulspirit why=ally-save
+-- on the human, toward enemies. Never on a human (they steer their own escape), not with an enemy hero within
+-- SAVE_ENEMY_RADIUS of Largo, and only when the pulled spot is farther from the nearest enemy hero than the ally is now.
+-- Returns ok, why ("human" | "enemy-near-me" | "not-safer").
+LargoRules.SAVE_ENEMY_RADIUS = 800
+function LargoRules.SaveLickOk(isHuman, enemiesNearMe, allyEnemyGap, pulledEnemyGap)
+	if isHuman then
+		return false, "human"
+	end
+	if (enemiesNearMe or 0) > 0 then
+		return false, "enemy-near-me"
+	end
+	if pulledEnemyGap <= allyEnemyGap then
+		return false, "not-safer"
+	end
+	return true, nil
 end
 
 return LargoRules

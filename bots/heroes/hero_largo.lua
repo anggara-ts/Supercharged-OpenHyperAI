@@ -291,22 +291,25 @@ function X.SkillsComplement()
 		local rhapsodyDesire, rhapsodyWhy = X.ConsiderAmphibianRhapsody(now)
 		if rhapsodyDesire > 0 then
 			rhapsody.toggleOrderAt = now
-			-- sinceIdle=: seconds since the last idle toggle-off (a top-up right after one is the on / off loop).
+			-- sinceIdle=: seconds since the last idle or silent toggle-off (a top-up right after one is the on / off loop);
+			-- lastOff=: why the song went off last; lowestHero=: who the lowest is.
 			local situation = rhapsody.lastSituation
 			LogLargo(
 				"toggle",
 				1,
-				"rhapsody-toggle on why=%s song=%s second=%s mana=%d stacks=%d lowest=%.2f missing=%d healers=%d mp=%.2f sinceIdle=%.1f",
+				"rhapsody-toggle on why=%s song=%s second=%s mana=%d stacks=%d lowest=%.2f lowestHero=%s missing=%d healers=%d mp=%.2f sinceIdle=%.1f lastOff=%s",
 				rhapsodyWhy,
 				rhapsody.first,
 				tostring(rhapsody.second),
 				bot:GetMana(),
 				Fu.GetModifierCount(bot, GROOVIN_MODIFIER),
 				situation.hurtHp,
+				situation.hurtName,
 				situation.missing,
 				situation.healCount,
 				situation.mpRatio,
-				math.min(999, now - rhapsody.idleOffAt)
+				math.min(999, now - rhapsody.idleOffAt),
+				rhapsody.lastOffWhy or "none"
 			)
 			bot:Action_UseAbility(amphibianRhapsodyAbility)
 			return
@@ -396,6 +399,48 @@ function X.SpellReady(ability, onceShown)
 		)
 end
 
+-- The nearest enemy hero's distance to a spot (from the given enemy list), or math.huge.
+local function NearestEnemyGap(location, enemies)
+	local gap = math.huge
+	for _, enemyHero in pairs(enemies) do
+		if Fu.IsValidHero(enemyHero) then
+			gap = math.min(gap, GetUnitToLocationDistance(enemyHero, location))
+		end
+	end
+	return gap
+end
+
+-- A save lick only on a bot ally, with no enemy hero near Largo, and when the pull (pull_distance_ally toward Largo)
+-- takes the ally farther from the nearest enemy hero (LargoRules.SaveLickOk, game 081 35:07). Logs the verdict.
+function X.SaveLickSafe(allyHero, pullDistanceAlly, enemiesNearAlly)
+	local allyLocation = allyHero:GetLocation()
+	local distToMe = GetUnitToUnitDistance(allyHero, bot)
+	local pulledLocation = allyLocation
+	if distToMe > 1 then
+		pulledLocation =
+			Fu.GetXUnitsTowardsLocation2(allyLocation, bot:GetLocation(), math.min(pullDistanceAlly, distToMe))
+	end
+	local enemiesNearMe = #Fu.GetEnemiesNearLoc(bot:GetLocation(), LargoRules.SAVE_ENEMY_RADIUS)
+	local allyGap = NearestEnemyGap(allyLocation, enemiesNearAlly)
+	local pulledGap = NearestEnemyGap(pulledLocation, enemiesNearAlly)
+	local isHuman = Fu.IsHumanPlayer(allyHero)
+	local ok, why = LargoRules.SaveLickOk(isHuman, enemiesNearMe, allyGap, pulledGap)
+	-- human= / enemiesNearMe= / allyGap= / pulledGap=: the save is a bot ally pulled away from the enemy.
+	LogLargo(
+		ok and "lick-save" or "lick-skip",
+		3,
+		"%s target=%s why=%s human=%s enemiesNearMe=%d allyGap=%d pulledGap=%d",
+		ok and "lick-save" or "lick-skip",
+		ShortName(allyHero),
+		ok and "safe" or why,
+		Bool(isHuman),
+		enemiesNearMe,
+		math.min(9999, allyGap),
+		math.min(9999, pulledGap)
+	)
+	return ok
+end
+
 function X.ConsiderCatchLick(onceShown)
 	if not X.SpellReady(catchyLickAbility, onceShown) then
 		return BOT_ACTION_DESIRE_NONE, nil, nil
@@ -449,7 +494,12 @@ function X.ConsiderCatchLick(onceShown)
 				and allyHero:WasRecentlyDamagedByAnyHero(5.0)
 			then
 				local lineInfo = PointToLineDistance(Fu.GetTeamFountain(), allyHero:GetLocation(), bot:GetLocation())
-				if lineInfo and lineInfo.within and lineInfo.distance <= 600 then
+				if
+					lineInfo
+					and lineInfo.within
+					and lineInfo.distance <= 600
+					and X.SaveLickSafe(allyHero, pullDistanceAlly, enemiesNearAlly)
+				then
 					return BOT_ACTION_DESIRE_HIGH, allyHero, "ally-save"
 				end
 			end
@@ -1105,6 +1155,10 @@ function X.RhapsodySituation(radius, singing)
 		under65 = 0,
 		healPerStrum = goodVibrationsAbility:GetSpecialValueInt("heal_burst"),
 		mpRatio = Fu.GetMP(bot),
+		-- Seconds since the last idle or silent toggle-off: a new top-up waits LargoRules.TOP_UP_REST.
+		sinceRestOff = DotaTime() - rhapsody.idleOffAt,
+		-- Who the lowest is (lowestHero= on the toggle lines: Largo himself hit by a camp, or an ally walking in).
+		hurtName = "none",
 	}
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -1133,7 +1187,10 @@ function X.RhapsodySituation(radius, singing)
 		then
 			local allyHp = Fu.GetHP(allyHero)
 			if X.IsGoodToHeal(allyHero) then
-				situation.hurtHp = math.min(situation.hurtHp, allyHp)
+				if allyHp < situation.hurtHp then
+					situation.hurtHp = allyHp
+					situation.hurtName = ShortName(allyHero)
+				end
 				if allyHp < 0.95 then
 					situation.missing = situation.missing + allyHero:GetMaxHealth() - allyHero:GetHealth()
 					situation.healCount = situation.healCount + 1
@@ -1235,7 +1292,7 @@ function X.TrackRhapsody(now)
 		local song = songByKey[rhapsody.first] or fightSongAbility
 		print(
 			string.format(
-				"[SHy-LARGO] t=%.0f largo rhapsody-on at=%.2f stacks=%d lickHidden=%s stompHidden=%s croakHidden=%s songHidden=%s songLevel=%d songCastable=%s songCost=%d toggle=%s",
+				"[SHy-LARGO] t=%.0f largo rhapsody-on at=%.2f stacks=%d lickHidden=%s stompHidden=%s croakHidden=%s songHidden=%s songLevel=%d songCastable=%s songCost=%d toggle=%s cap=%d rhapsodyLevel=%d",
 				now,
 				now,
 				stacks,
@@ -1246,7 +1303,9 @@ function X.TrackRhapsody(now)
 				song:GetLevel(),
 				Bool(song:IsFullyCastable()),
 				song:GetManaCost(),
-				Bool(amphibianRhapsodyAbility:GetToggleState())
+				Bool(amphibianRhapsodyAbility:GetToggleState()),
+				X.GroovinCap(),
+				amphibianRhapsodyAbility:GetLevel()
 			)
 		)
 	elseif not isOn and rhapsody.on then
@@ -1312,6 +1371,14 @@ function X.IsEscaping()
 	return Fu.IsRetreating(bot) or rhapsody.why ~= nil and string.find(rhapsody.why, "escape", 1, true) ~= nil
 end
 
+-- The Groovin' cap now: max_stacks of the ability (4/5/6 by level since 7.42a, LargoRules.MaxStacks).
+function X.GroovinCap()
+	return LargoRules.MaxStacks(
+		amphibianRhapsodyAbility:GetSpecialValueInt("max_stacks"),
+		amphibianRhapsodyAbility:GetLevel()
+	)
+end
+
 function X.CheckStrum(now, stacks)
 	local pending = rhapsody.pending
 	local since = now - pending.at
@@ -1355,7 +1422,8 @@ function X.CheckStrum(now, stacks)
 		bot:ActionPush_UseAbility(pending.second)
 		return
 	end
-	local result = LargoRules.StrumResult(pending.before, stacks, LargoRules.MAX_STACKS)
+	local cap = X.GroovinCap()
+	local result = LargoRules.StrumResult(pending.before, stacks, cap)
 	if since < 0.15 or result == "miss" and since < 0.5 then
 		return
 	end
@@ -1397,7 +1465,7 @@ function X.CheckStrum(now, stacks)
 	end
 	print(
 		string.format(
-			"[SHy-LARGO] t=%.0f largo strum song=%s second=%s why=%s before=%d after=%d hit=%s cast=%s via=%s attempts=%d castDelay=%.2f cdSeen=%.2f double=%s phase=%.2f frac=%.2f late=%.2f reanchor=%s n=%d hits=%d",
+			"[SHy-LARGO] t=%.0f largo strum song=%s second=%s why=%s before=%d after=%d hit=%s cast=%s via=%s attempts=%d castDelay=%.2f cdSeen=%.2f double=%s phase=%.2f frac=%.2f late=%.2f reanchor=%s n=%d hits=%d cap=%d",
 			now,
 			pending.key,
 			tostring(pending.key2),
@@ -1416,7 +1484,8 @@ function X.CheckStrum(now, stacks)
 			pending.at - pending.beat,
 			reanchor,
 			rhapsody.strums,
-			rhapsody.hits
+			rhapsody.hits,
+			cap
 		)
 	)
 	rhapsody.pending = nil
@@ -1483,6 +1552,7 @@ function X.RhapsodyThink(now)
 		local play, playTarget, playWhy = X.SongBreakPlay(first ~= nil)
 		if play ~= nil then
 			rhapsody.toggleOrderAt = now
+			rhapsody.lastOffWhy = play
 			LogLargo(
 				"toggle",
 				1,
@@ -1514,15 +1584,17 @@ function X.RhapsodyThink(now)
 		if offWhy == "no-cast" then
 			-- The songs don't go out: no new song for a while rather than a disarmed, silent Largo.
 			rhapsody.holdUntil = now + LargoRules.NO_CAST_HOLD
-		elseif offWhy == "idle" then
+		elseif offWhy == "idle" or offWhy == "silent" then
+			-- A new top-up waits LargoRules.TOP_UP_REST after this (the on / idle-off loop, games 081 and 083).
 			rhapsody.idleOffAt = now
 		end
+		rhapsody.lastOffWhy = offWhy
 		-- last=: what the song was for when its reason ended; reasonFor=: seconds of the song that had a reason;
 		-- lowest= / missing=: the group's HP now (an idle top-up should end with the group healed).
 		LogLargo(
 			"toggle",
 			1,
-			"rhapsody-toggle off why=%s last=%s held=%.1f reasonFor=%.1f strums=%d hits=%d mana=%d lowest=%.2f missing=%d mp=%.2f",
+			"rhapsody-toggle off why=%s last=%s held=%.1f reasonFor=%.1f strums=%d hits=%d mana=%d lowest=%.2f lowestHero=%s missing=%d mp=%.2f",
 			offWhy,
 			rhapsody.why,
 			now - rhapsody.onAt,
@@ -1531,6 +1603,7 @@ function X.RhapsodyThink(now)
 			rhapsody.hits,
 			bot:GetMana(),
 			situation.hurtHp,
+			situation.hurtName,
 			situation.missing,
 			situation.mpRatio
 		)

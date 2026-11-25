@@ -57,6 +57,20 @@ T.test("largo: strum result from the Groovin' stacks", function()
 	T.eq(R.StrumResult(5, 4, 5), "miss", "a stack lost at the cap")
 end)
 
+T.test("largo: the Groovin' cap follows the Rhapsody level (7.42a max_stacks 4/5/6)", function()
+	local R = load()
+	-- Datafeed hero_id=155 (7.42a): max_stacks [4,5,6]. Game 083 (server 6996) at level 1: 102 strums before=4 after=4
+	-- read as misses against a fixed cap of 5, moved a proven beat and ended the song as silent every 6s.
+	T.eq(R.MaxStacks(4, 1), 4, "the ability's own value")
+	T.eq(R.MaxStacks(0, 1), 4, "no read: the 7.42a value for level 1")
+	T.eq(R.MaxStacks(nil, 3), 6, "no read: level 3")
+	T.eq(R.MaxStacks(0, 0), 5, "not trained: the old cap")
+	T.eq(R.StrumResult(4, 4, R.MaxStacks(4, 1)), "max", "game 083 t=1662: at the level-1 cap, not a miss")
+	T.eq(R.StrumResult(5, 6, R.MaxStacks(6, 3)), "hit", "level 3 goes on to 6")
+	T.eq(R.StrumResult(6, 6, R.MaxStacks(6, 3)), "max", "and stops there")
+	T.ok(not R.MayReanchor(0, 4, 0), "at the cap the miss streak stays 0: the beat stays")
+end)
+
 T.test("largo: which song", function()
 	local R = load()
 	local function pick(s)
@@ -140,6 +154,45 @@ T.test("largo: a top-up song, once on, heals the group up (game 074 on / idle-of
 	T.ok(not R.TopUpWanted(0.85, 4, 0.5, false), "85% and 4 strums: not started")
 	T.ok(R.TopUpWanted(0.85, 0, 0.5, true), "85% once on: keep healing")
 	T.ok(not R.TopUpWanted(0.92, 1.5, 0.5, true), "92% and 1.5 strums: done")
+end)
+
+T.test("largo: no new top-up right after an idle or silent toggle-off", function()
+	local R = load()
+	-- Game 083 t=1800 idle off (lowest 0.98), t=1801 a camp hit Largo: lowest 0.80 (just under), 1.7s later.
+	T.ok(not R.TopUpWanted(0.79, 2.4, 0.95, false, 1.7), "game 083 t=1801: waits")
+	T.ok(R.TopUpWanted(0.79, 2.4, 0.95, false, 3.6), "after the rest: starts")
+	-- Game 081 t=1630: an ally walked in at 63%, 1.5s after the group was healed.
+	T.ok(not R.TopUpWanted(0.63, 9.4, 0.44, false, 1.5), "game 081 t=1630: waits")
+	T.ok(R.TopUpWanted(0.79, 0, 0.5, false, nil), "no toggle-off yet: no wait")
+	T.ok(R.TopUpWanted(0.85, 0, 0.5, true, 0.5), "a song that is on keeps going")
+	-- The rest is for the top-up only: the urgent and in-fight heals and the other songs don't wait.
+	local function pick(s)
+		local first, _, why = R.ChooseSongs(s)
+		return tostring(first) .. "/" .. tostring(why)
+	end
+	T.eq(pick({ hurtHp = 0.75, healPerStrum = 30, mpRatio = 0.8, sinceRestOff = 1.5 }), "nil/nil", "top-up waits")
+	T.eq(pick({ hurtHp = 0.3, healPerStrum = 30, mpRatio = 0.8, sinceRestOff = 1.5 }), "vibes/hurt", "urgent: no wait")
+	T.eq(
+		pick({ enemies = 1, fighting = true, hurtHp = 0.45, healPerStrum = 30, mpRatio = 0.8, sinceRestOff = 1.5 }),
+		"vibes/hurt",
+		"in a fight: no wait"
+	)
+	T.eq(
+		pick({ enemies = 2, fighting = true, mpRatio = 0.8, sinceRestOff = 0.5 }),
+		"fight/fight",
+		"fight song: no wait"
+	)
+	T.eq(R.TOP_UP_REST < 5, true, "under the 5s stack_duration: the stacks still linger")
+end)
+
+T.test("largo: a save lick only on a bot ally, with no enemy near Largo, pulled away from the enemy", function()
+	local R = load()
+	-- Game 081 35:07: the human Vengeful Spirit licked toward the enemy while running away.
+	T.eq(select(2, R.SaveLickOk(true, 0, 500, 800)), "human", "never on a human")
+	T.eq(select(2, R.SaveLickOk(false, 1, 500, 800)), "enemy-near-me", "an enemy hero near Largo")
+	T.eq(select(2, R.SaveLickOk(false, 0, 500, 400)), "not-safer", "the pull takes it closer to the enemy")
+	T.eq(select(2, R.SaveLickOk(false, 0, 500, 500)), "not-safer", "no gain")
+	T.ok(R.SaveLickOk(false, 0, 500, 850), "a bot ally pulled 350 away from the enemy")
 end)
 
 T.test("largo: a toggle order that has not taken is not sent again before the cooldown", function()
