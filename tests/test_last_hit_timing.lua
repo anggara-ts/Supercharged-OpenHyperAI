@@ -604,7 +604,7 @@ T.test("wind-up yield: a core stops its swing for a lower-position core's swing 
 	Stub.time = 1600
 	rangedBot(bot)
 	-- Game 077 t=38: Io (position 2) and Phantom Assassin (position 1) swung at one creep together.
-	local props = { attacking = true, point = 0.5, damage = 50, startAt = Stub.time }
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = GameTime() }
 	local ally = addSwinger(creep, props)
 	withPositions(Fu, bot, 2, ally, 1, function()
 		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
@@ -623,7 +623,7 @@ T.test("wind-up yield: never for a higher position number (one of two heroes yie
 	local Fu, Timing, bot, creep, state = setup(40)
 	Stub.time = 1650
 	rangedBot(bot)
-	local props = { attacking = true, point = 0.5, damage = 50, startAt = Stub.time }
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = GameTime() }
 	local ally = addSwinger(creep, props)
 	withPositions(Fu, bot, 1, ally, 2, function()
 		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
@@ -647,7 +647,7 @@ T.test("wind-up yield: a decided support swing stops at the last look for a core
 		state.activity = 1503
 		frames(Timing, bot, creep, 1, 45, false)
 		T.eq(bot._lhTiming.phase, "decided", "our hit kills: release decided at the first look")
-		props.attacking, props.startAt = true, Stub.time
+		props.attacking, props.startAt = true, GameTime()
 		frames(Timing, bot, creep, 5, 45, false)
 		T.eq(#state.orders, 0, "not before the last look")
 		local count = untilOrder(Timing, bot, creep, state, 45)
@@ -693,7 +693,7 @@ T.test("wind-up yield: looks 0.2s apart still stop the swing before the attack p
 		state.activity = 1503
 		look()
 		T.eq(bot._lhTiming.phase, "decided", "first look 0.1s into the 0.5s wind-up: released")
-		props.attacking, props.startAt = true, Stub.time
+		props.attacking, props.startAt = true, GameTime()
 		look()
 		T.eq(state.orders[1], "clear", "the next look (0.2s left, last look at a 0.2s gap) stops it")
 		T.ok(GameTime() < bot._lhTiming.cancelPointAt, "before the attack point")
