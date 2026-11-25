@@ -212,6 +212,10 @@ function ObjectiveTravel.Go(bot, loc, tag)
 		end
 	end
 	if how == "tp" then
+		-- A hero script's TP hold (bot._noTpUntil, e.g. Underlord's gate self-test).
+		if DotaTime() < (bot._noTpUntil or -999) then
+			return false
+		end
 		Log()
 		bot:Action_UseAbilityOnLocation(extra, spot)
 		return true

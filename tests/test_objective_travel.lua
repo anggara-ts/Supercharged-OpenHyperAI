@@ -151,9 +151,13 @@ T.test("underlord: bots only, no Scepter, nothing far: no gate, the skip is logg
 end)
 
 T.test("underlord: the first far gate is a self-test that measures whether he teleported", function()
-	T.eq(underlord().GateSelfResult(true, 1800), "yes", "jumped")
-	T.eq(underlord().GateSelfResult(true, 400), "no", "cast, walked only")
-	T.eq(underlord().GateSelfResult(false, 0), "retry", "the cast never happened")
+	local Result = underlord().GateSelfResult
+	T.eq(Result(true, 1800, nil), "yes", "cast, then jumped")
+	T.eq(Result(true, 400, nil), "no", "cast, walked only")
+	T.eq(Result(false, 0, nil), "retry", "the cast never happened")
+	T.eq(Result(false, 1800, nil), "retry", "a jump without a cast is not the gate")
+	T.eq(Result(true, 1800, "respawn"), "retry", "died and respawned during the watch")
+	T.eq(Result(true, 1800, "tp"), "retry", "a TP during the watch")
 
 	-- no Scepter: an ally under attack 4000+ away is a reason for the self-test cast
 	local X, bot, gate = gateScene({ scepter = false, allyHit = true })
@@ -184,9 +188,28 @@ T.test("underlord: the first far gate is a self-test that measures whether he te
 	gate.GetCooldownTimeRemaining = function()
 		return 90
 	end
-	T.stub.time = 1208
+	T.stub.time = 1200.5
+	X.GateSelfWatch()
+	T.eq(bot._noTpUntil > 1200.5, true, "TPs held during the watch")
+	T.stub.time = 1207.6
 	X.GateSelfWatch()
 	T.eq(printed("gate%-self result=no moved=0 .* nearTarget=no .* cast=true"), 1, "no teleport")
 	T.eq(bot._gateSelf.state, "no", "measured")
 	T.eq(desire > 0 and X.ConsiderFiendsGate() or -1, 0, "no more self-test casts")
+end)
+
+T.test("underlord: a respawn at the fountain during the self-test is not a teleport", function()
+	local X, bot, gate = gateScene({ scepter = false, allyHit = true })
+	local _, loc = X.ConsiderFiendsGate()
+	X.GateSelfStart(loc, "selftest-ally", "lina")
+	gate.GetCooldownTimeRemaining = function()
+		return 90
+	end
+	T.stub.time = 1200.5
+	X.GateSelfWatch()
+	bot._loc = Vector(-6500, -6200, 0)
+	T.stub.time = 1205
+	X.GateSelfWatch()
+	T.eq(printed("gate%-self result=retry .* void=respawn"), 1, "voided")
+	T.eq(bot._gateSelf.state, "untested", "tried again later")
 end)

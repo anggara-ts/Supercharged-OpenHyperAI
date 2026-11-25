@@ -452,6 +452,12 @@ function X.ConsiderGatePit()
 	if pitOfMaliceAbility:GetLevel() < 1 then
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
+	-- Unless the self-test showed the gate leaves him where he is, he may land on the far portal himself: only
+	-- while he is healthy and not running away.
+	local selfState = bot._gateSelf ~= nil and bot._gateSelf.state or "untested"
+	if selfState ~= "no" and (Fu.IsRetreating(bot) or Fu.GetHP(bot) < 0.5) then
+		return BOT_ACTION_DESIRE_NONE, 0
+	end
 	local best
 	for _, allyHero in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
 		if
@@ -536,8 +542,9 @@ end
 
 -- Self-test (#53): does Underlord himself get teleported by his own gate in 7.42, with no portal_warp ability?
 -- The datafeed only says "Heroes can channel a portal ... to teleport"; the maintainer remembers Underlord being
--- moved automatically. The first gate cast of the game (any reason) is watched for GATE_SELF_WATCH seconds: a
--- jump of GATE_SELF_JUMP+ between two thinks means he teleported. state: untested / watch / yes / no.
+-- moved automatically. The first gate cast of the game (any reason) is watched for GATE_SELF_WATCH seconds after
+-- the gate goes on cooldown: a jump of GATE_SELF_JUMP+ between two thinks means he teleported. TPs are held while
+-- it runs; a TP channel or a landing at our fountain (a respawn) voids the try. state: untested / watch / yes / no.
 local function GateSelf()
 	if bot._gateSelf == nil then
 		bot._gateSelf = { state = "untested", retryAt = -999 }
@@ -555,22 +562,25 @@ local function ModifierNames()
 	return #names > 0 and table.concat(names, ",") or "-"
 end
 
--- The outcome of a watched cast: "yes" (teleported), "no" (cast, no jump), "retry" (the cast never happened).
-function X.GateSelfResult(castSeen, maxJump)
-	if maxJump >= GATE_SELF_JUMP then
-		return "yes"
+-- The outcome of a watched order: "yes" (cast, then teleported), "no" (cast, no jump), "retry" (no cast, a jump
+-- without a cast, or a void reason: a TP, a respawn).
+function X.GateSelfResult(castSeen, maxJump, void)
+	if void ~= nil or not castSeen then
+		return "retry"
 	end
-	return castSeen and "no" or "retry"
+	return maxJump >= GATE_SELF_JUMP and "yes" or "no"
 end
 
+-- Called after every gate order; starts the watch on the first one of the game.
 function X.GateSelfStart(loc, why, target)
 	local selfTest = GateSelf()
 	if selfTest.state ~= "untested" then
 		return
 	end
 	local from = bot:GetLocation()
-	selfTest.state, selfTest.castAt, selfTest.at, selfTest.from = "watch", DotaTime(), loc, from
-	selfTest.lastLoc, selfTest.maxJump, selfTest.castSeen, selfTest.channel = from, 0, false, false
+	selfTest.state, selfTest.orderAt, selfTest.castAt, selfTest.at, selfTest.from = "watch", DotaTime(), nil, loc, from
+	selfTest.lastLoc, selfTest.lastTime, selfTest.maxJump, selfTest.maxGap = from, DotaTime(), 0, 0
+	selfTest.castSeen, selfTest.channel, selfTest.void = false, false, nil
 	selfTest.why, selfTest.target = why, target
 	pcall(
 		print,
@@ -588,30 +598,64 @@ function X.GateSelfStart(loc, why, target)
 	)
 end
 
+local function ChannelingTp()
+	local ok, name = pcall(function()
+		local active = bot:GetCurrentActiveAbility()
+		return active ~= nil and active ~= 0 and active:GetName() or ""
+	end)
+	return ok
+		and type(name) == "string"
+		and (string.find(name, "tpscroll", 1, true) ~= nil or string.find(name, "travel_boots", 1, true) ~= nil)
+end
+
 function X.GateSelfWatch()
 	local selfTest = bot._gateSelf
 	if selfTest == nil or selfTest.state ~= "watch" then
 		return
 	end
+	local now = DotaTime()
 	local loc = bot:GetLocation()
-	selfTest.maxJump = math.max(selfTest.maxJump, Dist2D(loc, selfTest.lastLoc))
-	selfTest.lastLoc = loc
+	-- No TP while the test runs (the TP wrapper in ability_item_usage_generic.lua and ObjectiveTravel.Go read it).
+	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 0.5)
+	local jump = Dist2D(loc, selfTest.lastLoc)
+	selfTest.maxJump = math.max(selfTest.maxJump, jump)
+	selfTest.maxGap = math.max(selfTest.maxGap, now - selfTest.lastTime)
+	selfTest.lastLoc, selfTest.lastTime = loc, now
+	if
+		jump >= GATE_SELF_JUMP
+		and Dist2D(loc, Fu.GetTeamFountain()) < 2000
+		and Dist2D(selfTest.at, Fu.GetTeamFountain()) > 3000
+	then
+		selfTest.void = "respawn"
+	end
 	if bot:IsChanneling() then
-		selfTest.channel = true
+		if ChannelingTp() then
+			selfTest.void = "tp"
+		else
+			selfTest.channel = true
+		end
 	end
-	if (fiendsGateAbility:GetCooldownTimeRemaining() or 0) > 0 then
-		selfTest.castSeen = true
+	if not selfTest.castSeen and (fiendsGateAbility:GetCooldownTimeRemaining() or 0) > 0 then
+		selfTest.castSeen, selfTest.castAt = true, now
 	end
-	local elapsed = DotaTime() - selfTest.castAt
-	if elapsed < GATE_SELF_WATCH and selfTest.maxJump < GATE_SELF_JUMP then
+	local done
+	if selfTest.void ~= nil then
+		done = true
+	elseif not selfTest.castSeen then
+		-- The order did not turn into a cast yet; the trigger keeps ordering it. A jump without a cast is not the gate.
+		done = now - selfTest.orderAt >= 3 or selfTest.maxJump >= GATE_SELF_JUMP
+	else
+		done = now - selfTest.castAt >= GATE_SELF_WATCH or selfTest.maxJump >= GATE_SELF_JUMP
+	end
+	if not done then
 		return
 	end
-	local result = X.GateSelfResult(selfTest.castSeen, selfTest.maxJump)
+	local result = X.GateSelfResult(selfTest.castSeen, selfTest.maxJump, selfTest.void)
 	pcall(
 		print,
 		string.format(
-			"[SHy-UNDERLORD] t=%.0f abyssal_underlord gate-self result=%s moved=%.0f at=%.0f,%.0f nearTarget=%s channel=%s cast=%s after=%.1f why=%s mods=%s",
-			DotaTime(),
+			"[SHy-UNDERLORD] t=%.0f abyssal_underlord gate-self result=%s moved=%.0f at=%.0f,%.0f nearTarget=%s channel=%s cast=%s after=%.1f gap=%.1f void=%s why=%s mods=%s",
+			now,
 			result,
 			selfTest.maxJump,
 			loc.x,
@@ -619,13 +663,15 @@ function X.GateSelfWatch()
 			Dist2D(loc, selfTest.at) < 1200 and "yes" or "no",
 			tostring(selfTest.channel),
 			tostring(selfTest.castSeen),
-			elapsed,
+			now - (selfTest.castAt or selfTest.orderAt),
+			selfTest.maxGap,
+			tostring(selfTest.void or "-"),
 			tostring(selfTest.why),
 			ModifierNames()
 		)
 	)
 	if result == "retry" then
-		selfTest.state, selfTest.retryAt = "untested", DotaTime() + 30
+		selfTest.state, selfTest.retryAt = "untested", now + 30
 	else
 		selfTest.state = result
 	end
@@ -691,7 +737,11 @@ function X.ConsiderFiendsGate()
 	-- gate: a global trip like Nature's Prophet's Teleportation.
 	local selfTest = GateSelf()
 	local selfTeleports = selfTest.state == "yes"
-	if selfTeleports or (selfTest.state == "untested" and DotaTime() >= selfTest.retryAt) then
+	if
+		selfTeleports
+		or (selfTest.state == "untested" and DotaTime() >= selfTest.retryAt)
+		or (selfTest.state == "watch" and not selfTest.castSeen)
+	then
 		local travelLocation, why, target = X.GateTravelSpot()
 		if travelLocation ~= nil then
 			fiendsGateWhy = (selfTeleports and "travel-" or "selftest-") .. why
