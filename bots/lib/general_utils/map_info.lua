@@ -183,15 +183,41 @@ local function installMapInfo(Fu)
 		end
 	end
 	local lastRoshanKillTime = 0.0
+	-- Roshan's last kill on the DotaTime() clock (0 = never killed). GetRoshanKillTime() is not on that clock: in game
+	-- 084 it read ~195s ahead of DotaTime() for both kills (#12; the kill at t~2097 was counted from t=2292, so the
+	-- first "11 minutes up" call came at t=2952 = 2292 + 660; the kill at t~3016 gave `seen-alive since-kill=406` at
+	-- t=3617, a kill time of 3211). That matches GameTime(), which also counts the time before the horn (unverified).
+	-- So the DotaTime() of the first think that sees a new value is kept instead (every bot's Roshan mode reads it each
+	-- think, so that is the kill within a frame), and the raw value is logged once per kill:
+	-- [SHy-ROSH] kill-time raw= dota= game=.
+	local rawRoshanKillTime = 0
+	function Fu.GetRoshanKillTime()
+		local raw = GetRoshanKillTime() or 0
+		if raw > 0 and raw ~= rawRoshanKillTime then
+			rawRoshanKillTime = raw
+			lastRoshanKillTime = DotaTime()
+			pcall(
+				print,
+				string.format(
+					"[SHy-ROSH] t=%.0f %s kill-time raw=%.1f dota=%.1f game=%.1f rawAhead=%.1f",
+					DotaTime(),
+					GetTeam() == TEAM_DIRE and "dire" or "radiant",
+					raw,
+					DotaTime(),
+					GameTime(),
+					raw - DotaTime()
+				)
+			)
+		end
+		return raw > 0 and lastRoshanKillTime or 0
+	end
 	-- Roshan seen alive after his last kill (any unit of ours sees him: the neutral unit list holds the visible ones).
 	-- Without it he counted as dead until the longest respawn wait (11 min), though a bot or the human can see him back
 	-- in the pit from 8 min on (game 082, maintainer: "can't bot see roshan is up even after we peek into his pit?").
 	local roshanSeenAt, roshanScanAt = -math.huge, -math.huge
 	function Fu.IsRoshanAlive()
-		if GetRoshanKillTime() > lastRoshanKillTime then
-			lastRoshanKillTime = GetRoshanKillTime()
-		end
-		if GetRoshanKillTime() == 0 or DotaTime() - lastRoshanKillTime > (Fu.IsModeTurbo() and 6 * 60 or 11 * 60) then
+		local killTime = Fu.GetRoshanKillTime()
+		if killTime == 0 or DotaTime() - killTime > (Fu.IsModeTurbo() and 6 * 60 or 11 * 60) then
 			return true
 		end
 		local now = DotaTime()
@@ -202,7 +228,12 @@ local function installMapInfo(Fu)
 					roshanSeenAt = now
 					pcall(
 						print,
-						string.format("[SHy-ROSH] t=%.0f seen-alive since-kill=%.0f", now, now - lastRoshanKillTime)
+						string.format(
+							"[SHy-ROSH] t=%.0f %s seen-alive since-kill=%.0f",
+							now,
+							GetTeam() == TEAM_DIRE and "dire" or "radiant",
+							now - lastRoshanKillTime
+						)
 					)
 					break
 				end
