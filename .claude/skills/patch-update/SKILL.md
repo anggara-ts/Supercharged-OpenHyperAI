@@ -128,6 +128,11 @@ active was changed, another that it was removed. The game file settles such a qu
 - The dump runs once per game (Radiant's first bot). Diff the first game of the new patch against the last game of
   the old one:
   `grep -a "\[SHy-API\]" <game.log> | sed 's/^.*\[SHy-API\]/[SHy-API]/' | sort > api-<patch>.txt`, then `diff`.
+- Ringmaster souvenirs (#49): 7.42 grants only set 1 (`ringmaster_dark_carnival_souvenirs` `use_souvenir_set_1` 1,
+  `use_souvenir_set_2` 0), so `[SHy-API] abilities ringmaster` lists Funhouse Mirror, Strongman Tonic, Whoopee
+  Cushion and Unicycle only. If a patch turns set 2 back on (Weighted Pie and Crystal Ball appear in the dump), the
+  cast rules `X.ConsiderWeightedPie` / `X.ConsiderCrystalBall` in `bots/heroes/hero_ringmaster.lua` start working:
+  check their `souvenir=` lines in the first game.
   The lines that describe the API (`globals`, `CDOTA_Bot_Script`, `CDOTABaseAbility_BotScript`,
   `CDOTA_TeamCommander`, `bot-handle`, `constants`, `item`, `item-names`, `shrine`) compare across games. Ignore
   `slots <hero>` (the items held at that moment) and the lines with `t=`; compare `abilities <hero>` only for heroes
