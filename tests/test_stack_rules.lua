@@ -83,7 +83,7 @@ local function camp(over)
 	local c = {
 		ourSide = true,
 		type = "large",
-		time = 5 * 60 + 20,
+		time = 5 * 60 + 35,
 		dist = 2000,
 		speed = 300,
 		enemyNear = false,
@@ -96,31 +96,58 @@ local function camp(over)
 	return c
 end
 
-T.test("camp: ours, reachable by :47, not claimed, no enemy; ancients only after 10:00", function()
+T.test("camp: ours, arriving between :39 and :47, not claimed, no enemy; ancients only after 10:00", function()
 	local R = rules()
+	-- 2000 - 650 = 1350 at 300/s = 4.5s, x1.5 for the path = 6.75s: from :35 it arrives at :41.75.
 	T.eq(R.CampOk(camp()), true)
 	T.eq(select(2, R.CampOk(camp({ ourSide = false }))), "not-our-side")
 	T.eq(select(2, R.CampOk(camp({ type = "ancient" }))), "ancient-early")
-	T.eq(R.CampOk(camp({ type = "ancient", time = 11 * 60 + 20 })), true)
+	T.eq(R.CampOk(camp({ type = "ancient", time = 11 * 60 + 35 })), true)
 	T.eq(select(2, R.CampOk(camp({ dist = 4000 }))), "far")
-	-- 2000 - 650 = 1350 at 300/s = 4.5s: from :20 fine, from :39 too late (:43.5 is fine, :47 limit).
-	T.eq(R.CampOk(camp({ time = 5 * 60 + 39 })), true)
+	-- Leaving at :20 it would stand at the camp for half a minute: wait.
+	T.eq(select(2, R.CampOk(camp({ time = 5 * 60 + 20 }))), "early")
+	-- 3400: 13.75s, from :39 that is :52.75.
 	T.eq(select(2, R.CampOk(camp({ time = 5 * 60 + 39, dist = 3400 }))), "late")
 	T.eq(select(2, R.CampOk(camp({ claimed = true }))), "claimed")
 	T.eq(select(2, R.CampOk(camp({ enemyNear = true }))), "enemy")
 	T.eq(select(2, R.CampOk(camp({ dangerous = true }))), "enemy")
 end)
 
-T.test("pick: the nearest allowed camp, each camp keeps its reason", function()
+T.test("pick: the nearest allowed camp, enemy checks only for allowed camps, each camp keeps its reason", function()
 	local R = rules()
-	local far = camp({ dist = 3000 })
-	local near = camp({ dist = 1200 })
-	local enemySide = camp({ dist = 500, ourSide = false })
+	local t = 5 * 60 + 38
+	local far = camp({ time = t, dist = 2400 })
+	local near = camp({ time = t, dist = 1200 })
+	local enemySide = camp({ time = t, dist = 500, ourSide = false })
 	T.eq(R.PickCamp({ far, enemySide, near }), near)
 	T.eq(enemySide.why, "not-our-side")
 	T.eq(far.why, "ok")
+	-- The enemy check runs nearest first and stops at the first safe camp.
+	local asked = {}
+	local picked = R.PickCamp({ far, enemySide, near }, function(c)
+		asked[#asked + 1] = c.dist
+		return c == near
+	end)
+	T.eq(picked, far)
+	T.eq(near.why, "enemy")
+	T.eq(#asked, 2)
+	T.eq(asked[1], 1200)
 	T.eq(R.PickCamp({ enemySide }), nil)
 	T.eq(R.PickCamp({}), nil)
+end)
+
+T.test("pick: a nearer camp that is still early wins over a farther one that could go now", function()
+	local R = rules()
+	local t = 5 * 60 + 30
+	-- 1200: arrives :32.75 (early); 2500: arrives :39.25 (ok).
+	local near = camp({ time = t, dist = 1200 })
+	local far = camp({ time = t, dist = 2500 })
+	T.eq(R.PickCamp({ near, far }), nil)
+	T.eq(near.why, "early")
+	T.eq(R.AnyEarly({ near, far }), true)
+	T.eq(R.AnyEarly({ far }), false)
+	-- Alone, the farther camp goes.
+	T.eq(R.PickCamp({ camp({ time = t, dist = 2500 }) }) ~= nil, true)
 end)
 
 T.test("order second: the hit lands at the camp's pull second; a walk starts it earlier, never before :50", function()

@@ -254,13 +254,19 @@ local function TryStart(bot, wardWanted)
 			time = now,
 			dist = GetUnitToLocationDistance(bot, spawner.location),
 			speed = speed,
-			enemyNear = EnemyHeroNear(spawner.location, Rules.ENEMY_RADIUS),
-			dangerous = Fu.Site.IsCampDangerous(bot, { cattr = spawner }),
 			claimed = claim ~= nil and claim.minute == minute and claim.bot ~= bot,
 		}
 	end
-	local camp = Rules.PickCamp(camps)
+	-- The enemy checks only for the camps that pass the rest, nearest first.
+	local camp = Rules.PickCamp(camps, function(c)
+		return EnemyHeroNear(c.spawner.location, Rules.ENEMY_RADIUS)
+			or Fu.Site.IsCampDangerous(bot, { cattr = c.spawner })
+	end)
 	if camp == nil then
+		-- A camp that only waits for its departure second is taken a second later: no skip line for it.
+		if Rules.AnyEarly(camps) then
+			return 0
+		end
 		-- Why the camps on our side were left out (the other side's camps are not counted).
 		local counts, order = {}, {}
 		for _, c in ipairs(camps) do
@@ -321,19 +327,22 @@ local function ActiveDesire(bot)
 	if bot:GetActiveMode() == BOT_MODE_WARD then
 		s.modeSeenAt = now
 	elseif now - s.modeSeenAt > LOST_MODE_SECONDS then
-		Finish(bot, "no", "mode-" .. tostring(bot:GetActiveMode()))
+		local dropped = (s.phase == "leave" or s.phase == "check") and "unknown" or "no"
+		Finish(bot, dropped, "mode-" .. tostring(bot:GetActiveMode()))
 		return 0
 	end
 	if now - s.startAt > 75 then
 		Finish(bot, "no", "timeout")
 		return 0
 	end
+	-- Dropped after the hit landed: the camp may well be stacked, but nobody counts it.
+	local dropped = (s.phase == "leave" or s.phase == "check") and "unknown" or "no"
 	if Fu.GetHP(bot) < 0.5 or bot:WasRecentlyDamagedByAnyHero(2.0) then
-		Finish(bot, "no", "hit")
+		Finish(bot, dropped, "hit")
 		return 0
 	end
 	if EnemyHeroNear(bot:GetLocation(), 1200) or s.phase == "walk" and EnemyHeroNear(s.loc, Rules.ENEMY_RADIUS) then
-		Finish(bot, "no", "enemy")
+		Finish(bot, dropped, "enemy")
 		return 0
 	end
 	return STACK_DESIRE
@@ -391,8 +400,20 @@ function Stack.Think(bot)
 		end
 	end
 	if s.phase == "wait" then
-		local spawners = Spawners()
-		local count, creep, creepDist = CampCreeps(s.loc, spawners, bot)
+		-- The camp is counted every 0.4s, not every think (28 spawner distances per creep). The highest count seen
+		-- while waiting is the `before` of the result (a creep standing at the far edge may be out of sight once).
+		local cache = s.waitCount
+		if
+			cache == nil
+			or now - cache.at >= 0.4
+			or cache.creep ~= nil and (cache.creep:IsNull() or not cache.creep:IsAlive())
+		then
+			local n, nearest, nearestDist = CampCreeps(s.loc, Spawners(), bot)
+			cache = { at = now, count = n, creep = nearest, dist = nearestDist }
+			s.waitCount = cache
+			s.maxCount = math.max(s.maxCount or 0, n)
+		end
+		local count, creep, creepDist = s.maxCount or cache.count, cache.creep, cache.dist
 		if creep == nil then
 			if sec >= Rules.EARLIEST_ORDER - 2 or minute > s.minute then
 				Finish(bot, "no", "empty", 0, 0, IsLocationVisible(s.loc))
@@ -461,7 +482,7 @@ function Stack.Think(bot)
 		return
 	end
 	if s.phase == "leave" then
-		-- Out of the box until the spawn has happened, then back to look.
+		-- Out of the box until the spawn has happened, then the count.
 		if now < s.spawnAt + 0.5 then
 			bot:Action_MoveToLocation(s.exitLoc)
 			return
@@ -469,8 +490,10 @@ function Stack.Think(bot)
 		s.phase = "check"
 	end
 	if s.phase == "check" then
+		-- Counted from the exit point: walking back in meets the pulled creeps still chasing. At night (800
+		-- vision) the camp may be out of sight from there: stacked=unknown.
 		if now < s.spawnAt + Rules.CHECK_SECOND then
-			bot:Action_MoveToLocation(s.waitLoc)
+			bot:Action_MoveToLocation(s.exitLoc)
 			return
 		end
 		local visible = IsLocationVisible(s.loc)

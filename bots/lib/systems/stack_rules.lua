@@ -26,10 +26,14 @@ StackRules.END_TIME = 20 * 60
 -- core every minute. After 10:00 it may stack every minute. A guess: tune it after a game.
 StackRules.LANE_PHASE_END = 10 * 60
 StackRules.LANING_GAP = 120
--- The camp is picked between these seconds of the minute, and the bot must reach the camp by WAIT_BY.
+-- The camp is picked between these seconds of the minute. The bot leaves so it arrives between ARRIVE_FROM and
+-- WAIT_BY (not at :15 for a :54 pull: that is half a minute more out of lane). The walk time is the straight
+-- distance at the bot's speed times PATH_FACTOR (paths through the jungle are longer than the straight line).
 StackRules.PICK_FROM = 15
-StackRules.PICK_UNTIL = 40
+StackRules.PICK_UNTIL = 44
+StackRules.ARRIVE_FROM = 39
 StackRules.WAIT_BY = 47
+StackRules.PATH_FACTOR = 1.5
 -- Farthest camp considered (walking distance is longer than this straight line).
 StackRules.MAX_DIST = 3500
 -- The bot stops this far from the camp centre to wait (out of the spawn box: its size is not in the bot API,
@@ -146,9 +150,12 @@ function StackRules.CampOk(c)
 		return false, "far"
 	end
 	local sec = StackRules.Clock(c.time)
-	local eta = math.max(0, c.dist - StackRules.WAIT_DIST) / math.max(100, c.speed or 300)
+	local eta = math.max(0, c.dist - StackRules.WAIT_DIST) / math.max(100, c.speed or 300) * StackRules.PATH_FACTOR
 	if sec + eta > StackRules.WAIT_BY then
 		return false, "late"
+	end
+	if sec + eta < StackRules.ARRIVE_FROM then
+		return false, "early"
 	end
 	if c.claimed then
 		return false, "claimed"
@@ -159,18 +166,47 @@ function StackRules.CampOk(c)
 	return true, "ok"
 end
 
--- The best camp: the nearest allowed one. camps: list of tables for CampOk plus anything else; returns the
--- chosen table (or nil) and, for each camp, the reason in camp.why.
-function StackRules.PickCamp(camps)
-	local best = nil
+-- The best camp: the nearest allowed one. camps: list of tables for CampOk plus anything else. isUnsafe(c), if
+-- given, is asked only for camps that pass CampOk, nearest first, until one is safe (the enemy checks cost engine
+-- calls, so they run for a few camps, not all 28). Returns the chosen table (or nil); each camp keeps its reason
+-- in camp.why ("enemy" for one isUnsafe turned down). Nil also while a nearer camp only waits for its departure
+-- time ("early"): the bot takes that one a few seconds later instead of walking off to a farther one now.
+function StackRules.PickCamp(camps, isUnsafe)
+	local allowed = {}
+	local nearestEarly = math.huge
 	for _, c in ipairs(camps or {}) do
 		local ok, why = StackRules.CampOk(c)
 		c.why = why
-		if ok and (best == nil or c.dist < best.dist) then
-			best = c
+		if ok then
+			allowed[#allowed + 1] = c
+		elseif why == "early" and c.dist < nearestEarly then
+			nearestEarly = c.dist
 		end
 	end
-	return best
+	table.sort(allowed, function(a, b)
+		return a.dist < b.dist
+	end)
+	for _, c in ipairs(allowed) do
+		if c.dist > nearestEarly then
+			return nil
+		end
+		if isUnsafe ~= nil and isUnsafe(c) then
+			c.why = "enemy"
+		else
+			return c
+		end
+	end
+	return nil
+end
+
+-- Whether any camp only waits for its departure time (picked again a second later, no skip line for it).
+function StackRules.AnyEarly(camps)
+	for _, c in ipairs(camps or {}) do
+		if c.why == "early" then
+			return true
+		end
+	end
+	return false
 end
 
 -- Second of the minute to give the attack order: the hit should land at the camp's pull second, so a hero who
