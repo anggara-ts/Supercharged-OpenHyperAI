@@ -441,8 +441,9 @@ function Stack.Think(bot)
 			bot:Action_MoveToLocation(s.exitLoc)
 			return
 		end
-		-- The creep died or went out of sight: the next one. Otherwise repeat the order at most every 0.7s
-		-- (not every frame: a repeated attack order restarts the attack animation).
+		-- The creep died or went out of sight: the next one. Otherwise repeat the order only when the bot is not
+		-- attacking (an order lost to something else), at most every 0.7s: a repeated attack order restarts the
+		-- attack animation.
 		if s.creep == nil or s.creep:IsNull() or not s.creep:IsAlive() or not s.creep:CanBeSeen() then
 			local _, creep = CampCreeps(s.loc, Spawners(), bot)
 			if creep == nil then
@@ -452,7 +453,8 @@ function Stack.Think(bot)
 			s.creep = creep
 			s.orderedAt = -math.huge
 		end
-		if now - s.orderedAt >= 0.7 then
+		local newCreep = s.orderedAt == -math.huge
+		if newCreep or now - s.orderedAt >= 0.7 and bot:GetCurrentActionType() ~= BOT_ACTION_TYPE_ATTACK then
 			s.orderedAt = now
 			bot:Action_AttackUnit(s.creep, true)
 		end
