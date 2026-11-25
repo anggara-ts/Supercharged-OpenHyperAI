@@ -12,6 +12,7 @@ end
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
 local HeroDisplayNames = require(GetScriptDirectory() .. "/lib/data/hero_display_names")
+local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local function getHeroDisplayName(unit)
 	if unit == nil then
 		return ""
@@ -36,19 +37,14 @@ local function sayModeChat(chatKey, target, cooldown)
 		if target then
 			line = string.gsub(line, "{target}", getHeroDisplayName(target))
 		end
-		bot:ActionImmediate_Chat(line, false)
+		ChatRules.SayDecision(bot, line, chatKey)
 	end
 end
-local PING_MAX_AGE = 8
-local ASSEMBLE_HOLD_SECONDS = 5
-local ATTACK_HOLD_SECONDS = 6
-local PING_DESIRE = 0.8
+-- Human orders (#222): pings and chat commands (bots/lib/systems/human_orders.lua).
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local HOLD_DESIRE = 0.4
-local PING_ATTACK_DESIRE = 0.7
 local HOLD_ATTACK_DESIRE = 0.4
 local ARRIVE_DISTANCE = 50
-local MAX_PING_DISTANCE = 2500
-local PING_ENEMY_RADIUS = 500
 local TARGET_LEASH_DISTANCE = 3000
 local assembleLocation = nil
 local holdUntil = 0
@@ -56,41 +52,18 @@ local pingTarget = nil
 local pingLocation = nil
 local groupUpAlly = nil
 function GetDesire()
+	-- Every bot runs the team's order tick (reads the humans' pings and chat commands); this mode carries out the
+	-- gank, chase, fog, group, danger and move orders.
+	HumanOrders.Tick(bot)
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
 	end
 	if not bot:IsAlive() then
 		return BOT_MODE_DESIRE_NONE
 	end
-	local pingingHuman, ping = Fu.GetHumanPing()
-	if
-		pingingHuman ~= nil
-		and ping ~= nil
-		and ping.normal_ping
-		and ping.time ~= 0
-		and GameTime() - ping.time < PING_MAX_AGE
-	then
-		local distanceToPing = GetUnitToLocationDistance(bot, ping.location)
-		if distanceToPing > ARRIVE_DISTANCE and distanceToPing < MAX_PING_DISTANCE then
-			assembleLocation = ping.location
-			pingLocation = ping.location
-			pingTarget = FindEnemyAtPing()
-			if pingTarget ~= nil then
-				holdUntil = GameTime() + ATTACK_HOLD_SECONDS
-				sayModeChat("say_assemble_attack", pingTarget, ASSEMBLE_HOLD_SECONDS)
-			else
-				holdUntil = GameTime() + ASSEMBLE_HOLD_SECONDS
-				Fu.ModeAnnounce(bot, "say_assemble", ASSEMBLE_HOLD_SECONDS)
-			end
-			if bot:GetLevel() < 6 then
-				local enemyTowers = bot:GetNearbyTowers(1000, true)
-				if enemyTowers and #enemyTowers >= 1 then
-					return BOT_MODE_DESIRE_NONE
-				end
-			end
-			local baseDesire = pingTarget ~= nil and PING_ATTACK_DESIRE or PING_DESIRE
-			return baseDesire * RemapValClamped(Fu.GetHP(bot), 0, 0.6, 0, 1)
-		end
+	local orderDesire = HumanOrders.AssembleDesire(bot)
+	if orderDesire ~= nil then
+		return orderDesire
 	end
 	if assembleLocation ~= nil and GameTime() < holdUntil then
 		if pingTarget ~= nil then
@@ -202,20 +175,11 @@ function OnEnd()
 	pingLocation = nil
 	groupUpAlly = nil
 end
-function FindEnemyAtPing()
-	if assembleLocation == nil then
-		return nil
-	end
-	local nearbyEnemies = Fu.GetEnemiesNearLoc(assembleLocation, PING_ENEMY_RADIUS)
-	for _, enemyHero in pairs(nearbyEnemies) do
-		if Fu.IsValidHero(enemyHero) and Fu.CanBeAttacked(enemyHero) then
-			return enemyHero
-		end
-	end
-	return nil
-end
 function Think()
 	if Fu.CanNotUseAction(bot) then
+		return
+	end
+	if HumanOrders.AssembleThink(bot) then
 		return
 	end
 	if assembleLocation == nil then

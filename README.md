@@ -20,7 +20,7 @@ and skill builds for every hero.
    - Bot Settings: choose the subscribed script for both Radiant and Dire.
 3. Join a team. The slot you take is your role: 1 carry (safe lane), 2 mid, 3 offlane, 4 soft support, 5 hard
    support. The bots fill the other roles.
-4. Start the game. When the script loaded, the bots' names end with **`.OHA-DEV`**.
+4. Start the game. When the script loaded, the bots' names end with **`.SHy`**.
 
 If the bots play with Valve's default names, the script didn't load: see
 [Run from this repository](#run-from-this-repository), or link the Workshop folder the same way (step 2 there,
@@ -49,6 +49,7 @@ example).
 | `!pick HERO` | Force a bot pick |
 | `!ban HERO` | Ban a hero from bot picks; during the draft |
 | `!sp XX` | Bot language: `en`, `zh`, `ru`, `ja` |
+| `!about` | One bot per team says the script name, version and where to send feedback (the Workshop page) |
 
 ---
 
@@ -108,3 +109,10 @@ default bots and earlier community scripts: jmz / New Beginner AI, ryndrb, adamq
 The Linux install script is based on ashoktamang's
 [dota2bot-OpenHyperAI-linux-patcher](https://github.com/ashoktamang/dota2bot-OpenHyperAI-linux-patcher).
 Thanks to all of them.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE). It keeps the MIT notice of the upstream project
+([forest0xia/dota2bot-OpenHyperAI](https://github.com/forest0xia/dota2bot-OpenHyperAI), Copyright (c) 2024 Mingyou
+Xia) next to this project's own copyright line. `bots/lib/vendor/json.lua` (dkjson by David Heiko Kolf) keeps its own MIT
+notice inside the file. Every copy of the scripts, the Workshop upload included, ships with `LICENSE`.
