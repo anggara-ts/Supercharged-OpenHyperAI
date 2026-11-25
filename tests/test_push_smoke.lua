@@ -162,3 +162,68 @@ T.test("push: a glyphed enemy tower keeps the bot at it (glyph-wait), the end pr
 	T.ok(printed("glyph-end why=ended lane=3"), "glyph-end line")
 	T.ok(printed("moves=2 backs=0 spread=-1"), "glyph-end counts the moves (out of range, one side-step), no ally")
 end)
+
+T.test("push: a lone bot walks to this lane's push group instead of dropping (alone-join, game 085 35:17)", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich" })
+	T.stub.time = 1800
+	local Push = require(GetScriptDirectory() .. "/lib/systems/push")
+	local bot = GetBot()
+	bot._level = 20
+	-- Every lane front in the middle of the map, far from both fountains (no high-ground rules).
+	local frontFn = _G.GetLaneFrontLocation
+	_G.GetLaneFrontLocation = function(_, _, delta)
+		return Vector(-(delta or 0) * 0.1, 0, 0)
+	end
+	-- All five enemies alive, far away.
+	for _, enemy in ipairs(T.stub.teams[GetOpposingTeam()]) do
+		enemy._level = 20
+		enemy._loc = Vector(6500, 6500, 0)
+	end
+	-- Two allies at the lane front (the group), two far off, this bot alone 5000 away.
+	local ourTeam = T.stub.teams[GetTeam()]
+	local others = {}
+	for i = 1, #ourTeam do
+		if ourTeam[i] ~= bot then
+			others[#others + 1] = ourTeam[i]
+		end
+	end
+	others[1]._loc = Vector(400, 300, 0)
+	others[2]._loc = Vector(600, 500, 0)
+	others[3]._loc = Vector(-7000, 6000, 0)
+	others[4]._loc = Vector(-7200, 6200, 0)
+	bot._loc = Vector(-5000, -1000, 0)
+	local moved = nil
+	bot.Action_MoveToLocation = function(_, location)
+		moved = location
+	end
+	local ok, err = pcall(function()
+		Push.GetPushDesire(bot, 1)
+		Push.PushThink(bot, 1)
+	end)
+	_G.GetLaneFrontLocation = frontFn
+	T.ok(ok, tostring(err))
+	local function printed(pattern)
+		for _, line in ipairs(T.stub.printed) do
+			if string.find(tostring(line), pattern, 1, true) then
+				return true
+			end
+		end
+		return false
+	end
+	T.ok(printed("push-gate lane=1 why=alone-join group=2 atFront=2"), "alone-join line")
+	T.ok(bot._pushGate ~= "alone", "the push is not dropped as alone")
+	T.ok(moved ~= nil and math.abs(moved.x - 500) < 1 and math.abs(moved.y - 400) < 1, "walks to the group")
+	-- Nobody on the lane: the old drop.
+	others[1]._loc = Vector(-7000, 6000, 0)
+	others[2]._loc = Vector(-7000, 6000, 0)
+	T.stub.time = 1801
+	_G.GetLaneFrontLocation = function(_, _, delta)
+		return Vector(-(delta or 0) * 0.1, 0, 0)
+	end
+	ok, err = pcall(function()
+		Push.GetPushDesire(bot, 1)
+	end)
+	_G.GetLaneFrontLocation = frontFn
+	T.ok(ok, tostring(err))
+	T.eq(bot._pushGate, "alone", "no group: dropped as alone")
+end)

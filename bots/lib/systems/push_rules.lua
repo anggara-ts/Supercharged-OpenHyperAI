@@ -197,6 +197,11 @@ end
 --   s.groupAllowed: an advantage window, or a joiner of an all-alive push the later caps let up the high ground
 --   s.released: the group went up less than ~12s ago (latched, so walking up doesn't drop the count and turn back)
 --   s.gatherAge: seconds this bot has been gathering; s.coolDown: a gather that gave up less than 30s ago
+--   s.atFront: our heroes at this lane's front (PushRules.HgGatherLane's count); 3+ there with no more enemies alive
+--     than that: the group is already up, "go" (game 085 50:43: Shadow Fiend, Sniper and Phoenix at the mid T3
+--     against 1-2 alive were held at 0.15). A bot arriving alone then walks up to them instead of waiting below.
+--   s.otherLane: the team gathers on another lane (PushRules.HgGatherLane): "cap" here, but only after the "go"
+--     checks, so a group that is already there is never held back by it
 -- Returns "none" (no high-ground cap), "go" (enough allies: no cap, latch the release), "cap" (0.15) or "gather".
 function PushRules.HgGather(s)
 	if not s.nearEnemyFountain or (s.enemiesAlive or 5) == 0 then
@@ -209,8 +214,15 @@ function PushRules.HgGather(s)
 	if (s.alliesNear or 1) >= need or (s.atSpot or 0) >= need then
 		return "go"
 	end
+	local atFront = s.atFront or 0
+	if atFront >= 3 and (s.enemiesAlive or 5) <= atFront then
+		return "go"
+	end
 	if s.released then
 		return "go"
+	end
+	if s.otherLane then
+		return "cap"
 	end
 	if not s.groupAllowed or s.atSpot == nil or s.coolDown then
 		return "cap"
@@ -542,6 +554,79 @@ function PushRules.RoshanFirst(s)
 		return false, "even"
 	end
 	return true, s.ahead and "ahead" or "pressure"
+end
+
+-- The team's high-ground gather lane (#12, game 085 50:43: Ringmaster, 15000 away, set the gather lane to bot because
+-- he asked first, and the three heroes at the mid T3 were capped to 0.15). Worked out from the team's positions only,
+-- so every bot gets the same answer whichever asks:
+--   s.counts[lane]: our heroes at that lane's front (within 3000 of it or 1600 of its gather spot)
+--   s.kept: the lane a gathering bot within 4000 of its spot set less than 3s ago (nil when none). It stays unless
+--     another lane has strictly more allies, so the pick doesn't flip on a tie.
+--   s.advLane: the group push's locked lane (nil when none); s.hgLanes[lane]: its front is near their fountain
+-- The lane with the most allies; on a tie the advantage push's lane, then the lowest tied lane. With nobody at any
+-- front: the kept lane, the advantage lane, the lowest high-ground lane, then lane 1.
+-- Returns lane, why (kept / most-allies / adv-lane / first-hg / first).
+function PushRules.HgGatherLane(s)
+	local counts = s.counts or {}
+	local best = 0
+	for lane = 1, 3 do
+		best = math.max(best, counts[lane] or 0)
+	end
+	local kept, advLane = s.kept, s.advLane
+	if kept ~= nil and (counts[kept] or 0) >= best then
+		return kept, "kept"
+	end
+	if best >= 1 then
+		local tied, first = 0, nil
+		for lane = 1, 3 do
+			if (counts[lane] or 0) == best then
+				tied = tied + 1
+				first = first or lane
+			end
+		end
+		if tied > 1 and advLane ~= nil and (counts[advLane] or 0) == best then
+			return advLane, "adv-lane"
+		end
+		return first, "most-allies"
+	end
+	if advLane ~= nil then
+		return advLane, "adv-lane"
+	end
+	for lane = 1, 3 do
+		if s.hgLanes ~= nil and s.hgLanes[lane] then
+			return lane, "first-hg"
+		end
+	end
+	return 1, "first"
+end
+
+-- The push gate for a bot with no ally within 1600 while 3+ enemies are alive (#12, game 085 35:17-35:56: bots that
+-- reached the top push one after another each counted as "alone" and went back to farm: `push-gate why=alone` from
+-- Phoenix, Shadow Fiend, Ringmaster and Sniper while the others pushed top).
+--   s.alliesNear: allies within 1600 (itself included); s.enemiesAlive; s.enemiesNear: enemy heroes within 1600
+--   s.window: an advantage window, or a joiner of an all-alive group push (as before: it may come alone)
+--   s.group: other allies on this lane's push: within 3000 of its front, or in its push mode within 6000 of it
+--   s.joinAge: seconds this bot has been walking to that group
+-- Returns "pass" (not alone), "window", "join" (walk to the group: push-gate why=alone-join) or "drop", and why.
+PushRules.ALONE_JOIN_MAX_SECONDS = 45
+function PushRules.AloneGate(s)
+	if (s.alliesNear or 1) > 1 or (s.enemiesAlive or 5) < 3 then
+		return "pass", "not-alone"
+	end
+	local enemiesNear = s.enemiesNear or 0
+	if s.window and enemiesNear == 0 then
+		return "window", "window"
+	end
+	if enemiesNear > 0 then
+		return "drop", "alone"
+	end
+	if (s.group or 0) >= 2 then
+		if (s.joinAge or 0) > PushRules.ALONE_JOIN_MAX_SECONDS then
+			return "drop", "alone-join-timeout"
+		end
+		return "join", "alone-join"
+	end
+	return "drop", "alone"
 end
 
 return PushRules

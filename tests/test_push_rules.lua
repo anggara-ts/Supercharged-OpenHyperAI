@@ -255,6 +255,89 @@ T.test("high-ground gather: an allowed group waits below the high ground, then g
 	T.eq(R.HgGather({ nearEnemyFountain = false }), "none", "not near their fountain")
 end)
 
+T.test(
+	"high-ground gather: a group already at the front goes, the other-lane cap comes after (game 085 50:43)",
+	function()
+		local R = rules()
+		-- Game 085 t=3043: Shadow Fiend, Sniper and Phoenix at the mid T3 (allies=3, need 2, alive 4/2) while the team's
+		-- gather lane was bot: they were capped to 0.15.
+		local s = {
+			nearEnemyFountain = true,
+			enemiesAlive = 2,
+			alliesAlive = 4,
+			alliesNear = 3,
+			atSpot = 0,
+			need = 2,
+			groupAllowed = true,
+			atFront = 3,
+			otherLane = true,
+		}
+		T.eq(R.HgGather(s), "go", "3 near the bot: go even when the team gathers on another lane")
+		-- A fourth bot arriving alone at the spot while the three stand at the T3: it walks up instead of waiting.
+		s.alliesNear, s.atSpot = 1, 1
+		T.eq(R.HgGather(s), "go", "3 at the front against 2 alive: go")
+		s.enemiesAlive, s.alliesAlive = 4, 5
+		T.eq(R.HgGather(s), "cap", "3 at the front against 4 alive, team gathers elsewhere: cap")
+		s.otherLane = false
+		T.eq(R.HgGather(s), "gather", "3 at the front against 4 alive on the team's lane: gather")
+		s.released, s.otherLane = true, true
+		T.eq(R.HgGather(s), "go", "a latched release beats the other-lane cap")
+	end
+)
+
+T.test("high-ground gather lane: most allies at a front, then the advantage lane, the same for every bot", function()
+	local R = rules()
+	-- Game 085 t=3039: nobody near bot, three at mid; Ringmaster (far, no count anywhere) asked for bot first.
+	local lane, why = R.HgGatherLane({ counts = { 0, 3, 0 }, hgLanes = { true, true, true } })
+	T.eq(lane, 2, "mid has the allies")
+	T.eq(why, "most-allies", "why")
+	-- A kept lane holds on a tie, loses to a lane with strictly more.
+	lane, why = R.HgGatherLane({ counts = { 2, 2, 0 }, kept = 1, advLane = 2 })
+	T.eq(lane, 1, "kept on a tie")
+	T.eq(why, "kept", "kept why")
+	lane = R.HgGatherLane({ counts = { 1, 3, 0 }, kept = 1 })
+	T.eq(lane, 2, "a lane with more allies takes over")
+	-- Ties without a kept lane: the advantage lane, else the lowest tied lane (the smoke test's identical fronts).
+	lane, why = R.HgGatherLane({ counts = { 1, 1, 1 }, advLane = 3 })
+	T.eq(lane, 3, "tie: the advantage lane")
+	T.eq(why, "adv-lane", "tie why")
+	T.eq(R.HgGatherLane({ counts = { 1, 1, 1 } }), 1, "tie, no advantage lane: the lowest")
+	T.eq(R.HgGatherLane({ counts = { 0, 2, 2 } }), 2, "tie between mid and bot: mid")
+	-- Nobody at any front (every bot far): one lane for all of them, never each asker's own lane (game 069 45:57).
+	local counts = { 0, 0, 0 }
+	lane, why = R.HgGatherLane({ counts = counts, hgLanes = { false, true, true } })
+	T.eq(lane, 2, "nobody near: the lowest high-ground lane")
+	T.eq(why, "first-hg", "nobody near why")
+	T.eq(R.HgGatherLane({ counts = counts, advLane = 3, hgLanes = { true, true, true } }), 3, "nobody near: adv lane")
+	T.eq(R.HgGatherLane({ counts = counts, kept = 3, advLane = 1 }), 3, "nobody near: the kept lane")
+	T.eq(R.HgGatherLane({ counts = counts }), 1, "nothing known: lane 1")
+end)
+
+T.test("alone gate: walk to this lane's push group instead of dropping (game 085 35:17-35:56)", function()
+	local R = rules()
+	-- Game 085 t=2147: Phoenix alone (allies=1) on the top push while Sniper, Brewmaster and Shadow Fiend pushed it.
+	local s = { alliesNear = 1, enemiesAlive = 3, enemiesNear = 0, group = 3, joinAge = 0 }
+	local gate, why = R.AloneGate(s)
+	T.eq(gate, "join", "a group on the lane: join")
+	T.eq(why, "alone-join", "join why")
+	s.group = 1
+	gate, why = R.AloneGate(s)
+	T.eq(gate, "drop", "one ally on the lane is no group")
+	T.eq(why, "alone", "drop why")
+	s.group, s.enemiesNear = 3, 1
+	T.eq(R.AloneGate(s), "drop", "an enemy hero near the lone bot: drop")
+	s.enemiesNear, s.joinAge = 0, R.ALONE_JOIN_MAX_SECONDS + 1
+	gate, why = R.AloneGate(s)
+	T.eq(gate, "drop", "walking to the group for too long: drop")
+	T.eq(why, "alone-join-timeout", "timeout why")
+	s.joinAge, s.group, s.window = 0, 0, true
+	T.eq(R.AloneGate(s), "window", "advantage window: comes alone as before")
+	s.window, s.alliesNear = nil, 2
+	T.eq(R.AloneGate(s), "pass", "an ally near: not alone")
+	s.alliesNear, s.enemiesAlive = 1, 2
+	T.eq(R.AloneGate(s), "pass", "2 enemies alive: no alone gate")
+end)
+
 T.test("own-HP cap: 40% in a dead-enemies window with no enemy near, 5% hysteresis (game 068 2331-2376)", function()
 	local R = rules()
 	T.eq(R.OwnHpCap({}), 0.5, "normal")
