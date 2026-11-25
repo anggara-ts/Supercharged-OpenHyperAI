@@ -1,5 +1,6 @@
 -- bots/lib/systems/hero_cast_rules.lua: casts that were never made (#47): Chen Hand of God, Huskar's Shard
--- Berserker's Blood, Pugna Life Drain on an ally, Tiny Toss onto an ally, Keeper's Spirit Form heal.
+-- Berserker's Blood, Pugna Life Drain on an ally, Tiny Toss onto an ally, Keeper's Spirit Form heal, Phoenix's
+-- Icarus Dive Stop.
 local T = ...
 
 local function rules()
@@ -55,4 +56,61 @@ T.test("keeper spirit-form heal: only in Spirit Form, for a hurt ally under atta
 	T.eq(R.SpiritIlluminateHealWorth(0.4, true, false), false, "not in Spirit Form")
 	T.eq(R.SpiritIlluminateHealWorth(0.8, true, true), false, "ally healthy")
 	T.eq(R.SpiritIlluminateHealWorth(0.4, false, true), false, "ally not under attack")
+end)
+
+local function dive(over)
+	local d = {
+		kind = "engage",
+		elapsed = 0.5,
+		duration = 2,
+		fromStart = 500,
+		fromStartMax = 500,
+		dashLength = 1100,
+		targetDist = 400,
+		targetDistMin = 400,
+		hitRadius = 200,
+		dashWidth = 500,
+	}
+	for k, v in pairs(over or {}) do
+		d[k] = v
+	end
+	return d
+end
+
+T.test("icarus dive stop: kill / engage stop at the target, not by time", function()
+	local R = rules()
+	T.eq(R.IcarusDiveStop(dive({ targetDist = 150, targetDistMin = 150 })), true, "within hit_radius: reached")
+	local stop, why = R.IcarusDiveStop(dive({ targetDist = 330, targetDistMin = 240 }))
+	T.eq(stop, true, "came within 250+200 and now moving away: passed")
+	T.eq(why, "passed")
+	T.eq(R.IcarusDiveStop(dive({ targetDist = 260, targetDistMin = 240 })), false, "still about level with it")
+	T.eq(R.IcarusDiveStop(dive({ targetDist = 700, targetDistMin = 600 })), false, "target left the path: no stop")
+	T.eq(R.IcarusDiveStop(dive({ elapsed = 1.9, targetDist = 700, targetDistMin = 600 })), false, "no time cap")
+	T.eq(R.IcarusDiveStop(dive({ kind = "kill", targetDist = nil, targetDistMin = nil })), false, "no target")
+	T.eq(R.IcarusDiveStop(dive({ elapsed = -0.1, targetDist = 100, targetDistMin = 100 })), false, "not started")
+end)
+
+T.test("icarus dive stop: retreat stops at the far end of the arc", function()
+	local R = rules()
+	local retreat = { kind = "retreat", targetDist = nil, targetDistMin = nil }
+	local function at(over)
+		local d = dive(retreat)
+		for k, v in pairs(over) do
+			d[k] = v
+		end
+		return d
+	end
+	T.eq(R.IcarusDiveStop(at({ elapsed = 0.6, fromStart = 800, fromStartMax = 800 })), false, "still going out")
+	local stop, why = R.IcarusDiveStop(at({ elapsed = 0.9, fromStart = 1040, fromStartMax = 1095 }))
+	T.eq(stop, true, "turned back after half the dash")
+	T.eq(why, "far-end")
+	T.eq(R.IcarusDiveStop(at({ elapsed = 0.5, fromStart = 200, fromStartMax = 260 })), false, "a wobble near the start")
+	stop, why = R.IcarusDiveStop(at({ elapsed = 1.0, fromStart = 900, fromStartMax = 900 }))
+	T.eq(stop, true, "half the dive duration is the cap")
+	T.eq(why, "half")
+	T.eq(
+		R.IcarusDiveStop(at({ kind = "stuck", elapsed = 1.05, fromStart = 950, fromStartMax = 950 })),
+		true,
+		"stuck too"
+	)
 end)

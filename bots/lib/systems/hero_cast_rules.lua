@@ -74,4 +74,49 @@ function Rules.SpiritIlluminateHealWorth(allyHp, allyHit, inSpiritForm)
 	return inSpiritForm == true and allyHit == true and allyHp < Rules.SPIRIT_HEAL_ALLY_HP
 end
 
+-- Phoenix, Icarus Dive Stop. Game data (Valve datafeed hero 110, 7.42): dash_length 1100/1200/1300/1400,
+-- dash_width 500, hit_radius 200, dive_duration 2, AbilityCastPoint 0.2; "dives forward in an arc with a fixed
+-- distance in the targeted direction ... and then orbiting back to its original position". A dive left alone ends
+-- where it started. The far end of the arc should come about half way through (1s), but the path shape is not in
+-- the game files, so the rules watch the distances and use the time only as a cap. The arc is dash_width wide, so
+-- it can pass up to about 250 beside the aimed spot instead of over it.
+-- d: kind ("kill", "engage", "retreat", "stuck"), elapsed (seconds since the dive started), duration
+-- (dive_duration), fromStart / fromStartMax (distance from the start now / the most so far), dashLength,
+-- targetDist / targetDistMin (to the dive's target now / the least so far; nil without a target), hitRadius,
+-- dashWidth. Returns stop (bool) and the reason:
+--   kill / engage: "reached" (within hit_radius of the target) or "passed" (came within half the arc width plus
+--     hit_radius and is moving away again). No time cap: if the target left the path, the dive finishes and
+--     carries Phoenix back to where she started, as before.
+--   retreat / stuck: "far-end" (the distance from the start turned back after half the dash) or "half" (half the
+--     dive duration, the far end of the arc).
+Rules.DIVE_TURN = 40
+-- Kill / engage: let the dive touch the target first (the burn lands on contact) before it may stop.
+Rules.DIVE_MIN_ELAPSED = 0.1
+function Rules.IcarusDiveStop(d)
+	if d.elapsed == nil or d.elapsed < 0 then
+		return false, nil
+	end
+	if d.kind == "kill" or d.kind == "engage" then
+		if d.targetDist == nil or d.targetDistMin == nil or d.elapsed < Rules.DIVE_MIN_ELAPSED then
+			return false, nil
+		end
+		if d.targetDist <= d.hitRadius then
+			return true, "reached"
+		end
+		if d.targetDistMin <= d.dashWidth / 2 + d.hitRadius and d.targetDist >= d.targetDistMin + Rules.DIVE_TURN then
+			return true, "passed"
+		end
+		return false, nil
+	end
+	if d.kind == "retreat" or d.kind == "stuck" then
+		if d.fromStartMax >= d.dashLength / 2 and d.fromStart <= d.fromStartMax - Rules.DIVE_TURN then
+			return true, "far-end"
+		end
+		if d.elapsed >= d.duration / 2 then
+			return true, "half"
+		end
+	end
+	return false, nil
+end
+
 return Rules
