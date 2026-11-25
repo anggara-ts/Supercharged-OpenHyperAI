@@ -332,3 +332,87 @@ T.test("strength push: Roshan desire boost only during a Roshan first, for boost
 	bot._retreatFinalDesire = nil
 	T.eq(S.RoshanDesire(bot, 0.3), 0.3, "team tick stale: unchanged")
 end)
+
+-- Games 083 and 084 (#12): even late games farmed out from 35:00 to 50:00 (maintainer: "minute 44 no team pushes").
+-- 083 at 42:00: Radiant 56.5k vs 52.9k, levels 17.6 vs 17.8. 084 at 44:00: Radiant 47.2k vs 50.8k, levels 17.2 vs 18.2.
+T.test("strength: late-even push in an even late game (games 083 and 084), both teams", function()
+	local R = rules()
+	local function late(over)
+		local i = inputs({ now = 44 * 60, teamSize = 5, ultsReadyAll = 4, ultsReady = 2, ultsTotal = 3 })
+		for k, v in pairs(over) do
+			i[k] = v
+		end
+		return { R.Decide(i) }
+	end
+	local cases = {
+		{ "083 radiant", 56500, 52900, 17.6, 17.8 },
+		{ "083 dire", 52900, 56500, 17.8, 17.6 },
+		{ "084 radiant", 47200, 50800, 17.2, 18.2 },
+		{ "084 dire", 50800, 47200, 18.2, 17.2 },
+	}
+	for _, c in ipairs(cases) do
+		local d = late({ ourNw = c[2], theirNw = c[3], ourLvl = c[4], theirLvl = c[5] })
+		T.eq(d[1], true, c[1] .. ": pushes")
+		T.eq(d[2], "late-even", c[1] .. ": as late-even")
+		T.eq(d[5], "late-even", c[1] .. ": late verdict")
+	end
+	local even = { ourNw = 47200, theirNw = 50800, ourLvl = 17.2, theirLvl = 18.2 }
+	local function lateWhy(over)
+		local i = {}
+		for k, v in pairs(even) do
+			i[k] = v
+		end
+		for k, v in pairs(over) do
+			i[k] = v
+		end
+		local d = late(i)
+		return d[1], d[2], d[5]
+	end
+	local ok, why, lateVerdict = lateWhy({ now = 34 * 60 })
+	T.eq(ok, false, "before 35:00: no push")
+	T.eq(why, "behind-lvl", "the lead reason stays the skip reason")
+	T.eq(lateVerdict, "late-early", "late verdict")
+	ok, _, lateVerdict = lateWhy({ aliveUs = 4, aliveThem = 4 })
+	T.eq(ok, false, "4 of 5 alive: no late-even push")
+	T.eq(lateVerdict, "late-alive", "late verdict")
+	ok, _, lateVerdict = lateWhy({ ultsReadyAll = 2 })
+	T.eq(ok, false, "2 ultimates ready: no push")
+	T.eq(lateVerdict, "late-ults", "late verdict")
+	ok, _, lateVerdict = lateWhy({ ourNw = 42000 })
+	T.eq(ok, false, "17% behind in net worth: no push")
+	T.eq(lateVerdict, "late-behind-nw", "late verdict")
+	ok, _, lateVerdict = lateWhy({ ourLvl = 16.5 })
+	T.eq(ok, false, "1.7 levels behind: no push")
+	T.eq(lateVerdict, "late-behind-lvl", "late verdict")
+	_, why = lateWhy({ defendDesire = 0.5 })
+	T.eq(why, "defend", "a lane to defend comes first")
+	_, why = lateWhy({ baseThreat = true })
+	T.eq(why, "base", "enemies at our base come first")
+	local lead = late({ ourNw = 80000, theirNw = 60000, ourLvl = 20, theirLvl = 18 })
+	T.eq(lead[2], "nw", "a real lead stays a lead push")
+end)
+
+T.test("strength: a late-even window ends on a lost fight, not on the missing lead, and re-arms after 90s", function()
+	local R = rules()
+	local state = { startedAt = 100, aliveAtStart = 5, arrivedAt = 100, kind = "late-even" }
+	local i = inputs({
+		ourNw = 47200,
+		theirNw = 50800,
+		ourLvl = 17.2,
+		theirLvl = 18.2,
+		factor = R.DEFAULTS.endFactor,
+		targetAlive = true,
+		enemiesAtFront = 2,
+		alliesAtFront = 4,
+	})
+	T.eq(R.EndWhy(state, 120, i), nil, "no lead: a late-even window keeps going")
+	T.eq(R.EndWhy({ startedAt = 100, aliveAtStart = 5, arrivedAt = 100 }, 120, i), "behind-lvl", "a lead window ends")
+	i.aliveUs, i.aliveThem = 3, 4
+	T.eq(R.EndWhy(state, 120, i), "deaths", "two of ours dead: ends")
+	T.eq(R.Cooldown("deaths", "late-even"), 90, "re-arms after 90s")
+	T.eq(R.Cooldown("outnumbered", "late-even"), 90, "outnumbered at the front: 90s")
+	T.eq(R.Cooldown("timeout", "late-even"), 60, "a timeout: 60s")
+	T.eq(R.Cooldown("building-down", "late-even"), 5, "a building fell: chain to the next")
+	T.eq(R.Cooldown("timeout"), 20, "lead windows unchanged")
+	T.ok(R.ROSH_PAST_SAFETY["rosh-window"], "the Roshan window call is a Roshan first")
+end)

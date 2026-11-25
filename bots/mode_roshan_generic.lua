@@ -327,6 +327,18 @@ local function FreshTakeNumbers(alliesAlive, enemiesAlive, missing)
 	end
 	return true, "ok"
 end
+-- Roshan window call (#12, bots/lib/systems/roshan_window.lua): in an even late game with all of ours alive the team
+-- takes Roshan at equal numbers. Every numbers check (the safety check, the fit, the running call) goes through here.
+do
+	local RoshanWindow = require(GetScriptDirectory() .. "/lib/systems/roshan_window")
+	local freshTakeNumbersBase = FreshTakeNumbers
+	FreshTakeNumbers = function(alliesAlive, enemiesAlive, missing)
+		if RoshanWindow.EvenTakeOk(alliesAlive, enemiesAlive) then
+			return true, "rosh-window"
+		end
+		return freshTakeNumbersBase(alliesAlive, enemiesAlive, missing)
+	end
+end
 -- Safe to start/continue Roshan: numbers + pit not contested. Returns ok, why.
 local function IsRoshanEngageSafe(roshanLocation, finishing)
 	if roshanLocation == nil then
@@ -1000,5 +1012,21 @@ do
 	local roshanGetDesire = GetDesire
 	GetDesire = function(...)
 		return StrengthPush.RoshanDesire(bot, roshanGetDesire(...))
+	end
+end
+-- Roshan window (#12, bots/lib/systems/roshan_window.lua): the pit peek in the respawn window (its own desire and
+-- walk, before the gather logic) and the even late-game call raised to gather strength.
+-- Logs [SHy-ROSH] rosh-peek, rosh-window.
+do
+	local RoshanWindow = require(GetScriptDirectory() .. "/lib/systems/roshan_window")
+	local roshanGetDesire, roshanThink = GetDesire, Think
+	GetDesire = function(...)
+		return RoshanWindow.Desire(bot, roshanGetDesire(...))
+	end
+	Think = function(...)
+		if RoshanWindow.Think(bot) then
+			return
+		end
+		return roshanThink(...)
 	end
 end

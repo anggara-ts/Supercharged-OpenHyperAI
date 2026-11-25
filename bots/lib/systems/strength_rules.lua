@@ -97,8 +97,10 @@ end
 
 -- Whether the team may start (or keep) a strength push. i = the Lead inputs plus
 --   laning (bool), baseThreat (bool: enemy heroes or creeps at our base), defendDesire (max over lanes),
---   defendPing (bool), aliveUs, aliveThem, ultsReady, ultsTotal (our cores with a learned ultimate).
--- Returns ok, why (the skip reason, or the lead kind when ok), nwPct, lvlLead.
+--   defendPing (bool), aliveUs, aliveThem, ultsReady, ultsTotal (our cores with a learned ultimate), and for the
+--   late-even push now, teamSize, ultsReadyAll (StrengthRules.LateEven).
+-- Returns ok, why (the skip reason, or the kind when ok: "nw", "lvl" or "late-even"), nwPct, lvlLead, lateWhy (the
+-- LateEven verdict when there was no lead).
 function StrengthRules.Decide(i)
 	if i.laning then
 		return false, "laning"
@@ -118,7 +120,12 @@ function StrengthRules.Decide(i)
 	end
 	local ok, lead, why, nwPct, lvlLead = StrengthRules.Lead(i)
 	if not ok then
-		return false, why, nwPct, lvlLead
+		-- No lead: the late-game push of an even game (StrengthRules.LateEven) may still go.
+		local lateOk, lateWhy = StrengthRules.LateEven(i, nwPct, lvlLead)
+		if lateOk then
+			return true, "late-even", nwPct, lvlLead, lateWhy
+		end
+		return false, why, nwPct, lvlLead, lateWhy
 	end
 	-- Our core ultimates: at least half of the learned ones ready (passives count as ready). The enemy's are unknown.
 	local total = i.ultsTotal or 0
@@ -126,6 +133,39 @@ function StrengthRules.Decide(i)
 		return false, "ults", nwPct, lvlLead
 	end
 	return true, lead, nwPct, lvlLead
+end
+
+-- Late-game push of an even game (#12, games 083 and 084, maintainer: "min 42 bots are farming instead of pushing",
+-- "minute 44 no team pushes", "the bot farms too long is the most users reported and boring"). Neither team led by
+-- the 20% / 2.5 levels above (083: Radiant 56.5k vs 52.9k, levels 17.6 vs 17.8; 084: 47.2k vs 50.8k, 17.2 vs 18.2),
+-- so nobody pushed from 35:00 to 50:00. After lateEvenTime, with all of us alive and 3+ of our ultimates ready (all
+-- heroes, not only the cores), the group pushes the weakest enemy lane anyway, unless clearly behind (the even band:
+-- net worth not under lateEvenNwBehind, levels not under lateEvenLvlBehind). The window ends on a lost fight (2 of us
+-- dead, StrengthRules.EndWhy "deaths") and re-arms after lateEvenCooldown. i = the Decide inputs plus now (DotaTime),
+-- teamSize, ultsReadyAll. Returns ok, why ("late-even" or the reason it does not apply).
+D.lateEvenTime = 35 * 60
+D.lateEvenUlts = 3
+D.lateEvenNwBehind = -0.12
+D.lateEvenLvlBehind = -1.5
+D.lateEvenCooldown = 90 -- after a lost fight (deaths, outnumbered)
+D.lateEvenRetry = 60 -- after a timeout or any other end
+function StrengthRules.LateEven(i, nwPct, lvlLead)
+	if (i.now or 0) < D.lateEvenTime then
+		return false, "late-early"
+	end
+	if (i.aliveUs or 0) < (i.teamSize or 5) then
+		return false, "late-alive"
+	end
+	if (i.ultsReadyAll or 0) < D.lateEvenUlts then
+		return false, "late-ults"
+	end
+	if nwPct ~= nil and nwPct < D.lateEvenNwBehind then
+		return false, "late-behind-nw"
+	end
+	if (lvlLead or 0) < D.lateEvenLvlBehind then
+		return false, "late-behind-lvl"
+	end
+	return true, "late-even"
 end
 
 -- The lane to push. lanes = list of { lane=, tier= (1-3 tower, 4 barracks / T4 / Ancient), hp= (target HP ratio),
@@ -155,7 +195,7 @@ function StrengthRules.PickLane(lanes)
 end
 
 -- Whether a running window ends. state = { startedAt, aliveAtStart, arrivedAt (nil until 2+ allies reached the lane
--- front) }, i = the Decide inputs at the end threshold (factor = endFactor) plus targetAlive (bool), targetDropping
+-- front), kind ("late-even" or nil) }, i = the Decide inputs at the end threshold (factor = endFactor) plus targetAlive (bool), targetDropping
 -- (the target lost HP since the last tick), enemiesAtFront, alliesAtFront (visible heroes near the lane front).
 -- The hold clock runs from the arrival, so the walk does not eat the window; gatherSeconds without an arrival ends
 -- it, and a target still losing HP at the end of the hold gets up to extendSeconds more. Our ultimates are not
@@ -190,6 +230,10 @@ function StrengthRules.EndWhy(state, now, i)
 	if (i.defendDesire or 0) >= D.defendDesire then
 		return "defend"
 	end
+	-- A late-even window (StrengthRules.LateEven) started without a lead: no lead check.
+	if state.kind == "late-even" then
+		return nil
+	end
 	local ok, _, why = StrengthRules.Lead(i)
 	-- An enemy not seen for a while makes net worth unknown; that alone does not end a running window.
 	if not ok and why ~= "no-lead-nw-unknown" then
@@ -198,12 +242,18 @@ function StrengthRules.EndWhy(state, now, i)
 	return nil
 end
 
--- Seconds to wait after an end before a new window.
-function StrengthRules.Cooldown(endWhy)
+-- Seconds to wait after an end before a new window. kind: the window's kind ("late-even", or nil for a lead window).
+function StrengthRules.Cooldown(endWhy, kind)
 	if endWhy == "roshan-first" then
 		return 0
 	end
-	return endWhy == "building-down" and D.cooldownAfterFall or D.cooldown
+	if endWhy == "building-down" then
+		return D.cooldownAfterFall
+	end
+	if kind == "late-even" then
+		return (endWhy == "deaths" or endWhy == "outnumbered") and D.lateEvenCooldown or D.lateEvenRetry
+	end
+	return D.cooldown
 end
 
 -- Roshan first (maintainer: "would they take aegis first when available?"; on #87: "Aegis first rather than forcing a
@@ -221,6 +271,8 @@ StrengthRules.ROSH_PAST_SAFETY = {
 	["human-invite"] = true,
 	["human-invite-expired"] = true,
 	["human-cooldown"] = true,
+	-- The team's Roshan window call (#12, bots/lib/systems/roshan_window.lua): Roshan before a group push.
+	["rosh-window"] = true,
 }
 -- Of those, the ones where the Roshan mode would not call the take itself (or only at a low desire): the strength
 -- push raises the Roshan desire of its bots for these (StrengthPush.RoshanDesire).
