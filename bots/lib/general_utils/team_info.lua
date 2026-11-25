@@ -283,7 +283,10 @@ local function installTeamInfo(Fu)
 		end
 		bot._fc[key] = { DotaTime(), value }
 	end
-	-- The filter of Fu.GetNearbyHeroes as one function, for FrameCache.Listed (the loop below has the same test).
+	-- The filter of Fu.GetNearbyHeroes. It used to test the CALLER's modifier
+	-- (`bot:HasModifier("modifier_arc_warden_tempest_double")`), so an Arc Warden Tempest Double calling it got an empty
+	-- list (blind in fights). Doubles in the list are kept on purpose: an enemy Double hits as hard as the real hero and
+	-- must count as a threat and a target. Fu.GetRealEnemyHeroes is the variant that leaves Doubles out.
 	local function IsListedHero(hero)
 		return Fu.IsValidHero(hero) and not Fu.IsMeepoClone(hero)
 	end
@@ -291,38 +294,16 @@ local function installTeamInfo(Fu)
 		if not mode then
 			mode = BOT_MODE_NONE
 		end
-		-- Two pieces of bots/lib/systems/frame_cache.lua (#52), each on or off for the frame; off is the code from
-		-- before. Lists: the frame's answer is the same table for every caller of the frame, so it is only read
-		-- here. The result below is a new table on every call, as before.
-		local heroes
-		-- The frame (GameTime()) is read once for both pieces: each kept answer costs that one engine call.
-		local now = nil
-		if FrameCache.lists then
-			now = GameTime()
-			heroes = FrameCache.NearbyHeroes(bot, radius, isEnemy, mode, now)
-		else
-			heroes = bot:GetNearbyHeroes(radius, isEnemy, mode)
-		end
+		local heroes = bot:GetNearbyHeroes(radius, isEnemy, mode)
 		if not heroes then
 			return heroes
 		end
+		-- A hero is checked once per frame, however many lists of the frame it is in (bots/lib/systems/frame_cache.lua,
+		-- #52, #251). The result is a new table on every call: callers change it (Fu.GetAroundBotUnitList, #121).
+		local now = GameTime()
 		local result = {}
-		if FrameCache.filter then
-			-- Filter: a hero is checked once per frame, however many lists of the frame it is in.
-			now = now or GameTime()
-			for _, hero in pairs(heroes) do
-				if FrameCache.Listed(hero, now, IsListedHero) then
-					table.insert(result, hero)
-				end
-			end
-			return result
-		end
 		for _, hero in pairs(heroes) do
-			-- Used to test the CALLER's modifier (`bot:HasModifier("modifier_arc_warden_tempest_double")`), so an
-			-- Arc Warden Tempest Double calling this got an empty list (blind in fights). Doubles in the list are
-			-- kept on purpose: an enemy Double hits as hard as the real hero and must count as a threat and a
-			-- target. Fu.GetRealEnemyHeroes is the variant that leaves Doubles out.
-			if Fu.IsValidHero(hero) and not Fu.IsMeepoClone(hero) then
+			if FrameCache.Listed(hero, now, IsListedHero) then
 				table.insert(result, hero)
 			end
 		end

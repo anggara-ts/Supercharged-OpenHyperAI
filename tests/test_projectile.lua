@@ -291,8 +291,6 @@ T.test("[SHy-DODGE]: Eul's and Blink answer a Sacred Arrow; the line has kind an
 		BOT_ACTION_DESIRE_NONE,
 		"BKB: caster 1500 away, no fight"
 	)
-	-- The enemy has walked closer: a later frame (the nearby-hero answers of one frame are kept, frame_cache.lua).
-	Stub.time = Stub.time + 1 / 30
 	enemy._loc = bot:GetLocation() + Vector(1200, 0, 0)
 	bot._dodgeChosen = nil
 	T.eq((Usage.ConsiderItemDesire["item_black_king_bar"](bkb)), BOT_ACTION_DESIRE_HIGH, "BKB")
