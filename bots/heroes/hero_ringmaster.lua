@@ -772,11 +772,15 @@ end
 function X.HoldFirst()
 	local now = DotaTime()
 	local wantAt = bot._ringmasterHoldWantAt
-	local step = X.HoldStep(OurThinkMode(bot:GetActiveMode()), wantAt ~= nil and now - wantAt or nil, HOLD_WAIT)
+	local ourMode = OurThinkMode(bot:GetActiveMode())
+	local wantAge = wantAt ~= nil and now - wantAt or nil
+	local step = X.HoldStep(ourMode, wantAge, HOLD_WAIT)
 	if step == "ask" then
 		bot._ringmasterHoldWantAt = now
 		return true
 	end
+	-- How long this cast waited for the hold, for the tame-cast line (0 in our own modes).
+	bot._ringmasterWaited = (step == "cast" and not ourMode) and wantAge or 0
 	return step == "wait"
 end
 -- How long a whip order may take to start: 0.8s to turn when in range, plus the walk into cast range, at most 3s.
@@ -799,7 +803,8 @@ function X.WhipOrdered(why, location, target)
 		return
 	end
 	local dist = location ~= nil and GetUnitToLocationDistance(bot, location) or 0
-	local wantAt = bot._ringmasterHoldWantAt
+	local waited = bot._ringmasterWaited or 0
+	bot._ringmasterWaited = nil
 	bot._whip = {
 		why = why or "?",
 		location = location,
@@ -820,7 +825,7 @@ function X.WhipOrdered(why, location, target)
 			location ~= nil and dist or -1,
 			(target ~= nil and Fu.IsValidHero(target)) and target:GetUnitName() or "none",
 			ModeNow(),
-			(wantAt ~= nil and now - wantAt < 1) and now - wantAt or 0,
+			waited,
 			bot._whip.startLimit
 		)
 	)
@@ -1020,6 +1025,8 @@ end
 -- Wheel casts: one line per Wheel that really went out (its cooldown started), with the rule that ordered it.
 function X.WheelOrdered(why, extra)
 	if bot._wheelPending == nil then
+		-- The wait belongs to this Wheel, not to a later whip's line.
+		bot._ringmasterWaited = nil
 		bot._wheelPending = { why = why, at = DotaTime(), extra = extra or "" }
 	end
 end
