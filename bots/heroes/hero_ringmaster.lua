@@ -140,7 +140,7 @@ local weightedPieAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_weighted_pie"), "ringmaster_weighted_pie", "ringmaster")
 local crystalBallAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_crystal_ball"), "ringmaster_crystal_ball", "ringmaster")
-local botTarget, botLevel
+local botTarget
 local isEngaging
 local isRetreating
 local isAttacking
@@ -194,7 +194,6 @@ function X.SkillsComplement()
 	isAttacking = Fu.IsAttacking(bot)
 	hpRatio = abilityContext.hp
 	botTarget = abilityContext.target
-	botLevel = bot:GetLevel()
 	whoopeeCushionDesire = X.ConsiderWhoopeeCushion()
 	if whoopeeCushionDesire > 0 then
 		X.LogSouvenir("whoopee_cushion", "cast-" .. whoopeeCushionWhy)
@@ -609,7 +608,8 @@ function X.ConsiderTameTheBeasts()
 	return BOT_ACTION_DESIRE_NONE, 0
 end
 -- Tame the Beasts as a channel (#49, game 084: "tame also instant, the fear is minimum duration").
--- Game files (npc_dota_hero_ringmaster, 7.42a, also the datafeed hero 131 read 2026-11-25): POINT | AOE | CHANNELLED,
+-- Game files (scripts/npc ringmaster abilities from pak01_dir.vpk, read 2026-11-21; the datafeed hero 131 read 2026-11-25
+-- has the same values): POINT | AOE | CHANNELLED,
 -- AbilityChannelTime 1.0, cast point 0, start_width 450 -> end_width 200 ("RADIUS START / END"), damage_min
 -- 50/75/100/125 with "Real max damage is 4x damage min" (max_multiplier 4; damage_max only feeds the tooltip),
 -- fear_duration_min 0.1/0.2/0.3/0.4 -> fear_duration_max 0.6/0.8/1.0/1.2, crack_duration 0.2. Tooltip: "Channel time
@@ -675,8 +675,12 @@ local function WhipCrackShown()
 		and tameTheBeastsCrackAbility:GetName() == "ringmaster_tame_the_beasts_crack"
 		and not tameTheBeastsCrackAbility:IsHidden()
 end
-local function WhipChannelOn()
-	return WhipCrackShown() or bot:HasModifier("modifier_ringmaster_tame_the_beasts")
+-- The modifier only counts when it was not already on at the order (its holder and lifetime are not in the game data).
+local function WhipChannelOn(whip)
+	return WhipCrackShown() or (not whip.modifierBefore and bot:HasModifier("modifier_ringmaster_tame_the_beasts"))
+end
+local function WhipDisabled()
+	return not bot:IsAlive() or bot:IsStunned() or bot:IsSilenced() or bot:IsHexed() or bot:IsNightmared()
 end
 local function WhipNoSave(unit)
 	return not unit:HasModifier("modifier_abaddon_borrowed_time")
@@ -695,7 +699,13 @@ function X.WhipOrdered(why, location, target)
 	if whip ~= nil then
 		return
 	end
-	bot._whip = { why = why or "?", location = location, target = target, orderAt = now }
+	bot._whip = {
+		why = why or "?",
+		location = location,
+		target = target,
+		orderAt = now,
+		modifierBefore = bot:HasModifier("modifier_ringmaster_tame_the_beasts"),
+	}
 	bot._castHoldUntil = now + 0.8
 	pcall(
 		print,
@@ -721,7 +731,7 @@ function X.WhipEnd(whip, endWhy, elapsed, channelTime, extra)
 	pcall(
 		print,
 		string.format(
-			"[SHy-RINGMASTER] t=%.0f ringmaster tame-crack why=%s end=%s channelled=%.2f share=%.2f fear=%.2f damage=%d level=%d chan=%s active=%s%s",
+			"[SHy-RINGMASTER] t=%.0f ringmaster tame-crack why=%s end=%s channelled=%.2f share=%.2f fear=%.2f damage=%d level=%d chan0=%s active0=%s crackable0=%s%s",
 			DotaTime(),
 			whip.why,
 			endWhy,
@@ -730,8 +740,9 @@ function X.WhipEnd(whip, endWhy, elapsed, channelTime, extra)
 			X.WhipFear(f, fearMin, fearMax, multiplier),
 			X.WhipDamage(f, damageMin, multiplier),
 			level,
-			tostring(bot:IsChanneling()),
-			tostring(bot:GetCurrentActiveAbility() ~= nil and bot:GetCurrentActiveAbility():GetName() or "none"),
+			tostring(whip.chan0),
+			tostring(whip.active0),
+			tostring(whip.crackable0),
 			extra or ""
 		)
 	)
@@ -750,13 +761,18 @@ function X.WhipTick()
 	if channelTime == nil or channelTime <= 0 then
 		channelTime = 1.0
 	end
-	local channelOn = WhipChannelOn()
+	local channelOn = WhipChannelOn(whip)
 	if whip.startAt == nil then
 		-- The clock starts when the whip is out, not at the order (turning to the point comes first). The cooldown
 		-- starts with the channel too, in case neither the crack button nor the modifier shows through the API.
 		if channelOn or tameTheBeastsAbility:GetCooldownTimeRemaining() > 0 then
 			whip.startAt = now
 			whip.seen = channelOn
+			-- What the API shows on the first channel frame (game 084 [SHy-STUCK]: channel=false during the whip).
+			whip.chan0 = bot:IsChanneling()
+			local active = bot:GetCurrentActiveAbility()
+			whip.active0 = active ~= nil and active:GetName() or "none"
+			whip.crackable0 = Fu.CanCastAbility(tameTheBeastsCrackAbility)
 			bot._castHoldUntil = now + channelTime + 0.15
 			return true
 		end
@@ -788,11 +804,16 @@ function X.WhipTick()
 		end
 		return true
 	end
+	if elapsed > channelTime + 0.5 then
+		-- The signal stuck: never hold longer than the channel.
+		X.WhipEnd(whip, "stuck", channelTime, channelTime)
+		return false
+	end
 	if not channelOn then
-		-- The engine ended it: the full channel, or an interrupt (stun, silence, death).
+		-- The engine ended it: the full channel, a disable (stun, silence, hex, death) or an interrupt by an order.
 		X.WhipEnd(
 			whip,
-			elapsed >= channelTime - 0.1 and "full" or "interrupted",
+			elapsed >= channelTime - 0.1 and "full" or (WhipDisabled() and "disabled" or "interrupted"),
 			math.min(elapsed, channelTime),
 			channelTime
 		)
@@ -865,6 +886,8 @@ function X.WhipTick()
 			radiusLater
 		)
 	)
+	-- Keep the hold while the crack lands (crack_duration).
+	bot._castHoldUntil = now + crackDuration
 	return true
 end
 -- Wheel casts: one line per Wheel that really went out (its cooldown started), with the rule that ordered it.
