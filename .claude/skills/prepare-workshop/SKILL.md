@@ -42,7 +42,9 @@ host's Steam ID and server IPs) and the local test lineup.
    game.
 
 Not in the copy on purpose (maintainer's decision, #177): `install/` and docs. The Workshop copy is
-the bot scripts only. Our Workshop item is 3843444501 (https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501): update it,
+the bot scripts plus `LICENSE` (the MIT notice has to ship with every copy, #215; `NOTICE_FILES` in
+`tools/export-bots.js`). After an upload, check once that the Workshop item kept `LICENSE` (the uploader may skip
+files that are not `.lua`; unverified). Our Workshop item is 3843444501 (https://steamcommunity.com/sharedfiles/filedetails/?id=3843444501): update it,
 not a new item.
 
 New Lua files: a committed `.lua` file under `bots/` is in the copy automatically, at the same path below
