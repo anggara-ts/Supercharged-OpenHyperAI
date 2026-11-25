@@ -10,12 +10,14 @@ local defaultLocale = "en"
 local strings = {
 	en = {
 		say_play_pos = "I will play position ",
+		-- `!about` answer (#215); %s is the version, the same text as the welcome's (chat_rules.lua WelcomeVersion). No URL: chat links are not clickable.
+		say_about = "Supercharged OpenHyperAI, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
 		pos_select_closed = "Position selection closed.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome): the version line, then
 		-- the Workshop page. No command hints (!pos, !Xpos Y, !sp, !debug; maintainer 2026-11-23). {version} and {date}:
 		-- bots/lib/systems/chat_rules.lua WelcomeVersion.
 		welcome = {
-			"Supercharged OpenHyperAI {version} (update: {date})",
+			"Supercharged OpenHyperAI {version} ({date})",
 			"Feedback and known limitations: see the bot script's Workshop page.",
 		},
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
@@ -226,6 +228,10 @@ local strings = {
 		say_ward_sentry_defend = { "Defensive sentry up.", "Sentry near base.", "True sight for defense." },
 		say_ward_observer_offense = { "Offensive observer up.", "Warding their jungle.", "Deep observer." },
 		say_ward_sentry_offense = { "Offensive sentry up.", "Sentry in their jungle.", "Deep sentry." },
+		-- `!chatty` (the decision chat) replies (#222). `!debug` was removed (maintainer, 2026-11-24); say_debug_on /
+		-- say_debug_off below are its old replies, no longer said.
+		say_chatty_on = { "Chatty ON: we'll call out what we do.", "Chatty mode enabled." },
+		say_chatty_off = { "Chatty OFF.", "Chatty mode disabled." },
 		say_take_lotus = { "Taking lotus.", "Grabbing the lotus pool.", "Lotus for me." },
 		say_take_wisdom = { "Taking wisdom shrine.", "Grabbing the XP shrine.", "Wisdom shrine — covering it." },
 		say_debug_on = { "Verbose debug ON. Bots will chat more decisions.", "Debug mode enabled." },
@@ -265,10 +271,11 @@ local strings = {
 	},
 	zh = {
 		say_play_pos = "我将玩位置 ",
+		say_about = "Supercharged OpenHyperAI，版本 %s。反馈、错误报告和已知限制：请查看脚本的创意工坊页面。",
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（更新：{date}）",
+			"Supercharged OpenHyperAI {version}（{date}）",
 			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
 		},
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
@@ -462,6 +469,8 @@ local strings = {
 		say_ward_sentry_defend = { "防守假眼。", "家里补哨兵。", "防守真视。" },
 		say_ward_observer_offense = { "进攻真眼。", "对面野区插眼。", "深插观察者。" },
 		say_ward_sentry_offense = { "进攻假眼。", "对面野区哨兵。", "深插哨兵。" },
+		say_chatty_on = { "聊天模式已开启：我们会说出在做什么。", "聊天模式已开启。" },
+		say_chatty_off = { "聊天模式已关闭。", "聊天已关闭。" },
 		say_take_lotus = { "去拿莲花。", "我去采莲花池。", "莲花给我。" },
 		say_take_wisdom = { "去拿智慧神殿。", "我去收经验神殿。", "智慧神殿我来。" },
 		say_debug_on = { "调试模式已开启，机器人会更啰嗦。", "Verbose debug 已开启。" },
@@ -485,10 +494,11 @@ local strings = {
 	},
 	ru = {
 		say_play_pos = "Я буду играть на позиции ",
+		say_about = "Supercharged OpenHyperAI, версия %s. Отзывы, сообщения об ошибках и известные ограничения: подробнее на странице мастерской скрипта.",
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version} (обновление: {date})",
+			"Supercharged OpenHyperAI {version} ({date})",
 			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
 		},
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
@@ -729,6 +739,11 @@ local strings = {
 			"Сентри в их лесу.",
 			"Глубокий сентри.",
 		},
+		say_chatty_on = {
+			"Болтовня ВКЛ: скажем, что делаем.",
+			"Режим болтовни включён.",
+		},
+		say_chatty_off = { "Болтовня ВЫКЛ.", "Режим болтовни выключен." },
 		say_take_lotus = { "Беру лотос.", "Иду за лотосом.", "Лотос мой." },
 		say_take_wisdom = {
 			"Беру святыню мудрости.",
@@ -740,10 +755,11 @@ local strings = {
 	},
 	ja = {
 		say_play_pos = "私はポジション ",
+		say_about = "Supercharged OpenHyperAI、バージョン %s。フィードバック、バグ報告、既知の制限については、スクリプトのワークショップページをご覧ください。",
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（更新：{date}）",
+			"Supercharged OpenHyperAI {version}（{date}）",
 			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
 		},
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
@@ -968,6 +984,8 @@ local strings = {
 			"敵ジャングルにセントリー。",
 			"深いセントリー。",
 		},
+		say_chatty_on = { "おしゃべりON：行動を伝えます。", "おしゃべりモード有効。" },
+		say_chatty_off = { "おしゃべりOFF。", "おしゃべりモード無効。" },
 		say_take_lotus = { "ロータスを取る。", "ロータスプールへ。", "ロータスもらう。" },
 		say_take_wisdom = {
 			"ウィズダムを取る。",
