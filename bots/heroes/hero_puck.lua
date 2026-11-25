@@ -6,6 +6,7 @@ local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_con
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
 local EscapeRules = require(GetScriptDirectory() .. "/lib/systems/escape_rules")
 local DodgeRules = require(GetScriptDirectory() .. "/lib/systems/dodge_rules")
+local OrbPath = require(GetScriptDirectory() .. "/lib/systems/orb_path_rules")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
 local sRole = Fu.Item.GetRoleItemsBuyList(bot)
@@ -199,6 +200,135 @@ function X.OrbInFlight()
 		end
 	end
 	return nil
+end
+-- Alt-cast probe (#36, game 039, maintainer: "puck better alt-cast illusory orb so that it become straight"). Game
+-- data (puck_illusory_orb, 7.42): POINT | ALT_CASTABLE, curve_orb 1, curve_strength 0.6; the alt-cast flies straight.
+-- The cast orders have no alt flag. Game 043 turned the autocast switch on (ToggleAutoCast, the closest the bot API
+-- has to the alt state) and the Orb still curved, by eye (docs/BOT_API_RUNTIME.md, discussion #50 item 2). This
+-- measures it: the switch flips after every Orb, so one game has casts in both states, and each Orb's positions
+-- (GetLinearProjectiles, every 0.1s) are compared with the straight line she aimed along (OrbPath.Offset).
+-- [SHy-PUCK] orb-altcast before= after= behavior=: once, when the Orb is learned.
+-- [SHy-PUCK] orb-path alt= why= n= aim= dev= devAt= end= endAt= jaunt= land= how=: once per Orb, when it is gone.
+-- dev / end: largest and last offset from the aimed line (left +, right -); land: where a Jaunt in the flight put her.
+local orbAltProbed = false
+local orbAltFlipWanted = false
+local orbPath = nil
+function X.FinishOrbPath(how)
+	local path = orbPath
+	orbPath = nil
+	if path == nil then
+		return
+	end
+	orbAltFlipWanted = true
+	print(
+		string.format(
+			"[SHy-PUCK] t=%.0f puck orb-path alt=%s why=%s n=%d aim=%d dev=%d devAt=%d end=%d endAt=%d jaunt=%s land=%s from=%d,%d to=%d,%d how=%s",
+			DotaTime(),
+			tostring(path.alt),
+			path.why,
+			path.n,
+			math.sqrt((path.ax - path.sx) ^ 2 + (path.ay - path.sy) ^ 2),
+			path.dev,
+			path.devAlong,
+			path.last,
+			path.lastAlong,
+			path.jaunted and "yes" or "no",
+			path.land ~= nil and string.format("%d", path.land) or "-",
+			path.sx,
+			path.sy,
+			path.ax,
+			path.ay,
+			how
+		)
+	)
+end
+function X.StartOrbPath(point, why)
+	if orbPath ~= nil and orbPath.n > 0 then
+		X.FinishOrbPath("recast")
+	end
+	local here = bot:GetLocation()
+	orbPath = OrbPath.New(here.x, here.y, point.x, point.y)
+	orbPath.at = DotaTime()
+	orbPath.why = why or "other"
+	orbPath.alt = illusoryOrbAbility:GetAutoCastState()
+	orbPath.jauntCd = etherealJauntAbility:GetCooldownTimeRemaining()
+	orbPath.sampledAt = -999
+end
+-- Every Orb order goes through here: the time feeds the escape rules, the point the path probe.
+function X.NoteOrbCast(point, why)
+	bot._orbCastAt = DotaTime()
+	if point ~= nil then
+		pcall(X.StartOrbPath, point, why)
+	end
+end
+function X.OwnOrbLocation()
+	for _, projectile in pairs(GetLinearProjectiles() or {}) do
+		if
+			projectile ~= nil
+			and projectile.ability ~= nil
+			and projectile.location ~= nil
+			and projectile.ability:GetName() == "puck_illusory_orb"
+			and (type(projectile.caster) ~= "table" or projectile.caster:GetTeam() == bot:GetTeam())
+		then
+			return projectile.location
+		end
+	end
+	return nil
+end
+-- Runs at the top of every think and inside the cast hold (CastHoldTick), so the escape Orbs are sampled too.
+function X.TrackOrbPath()
+	if not orbAltProbed and illusoryOrbAbility:IsTrained() then
+		orbAltProbed = true
+		local before = illusoryOrbAbility:GetAutoCastState()
+		illusoryOrbAbility:ToggleAutoCast()
+		local behavior = illusoryOrbAbility:GetBehavior()
+		print(
+			string.format(
+				"[SHy-PUCK] t=%.0f puck orb-altcast before=%s after=%s behavior=%s",
+				DotaTime(),
+				tostring(before),
+				tostring(illusoryOrbAbility:GetAutoCastState()),
+				type(behavior) == "number" and string.format("%.0f", behavior) or tostring(behavior)
+			)
+		)
+	end
+	local path = orbPath
+	if path == nil then
+		-- Flip the switch for the next Orb only between casts: never inside a Phase Shift, a hold or a queued combo.
+		if
+			orbAltFlipWanted
+			and not bot:IsChanneling()
+			and bot:NumQueuedActions() == 0
+			and (bot._castHoldUntil == nil or DotaTime() >= bot._castHoldUntil)
+			and not bot:HasModifier("modifier_puck_phase_shift")
+		then
+			orbAltFlipWanted = false
+			illusoryOrbAbility:ToggleAutoCast()
+		end
+		return
+	end
+	local now = DotaTime()
+	if now - path.sampledAt < 0.1 then
+		return
+	end
+	path.sampledAt = now
+	local orbAt = X.OwnOrbLocation()
+	if orbAt ~= nil then
+		OrbPath.Add(path, orbAt.x, orbAt.y)
+	end
+	local jauntCd = etherealJauntAbility:GetCooldownTimeRemaining()
+	if not path.jaunted and jauntCd > path.jauntCd + 0.5 then
+		path.jaunted = true
+		local here = bot:GetLocation()
+		path.land = OrbPath.Offset(path.sx, path.sy, path.ax, path.ay, here.x, here.y)
+	end
+	path.jauntCd = jauntCd
+	-- The Orb flies 1950 / 750 = 2.6s (datafeed hero 13); an order that never went out shows no Orb at all.
+	if orbAt == nil and path.n > 0 then
+		X.FinishOrbPath("gone")
+	elseif now - path.at > 4 or orbAt == nil and path.n == 0 and now - path.at > 1 then
+		X.FinishOrbPath(path.n > 0 and "timeout" or "no-orb")
+	end
 end
 function X.DangerJaunt()
 	if
@@ -482,7 +612,7 @@ function X.ConsiderSiphonEscape()
 		local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
 		local point = X.EscapePoint(castRange)
 		bot._siphonOrbAt = DotaTime()
-		bot._orbCastAt = DotaTime()
+		X.NoteOrbCast(point, "siphon")
 		bot._siphonEscapeFrom = siphoner
 		X.LogEscapeAction("orb", "siphon", point)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
@@ -537,7 +667,7 @@ function X.EscapeShiftJaunt(orderAt, since, duration)
 			local point = X.EscapePoint(castRange)
 			bot._phaseExitFor = orderAt
 			bot._phaseExitHow = "orb"
-			bot._orbCastAt = DotaTime()
+			X.NoteOrbCast(point, "phase-exit")
 			bot._exitOrbAt = DotaTime()
 			-- No TP while it flies (#191): the TP rule runs before this script in the next think.
 			bot._noTpUntil = math.max(bot._noTpUntil or -999, DotaTime() + 1.0)
@@ -780,6 +910,7 @@ end
 -- (game 051: every probe printed only after the hold, 1.1s to 3.3s after the order).
 function X.CastHoldTick()
 	pcall(X.SampleHp)
+	pcall(X.TrackOrbPath)
 	local okHold, errHold = pcall(X.HoldTpInDanger)
 	if not okHold then
 		X.LogStepError("HoldTpInDanger", errHold)
@@ -1012,7 +1143,7 @@ function X.StartPhaseWant(outpostMode)
 		local point = X.EscapePoint(castRange)
 		bot._phaseOrbFirstAt = now
 		bot._phaseOrbFirstWhy = "thrown"
-		bot._orbCastAt = now
+		X.NoteOrbCast(point, "phase-first")
 		X.LogEscapeAction("orb", "phase-first", point)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
 		return true
@@ -1199,7 +1330,7 @@ function X.TowerEscape(canCast)
 		X.LogTowerEscape(via, "hit", tower, dist, out, loss)
 		local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
 		local point = X.EscapePoint(castRange, threats)
-		bot._orbCastAt = now
+		X.NoteOrbCast(point, "tower")
 		bot._towerOrb = { at = now, x = towerAt.x, y = towerAt.y, range = range, why = "hit" }
 		X.LogEscapeAction("orb", "tower", point)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
@@ -1259,7 +1390,7 @@ function X.TowerHop(canCast)
 					EscapeRules.HopDirection(here.x, here.y, towerAt.x, towerAt.y, range, home.x, home.y, orbReach)
 				if dx ~= nil then
 					local point = Vector(here.x + dx * castRange, here.y + dy * castRange, here.z)
-					bot._orbCastAt = DotaTime()
+					X.NoteOrbCast(point, "tower-hop")
 					bot._towerOrb = {
 						at = DotaTime(),
 						x = towerAt.x,
@@ -1381,6 +1512,7 @@ function X.AskDodgeHold()
 end
 function X.SkillsComplement()
 	pcall(X.SampleHp)
+	pcall(X.TrackOrbPath)
 	local okHold, errHold = pcall(X.HoldTpInDanger)
 	if not okHold then
 		X.LogStepError("HoldTpInDanger", errHold)
@@ -1590,7 +1722,7 @@ function X.SkillsComplement()
 	local phaseDuration
 	phaseOrbDesire, phaseOrbLocation, phaseDuration = X.ConsiderPhaseOrb()
 	if phaseOrbDesire > 0 then
-		bot._orbCastAt = DotaTime()
+		X.NoteOrbCast(phaseOrbLocation, "phase-orb")
 		-- An escape combo (ConsiderPhaseOrb): no offensive Rift right after its shift either.
 		bot._phaseCastEscape = true
 		bot:Action_ClearActions(false)
@@ -1611,8 +1743,8 @@ function X.SkillsComplement()
 	illusoryOrbDesire, illusoryOrbLocation = X.ConsiderIllusoryOrb()
 	if illusoryOrbDesire > 0 then
 		-- Bots can't make the orb fly straight: no alt-cast, and neither a full-range aim nor facing the point first
-		-- changed the curve (games 044-045, discussion #50). Aim at the target point.
-		bot._orbCastAt = DotaTime()
+		-- changed the curve (games 044-045, discussion #50). Aim at the target point; the path probe measures it.
+		X.NoteOrbCast(illusoryOrbLocation, X.orbWhy)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, illusoryOrbLocation)
 		return
 	end
