@@ -670,7 +670,7 @@ local function watchWindup(bot, st, now, recheck)
 	local delay = math.max(0, remaining) + X.TravelTime(bot, st.creep)
 	local predictedHp, ourHit, incomingKills, swingKill, swings =
 		X.Predict(st.creep, st.damage, delay, X.TowerShotBefore(bot, st.creep, delay))
-	-- An ally winding up on it that the bot leaves it to (#71, game 077 t=38): stopped at the last look.
+	-- An ally winding up on it that the bot leaves it to (#71, LastHitRules.WindupYield): stopped at the last look.
 	local yieldWhy, yieldTo = windupYield(bot, swings, swingKill, delay)
 	local core = backupCoreOf(st)
 	local facts = nil

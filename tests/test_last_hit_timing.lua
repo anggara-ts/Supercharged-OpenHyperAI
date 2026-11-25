@@ -563,7 +563,7 @@ T.test("ally swing: a backup behind a core in a team slot counts its pending hit
 	Fu.GetPosition = getPosition
 end)
 
--- The wind-up yield (#71, game 077 t=38 and games 083-085): the bot's own swing is stopped for an ally.
+-- The wind-up yield (#71, games 083-085): the bot's own swing is stopped for an ally.
 local function rangedBot(bot)
 	-- Ranged, slow projectile: the creep at 100 (less the 39 offset) takes 61 / 250 = 0.244s to reach.
 	bot.GetAttackRange = function()
@@ -603,7 +603,7 @@ T.test("wind-up yield: a core stops its swing for a lower-position core's swing 
 	local Fu, Timing, bot, creep, state = setup(40)
 	Stub.time = 1600
 	rangedBot(bot)
-	-- Game 077 t=38: Io (position 2) and Phantom Assassin (position 1) swung at one creep together.
+	-- Positions 2 and 1 swing at one creep together.
 	local props = { attacking = true, point = 0.5, damage = 50, startAt = GameTime() }
 	local ally = addSwinger(creep, props)
 	withPositions(Fu, bot, 2, ally, 1, function()

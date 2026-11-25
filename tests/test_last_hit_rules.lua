@@ -277,11 +277,7 @@ end)
 
 T.test("wind-up yield: who stops for whom", function()
 	local R = rules()
-	T.eq(
-		R.WindupYield(2, 1, true),
-		"ally-swing",
-		"game 077 t=38: Io (2) for Phantom Assassin (1), whose hit kills first"
-	)
+	T.eq(R.WindupYield(2, 1, true), "ally-swing", "position 2 for position 1, whose hit kills first")
 	T.eq(R.WindupYield(1, 2, true), nil, "never for a higher position number: only one of the two stops")
 	T.eq(R.WindupYield(2, 1, false), nil, "a core keeps its swing when the other core's hit does not kill")
 	T.eq(R.WindupYield(5, 1, false), "core-swing", "a support never steals a core's creep")

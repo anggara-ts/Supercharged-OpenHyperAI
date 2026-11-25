@@ -400,9 +400,9 @@ function LastHitRules.YieldReason(s)
 	return nil
 end
 
--- Yield during our own wind-up (#71: game 077 t=38 Io (position 2) swung at the creep Phantom Assassin (position 1)
--- took; games 083-085: 9 support backup swings released at the first look, then the core swung again and took the
--- creep). The pick-time yield above does not apply once our swing winds up, so the wind-up watch asks this for every
+-- Yield during our own wind-up (#71, maintainer request after game 077: "yield when an allied core is mid-swing on the
+-- same creep"; games 083-085: 9 support backup swings released at the first look, then the core swung again and took
+-- the creep). The pick-time yield above does not apply once our swing winds up, so the wind-up watch asks this for every
 -- allied hero winding up on the creep (LastHitRules.SwingRemaining). myPos / allyPos: positions 1-5; allyKillsFirst:
 -- the allied swings landing before ours kill it (OthersKill's bySwing) and this ally's is one of them.
 -- Returns "ally-swing" (its hit kills it first: ours would land on a dead creep), "core-swing" (we are a support, it is
