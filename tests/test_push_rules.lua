@@ -329,7 +329,7 @@ T.test("alone gate: walk to this lane's push group instead of dropping (game 085
 	s.enemiesNear, s.joinAge = 0, R.ALONE_JOIN_MAX_SECONDS + 1
 	gate, why = R.AloneGate(s)
 	T.eq(gate, "drop", "walking to the group for too long: drop")
-	T.eq(why, "alone-join-timeout", "timeout why")
+	T.eq(why, "join-timeout", "timeout why")
 	s.joinAge, s.group, s.window = 0, 0, true
 	T.eq(R.AloneGate(s), "window", "advantage window: comes alone as before")
 	s.window, s.alliesNear = nil, 2

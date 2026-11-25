@@ -373,16 +373,29 @@ local function TeamGatherLane(bot, team, enemyFountain)
 		hgLanes[lane] = getLocationToLocationDistance(fronts[lane], enemyFountain) < 5000
 		spots[lane] = hgLanes[lane] and HgGatherSpot(team, lane, enemyFountain) or nil
 	end
+	-- Each ally counts once, for the lane whose front (or gather spot) is nearest, when within reach of it: the three
+	-- fronts at their T3s can be closer than 3000 to each other.
 	for i = 1, 5 do
 		local member = GetTeamMember(i)
 		if member ~= nil and member:IsAlive() and not member:IsIllusion() then
+			local bestLane, bestDist = nil, math.huge
 			for lane = 1, 3 do
-				if
-					GetUnitToLocationDistance(member, fronts[lane]) <= GATHER_FRONT_RADIUS
-					or spots[lane] ~= nil and GetUnitToLocationDistance(member, spots[lane]) <= 1600
-				then
-					counts[lane] = counts[lane] + 1
+				local dist = GetUnitToLocationDistance(member, fronts[lane])
+				if dist > GATHER_FRONT_RADIUS then
+					dist = math.huge
 				end
+				if spots[lane] ~= nil then
+					local spotDist = GetUnitToLocationDistance(member, spots[lane])
+					if spotDist <= 1600 and spotDist < dist then
+						dist = spotDist
+					end
+				end
+				if dist < bestDist then
+					bestLane, bestDist = lane, dist
+				end
+			end
+			if bestLane ~= nil then
+				counts[bestLane] = counts[bestLane] + 1
 			end
 		end
 	end
@@ -858,9 +871,10 @@ function Push.GetPushDesireHelper(bot, lane)
 	-- Alone (no ally within 1600, 3+ enemies alive; PushRules.AloneGate): in an advantage window or as a joiner of an
 	-- all-alive group push the bot comes to the group as before. Otherwise it walks to this lane's push group when there
 	-- is one (2+ allies at the front or walking in, push-gate why=alone-join; PushThink walks it to them) and drops
-	-- only when nobody else is on this lane's push. While it walks in, the caps that count allies near the bot
-	-- (high ground, fewer-than-alive, hurt-near-ancient) count the group it is joining (alliesCounted).
-	local alliesCounted = #alliesNearBot
+	-- only when nobody else is on this lane's push. While it walks in, the caps that count allies near the bot count
+	-- the group it is joining: fewer-than-alive and hurt-near-ancient the whole group (alliesCounted), the high-ground
+	-- cap only the allies already at the front (hgAlliesCounted).
+	local alliesCounted, hgAlliesCounted = #alliesNearBot, #alliesNearBot
 	bot._pushJoin = bot._pushJoin or {}
 	local now = DotaTime()
 	local join = bot._pushJoin[lane]
@@ -884,17 +898,25 @@ function Push.GetPushDesireHelper(bot, lane)
 			joinAge = now - join.since,
 		})
 		-- The join clock runs only while walking to a group; a timed-out join stays out until the bot is not alone.
-		bot._pushJoin[lane] = (gate == "join" or gateWhy == "alone-join-timeout") and join or nil
+		bot._pushJoin[lane] = (gate == "join" or gateWhy == "join-timeout") and join or nil
 		if gate == "drop" then
 			return NoPush(bot, gateWhy)
 		elseif gate == "join" then
 			alliesCounted = math.max(alliesCounted, group + 1)
+			-- The high-ground cap counts only the group already at the front (not allies still walking in), so a joiner
+			-- is never released up their high ground with nobody standing there.
+			hgAlliesCounted = math.max(hgAlliesCounted, atFront + 1)
 			join.at, join.spot, join.group, join.atFront, join.age = now, spot, group, atFront, now - join.since
 		end
 	elseif join ~= nil then
 		-- Not alone any more: met the group (one line when it had walked to them).
 		bot._pushJoin[lane] = nil
-		if join.walked and not Fu.IsMeepoClone(bot) then
+		if
+			join.walked
+			and #alliesNearBot >= 2
+			and now - join.since <= PushRules.ALONE_JOIN_MAX_SECONDS
+			and not Fu.IsMeepoClone(bot)
+		then
 			pcall(
 				print,
 				string.format(
@@ -932,7 +954,7 @@ function Push.GetPushDesireHelper(bot, lane)
 			enemyFountain = enemyFountainTpPoint,
 			enemiesAlive = gameState.aliveEnemyCount,
 			alliesAlive = gameState.aliveAllyCount,
-			alliesNear = alliesCounted,
+			alliesNear = hgAlliesCounted,
 			need = hgAllies,
 			groupAllowed = advDesire ~= nil or fiveJoiner and hgAllies >= PushRules.FewerThanAliveCount(
 				ancientOpen,
@@ -1308,9 +1330,26 @@ function Push.GetPushDesireHelper(bot, lane)
 		if gameState.hasAegis and aliveAllyCount >= 4 then
 			laneDesire = laneDesire + 0.25
 			-- Not over a cap that already applied (#12, games 082-085: `advantage-push why=aegis desire=0.60` from Puck at
-			-- 12-32% HP and Largo at a backdoored T3: this lift undid the own-HP, high-ground and backdoor caps).
+			-- 12-32% HP with allies=1: this lift undid the own-HP and high-ground caps; which cap held the healthy ones with
+			-- allies=3 at 0.60, e.g. Largo at the mid T3 in game 082 t=1091, is unverified: aegis-lift-skip names it).
 			if pushCapSrc == "" then
 				maxPushDesire = math.max(maxPushDesire, 0.6)
+			elseif DotaTime() >= (bot._aegisLiftSkipLogAt or -999) and not Fu.IsMeepoClone(bot) then
+				bot._aegisLiftSkipLogAt = DotaTime() + 8
+				pcall(
+					print,
+					string.format(
+						"[SHy-PUSH] t=%.0f %s aegis-lift-skip lane=%s src=%s max=%.2f hp=%.2f allies=%d enemies=%d",
+						DotaTime(),
+						ShortHeroName(bot),
+						tostring(lane),
+						pushCapSrc,
+						maxPushDesire,
+						Fu.GetHP(bot),
+						#alliesNearBot,
+						#enemiesNearBot
+					)
+				)
 			end
 		end
 		if aliveAllyCount >= aliveEnemyCount and gameState.averageLevel >= 12 then
@@ -2551,27 +2590,6 @@ function Push.GetPushDesire(bot, lane)
 			end
 		end
 	end
-	-- A bot alone walking to this lane's push group (PushRules.AloneGate "join"): one line per bot every 6s, with the
-	-- final desire (under 0.5 a later cap or farm still wins, and the join has no effect).
-	local join = bot._pushJoin ~= nil and bot._pushJoin[lane] or nil
-	if join ~= nil and join.at == now and now >= (bot._aloneJoinLogAt or -999) and not Fu.IsMeepoClone(bot) then
-		bot._aloneJoinLogAt = now + 6
-		pcall(
-			print,
-			string.format(
-				"[SHy-PUSH] t=%.0f %s push-gate lane=%s why=alone-join group=%d atFront=%d dist=%d age=%.0f desire=%.2f mode=%s",
-				now,
-				ShortHeroName(bot),
-				tostring(lane),
-				join.group,
-				join.atFront,
-				join.spot ~= nil and math.floor(GetUnitToLocationDistance(bot, join.spot)) or -1,
-				join.age,
-				desire,
-				tostring(bot:GetActiveMode())
-			)
-		)
-	end
 	bot.pushDesire = desire
 	-- Read by farm's enemy-half withdraw (mode_farm_generic.lua): a bot pushing at their Ancient doesn't walk home.
 	if desire >= 0.3 then
@@ -2963,12 +2981,32 @@ function Push.PushThink(bot, lane)
 	end
 	-- Alone, joining this lane's push group (Push.GetPushDesireHelper this think, PushRules.AloneGate): walk to where
 	-- the group stands, not to the lane front alone. Within 1200 of them the normal push takes over (the helper prints
-	-- push-join-arrived once an ally is within 1600).
+	-- push-join-arrived once 2+ allies are within 1600). Line: push-gate why=alone-join (every 6s while walking).
 	do
 		local join = bot._pushJoin ~= nil and bot._pushJoin[lane] or nil
 		if join ~= nil and join.spot ~= nil and DotaTime() - (join.at or -999) <= 1 then
-			if GetUnitToLocationDistance(bot, join.spot) > 1200 and not bot:WasRecentlyDamagedByAnyHero(1) then
+			local dist = GetUnitToLocationDistance(bot, join.spot)
+			if dist > 1200 and not bot:WasRecentlyDamagedByAnyHero(1) then
 				join.walked = true
+				-- One line per bot every 6s while it walks (it is in this lane's push mode here, so the join took effect).
+				if DotaTime() >= (bot._aloneJoinLogAt or -999) and not Fu.IsMeepoClone(bot) then
+					bot._aloneJoinLogAt = DotaTime() + 6
+					local modeDesire = bot:GetActiveModeDesire()
+					pcall(
+						print,
+						string.format(
+							"[SHy-PUSH] t=%.0f %s push-gate lane=%s why=alone-join group=%d atFront=%d dist=%d age=%.0f desire=%.2f",
+							DotaTime(),
+							ShortHeroName(bot),
+							tostring(lane),
+							join.group or 0,
+							join.atFront or 0,
+							math.floor(dist),
+							join.age or 0,
+							type(modeDesire) == "number" and modeDesire or 0
+						)
+					)
+				end
 				bot:Action_MoveToLocation(join.spot)
 				return
 			end

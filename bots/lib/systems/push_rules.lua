@@ -622,7 +622,7 @@ function PushRules.AloneGate(s)
 	end
 	if (s.group or 0) >= 2 then
 		if (s.joinAge or 0) > PushRules.ALONE_JOIN_MAX_SECONDS then
-			return "drop", "alone-join-timeout"
+			return "drop", "join-timeout"
 		end
 		return "join", "alone-join"
 	end
