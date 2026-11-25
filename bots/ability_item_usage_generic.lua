@@ -10190,35 +10190,51 @@ local function GlyphTowerAttacked(tower)
 	end
 	return false
 end
--- Our heroes that can help at a building within its 7s of Glyph (#12, second save Glyph): alive, not retreating,
--- within HELP_RADIUS, and already within ALLY_RADIUS or 100+ closer than at the last tick (walking in).
+-- Our heroes on the way to a building, who can help within its 7s of Glyph (#12, second save Glyph): alive, not
+-- retreating, within HELP_RADIUS and 100+ closer than at the last tick (walking in), or a teleport of ours landing
+-- within TP_RADIUS of it. One standing near it without fighting (game 085 t=3636: two Radiant heroes held at the
+-- fountain while Dire took the T4) does not count; one fighting there is in GlyphAlliesFighting.
+-- Returns the count and how many of them are teleports.
 local function GlyphHelpComing(building, prevLoc)
-	local count, seen = 0, {}
+	local count, tp, seen = 0, 0, {}
 	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
 		if Fu.IsValidHero(ally) and not ally:IsIllusion() and not seen[ally:GetPlayerID()] then
 			local dist = GetUnitToUnitDistance(ally, building)
-			if dist <= GlyphRules.HELP_RADIUS and ally:GetActiveMode() ~= BOT_MODE_RETREAT then
-				local prev = prevLoc[ally:GetPlayerID()]
-				if
-					dist <= GlyphRules.ALLY_RADIUS
-					or (prev ~= nil and GetUnitToLocationDistance(building, prev) - dist >= 100)
-				then
-					seen[ally:GetPlayerID()] = true
-					count = count + 1
-				end
+			local prev = prevLoc[ally:GetPlayerID()]
+			if
+				dist <= GlyphRules.HELP_RADIUS
+				and ally:GetActiveMode() ~= BOT_MODE_RETREAT
+				and prev ~= nil
+				and GetUnitToLocationDistance(building, prev) - dist >= 100
+			then
+				seen[ally:GetPlayerID()] = true
+				count = count + 1
 			end
 		end
 	end
-	return count
+	for _, teleport in ipairs(GetIncomingTeleports() or {}) do
+		if
+			teleport ~= nil
+			and teleport.location ~= nil
+			and IsTeamPlayer(teleport.playerid)
+			and not seen[teleport.playerid]
+			and GetUnitToLocationDistance(building, teleport.location) <= GlyphRules.TP_RADIUS
+		then
+			seen[teleport.playerid] = true
+			count = count + 1
+			tp = tp + 1
+		end
+	end
+	return count, tp
 end
-local function GlyphCast(why, building, name, enemies, allies, help, rule)
+local function GlyphCast(why, building, name, enemies, allies, help, tp, rule)
 	bot:ActionImmediate_Glyph()
 	GlyphRules.Spend(GlyphState.charges, DotaTime())
 	GlyphState.pending = { building = building, name = name, why = why }
 	GlyphState.lastAt[name] = DotaTime()
 	print(
 		string.format(
-			"[SHy-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d help=%d rule=%s alone=%s",
+			"[SHy-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d help=%d tp=%d rule=%s alone=%s",
 			DotaTime(),
 			string.gsub(botName, "npc_dota_hero_", ""),
 			why,
@@ -10229,6 +10245,7 @@ local function GlyphCast(why, building, name, enemies, allies, help, rule)
 			team,
 			GlyphState.charges.charges,
 			help,
+			tp,
 			rule or "none",
 			(allies < 1 and help < 1) and "yes" or "no"
 		)
@@ -10240,7 +10257,7 @@ end
 local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
 	local enemies = GlyphEnemiesNear(building, radius)
 	local allies = GlyphAlliesFighting(building, enemies)
-	local help = GlyphHelpComing(building, prevLoc)
+	local help, tp = GlyphHelpComing(building, prevLoc)
 	local last = GlyphState.lastAt[name]
 	local sinceSame = last ~= nil and now - last or nil
 	local ok, why, rule = GlyphRules.ShouldSpendSave({
@@ -10251,14 +10268,14 @@ local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
 		coming = help,
 	})
 	if ok then
-		GlyphCast("save", building, name, #enemies, allies, help, rule)
+		GlyphCast("save", building, name, #enemies, allies, help, tp, rule)
 		return true
 	end
 	if now - (GlyphState.lastHelpLog[name] or -100) >= 10 then
 		GlyphState.lastHelpLog[name] = now
 		print(
 			string.format(
-				"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s rule=%s tower=%s enemies=%d allies=%d help=%d hp=%.2f team=%d charges=%d since=%s",
+				"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s rule=%s tower=%s enemies=%d allies=%d help=%d tp=%d hp=%.2f team=%d charges=%d since=%s",
 				now,
 				string.gsub(botName, "npc_dota_hero_", ""),
 				why,
@@ -10267,6 +10284,7 @@ local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
 				#enemies,
 				allies,
 				help,
+				tp,
 				building:GetHealth() / building:GetMaxHealth(),
 				team,
 				GlyphState.charges.charges,
@@ -10433,7 +10451,8 @@ local function UseGlyphIfNeeded()
 					fortified = tower:HasModifier("modifier_fountain_glyph"),
 				})
 				if ok and glyphCd <= 0 then
-					GlyphCast("fight", tower, info.name, #enemies, allies, GlyphHelpComing(tower, prevLoc), nil)
+					local help, tp = GlyphHelpComing(tower, prevLoc)
+					GlyphCast("fight", tower, info.name, #enemies, allies, help, tp, nil)
 					return
 				end
 				-- A fight under the tower that did not get the Glyph: say why (at most every 10s).

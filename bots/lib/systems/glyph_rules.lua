@@ -118,6 +118,8 @@ GlyphRules.REPEAT_WINDOW = 20
 -- An ally this close can reach the building within the 7s fortification: ~330 move speed x 7s = 2300 plus the
 -- tower's 700 attack range to fight under it.
 GlyphRules.HELP_RADIUS = 2800
+-- A teleport of ours landing this close to the building counts as help (it lands under the tower; GetIncomingTeleports).
+GlyphRules.TP_RADIUS = 1500
 
 -- When a save needs help on the way: nil (no), "repeat" (our last Glyph on this building was under REPEAT_WINDOW s
 -- ago) or "last-charge" (it would spend our last charge). The Ancient never needs it: losing it ends the game, and 7s
@@ -137,7 +139,7 @@ function GlyphRules.SaveNeedsHelp(kind, charges, sinceSame)
 end
 
 -- Spend a save Glyph? s = { kind, charges, sinceSame, allies, coming }: allies = our heroes fighting at the building
--- (GlyphAlliesFighting), coming = our heroes within HELP_RADIUS that are not retreating and are there or walking in.
+-- (GlyphAlliesFighting), coming = our heroes walking in from within HELP_RADIUS or teleporting in (GlyphHelpComing).
 -- Returns ok, why ("save" or "no-help"), rule (what asked for help, or nil).
 function GlyphRules.ShouldSpendSave(s)
 	local rule = GlyphRules.SaveNeedsHelp(s.kind, s.charges, s.sinceSame)
