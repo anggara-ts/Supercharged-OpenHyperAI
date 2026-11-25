@@ -457,9 +457,10 @@ function X.SkillsComplement()
 	end
 	-- Scepter: Minefield Sign first (one per Blast Off), on himself (10 range): the triangle goes
 	-- around him, inside its radius, invulnerable and with +15% damage (Valve data).
-	if X.ConsiderPostBlastSign() then
+	local postBlastSign, postBlastEnemies = X.ConsiderPostBlastSign()
+	if postBlastSign then
 		bot._signBlastAt = bot._blastAt
-		X.LogTechies("post-blast-sign", 0, bot:GetLocation())
+		X.LogTechies(string.format("post-blast-sign enemies=%d", postBlastEnemies), 0, bot:GetLocation())
 		-- Only one sign at a time (datafeed hero_id=105): this one replaces any other and takes the 60s cooldown, so a
 		-- spot the standing-sign rule holds is dropped (it must not log minefield-sign-placed for this cast).
 		bot._signSpot = nil
@@ -2002,7 +2003,24 @@ function X.ConsiderPostBlastSign()
 	then
 		return false
 	end
-	return true
+	-- Maintainer, 2026-11-26 (#161): "the sign is too valuable for solo kill. make the sign optional in the combo. only
+	-- plant if there are 2+ enemies". Counted like the stack rule: enemy heroes seen in the last 3s within 1200 of
+	-- where he landed (1000 minefield area plus 200 trigger radius, datafeed hero_id=105). Fewer: no sign this Blast
+	-- Off, straight to the mines; logged once per Blast Off.
+	local enemies = X.EnemiesSeenNear(bot:GetLocation(), 1200, 3)
+	if enemies < 2 then
+		bot._signBlastAt = bot._blastAt
+		pcall(
+			print,
+			string.format(
+				"[SHy-TECHIES] t=%.0f techies minefield-sign-skip why=post-blast-solo enemies=%d scepter=true",
+				DotaTime(),
+				enemies
+			)
+		)
+		return false
+	end
+	return true, enemies
 end
 function X.ConsiderPostBlastMines()
 	if bot._blastAt == nil or bot._blastLoc == nil or DotaTime() - bot._blastAt > 3.5 then
