@@ -98,13 +98,11 @@ end)
 
 T.test("ringmaster: the outpost hold comes before a cast in Valve's modes", function()
 	local X = ringmaster()
-	-- Our own mode's Think is paused by the cast hold: cast at once.
-	T.eq(X.HoldStep(true, nil, 0.4), "cast", "our mode: no wait")
-	-- Valve's attack or retreat mode: ask for the hold, wait up to 0.4s, then cast anyway.
-	T.eq(X.HoldStep(false, nil, 0.4), "ask", "never asked")
-	T.eq(X.HoldStep(false, 0.1, 0.4), "wait", "asked 0.1s ago")
-	T.eq(X.HoldStep(false, 0.45, 0.4), "cast", "waited long enough")
-	T.eq(X.HoldStep(false, 0.8, 0.4), "ask", "an old ask is asked again")
+	-- A held order (decided in Valve's attack or retreat mode) waits for the hold, at most 0.4s.
+	T.eq(X.HoldStep(false, 0.1, 0.4), "wait", "asked 0.1s ago, Valve's mode still on")
+	T.eq(X.HoldStep(true, 0.1, 0.4), "cast", "the outpost hold is on: cast now")
+	T.eq(X.HoldStep(false, 0.45, 0.4), "cast", "waited long enough: cast anyway")
+	T.eq(X.HoldStep(true, 0.8, 0.4), "drop", "too old (the ticks stopped): dropped")
 	-- The hold is shared by name between the hero file and the outpost mode.
 	local hero = T.read("bots/heroes/hero_ringmaster.lua")
 	local outpost = T.read("bots/mode_outpost_generic.lua")

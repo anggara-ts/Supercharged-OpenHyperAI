@@ -206,6 +206,11 @@ function X.SkillsComplement()
 	if okL and lastWill then
 		return
 	end
+	-- A whip or Wheel decided earlier and waiting for the outpost hold (X.HoldFirst).
+	local okH, held = pcall(X.HeldOrderTick)
+	if okH and held then
+		return
+	end
 	whoopeeCushionDesire = X.ConsiderWhoopeeCushion()
 	if whoopeeCushionDesire > 0 then
 		X.LogSouvenir("whoopee_cushion", "cast-" .. whoopeeCushionWhy)
@@ -219,7 +224,7 @@ function X.SkillsComplement()
 	wheelOfWonderDesire, wheelOfWonderLocation = X.ConsiderWheelOfWonder()
 	if wheelOfWonderDesire > 0 then
 		-- Game 085: 4 team-fight Wheels were ordered and never went out (dropped=1), 3 of them 11-21s before a death.
-		if X.HoldFirst() then
+		if X.HoldFirst({ kind = "wheel", location = wheelOfWonderLocation }) then
 			return
 		end
 		X.WheelOrdered("teamfight")
@@ -231,7 +236,16 @@ function X.SkillsComplement()
 	tameTheBeastsDesire, tameTheBeastsLocation, tameTheBeastsWhy, tameTheBeastsTarget = X.ConsiderTameTheBeasts()
 	if tameTheBeastsDesire > 0 then
 		-- A teleport-cancel whip cracks at once: nothing to hold, and the teleport does not wait.
-		if tameTheBeastsWhy ~= "cancel" and X.HoldFirst() then
+		if
+			tameTheBeastsWhy ~= "cancel"
+			and X.HoldFirst({
+				kind = "whip",
+				why = tameTheBeastsWhy,
+				location = tameTheBeastsLocation,
+				target = tameTheBeastsTarget,
+				targetAt = Fu.IsValidHero(tameTheBeastsTarget) and tameTheBeastsTarget:GetLocation() or nil,
+			})
+		then
 			return
 		end
 		X.WhipOrdered(tameTheBeastsWhy, tameTheBeastsLocation, tameTheBeastsTarget)
@@ -432,13 +446,20 @@ function X.WheelTameCombo()
 		return false
 	end
 	-- Game 085: all 3 combo whips were cut at 0.07-0.13s in attack mode. Hold first; the hold lasts to the whip.
-	if X.HoldFirst() then
+	if X.HoldFirst({ kind = "combo", center = center }) then
 		return true
 	end
+	X.ComboWheelGo(center, "")
+	return true
+end
+-- Combo step 1: the Wheel beyond the group on the line from him (700-1400).
+function X.ComboWheelGo(center, extra)
+	local now = DotaTime()
+	local dist = GetUnitToLocationDistance(bot, center)
 	local wheelDist = math.max(700, math.min(1400, dist + 400))
 	local wheelPoint = Fu.VectorTowards(bot:GetLocation(), center, wheelDist)
 	bot._wheelTame = { at = now, center = center }
-	X.WheelOrdered("combo")
+	X.WheelOrdered("combo", extra)
 	-- Hold the mode Thinks and items through the Wheel's turn and cast point (released by X.WheelTick).
 	bot._castHoldUntil = now + 0.6
 	pcall(
@@ -446,13 +467,12 @@ function X.WheelTameCombo()
 		string.format(
 			"[SHy-RINGMASTER] t=%.0f ringmaster wheel-tame step=wheel enemies=%d wheel-dist=%d group-dist=%d",
 			now,
-			#enemies,
+			#Fu.GetEnemiesNearLoc(center, 600),
 			wheelDist,
 			dist
 		)
 	)
 	bot:Action_UseAbilityOnLocation(wheelOfWonderAbility, wheelPoint)
-	return true
 end
 function X.ConsiderTameTheBeasts()
 	if not Fu.CanCastAbility(tameTheBeastsAbility) then
@@ -753,35 +773,34 @@ local function OurThinkMode(mode)
 	return ourThinkModes[mode] == true
 end
 -- Hold first, cast a moment later (the Puck pattern, hero_puck.lua, game 055/064). Mode desires are read about 3
--- times a second, so the outpost hold can take up to ~0.3s to win. ourMode: the active mode's Think is ours;
--- wantAge: seconds since the hold was asked for (nil = never). "ask" = ask now and wait, "wait", "cast".
+-- times a second, so the outpost hold can take up to ~0.3s to win.
+-- The decision is made once, under the mode that asked, and kept (bot._rmHeldOrder): once the hold is on the active
+-- mode is outpost, and the engage / retreat rules read the mode (Fu.IsGoingOnSomeone, Fu.IsRetreating), so a decision
+-- made again then would never cast.
+-- A held order's step: ourMode = the active mode's Think is ours (the outpost hold is on, or another of our modes);
+-- age = seconds since the ask. "wait", "cast" (the hold is on, or HOLD_WAIT is over: cast anyway), "drop" (too old).
 local HOLD_WAIT = 0.4
-function X.HoldStep(ourMode, wantAge, maxWait)
-	if ourMode then
+function X.HoldStep(ourMode, age, maxWait)
+	if age > maxWait + 0.3 then
+		return "drop"
+	end
+	if ourMode or age >= maxWait then
 		return "cast"
 	end
-	if wantAge == nil or wantAge > maxWait + 0.3 then
-		return "ask"
-	end
-	if wantAge < maxWait then
-		return "wait"
-	end
-	return "cast"
+	return "wait"
 end
--- true = no cast this frame: the outpost hold was asked for and one of Valve's modes still runs (at most HOLD_WAIT).
-function X.HoldFirst()
-	local now = DotaTime()
-	local wantAt = bot._ringmasterHoldWantAt
-	local ourMode = OurThinkMode(bot:GetActiveMode())
-	local wantAge = wantAt ~= nil and now - wantAt or nil
-	local step = X.HoldStep(ourMode, wantAge, HOLD_WAIT)
-	if step == "ask" then
-		bot._ringmasterHoldWantAt = now
-		return true
+-- true = no cast this frame: one of Valve's modes runs, so the order is kept and the outpost hold asked for. In one of
+-- our own modes the cast goes out at once (false), and the hold takes over at the next desire read.
+function X.HoldFirst(order)
+	if OurThinkMode(bot:GetActiveMode()) then
+		bot._ringmasterWaited = 0
+		return false
 	end
-	-- How long this cast waited for the hold, for the tame-cast line (0 in our own modes).
-	bot._ringmasterWaited = (step == "cast" and not ourMode) and wantAge or 0
-	return step == "wait"
+	local now = DotaTime()
+	order.at = now
+	bot._rmHeldOrder = order
+	bot._ringmasterHoldWantAt = now
+	return true
 end
 -- How long a whip order may take to start: 0.8s to turn when in range, plus the walk into cast range, at most 3s.
 -- Game 085: all 11 nostart whips were ordered 843-1453 away (cast range 700) and timed out at 0.8s mid-walk.
@@ -795,6 +814,98 @@ end
 -- The retreat mode wants him out (mode_retreat_generic.lua's bot._retreatDesireNow, fresh within 1s; as Alchemist).
 local function RetreatWanted()
 	return (bot._retreatDesireNow or 0) >= 0.5 and DotaTime() - (bot._retreatDesireAt or -99) < 1.0
+end
+-- [SHy-RINGMASTER] hold-drop: a held order that was not sent (the target left, the spell is not castable, too old).
+local function HoldDropLog(order, why, age)
+	if DotaTime() < (bot._holdDropLogAt or -999) then
+		return
+	end
+	bot._holdDropLogAt = DotaTime() + 2
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster hold-drop kind=%s why=%s reason=%s age=%.2f mode=%s",
+			DotaTime(),
+			order.kind,
+			order.why or "-",
+			why,
+			age,
+			ModeNow()
+		)
+	)
+end
+-- Sends a held order after a last check (castable, target alive and near). false = dropped.
+function X.SendHeldOrder(order, age)
+	if order.kind == "whip" then
+		if not Fu.CanCastAbility(tameTheBeastsAbility) then
+			return false, "uncastable"
+		end
+		local location = order.location
+		local target = order.target
+		if target ~= nil then
+			if not Fu.IsValidHero(target) or not target:IsAlive() then
+				return false, "target-gone"
+			end
+			-- The point moves with the target (the engage point is the target or a group around it).
+			if order.targetAt ~= nil then
+				location = location + (target:GetLocation() - order.targetAt)
+			end
+		end
+		if GetUnitToLocationDistance(bot, location) > tameTheBeastsAbility:GetCastRange() + 300 then
+			return false, "far"
+		end
+		bot._ringmasterWaited = age
+		X.WhipOrdered(order.why, location, target)
+		Fu.SetQueuePtToINT(bot, true)
+		bot:ActionQueue_UseAbilityOnLocation(tameTheBeastsAbility, location)
+		return true
+	end
+	if order.kind == "wheel" then
+		if not Fu.CanCastAbility(wheelOfWonderAbility) then
+			return false, "uncastable"
+		end
+		X.WheelOrdered("teamfight", string.format(" waited=%.2f", age))
+		bot._castHoldUntil = DotaTime() + 1.0
+		Fu.SetQueuePtToINT(bot, false)
+		bot:ActionQueue_UseAbilityOnLocation(wheelOfWonderAbility, order.location)
+		return true
+	end
+	if order.kind == "combo" then
+		if not Fu.CanCastAbility(wheelOfWonderAbility) or not Fu.CanCastAbility(tameTheBeastsAbility) then
+			return false, "uncastable"
+		end
+		if #Fu.GetEnemiesNearLoc(order.center, 600) < 2 or GetUnitToLocationDistance(bot, order.center) > 750 then
+			return false, "group-gone"
+		end
+		X.ComboWheelGo(order.center, string.format(" waited=%.2f", age))
+		return true
+	end
+	return false, "unknown"
+end
+-- Runs before the cast rules: a held order waits for the outpost hold, then goes out. true = nothing else this frame.
+function X.HeldOrderTick()
+	local order = bot._rmHeldOrder
+	if order == nil then
+		return false
+	end
+	local age = DotaTime() - order.at
+	local step = X.HoldStep(OurThinkMode(bot:GetActiveMode()), age, HOLD_WAIT)
+	if step == "wait" then
+		return true
+	end
+	bot._rmHeldOrder = nil
+	local sent, why = false, "old"
+	if step == "cast" then
+		sent, why = X.SendHeldOrder(order, age)
+	end
+	if not sent then
+		-- Let the outpost hold go at its next read. An order from before a death (age 20s+) goes without a line.
+		bot._ringmasterHoldWantAt = nil
+		if age < 5 then
+			HoldDropLog(order, why or "?", age)
+		end
+	end
+	return sent
 end
 function X.WhipOrdered(why, location, target)
 	local now = DotaTime()
@@ -1229,6 +1340,7 @@ function X.LastWillWheel(blocked)
 		"last-will",
 		string.format(" hp=%.2f enemies=%d damage2s=%d nearest=%d", hp, s.enemiesInWheel, damage2s, nearestDist or -1)
 	)
+	bot._rmHeldOrder = nil
 	-- Hold the mode Thinks (retreat too) through the turn and cast point; X.WheelTick releases it. No wait for the
 	-- outpost hold first (he is about to die): the hold takes over at the next desire read.
 	bot._castHoldUntil = DotaTime() + 0.5
