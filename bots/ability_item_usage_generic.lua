@@ -1719,6 +1719,63 @@ local function DoomWastes(name)
 	end
 	return DOOM_HEAL_AND_MANA[name] == true and bot:GetMana() / math.max(1, bot:GetMaxMana()) >= 0.3
 end
+-- [SHy-NEUTRAL] use item= why= target= cast= desire= mode= (#116, game 081): one line when a use rule orders the
+-- item in the neutral slot (16), at most once per item every 10 seconds. Game 081: bots held 24 different neutrals
+-- and only the Brick's use showed in the log. Rules that print their own `use` line (Red Ledger, Kobold Cup, Brick,
+-- Witchbane, the Mana Draught give) stamp NeutralUseLog.ruleAt in that frame, and this line is skipped.
+-- why= is the rule's reason (spaces as "_", "-" when it gives none); target= a hero or unit name, self, loc (a
+-- point) or tree.
+-- One table for the state (this file is near Lua's 200-local limit for a chunk).
+local NeutralUseLog = { gap = 10, ruleAt = {}, nextAt = {} }
+function NeutralUseLog.TargetText(target)
+	if target == nil then
+		return "-"
+	end
+	if target == bot then
+		return "self"
+	end
+	local kind = type(target)
+	if kind == "number" then
+		return "tree"
+	end
+	if kind == "table" or kind == "userdata" then
+		local ok, name = pcall(function()
+			return target:GetUnitName()
+		end)
+		if ok and type(name) == "string" then
+			return (string.gsub(name, "npc_dota_hero_", ""))
+		end
+		local okLoc, x = pcall(function()
+			return target.x
+		end)
+		if okLoc and type(x) == "number" then
+			return "loc"
+		end
+	end
+	return "?"
+end
+function NeutralUseLog.SlotUse(itemName, target, castType, castReason, desire)
+	local now = DotaTime()
+	if NeutralUseLog.ruleAt[itemName] == now or now < (NeutralUseLog.nextAt[itemName] or -999) then
+		return
+	end
+	NeutralUseLog.nextAt[itemName] = now + NeutralUseLog.gap
+	local why = castReason ~= nil and (string.gsub(tostring(castReason), "%s+", "_")) or ""
+	pcall(
+		print,
+		string.format(
+			"[SHy-NEUTRAL] t=%.0f %s use item=%s why=%s target=%s cast=%s desire=%.2f mode=%s",
+			now,
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			itemName,
+			why ~= "" and why or "-",
+			NeutralUseLog.TargetText(target),
+			tostring(castType),
+			tonumber(desire) or 0,
+			tostring(botMode)
+		)
+	)
+end
 -- The slots ConsiderItems reads: main, backpack (Smoke only), TP scroll, neutral. Built once instead of on every
 -- item think (#52: one table less per bot per think); same slots in the same order.
 Usage.itemThinkSlots = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 16 }
@@ -1871,6 +1928,9 @@ local function ConsiderItems()
 						if string.find(tostring(castReason), "前往守塔", 1, true) ~= nil then
 							bot._defendTpLane, bot._defendTpAt = bot._defendTpCandidateLane, DotaTime()
 						end
+					end
+					if slot == 16 then
+						NeutralUseLog.SlotUse(itemName, target, castType, castReason, desire)
 					end
 					Usage.SetUseItem(item, target, castType)
 				end
@@ -7935,6 +7995,7 @@ Usage.ConsiderItemDesire["item_heavy_blade"] = function(item)
 	local function Cast(why, unit)
 		local loc, dist = CastPointFor(unit)
 		bot._heavyBladeTriedAt = DotaTime()
+		NeutralUseLog.ruleAt["item_heavy_blade"] = DotaTime()
 		print(
 			string.format(
 				"[SHy-NEUTRAL] t=%.0f %s use item=item_heavy_blade why=%s target=%s loc=%.0f,%.0f dist=%.0f range=%.0f",
@@ -9554,6 +9615,7 @@ function Usage.ConsiderGiveManaDraught(item)
 	end
 	local allyName = (string.gsub(bestAlly:GetUnitName(), "npc_dota_hero_", ""))
 	bot._manaDraughtGive = { at = now, target = allyName }
+	NeutralUseLog.ruleAt["item_mana_draught"] = now
 	print(
 		string.format(
 			"[SHy-NEUTRAL] t=%.0f %s use item=item_mana_draught why=give target=%s allyMp=%.2f myMp=%.2f restore=%.0f dist=%.0f",
@@ -9769,6 +9831,7 @@ do
 	end
 	local function LogNeutralUse(itemName, why, target, detail)
 		lastAttemptAt[itemName] = DotaTime()
+		NeutralUseLog.ruleAt[itemName] = DotaTime()
 		local targetName = "-"
 		if target ~= nil and target ~= bot and not target:IsNull() then
 			targetName = (string.gsub(target:GetUnitName(), "npc_dota_hero_", ""))

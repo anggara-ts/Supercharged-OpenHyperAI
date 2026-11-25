@@ -454,20 +454,6 @@ local function ForceSwap(fromSlot, toSlot)
 	bot:ActionImmediate_SwapItems(fromSlot, toSlot)
 	bot._swapDespiteEnemies = nil
 end
-local function MainSlotForBackpackItem()
-	for slot = 0, 5 do
-		if bot:GetItemInSlot(slot) == nil then
-			return slot
-		end
-	end
-	for slot = 0, 5 do
-		local it = bot:GetItemInSlot(slot)
-		if it ~= nil and PARK_IN_BACKPACK[it:GetName()] then
-			return slot
-		end
-	end
-	return nil
-end
 -- A full bag puts the grenade in the backpack, where it cannot be thrown.
 -- The grenade takes a main slot ahead of a branch. Do not pull that branch back out.
 local function PreferBloodGrenadeOverBranch()
@@ -2303,61 +2289,84 @@ function ItemPurchaseThink()
 		local forageName, forageSlot, forageItem = BackpackForage()
 		if forageItem ~= nil then
 			bot._lastBackpackForage = now
-			local dest = MainSlotForBackpackItem()
-			if dest == nil then
-				local cheap = Item.GetMainInvLessValItemSlot(bot)
-				if cheap ~= nil and cheap >= 0 then
-					dest = cheap
+			-- Only into an empty main slot (#116, game 085): Venomancer's 6 swaps of her own mushrooms with an occupied
+			-- main slot (Clarity, Magic Wand, Smoke) all left the mushroom in the backpack (`swap-result ... ok=no`); the
+			-- one into an empty slot while alive (t=1374) moved it and it was eaten. The same as every other bot swap of a
+			-- backpack item with a main item (discussion #50 item 5, pull-check: about 15 of 1,640 stuck). A mushroom is
+			-- worth less than any main item, so none is moved out for it; it waits for a free main slot.
+			local dest = nil
+			for slot = 0, 5 do
+				if bot:GetItemInSlot(slot) == nil then
+					dest = slot
+					break
 				end
 			end
-			-- A mushroom that can't be used here (another hero's Forager's Kit) went back and forth every 4s for the
-			-- rest of the game (game 045: Weaver, 34 swap lines). After 2 swaps of the same forage within 60s, leave it
-			-- for 120s.
-			bot._forageSwaps = bot._forageSwaps or {}
-			local swaps = bot._forageSwaps[forageName]
-			if swaps == nil or now - swaps.since > 60 then
-				swaps = { n = 0, since = now }
-			end
-			swaps.n = swaps.n + 1
-			bot._forageSwaps[forageName] = swaps
-			if swaps.n > 2 then
-				bot._forageSwapBackoff = bot._forageSwapBackoff or {}
-				bot._forageSwapBackoff[forageName] = now + 120
-				bot._forageSwaps[forageName] = nil
-				pcall(
-					print,
-					string.format(
-						"[SHy-FORAGE] t=%.0f %s swap-giveup %s why=not-used backoff=120s",
-						now,
-						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-						forageName
-					)
-				)
-				dest = nil
-			end
-			if dest ~= nil then
-				ForceSwap(forageSlot, dest)
-				-- Game 031: Dazzle kept a Forager mushroom in the backpack for the rest of the game,
-				-- and this step never logged a use. Log each try (once per 15s; its own clock: it shared one with the
-				-- eat line, so no eat line printed after a swap in games 073-077), and the slot 0.5s later
-				-- (swap-result above). The eat itself is Usage.EatForage (ability_item_usage_generic.lua), which repeats
-				-- the order until it lands; an order in the same frame as the swap came out of the backpack lock.
-				if now >= (bot._forageSwapLogAt or -999) then
-					bot._forageSwapLogAt = now + 15
+			if dest == nil then
+				-- [SHy-FORAGE] wait-slot item= slot= why=main-full: at most once per 60s per bot.
+				if now >= (bot._forageWaitLogAt or -999) then
+					bot._forageWaitLogAt = now + 60
 					pcall(
 						print,
 						string.format(
-							"[SHy-FORAGE] t=%.0f %s swap %s slot%d->%d",
+							"[SHy-FORAGE] t=%.0f %s wait-slot item=%s slot=%d why=main-full",
 							now,
 							(string.gsub(botName, "npc_dota_hero_", "")),
 							forageName,
-							forageSlot,
-							dest
+							forageSlot
 						)
 					)
 				end
-				bot._forageSwapCheck = { name = forageName, from = forageSlot, to = dest, at = now }
-				MatchTrace.Buy(bot, forageName, "backpack forage swap")
+			else
+				ForceSwap(forageSlot, dest)
+				-- A swap the wrapper held (the pair gap, blocked-cooldown) is not a try: game 085 counted 5 of them as
+				-- failed swaps (swap-result ok=no) and gave up after 2.
+				if SwapIssued(forageSlot, dest) then
+					-- A mushroom that can't be used here (another hero's Forager's Kit) went back and forth every 4s for
+					-- the rest of the game (game 045: Weaver, 34 swap lines). After 2 swaps of the same forage within 60s,
+					-- leave it for 120s.
+					bot._forageSwaps = bot._forageSwaps or {}
+					local swaps = bot._forageSwaps[forageName]
+					if swaps == nil or now - swaps.since > 60 then
+						swaps = { n = 0, since = now }
+					end
+					swaps.n = swaps.n + 1
+					bot._forageSwaps[forageName] = swaps
+					if swaps.n >= 2 then
+						bot._forageSwapBackoff = bot._forageSwapBackoff or {}
+						bot._forageSwapBackoff[forageName] = now + 120
+						bot._forageSwaps[forageName] = nil
+						pcall(
+							print,
+							string.format(
+								"[SHy-FORAGE] t=%.0f %s swap-giveup %s why=not-used backoff=120s",
+								now,
+								(string.gsub(botName, "npc_dota_hero_", "")),
+								forageName
+							)
+						)
+					end
+					-- Game 031: Dazzle kept a Forager mushroom in the backpack for the rest of the game, and this step
+					-- never logged a use. Log each try (once per 15s; its own clock: it shared one with the eat line, so no
+					-- eat line printed after a swap in games 073-077), and the slot 0.5s later (swap-result above). The eat
+					-- itself is Usage.EatForage (ability_item_usage_generic.lua), which repeats the order until it lands;
+					-- an order in the same frame as the swap came out of the backpack lock.
+					if now >= (bot._forageSwapLogAt or -999) then
+						bot._forageSwapLogAt = now + 15
+						pcall(
+							print,
+							string.format(
+								"[SHy-FORAGE] t=%.0f %s swap %s slot%d->%d",
+								now,
+								(string.gsub(botName, "npc_dota_hero_", "")),
+								forageName,
+								forageSlot,
+								dest
+							)
+						)
+					end
+					bot._forageSwapCheck = { name = forageName, from = forageSlot, to = dest, at = now }
+					MatchTrace.Buy(bot, forageName, "backpack forage swap")
+				end
 				return
 			end
 		end

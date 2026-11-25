@@ -140,6 +140,14 @@ T.test("neutral items: Brick is thrown at the bot's target in a fight (through I
 	T.eq(orderedItem, brick, "Brick ordered")
 	T.eq(orderedTarget, enemy, "on the bot's target")
 	T.ok(printedUse("item_brick", "fight"), "the use is logged")
+	-- The rule's own line only: the neutral-slot use line (#116) is skipped for it.
+	local brickLines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "use item=item_brick", 1, true) then
+			brickLines = brickLines + 1
+		end
+	end
+	T.eq(brickLines, 1, "one use line for the Brick")
 end)
 
 T.test("neutral items: Mana Draught give rule (pure numbers)", function()
@@ -306,3 +314,106 @@ T.test(
 		T.eq(firstCount, 1, "printed once")
 	end
 )
+
+-- #116 (game 081): a use rule's order on the neutral slot prints one [SHy-NEUTRAL] use line, whatever the target.
+T.test("neutral items: an order from the neutral slot prints a use line (unit, point, no target), throttled", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_lich", slot = 5, time = 1500 })
+	local bot = Stub.bot
+	local enemy = Stub.teams[bot:GetTeam() == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT][1]
+	local pogo = Stub.newAbility("item_pogo_stick", bot)
+	pogo.IsFullyCastable = function()
+		return true
+	end
+	pogo.IsTrained = function()
+		return true
+	end
+	bot._items[16] = pogo
+	local answer = { BOT_ACTION_DESIRE_HIGH, enemy, "unit", "test reason" }
+	Usage.ConsiderItemDesire["item_pogo_stick"] = function()
+		return answer[1], answer[2], answer[3], answer[4]
+	end
+	local function useLines()
+		local lines = {}
+		for _, line in ipairs(Stub.printed) do
+			if
+				string.find(line, "[SHy-NEUTRAL]", 1, true) and string.find(line, "use item=item_pogo_stick", 1, true)
+			then
+				lines[#lines + 1] = line
+			end
+		end
+		return lines
+	end
+	Usage.ItemUsageThink()
+	local enemyName = string.gsub(enemy:GetUnitName(), "npc_dota_hero_", "")
+	local lines = useLines()
+	T.eq(#lines, 1, "one use line")
+	T.ok(
+		lines[1] ~= nil and string.find(lines[1], "why=test_reason target=" .. enemyName .. " cast=unit", 1, true),
+		"unit target: " .. tostring(lines[1])
+	)
+	Stub.time = 1505
+	Usage.ItemUsageThink()
+	T.eq(#useLines(), 1, "no second line within 10 s")
+	Stub.time = 1516
+	answer = { BOT_ACTION_DESIRE_HIGH, bot:GetLocation() + Vector(300, 0, 0), "ground", nil }
+	Usage.ItemUsageThink()
+	lines = useLines()
+	T.ok(
+		lines[2] ~= nil and string.find(lines[2], "why=- target=loc cast=ground", 1, true),
+		"point target: " .. tostring(lines[2])
+	)
+	Stub.time = 1527
+	answer = { BOT_ACTION_DESIRE_HIGH, nil, "none", "escape" }
+	Usage.ItemUsageThink()
+	lines = useLines()
+	T.ok(
+		lines[3] ~= nil and string.find(lines[3], "why=escape target=- cast=none", 1, true),
+		"no target: " .. tostring(lines[3])
+	)
+end)
+
+-- #116 (game 085): a bot swap of a backpack item with an occupied main slot never moved the mushroom; only an empty
+-- main slot is used, and a bot with six full main slots waits.
+T.test("forager mushrooms: swapped only into an empty main slot, else wait-slot (item_purchase_generic)", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_venomancer", slot = 4, time = 1300 })
+	for _, team in pairs(Stub.teams) do
+		for _, hero in pairs(team) do
+			if hero ~= bot then
+				hero._loc = Vector(7000, 7000, 0)
+			end
+		end
+	end
+	for slot = 0, 5 do
+		bot._items[slot] = Stub.newAbility(slot == 5 and "item_clarity" or "item_magic_wand", bot)
+	end
+	bot._items[6] = Stub.newAbility("item_foragers_health", bot)
+	bot._items[16] = Stub.newAbility("item_foragers_kit", bot)
+	local swaps = {}
+	local originalSwap = _G.CDOTA_Bot_Script.ActionImmediate_SwapItems
+	_G.CDOTA_Bot_Script.ActionImmediate_SwapItems = function(_, a, b)
+		swaps[#swaps + 1] = { a, b }
+		bot._swapCheck = { a = a, b = b, at = DotaTime() }
+	end
+	local ok, err = Stub.load("item_purchase_generic")
+	T.ok(ok, "item_purchase_generic loads: " .. tostring(err))
+	for step = 1, 4 do
+		Stub.time = 1300 + step * 4
+		pcall(_G.ItemPurchaseThink)
+	end
+	T.eq(#swaps, 0, "no swap with an occupied main slot")
+	local waited = false
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "wait-slot item=item_foragers_health slot=6 why=main-full", 1, true) then
+			waited = true
+		end
+	end
+	T.ok(waited, "wait-slot logged")
+	bot._items[3] = nil
+	for step = 5, 6 do
+		Stub.time = 1300 + step * 4
+		pcall(_G.ItemPurchaseThink)
+	end
+	T.ok(#swaps >= 1, "swapped once a main slot is free")
+	T.ok(swaps[1] ~= nil and swaps[1][1] == 6 and swaps[1][2] == 3, "into the empty slot 3")
+	_G.CDOTA_Bot_Script.ActionImmediate_SwapItems = originalSwap
+end)
