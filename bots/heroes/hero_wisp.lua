@@ -10,6 +10,8 @@ local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local GetTeamFountainTpPoint = Utils.GetTeamFountainTpPoint
 local HasAnyEffect = Utils.HasAnyEffect
 local IsValidHero = Utils.IsValidHero
+local RelocateRules = require(GetScriptDirectory() .. "/lib/systems/relocate_rules")
+local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 local HeroBuilder = require(GetScriptDirectory() .. "/lib/hero/hero_builder")
 local buildHeroConfig = HeroBuilder.buildHeroConfig
 local buildHeroExport = HeroBuilder.buildHeroExport
@@ -17,7 +19,6 @@ local relocateHpThreshold = 0.2
 local tetherAllyHpThreshold = 0.75
 local tetherManaThreshold = 0.8
 local retreatHpThreshold = 0.25
-local relocateMinDistance = 3000
 local spiritsMinCreeps = 2
 local spiritsManaThreshold = 0.4
 local bot = GetBot()
@@ -131,6 +132,7 @@ local spiritsAbility = bot:GetAbilityByName("wisp_spirits")
 local overchargeAbility = bot:GetAbilityByName("wisp_overcharge")
 local relocateAbility = bot:GetAbilityByName("wisp_relocate")
 local tetherBreakAbility = bot:GetAbilityByName("wisp_tether_break")
+local relocateDelayTalent = bot:GetAbilityByName("special_bonus_unique_wisp_relocate_delay")
 local nearbyEnemies = {}
 bot.stateTetheredHero = bot.stateTetheredHero
 local function isHealing(unit)
@@ -214,43 +216,897 @@ local function considerSpirits()
 	end
 	return BotActionDesire.None
 end
+-- Relocate (#47). The rules and the game-file values are in bots/lib/systems/relocate_rules.lua.
+local function relocateDelay()
+	local talent = relocateDelayTalent ~= nil and relocateDelayTalent:IsTrained()
+	return RelocateRules.CastDelay(relocateAbility:GetLevel(), talent)
+end
+local function nearOwnFountain(unit)
+	return unit:HasModifier("modifier_fountain_aura_buff") or Fu.GetDistanceFromAllyFountain(unit) < 2500
+end
+local function enemyHeroCount(unit, radius)
+	return #(unit:GetNearbyHeroes(radius, true, BotMode.None) or {})
+end
+-- HP history for the damage rate: Io and the tethered ally, sampled every think before any early return.
+local selfSamples = {}
+local allySamples = { unit = nil, samples = {} }
+-- Every other allied hero by player ID: the rescue needs a far ally's loss rate.
+local allyHeroSamples = {}
+local function sampleHp()
+	local now = DotaTime()
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		if IsValidHero(hero) and hero ~= bot and not hero:IsIllusion() then
+			local id = hero:GetPlayerID()
+			allyHeroSamples[id] = RelocateRules.AddSample(allyHeroSamples[id] or {}, now, Fu.GetHP(hero))
+		end
+	end
+	if bot:IsAlive() then
+		RelocateRules.AddSample(selfSamples, now, Fu.GetHP(bot))
+	else
+		selfSamples = {}
+	end
+	local ally = bot.stateTetheredHero
+	if not isTethered() or not IsValidHero(ally) then
+		allySamples = { unit = nil, samples = {} }
+		return
+	end
+	if allySamples.unit ~= ally then
+		allySamples = { unit = ally, samples = {} }
+	end
+	RelocateRules.AddSample(allySamples.samples, now, Fu.GetHP(ally))
+end
+-- The save to the fountain: the tethered ally (or Io) would not last the cast delay at the HP it is losing, or is
+-- focused at low HP. Only with the tether up and the ally well inside the 1000 tether radius (the ally comes along
+-- only if still tethered when the teleport happens), never for an ally already at the fountain or in a TP channel.
+local function considerRelocateSave()
+	if not relocateAbility:IsFullyCastable() or not isTethered() then
+		return nil
+	end
+	local ally = bot.stateTetheredHero
+	if not IsValidHero(ally) or GetUnitToUnitDistance(bot, ally) > RelocateRules.TETHER_SAFE then
+		return nil
+	end
+	if
+		nearOwnFountain(bot)
+		or nearOwnFountain(ally)
+		or bot:HasModifier("modifier_teleporting")
+		or ally:HasModifier("modifier_teleporting")
+	then
+		return nil
+	end
+	local delay = relocateDelay()
+	local unit, who = ally, "ally"
+	local rate = RelocateRules.LossRate(allySamples.samples)
+	local needed, why, ttd = RelocateRules.SaveNeeded(Fu.GetHP(ally), rate, delay, enemyHeroCount(ally, 1200))
+	if not needed then
+		unit, who = bot, "self"
+		rate = RelocateRules.LossRate(selfSamples)
+		needed, why, ttd = RelocateRules.SaveNeeded(Fu.GetHP(bot), rate, delay, enemyHeroCount(bot, 1200))
+	end
+	if not needed then
+		return nil
+	end
+	return {
+		kind = "save",
+		why = who .. "-" .. why,
+		ally = ally,
+		hp = Fu.GetHP(unit),
+		dps = rate * unit:GetMaxHealth(),
+		ttd = ttd,
+		delay = delay,
+		target = GetTeamFountainTpPoint(),
+	}
+end
 local function considerRelocate()
 	if not relocateAbility:IsFullyCastable() then
-		return BotActionDesire.None, nil
+		return nil
 	end
-	if isTethered() and bot.stateTetheredHero ~= nil then
-		local tetheredHpRatio = Fu.GetHP(bot.stateTetheredHero)
-		local hpRatio = Fu.GetHP(bot)
-		if tetheredHpRatio <= relocateHpThreshold or hpRatio <= relocateHpThreshold then
-			local enemiesNearTethered = bot.stateTetheredHero:GetNearbyHeroes(1200, true, BotMode.None) or {}
-			local tetheredIsLosing = #enemiesNearTethered >= 1 and tetheredHpRatio < Fu.GetHP(enemiesNearTethered[1])
-			local botIsLosing = #nearbyEnemies >= 1 and hpRatio < Fu.GetHP(nearbyEnemies[1])
-			if tetheredIsLosing or botIsLosing then
-				return BotActionDesire.High, GetTeamFountainTpPoint()
+	-- Io's own escape at 20%, tethered or not (the save above covers the tethered ally; when it can't, e.g. the ally
+	-- is out of range, Io still gets out).
+	if #nearbyEnemies >= 1 and Fu.GetHP(bot) < relocateHpThreshold then
+		return {
+			-- A tethered ally comes along: the same fountain stay and return decision as the save.
+			kind = "save",
+			why = "self-low",
+			ally = isTethered() and IsValidHero(bot.stateTetheredHero) and bot.stateTetheredHero or nil,
+			hp = Fu.GetHP(bot),
+			dps = RelocateRules.LossRate(selfSamples) * bot:GetMaxHealth(),
+			delay = relocateDelay(),
+			target = GetTeamFountainTpPoint(),
+		}
+	end
+	-- The far-teamfight join moved into considerOffense (the numbers guard and the partner apply to it too).
+	return nil
+end
+-- Offensive Relocate (#47): onto a far ally being ganked ("rescue", maintainer 2026-11-22, like Nature's Prophet's
+-- save-teleport) or in a far teamfight ("join", the old rule). A healthy, ready partner near Io is tethered first
+-- when there is one (it comes along and adds to the numbers); without one Io goes alone. Every offensive cast checks
+-- the numbers (RelocateRules.NumbersOk) at cast time only: the cast is committed, nothing can be re-checked when the
+-- delay ends. Pure rules: RelocateRules.RescueCheck / NumbersOk / PartnerScore.
+local offenseState = nil
+local skipLogState = { key = nil, at = -999 }
+-- A skip line on change, or every 10s while it stays the same.
+local function logSkip(key, line)
+	local now = DotaTime()
+	if key == skipLogState.key and now - skipLogState.at < 10 then
+		return
+	end
+	skipLogState.key = key
+	skipLogState.at = now
+	print(string.format("[SHy-WISP] t=%.0f wisp %s", now, line))
+end
+-- Damage / disable spells castable now (cooldown and mana), and whether the ultimate is one of them.
+local function readyFightSpells(hero)
+	local count, ultReady = 0, false
+	for slot = 0, 5 do
+		local ability = hero:GetAbilityInSlot(slot)
+		if
+			ability ~= nil
+			and not ability:IsNull()
+			and ability:IsTrained()
+			and not ability:IsPassive()
+			and not ability:IsToggle()
+			and not ability:IsHidden()
+			and ability:IsFullyCastable()
+			and (
+				bit.band(ABILITY_TARGET_TEAM_ENEMY, ability:GetTargetTeam() or 0) ~= 0
+				or (ability:GetAbilityDamage() or 0) > 0
+			)
+		then
+			count = count + 1
+			if ability:IsUltimate() then
+				ultReady = true
 			end
 		end
 	end
-	if not isTethered() and #nearbyEnemies >= 1 and Fu.GetHP(bot) < relocateHpThreshold then
-		return BotActionDesire.High, GetTeamFountainTpPoint()
-	end
-	for _, allyHero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
-		if
-			IsValidHero(allyHero)
-			and Fu.IsInTeamFight(allyHero, 1200)
-			and GetUnitToUnitDistance(bot, allyHero) > relocateMinDistance
-			and allyHero:WasRecentlyDamagedByAnyHero(2)
-		then
-			return BotActionDesire.High, allyHero:GetLocation()
+	return count, ultReady
+end
+local function bestRescuePartner()
+	local best, bestScore, bestReady = nil, nil, 0
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		local dist = IsValidHero(hero) and GetUnitToUnitDistance(bot, hero) or math.huge
+		-- Already tethered: only the tethered ally can come (a new tether would wait for the break).
+		local tetherOk = not isTethered() or hero == bot.stateTetheredHero
+		if hero ~= bot and dist <= RelocateRules.TETHER_CAST_RANGE and tetherOk and not hero:IsIllusion() then
+			local readySpells, ultReady = readyFightSpells(hero)
+			local score = RelocateRules.PartnerScore({
+				hp = Fu.GetHP(hero),
+				dist = dist,
+				ultReady = ultReady,
+				readySpells = readySpells,
+				channeling = hero:IsChanneling(),
+				inFight = enemyHeroCount(hero, 1200) > 0 or hero:WasRecentlyDamagedByAnyHero(2),
+				laneUnderTower = #(hero:GetNearbyTowers(900, false) or {}) > 0
+					and #(hero:GetNearbyLaneCreeps(900, true) or {}) >= 3,
+			})
+			if score ~= nil and (bestScore == nil or score > bestScore) then
+				best, bestScore, bestReady = hero, score, readySpells
+			end
 		end
 	end
-	return BotActionDesire.None, nil
+	return best, bestReady
+end
+-- Enemy heroes alive and seen near loc in the last maxAge seconds (default 5; the last-seen list, not only the
+-- visible ones), and their centre.
+local function enemiesSeenNear(loc, radius, maxAge)
+	maxAge = maxAge or 5.0
+	local count, sumX, sumY = 0, 0, 0
+	for _, playerId in pairs(GetTeamPlayers(GetOpposingTeam())) do
+		if IsHeroAlive(playerId) then
+			local info = GetHeroLastSeenInfo(playerId)
+			local lastSeen = info ~= nil and info[1] or nil
+			if
+				lastSeen ~= nil
+				and lastSeen.time_since_seen < maxAge
+				and Fu.GetLocationToLocationDistance(loc, lastSeen.location) <= radius
+			then
+				count = count + 1
+				sumX = sumX + lastSeen.location.x
+				sumY = sumY + lastSeen.location.y
+			end
+		end
+	end
+	if count == 0 then
+		return 0, nil
+	end
+	return count, Vector(sumX / count, sumY / count, loc.z)
+end
+-- Our side after the landing: Io, the hero it brings, and allied heroes near the landing point.
+local function oursAt(loc, taking)
+	local count = taking ~= nil and 2 or 1
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		if
+			IsValidHero(hero)
+			and hero ~= bot
+			and hero ~= taking
+			and not hero:IsIllusion()
+			and GetUnitToLocationDistance(hero, loc) <= 1200
+		then
+			count = count + 1
+		end
+	end
+	return count
+end
+-- 300 behind the ally on our side: away from the enemies' centre, or toward our fountain when none are seen.
+local function landingPoint(ally, centre)
+	local allyLoc = ally:GetLocation()
+	if centre == nil or Fu.GetLocationToLocationDistance(allyLoc, centre) < 50 then
+		return Fu.AdjustLocationWithOffsetTowardsFountain(allyLoc, 300)
+	end
+	return Fu.GetXUnitsTowardsLocation2(allyLoc, allyLoc + (allyLoc - centre), 300)
+end
+-- Player ID -> time until which a too-late verdict on that ally holds (RelocateRules.RESCUE_TOO_LATE_HOLD).
+local rescueTooLateUntil = {}
+local function rescueCheck(hero, delay)
+	return RelocateRules.RescueCheck({
+		hp = Fu.GetHP(hero),
+		dps = RelocateRules.LossRate(allyHeroSamples[hero:GetPlayerID()] or {}),
+		delay = delay,
+		damaged = hero:WasRecentlyDamagedByAnyHero(1.5),
+		enemies = enemyHeroCount(hero, 1200),
+		alliesThere = math.max(0, #(hero:GetNearbyHeroes(1200, false, BotMode.None) or {}) - 1),
+	})
+end
+-- A far ally to go to: ganked (RescueCheck) or in a teamfight (the old join rule: in a fight and hit by a hero).
+local function findOffenseTarget(delay)
+	local now = DotaTime()
+	local tooLate, tooLateTtd, held = nil, nil, false
+	for _, hero in ipairs(GetUnitList(UnitType.AlliedHeroes)) do
+		if
+			IsValidHero(hero)
+			and hero ~= bot
+			and not hero:IsIllusion()
+			and GetUnitToUnitDistance(bot, hero) > RelocateRules.RESCUE_MIN_DIST
+			and not nearOwnFountain(hero)
+			and not hero:HasModifier("modifier_teleporting")
+		then
+			local id = hero:GetPlayerID()
+			local ok, why, ttd = rescueCheck(hero, delay)
+			local holding = now < (rescueTooLateUntil[id] or -999)
+			if ok and not holding then
+				return { ally = hero, kind = "rescue", ttd = ttd }
+			end
+			if why == "too-late" or holding then
+				if why == "too-late" then
+					rescueTooLateUntil[id] = now + RelocateRules.RESCUE_TOO_LATE_HOLD
+				end
+				tooLate, tooLateTtd, held = hero, ttd, why ~= "too-late"
+			elseif Fu.IsInTeamFight(hero, 1200) and hero:WasRecentlyDamagedByAnyHero(2) then
+				return { ally = hero, kind = "join", ttd = ttd }
+			end
+		end
+	end
+	if tooLate ~= nil then
+		logSkip(
+			"too-late",
+			string.format(
+				"rescue-skip why=too-late ally=%s hp=%.2f ttd=%s delay=%.2f held=%s",
+				tooLate:GetUnitName(),
+				Fu.GetHP(tooLate),
+				tooLateTtd ~= nil and string.format("%.1f", tooLateTtd) or "-",
+				delay,
+				tostring(held)
+			)
+		)
+	end
+	return nil
+end
+-- One offensive step: tether a partner first when one qualifies, then Relocate onto the landing point when the
+-- numbers allow. Returns "tether", partner | "relocate", plan | nil.
+local function considerOffense()
+	if not relocateAbility:IsFullyCastable() or enemyHeroCount(bot, 1200) > 0 then
+		offenseState = nil
+		return nil
+	end
+	local now = DotaTime()
+	if now < (bot._wispOffenseScanAt or -999) then
+		return nil
+	end
+	bot._wispOffenseScanAt = now + 0.3
+	local delay = relocateDelay()
+	local target = findOffenseTarget(delay)
+	if target == nil then
+		offenseState = nil
+		return nil
+	end
+	if offenseState == nil or offenseState.ally ~= target.ally then
+		local partner, ready = bestRescuePartner()
+		offenseState = { ally = target.ally, partner = partner, ready = ready, at = now }
+	end
+	local partner = offenseState.partner
+	if partner ~= nil and not IsValidHero(partner) then
+		partner = nil
+	end
+	if partner ~= nil and not (isTethered() and bot.stateTetheredHero == partner) then
+		if now - offenseState.at <= 3 and tetherAbility:IsFullyCastable() and tetherBreakAbility:IsHidden() then
+			return "tether", partner
+		end
+		-- The tether didn't come up in 3s (or can't be cast): go alone.
+		logSkip("tether-failed", "rescue-skip why=tether-failed partner=" .. partner:GetUnitName())
+		offenseState.partner = nil
+		partner = nil
+	end
+	if partner ~= nil and GetUnitToUnitDistance(bot, partner) > RelocateRules.TETHER_SAFE then
+		if now - offenseState.at <= 3 then
+			return nil
+		end
+		offenseState.partner = nil
+		partner = nil
+	end
+	-- Whoever is tethered and close comes along (the tooltip: the tethered ally teleports with Io).
+	local taking = nil
+	if
+		isTethered()
+		and IsValidHero(bot.stateTetheredHero)
+		and GetUnitToUnitDistance(bot, bot.stateTetheredHero) <= RelocateRules.TETHER_SAFE
+	then
+		taking = bot.stateTetheredHero
+	end
+	local ally = target.ally
+	local enemies, centre = enemiesSeenNear(ally:GetLocation(), 1200)
+	local landing = landingPoint(ally, centre)
+	local ours = oursAt(landing, taking)
+	local takingName = taking ~= nil and taking:GetUnitName() or "none"
+	if not RelocateRules.NumbersOk(ours, enemies) then
+		logSkip(
+			"outnumbered",
+			string.format(
+				"relocate-skip why=outnumbered kind=%s ally=%s ours=%d enemies=%d partner=%s",
+				target.kind,
+				ally:GetUnitName(),
+				ours,
+				enemies,
+				takingName
+			)
+		)
+		return nil
+	end
+	if target.kind == "rescue" then
+		print(
+			string.format(
+				"[SHy-WISP] t=%.0f wisp relocate-rescue ally=%s partner=%s enemies=%d ttd=%s partnerReady=%d",
+				now,
+				ally:GetUnitName(),
+				takingName,
+				enemies,
+				target.ttd ~= nil and string.format("%.1f", target.ttd) or "-",
+				taking ~= nil and (offenseState.ready or 0) or 0
+			)
+		)
+	end
+	offenseState = nil
+	return "relocate",
+		{
+			kind = target.kind,
+			why = target.kind,
+			ally = taking,
+			hp = Fu.GetHP(ally),
+			dps = RelocateRules.LossRate(allyHeroSamples[ally:GetPlayerID()] or {}) * ally:GetMaxHealth(),
+			ttd = target.ttd,
+			delay = delay,
+			target = landing,
+			ours = ours,
+			enemies = enemies,
+			toName = ally:GetUnitName(),
+			-- the ally Io goes to: the result line says whether it lived (relocate-result target= targetDied=)
+			toUnit = ally,
+		}
+end
+local relocateState = nil
+local function unitName(unit)
+	if unit ~= nil and not unit:IsNull() then
+		return unit:GetUnitName()
+	end
+	return "none"
+end
+local function unitAlive(unit)
+	return unit ~= nil and not unit:IsNull() and unit:IsAlive()
+end
+-- What kept a pending order from being sent this think, or nil when Io could cast: the parts of Fu.CanNotUseAbility
+-- one by one ("own" = Io busy with an order or cast of its own), so the order lines show which one it was.
+local function castBlock()
+	if not relocateAbility:IsFullyCastable() then
+		return "nocast"
+	end
+	if bot:IsSilenced() then
+		return "silenced"
+	end
+	if bot:IsStunned() then
+		return "stunned"
+	end
+	if bot:IsHexed() then
+		return "hexed"
+	end
+	if bot:IsNightmared() then
+		return "nightmared"
+	end
+	if bot:IsCastingAbility() or bot:IsUsingAbility() or bot:IsChanneling() or Fu.HasQueuedAction(bot) then
+		return "own"
+	end
+	if Fu.CanNotUseAbility(bot) then
+		return "other"
+	end
+	return nil
+end
+-- "silenced:3,own:2" from a count table, "-" when empty (sorted, so lines compare across games).
+local function countText(counts)
+	local keys = {}
+	for key in pairs(counts or {}) do
+		keys[#keys + 1] = tostring(key)
+	end
+	if #keys == 0 then
+		return "-"
+	end
+	table.sort(keys)
+	local parts = {}
+	for _, key in ipairs(keys) do
+		parts[#parts + 1] = key .. ":" .. tostring(counts[key])
+	end
+	return table.concat(parts, ",")
+end
+-- The order hold (RelocateRules.ORDER_HOLD_AFTER) ends with the order: cast, lost or dropped.
+local function releaseOrderHold(state)
+	if state ~= nil and state.holdUntil ~= nil then
+		if bot._castHoldUntil == state.holdUntil then
+			bot._castHoldUntil = nil
+		end
+		state.holdUntil = nil
+	end
+end
+local function logOrderDropped(state, why)
+	print(
+		string.format(
+			"[SHy-WISP] t=%.0f wisp relocate-order-dropped why=%s kind=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s",
+			DotaTime(),
+			why,
+			state.why,
+			state.toName or "fountain",
+			state.sends or 0,
+			DotaTime() - state.orderAt,
+			state.free or 0,
+			state.held or 0,
+			countText(state.blocked)
+		)
+	)
+end
+local function issueRelocate(plan)
+	-- A save replaces an offensive order that has not gone out yet (the save is the urgent one).
+	if
+		relocateState ~= nil
+		and not relocateState.confirmed
+		and plan.kind == "save"
+		and relocateState.kind ~= "save"
+	then
+		logOrderDropped(relocateState, "save-first")
+		releaseOrderHold(relocateState)
+		relocateState = nil
+	end
+	bot:Action_UseAbilityOnLocation(relocateAbility, plan.target)
+	if relocateState == nil then
+		plan.orderAt = DotaTime()
+		plan.allyName = unitName(plan.ally)
+		plan.sends = 1
+		plan.lastTickAt = plan.orderAt
+		plan.maxGap = 0
+		-- Seconds Io could cast since the first order, seconds of order hold used, ticks not sent by cause, and Io's
+		-- action type seen before each re-send. acts: without the hold (the mode Think of this frame ran just before,
+		-- so it shows the mode's own order whether or not the cast stood); actsHeld: under the hold since the last
+		-- re-send (6 = our cast still stood, anything else replaced it although the Lua modes were held).
+		plan.free = 0
+		plan.held = 0
+		plan.blocked = {}
+		plan.acts = {}
+		plan.actsHeld = {}
+		relocateState = plan
+	end
+end
+-- RelocateRules.PendingVerdict for an order still waiting to go out: "lost" / "disabled" / a drop reason, or nil to
+-- send it again. A save goes on unless the ally it was for died; an offensive one stops when the ally it goes to died,
+-- an enemy hero came near Io (Io's own danger comes first), or the rescue became too late (RescueCheck, the verdict
+-- held as usual).
+local function pendingVerdict(state, now)
+	local offensive = state.kind ~= "save"
+	local tooLate = false
+	if state.kind == "rescue" and unitAlive(state.toUnit) then
+		local _, why = rescueCheck(state.toUnit, state.delay)
+		tooLate = why == "too-late"
+	end
+	local allySave = string.sub(state.why or "", 1, 5) == "ally-"
+	local allyAlive = unitAlive(state.ally)
+	local selfNeeded = false
+	local selfWhy
+	if allySave and not allyAlive then
+		selfNeeded, selfWhy = RelocateRules.SaveNeeded(
+			Fu.GetHP(bot),
+			RelocateRules.LossRate(selfSamples),
+			state.delay,
+			enemyHeroCount(bot, 1200)
+		)
+	end
+	local verdict = RelocateRules.PendingVerdict({
+		kind = state.kind,
+		allySave = allySave,
+		allyAlive = allyAlive,
+		selfNeeded = selfNeeded,
+		targetAlive = unitAlive(state.toUnit),
+		enemyNear = offensive and enemyHeroCount(bot, 1200) > 0,
+		tooLate = tooLate,
+		free = state.free or 0,
+		total = now - state.orderAt,
+	})
+	if verdict == "too-late" then
+		rescueTooLateUntil[state.toUnit:GetPlayerID()] = now + RelocateRules.RESCUE_TOO_LATE_HOLD
+	elseif verdict == nil and selfNeeded then
+		-- The ally died; the order goes on as Io's own save (the cast line shows why=self-...).
+		state.why = "self-" .. tostring(selfWhy)
+	end
+	return verdict
+end
+local function heroesNear(listType, loc, radius, skipA, skipB)
+	local count = 0
+	for _, hero in ipairs(GetUnitList(listType)) do
+		if
+			IsValidHero(hero)
+			and hero ~= skipA
+			and hero ~= skipB
+			and not hero:IsIllusion()
+			and GetUnitToLocationDistance(hero, loc) <= radius
+		then
+			count = count + 1
+		end
+	end
+	return count
+end
+-- Seconds to Io's return: the return modifier when the API shows it, else the timer from the cast.
+local function returnLeft(state, now)
+	local ok, left = pcall(function()
+		local index = bot:GetModifierByName("modifier_wisp_relocate_return")
+		if index ~= nil and index >= 0 then
+			return bot:GetModifierRemainingDuration(index)
+		end
+		return nil
+	end)
+	-- Only a plausible read (0..12.5s); a 0 or negative read would decide right after the arrival.
+	if ok and type(left) == "number" and left > 0 and left <= RelocateRules.RETURN_TIME + 0.5 then
+		return left, "modifier"
+	end
+	return state.returnAt - now, "timer"
+end
+local function clearRelocate()
+	releaseOrderHold(relocateState)
+	relocateState = nil
+	TeamMemory.Set(bot:GetTeam(), "wispRelocate", nil)
+end
+-- Follows one Relocate from the order to the return: the cast line once the cooldown shows it went off, the result
+-- after the teleport, the keep / break decision before the return, and where both ended up. Returns true when it
+-- issued an order this think.
+local function relocateTick()
+	local state = relocateState
+	if state == nil then
+		return false
+	end
+	local now = DotaTime()
+	if not state.confirmed then
+		if relocateAbility:GetCooldownTimeRemaining() > 0 then
+			state.confirmed = true
+			releaseOrderHold(state)
+			state.teleportAt = now + state.delay
+			state.resultAt = state.teleportAt + 1
+			state.returnAt = state.teleportAt + RelocateRules.RETURN_TIME
+			state.origin = bot:GetLocation()
+			-- Deaths counted from here: the hero think may not run while Io is dead, so "alive now" can't tell.
+			state.ioDeaths = GetHeroDeaths(bot:GetPlayerID())
+			if unitAlive(state.ally) then
+				state.allyId = state.ally:GetPlayerID()
+				state.allyDeaths = GetHeroDeaths(state.allyId)
+			end
+			-- The ally Io goes to (rescue / join): did it live until Io landed?
+			if unitAlive(state.toUnit) then
+				state.targetId = state.toUnit:GetPlayerID()
+				state.targetDeaths = GetHeroDeaths(state.targetId)
+			end
+			print(
+				string.format(
+					"[SHy-WISP] t=%.0f wisp relocate-cast why=%s ally=%s hp=%.2f dps=%.0f ttd=%s delay=%.2f ours=%s enemies=%s partner=%s to=%s sends=%d waited=%.1f free=%.1f held=%.1f blocked=%s acts=%s actsHeld=%s",
+					now,
+					state.why,
+					state.allyName,
+					state.hp,
+					state.dps,
+					state.ttd ~= nil and string.format("%.1f", state.ttd) or "-",
+					state.delay,
+					tostring(state.ours or "-"),
+					tostring(state.enemies or "-"),
+					state.allyName,
+					state.toName or "fountain",
+					state.sends or 0,
+					now - state.orderAt,
+					state.free or 0,
+					state.held or 0,
+					countText(state.blocked),
+					countText(state.acts),
+					countText(state.actsHeld)
+				)
+			)
+			if state.kind == "save" then
+				bot._noTpUntil = state.returnAt
+				if unitAlive(state.ally) then
+					state.memory = {
+						allyId = state.allyId,
+						io = bot,
+						teleportAt = state.teleportAt,
+						returnAt = state.returnAt,
+						released = false,
+					}
+					TeamMemory.Set(bot:GetTeam(), "wispRelocate", state.memory)
+				end
+			end
+			return false
+		end
+		-- Not cast yet. The order is sent again every think (games 075-078: sent once, it was held by the difficulty
+		-- layer's reaction delay, which needs the same order again within 0.6s, and never went out; a mode or item
+		-- order in between can replace it too). gap= is the longest stretch without a think (no re-send possible).
+		-- Only the thinks where Io could cast count toward ORDER_WAIT (free=); the others are counted by cause.
+		local dt = now - (state.lastTickAt or now)
+		state.maxGap = math.max(state.maxGap or 0, dt)
+		state.lastTickAt = now
+		local block = castBlock()
+		if block == nil then
+			state.free = (state.free or 0) + dt
+		else
+			state.blocked[block] = (state.blocked[block] or 0) + 1
+		end
+		local verdict = pendingVerdict(state, now)
+		if verdict == "lost" then
+			local okAction, action = pcall(function()
+				return bot:GetCurrentActionType()
+			end)
+			print(
+				string.format(
+					"[SHy-WISP] t=%.0f wisp relocate-order-lost why=%s ally=%s sends=%d waited=%.1f free=%.1f gap=%.1f held=%.1f blocked=%s acts=%s actsHeld=%s castable=%s block=%s mode=%s action=%s",
+					now,
+					state.why,
+					state.allyName,
+					state.sends or 0,
+					now - state.orderAt,
+					state.free or 0,
+					state.maxGap,
+					state.held or 0,
+					countText(state.blocked),
+					countText(state.acts),
+					countText(state.actsHeld),
+					tostring(relocateAbility:IsFullyCastable()),
+					block or "none",
+					tostring(bot:GetActiveMode()),
+					okAction and tostring(action) or "?"
+				)
+			)
+			clearRelocate()
+			return false
+		end
+		-- A save replaces an offensive order still waiting (logged as save-first) before its own drop reasons.
+		if verdict ~= "disabled" and state.kind ~= "save" then
+			local savePlan = considerRelocateSave()
+			if savePlan ~= nil then
+				issueRelocate(savePlan)
+				return true
+			end
+		end
+		if verdict ~= nil then
+			logOrderDropped(state, verdict)
+			clearRelocate()
+			return false
+		end
+		if block == nil then
+			-- Io's action before the re-send: 6 (BOT_ACTION_TYPE_USE_ABILITY) while our order still stands.
+			local okAction, action = pcall(function()
+				return bot:GetCurrentActionType()
+			end)
+			local actKey = okAction and tostring(action) or "?"
+			local acts = (state.holdUntil ~= nil and now <= state.holdUntil) and state.actsHeld or state.acts
+			acts[actKey] = (acts[actKey] or 0) + 1
+			bot:Action_UseAbilityOnLocation(relocateAbility, state.target)
+			state.sends = (state.sends or 0) + 1
+			-- No TP order from the item think in the same frame (it would replace this one).
+			bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 0.5)
+			if RelocateRules.HoldWanted(state.free, state.held) then
+				-- No mode or item order until the next re-send (the item think calls X.CastHoldTick meanwhile).
+				if state.holdUntil ~= nil then
+					state.held = state.held + math.min(dt, RelocateRules.ORDER_HOLD_STEP)
+				end
+				state.holdUntil = now + RelocateRules.ORDER_HOLD_STEP
+				bot._castHoldUntil = state.holdUntil
+			end
+			return true
+		end
+		-- Not sent (a disable, or Io busy with an order of its own): a hold set by the last re-send runs out by itself.
+		return false
+	end
+	if now < state.teleportAt then
+		-- The return goes back to where Io stood when it left.
+		state.origin = bot:GetLocation()
+		return false
+	end
+	if not state.resultDone then
+		if now < state.resultAt then
+			return false
+		end
+		state.resultDone = true
+		local ioDied = GetHeroDeaths(bot:GetPlayerID()) > state.ioDeaths
+		local allyDied = state.allyId ~= nil and GetHeroDeaths(state.allyId) > state.allyDeaths
+		-- More than 2s late (Io was dead, no thinks): the positions say nothing about the teleport.
+		local late = now - state.resultAt > 2
+		local arrived = not ioDied and not late and GetUnitToLocationDistance(bot, state.target) < 1200
+		local allyAlive = not allyDied and unitAlive(state.ally)
+		local allyThere = arrived and allyAlive and GetUnitToLocationDistance(state.ally, state.target) < 1200
+		local died = "none"
+		if ioDied and allyDied then
+			died = "both"
+		elseif ioDied then
+			died = "io"
+		elseif allyDied then
+			died = "ally"
+		end
+		local modLeft = "-"
+		pcall(function()
+			local index = bot:GetModifierByName("modifier_wisp_relocate_return")
+			if index ~= nil and index >= 0 then
+				modLeft = string.format("%.1f", bot:GetModifierRemainingDuration(index))
+			end
+		end)
+		-- The rescued / joined ally (not the tethered partner): 1 when it died between the cast and now.
+		local targetDied = "-"
+		if state.targetId ~= nil then
+			targetDied = GetHeroDeaths(state.targetId) > state.targetDeaths and "1" or "0"
+		end
+		print(
+			string.format(
+				"[SHy-WISP] t=%.0f wisp relocate-result why=%s ally=%s arrived=%s tether=%s died=%s late=%s ioReturn=%s returnLeft=%s allyReturn=%s originEnemies=%d target=%s targetDied=%s",
+				now,
+				state.why,
+				state.allyName,
+				tostring(arrived),
+				tostring(allyThere and isTethered()),
+				died,
+				tostring(late),
+				tostring(bot:HasModifier("modifier_wisp_relocate_return")),
+				modLeft,
+				tostring(allyAlive and state.ally:HasModifier("modifier_wisp_relocate_return")),
+				heroesNear(UnitType.EnemyHeroes, state.origin, 1500),
+				state.toName or "-",
+				targetDied
+			)
+		)
+		if not arrived then
+			bot._noTpUntil = nil
+			clearRelocate()
+			return false
+		end
+		if not allyThere then
+			state.ally = nil
+			if state.memory ~= nil then
+				state.memory.released = true
+			end
+		end
+		return false
+	end
+	local left, leftSource = returnLeft(state, now)
+	if not state.decided then
+		if state.kind == "self" or state.ally == nil then
+			state.decided = true
+		elseif left <= 1.0 then
+			state.decided = true
+			local allyAlive = unitAlive(state.ally)
+			-- Enemies at the spot they return to: the visible ones, or more by the last-seen info since Io left
+			-- (2s before the teleport on). Games 071 t=1164 and 073 t=1272: the allies there had died, the spot was
+			-- fogged, the visible count was low, and "keep" sent both back into 4-5 enemies (both dead 4-7s later).
+			local visible = heroesNear(UnitType.EnemyHeroes, state.origin, 1500)
+			local seen = enemiesSeenNear(state.origin, 1500, now - state.teleportAt + 2)
+			local enemiesAtOrigin = math.max(visible, seen)
+			local alliesAtOrigin = heroesNear(UnitType.AlliedHeroes, state.origin, 1500, bot, state.ally)
+			local decision, why = RelocateRules.ReturnDecision({
+				allyAlive = allyAlive,
+				tetherUp = isTethered(),
+				allyHp = allyAlive and Fu.GetHP(state.ally) or 0,
+				alliesAtOrigin = alliesAtOrigin,
+				enemiesAtOrigin = enemiesAtOrigin,
+			})
+			print(
+				string.format(
+					"[SHy-WISP] t=%.0f wisp relocate-return %s why=%s ally=%s hp=%.2f left=%.1f src=%s ours=%d enemies=%d visible=%d seen=%d",
+					now,
+					decision,
+					why,
+					state.allyName,
+					allyAlive and Fu.GetHP(state.ally) or 0,
+					left,
+					leftSource,
+					alliesAtOrigin + 2,
+					enemiesAtOrigin,
+					visible,
+					seen
+				)
+			)
+			if decision == "break" then
+				state.breakTether = true
+				if state.memory ~= nil then
+					state.memory.released = true
+				end
+			end
+		end
+	end
+	-- Break the tether so the ally stays home; Io itself cannot cancel its return (no such ability in the game file).
+	if state.breakTether and isTethered() and left > 0.1 then
+		if tetherBreakAbility ~= nil and not tetherBreakAbility:IsHidden() and tetherBreakAbility:IsFullyCastable() then
+			bot:Action_UseAbility(tetherBreakAbility)
+			return true
+		end
+	end
+	if now >= state.returnAt + 1.5 then
+		print(
+			string.format(
+				"[SHy-WISP] t=%.0f wisp relocate-back ally=%s ioFountain=%d allyFountain=%d",
+				now,
+				state.allyName,
+				Fu.GetDistanceFromAllyFountain(bot),
+				unitAlive(state.ally) and Fu.GetDistanceFromAllyFountain(state.ally) or -1
+			)
+		)
+		clearRelocate()
+	end
+	return false
+end
+-- An error in the tick would repeat every think with the state stuck (and Tether blocked): log it once, drop the state.
+local function guardedRelocateTick()
+	local ok, result = pcall(relocateTick)
+	if ok then
+		return result
+	end
+	pcall(print, string.format("[SHy-WISP] t=%.0f wisp relocate-error %s", DotaTime(), tostring(result)))
+	clearRelocate()
+	return false
+end
+-- Between the teleport and the return Io stays with the relocated ally so the tether holds.
+local function relocateHolding()
+	local state = relocateState
+	return state ~= nil
+		and state.confirmed
+		and state.ally ~= nil
+		and not state.breakTether
+		and DotaTime() < (state.returnAt or 0)
 end
 local function skillsComplement()
-	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
+	-- Before the early returns: the damage rate needs samples while Io is stunned too, and the Relocate result is due
+	-- whatever Io is doing.
+	sampleHp()
+	local ordered = guardedRelocateTick()
+	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() or ordered then
 		return
 	end
 	nearbyEnemies = bot:GetNearbyHeroes(1600, true, BotMode.None) or {}
-	local tetherDesire, tetherTarget = considerTether()
+	-- The save goes first: a danger think used to cast Spirits or Overcharge instead (#47).
+	local savePlan = considerRelocateSave()
+	if savePlan ~= nil then
+		issueRelocate(savePlan)
+		return
+	end
+	if relocateState == nil then
+		local rescueStep, rescueTarget = considerOffense()
+		if rescueStep == "tether" then
+			bot:Action_UseAbilityOnEntity(tetherAbility, rescueTarget)
+			bot.stateTetheredHero = rescueTarget
+			return
+		elseif rescueStep == "relocate" then
+			issueRelocate(rescueTarget)
+			return
+		end
+	end
+	-- No new tether while the ally is being let go before the return (it would bring the ally back after all).
+	local releasing = relocateState ~= nil and relocateState.breakTether
+	local tetherDesire, tetherTarget = BotActionDesire.None, nil
+	if not releasing then
+		tetherDesire, tetherTarget = considerTether()
+	end
 	if tetherDesire > 0 and tetherTarget then
 		bot:Action_UseAbilityOnEntity(tetherAbility, tetherTarget)
 		bot.stateTetheredHero = tetherTarget
@@ -266,18 +1122,19 @@ local function skillsComplement()
 		bot:Action_UseAbility(spiritsAbility)
 		return
 	end
-	local relocateDesire, relocateLocation = considerRelocate()
-	if relocateDesire > 0 and relocateLocation ~= nil then
-		bot:Action_UseAbilityOnLocation(relocateAbility, relocateLocation)
+	local relocatePlan = considerRelocate()
+	if relocatePlan ~= nil then
+		issueRelocate(relocatePlan)
 		return
 	end
 	-- Follow the tethered ally: the tether breaks past 1000 range (MAX TETHER DISTANCE in the
-	-- datafeed) and nothing kept Io near the ally, so modes walked Io away and broke it.
+	-- datafeed) and nothing kept Io near the ally, so modes walked Io away and broke it. While a Relocate is under
+	-- way (the delay, then the fountain until the return) Io follows even when retreating, so the tether holds.
 	local tetheredHero = bot.stateTetheredHero
 	if
 		isTethered()
 		and IsValidHero(tetheredHero)
-		and not Fu.IsRetreating(bot)
+		and (not Fu.IsRetreating(bot) or relocateHolding())
 		and GetUnitToUnitDistance(bot, tetheredHero) > 650
 	then
 		if DotaTime() >= (bot._wispFollowLogAt or -999) then
@@ -301,4 +1158,10 @@ local function minionThink(minion)
 	end
 end
 local X = buildHeroExport(heroConfig, skillsComplement, minionThink)
+-- While a Relocate order is held against other orders (RelocateRules.ORDER_HOLD_AFTER) the item think runs this
+-- instead of SkillsComplement: the HP samples and the re-send go on.
+function X.CastHoldTick()
+	sampleHp()
+	guardedRelocateTick()
+end
 return X
