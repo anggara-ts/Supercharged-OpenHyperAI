@@ -3,6 +3,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
+local AllyEscapeRules = require(GetScriptDirectory() .. "/lib/systems/ally_escape_rules")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -126,12 +127,52 @@ local wintersCurseAbility =
 	SafeAbility(bot:GetAbilityByName("winter_wyvern_winters_curse"), "winter_wyvern_winters_curse", "winter_wyvern")
 -- [SHy-WYVERN] lines: throttled per reason, at most once per 5s.
 function X.LogWyvern(why, fmt, ...)
+	X.LogWyvernAs(why, why, fmt, ...)
+end
+-- The same, with its own throttle key (two kinds of embrace-skip line don't hide each other).
+function X.LogWyvernAs(key, why, fmt, ...)
 	bot._wwLogAt = bot._wwLogAt or {}
-	if DotaTime() < (bot._wwLogAt[why] or -999) then
+	if DotaTime() < (bot._wwLogAt[key] or -999) then
 		return
 	end
-	bot._wwLogAt[why] = DotaTime() + 5
+	bot._wwLogAt[key] = DotaTime() + 5
 	pcall(print, string.format("[SHy-WYVERN] t=%.0f " .. why .. " " .. fmt, DotaTime(), ...))
+end
+-- The ally's ready-or-not item of that name in its main or neutral slots, or nil.
+function X.AllyItem(ally, name)
+	local slot = ally:FindItemSlot(name)
+	if slot == nil or slot < 0 or slot > 5 and slot ~= 16 then
+		return nil
+	end
+	return ally:GetItemInSlot(slot)
+end
+-- Is the ally escaping (AllyEscapeRules, #238 game 083 44:51): an escape modifier on it, or an escape spell or item
+-- cast in the last 1s or in its cast point now. Returns the modifier, or nil and the spell and how long ago
+-- ("phase": in its cast point), or nil.
+function X.AllyEscaping(ally)
+	for _, name in ipairs(AllyEscapeRules.MODIFIERS) do
+		if ally:HasModifier(name) then
+			return name
+		end
+	end
+	for _, name in ipairs(AllyEscapeRules.SPELLS) do
+		local ability
+		if string.sub(name, 1, 5) == "item_" then
+			ability = X.AllyItem(ally, name)
+		else
+			ability = ally:GetAbilityByName(name)
+		end
+		if ability ~= nil and not ability:IsNull() then
+			if ability:IsInAbilityPhase() then
+				return nil, name, "phase"
+			end
+			local just, ago = AllyEscapeRules.JustCast(ability:GetCooldown(), ability:GetCooldownTimeRemaining())
+			if just then
+				return nil, name, string.format("%.2f", ago)
+			end
+		end
+	end
+	return nil
 end
 -- True when a visible real enemy hero within 1600 of the ally has it as its attack target.
 function X.IsAttackedByEnemyHero(ally)
@@ -149,10 +190,27 @@ end
 -- Every ally-target embrace goes through here. Logs:
 --   [SHy-WYVERN] embrace-save why= ally= hp= channel=no|yes [kind= left= dmg= health= ratio= attackers=]
 --   [SHy-WYVERN] embrace-skip why=channel ally= kind= left= dmg= health= ratio= attackers=  (once per 5s)
+--   [SHy-WYVERN] embrace-skip why=escaping save= ally= hp= mod= spell= ago=  (once per 5s): the ally is escaping
+--                (X.AllyEscaping; game 083 44:51), checked before the channel rule (Phase Shift is a channel).
 local EMBRACE_CAST_POINT = 0.3
 function X.EmbraceAlly(allyHero, why)
-	local channelling, allowed, info = Fu.ChannelSaveCheck(allyHero, EMBRACE_CAST_POINT)
 	local name = (string.gsub(allyHero:GetUnitName(), "npc_dota_hero_", ""))
+	local escapeMod, escapeSpell, escapeAgo = X.AllyEscaping(allyHero)
+	if escapeMod ~= nil or escapeSpell ~= nil then
+		X.LogWyvernAs(
+			"embrace-skip-escaping",
+			"embrace-skip",
+			"why=escaping save=%s ally=%s hp=%.2f mod=%s spell=%s ago=%s",
+			why,
+			name,
+			Fu.GetHP(allyHero),
+			escapeMod or "-",
+			escapeSpell or "-",
+			escapeAgo or "-"
+		)
+		return false
+	end
+	local channelling, allowed, info = Fu.ChannelSaveCheck(allyHero, EMBRACE_CAST_POINT)
 	if not channelling then
 		X.LogWyvern("embrace-save", "why=%s ally=%s hp=%.2f channel=no", why, name, Fu.GetHP(allyHero))
 		return true
@@ -184,6 +242,7 @@ local isEngaging
 local isRetreating
 local hpRatio
 function X.SkillsComplement()
+	X.EmbraceCastCheck()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -200,6 +259,9 @@ function X.SkillsComplement()
 	coldEmbraceDesire, coldEmbraceTarget = X.ConsiderColdEmbrace()
 	if coldEmbraceDesire > 0 then
 		bot:Action_UseAbilityOnEntity(coldEmbraceAbility, coldEmbraceTarget)
+		if coldEmbraceTarget ~= bot then
+			bot._wwEmbrace = { ally = coldEmbraceTarget, at = DotaTime() }
+		end
 		return
 	end
 	splinterBlastDesire, splinterBlastTarget = X.ConsiderSplinterBlast()
@@ -570,6 +632,56 @@ function X.ConsiderSplinterBlast()
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- An ally embrace in its 0.3s cast point (datafeed hero 112) whose ally started escaping after the order: stop the
+-- cast. Game 083, 44:51: Wyvern's embrace-save line came before Dark Willow's shadow-realm-cast line in the same
+-- second, so the check at the decision could not see the realm. Runs every think, before the CanNotUseAbility return
+-- (true while casting). Whether Action_ClearActions(true) stops a cast point is unverified (docs/BOT_API_RUNTIME.md:
+-- it stops an attack wind-up), so a result line follows 0.5s later. Lines:
+--   [SHy-WYVERN] embrace-cancel why=escaping ally= hp= mod= spell= ago=
+--   [SHy-WYVERN] embrace-cancel-result ally= cast=yes|no  (cast=yes: the embrace went out anyway)
+function X.EmbraceCastCheck()
+	local pending = bot._wwEmbrace
+	if pending == nil then
+		return
+	end
+	local now = DotaTime()
+	if pending.cancelAt ~= nil then
+		if now - pending.cancelAt >= 0.5 then
+			bot._wwEmbrace = nil
+			X.LogWyvern(
+				"embrace-cancel-result",
+				"ally=%s cast=%s",
+				pending.name,
+				coldEmbraceAbility:GetCooldownTimeRemaining() > 0 and "yes" or "no"
+			)
+		end
+		return
+	end
+	if now - pending.at > 0.6 then
+		bot._wwEmbrace = nil
+		return
+	end
+	local ally = pending.ally
+	if not coldEmbraceAbility:IsInAbilityPhase() or not Fu.IsValidHero(ally) then
+		return
+	end
+	local escapeMod, escapeSpell, escapeAgo = X.AllyEscaping(ally)
+	if escapeMod == nil and escapeSpell == nil then
+		return
+	end
+	bot:Action_ClearActions(true)
+	pending.cancelAt = now
+	pending.name = (string.gsub(ally:GetUnitName(), "npc_dota_hero_", ""))
+	X.LogWyvern(
+		"embrace-cancel",
+		"why=escaping ally=%s hp=%.2f mod=%s spell=%s ago=%s",
+		pending.name,
+		Fu.GetHP(ally),
+		escapeMod or "-",
+		escapeSpell or "-",
+		escapeAgo or "-"
+	)
 end
 function X.ConsiderColdEmbrace()
 	if not coldEmbraceAbility:IsFullyCastable() then
