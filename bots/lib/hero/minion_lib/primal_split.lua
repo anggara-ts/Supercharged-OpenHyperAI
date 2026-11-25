@@ -9,6 +9,31 @@ local X = {}
 local bot = nil
 local dispelMagicDesire, cycloneDesire, windWalkDesire, hurlBoulderDesire = 0, 0, 0, 0
 local botTarget
+-- [SHy-BREWLING] t= <owner> <brewling> cast=<spell> why= target= (at most once per 3s per brewling and spell; #13,
+-- game 085: proves the brewling think runs to its casts without a script error).
+local function LogBrewlingCast(minion, spell, why, target)
+	local key = "_brewlingLogAt_" .. spell
+	if DotaTime() < (minion[key] or -999) then
+		return
+	end
+	minion[key] = DotaTime() + 3
+	local targetName = "-"
+	if target ~= nil and not target:IsNull() then
+		targetName = string.gsub(target:GetUnitName(), "npc_dota_hero_", "")
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-BREWLING] t=%.0f %s %s cast=%s why=%s target=%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			(string.gsub(minion:GetUnitName(), "npc_dota_brewmaster_", "")),
+			spell,
+			tostring(why),
+			targetName
+		)
+	)
+end
 function X.MinionThink(ownerBot, minion)
 	bot = ownerBot
 	botTarget = Fu.GetProperTarget(bot)
@@ -22,11 +47,13 @@ function X.MinionThink(ownerBot, minion)
 			WindWalk = minion:GetAbilityByName("brewmaster_storm_wind_walk")
 			dispelMagicDesire, DispelMagicTarget = UseDispelMagic(minion)
 			if dispelMagicDesire > 0 then
+				LogBrewlingCast(minion, "dispel-magic", "aoe", nil)
 				minion:Action_UseAbilityOnLocation(DispelMagic, DispelMagicTarget)
 				return
 			end
 			cycloneDesire, CycloneTarget = UseCyclone(minion)
 			if cycloneDesire > 0 then
+				LogBrewlingCast(minion, "cyclone", "enemy", CycloneTarget)
 				minion:Action_UseAbilityOnEntity(Cyclone, CycloneTarget)
 				return
 			end
@@ -41,8 +68,10 @@ function X.MinionThink(ownerBot, minion)
 				return
 			end
 			HurlBoulder = minion:GetAbilityByName("brewmaster_earth_hurl_boulder")
-			hurlBoulderDesire, HurlBoulderTarget = UseHurlBoulder(minion)
+			local hurlBoulderWhy
+			hurlBoulderDesire, HurlBoulderTarget, hurlBoulderWhy = UseHurlBoulder(minion)
 			if hurlBoulderDesire > 0 then
+				LogBrewlingCast(minion, "hurl-boulder", hurlBoulderWhy, HurlBoulderTarget)
 				minion:Action_UseAbilityOnEntity(HurlBoulder, HurlBoulderTarget)
 				return
 			end
@@ -123,7 +152,7 @@ function AttackUnits(minion)
 		return nil
 	end
 	if botMode == BOT_MODE_LANING then
-		local enemyTowers = minion:GetNearbyTowers(800, true)
+		local enemyTowers = minion:GetNearbyTowers(800, true) or {}
 		for _, tower in pairs(enemyTowers) do
 			if Fu.IsValidBuilding(tower) then
 				local towerTarget = tower:GetAttackTarget()
@@ -233,7 +262,7 @@ function AttackUnits(minion)
 	return nil
 end
 function UseDispelMagic(minion)
-	if not DispelMagic:IsFullyCastable() then
+	if DispelMagic == nil or not DispelMagic:IsFullyCastable() then
 		return 0, nil
 	end
 	if Fu.CanNotUseAbility(minion) then
@@ -248,14 +277,14 @@ function UseDispelMagic(minion)
 	return 0, nil
 end
 function UseCyclone(minion)
-	if not Cyclone:IsFullyCastable() then
+	if Cyclone == nil or not Cyclone:IsFullyCastable() then
 		return 0, nil
 	end
 	if Fu.CanNotUseAbility(minion) then
 		return 0, nil
 	end
 	local castRange = Cyclone:GetCastRange()
-	local nearbyEnemies = minion:GetNearbyHeroes(castRange + 500, true, BOT_MODE_NONE)
+	local nearbyEnemies = minion:GetNearbyHeroes(castRange + 500, true, BOT_MODE_NONE) or {}
 	local stunnableEnemies = Fu.FilterEnemiesForStun(nearbyEnemies)
 	local cycloneTarget = nil
 	for _, enemyHero in pairs(nearbyEnemies) do
@@ -299,13 +328,13 @@ function UseCyclone(minion)
 	return 0, nil
 end
 function UseWindWalk(minion)
-	if not WindWalk:IsFullyCastable() then
+	if WindWalk == nil or not WindWalk:IsFullyCastable() then
 		return 0, nil
 	end
-	if DispelMagic:IsFullyCastable() then
+	if DispelMagic ~= nil and DispelMagic:IsFullyCastable() then
 		return 0, nil
 	end
-	if Cyclone:IsFullyCastable() then
+	if Cyclone ~= nil and Cyclone:IsFullyCastable() then
 		return 0, nil
 	end
 	if Fu.CanNotUseAbility(minion) then
@@ -314,7 +343,7 @@ function UseWindWalk(minion)
 	return BOT_ACTION_DESIRE_HIGH
 end
 function UseHurlBoulder(minion)
-	if not HurlBoulder:IsFullyCastable() then
+	if HurlBoulder == nil or not HurlBoulder:IsFullyCastable() then
 		return 0, nil
 	end
 	if Fu.CanNotUseAbility(minion) then
@@ -322,7 +351,7 @@ function UseHurlBoulder(minion)
 	end
 	local castRange = HurlBoulder:GetCastRange()
 	local damage = HurlBoulder:GetSpecialValueInt("damage")
-	local nearbyEnemies = minion:GetNearbyHeroes(castRange, true, BOT_MODE_NONE)
+	local nearbyEnemies = minion:GetNearbyHeroes(castRange, true, BOT_MODE_NONE) or {}
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
 			Fu.IsValidHero(enemyHero)
@@ -330,7 +359,7 @@ function UseHurlBoulder(minion)
 			and not Fu.IsReflectingSpells(enemyHero)
 			and (enemyHero:IsChanneling() or damage > enemyHero:GetHealth())
 		then
-			return BOT_ACTION_DESIRE_HIGH, enemyHero
+			return BOT_ACTION_DESIRE_HIGH, enemyHero, enemyHero:IsChanneling() and "channel" or "kill"
 		end
 	end
 	if
@@ -341,7 +370,7 @@ function UseHurlBoulder(minion)
 		and not Fu.IsReflectingSpells(botTarget)
 		and not Fu.IsDisabled(botTarget)
 	then
-		return BOT_ACTION_DESIRE_HIGH, botTarget
+		return BOT_ACTION_DESIRE_HIGH, botTarget, "target"
 	end
 	if Fu.IsRetreating(bot) then
 		local strongestEnemy = Fu.GetStrongestEnemyHero(nearbyEnemies)
@@ -350,19 +379,20 @@ function UseHurlBoulder(minion)
 			and not strongestEnemy:IsMagicImmune()
 			and not Fu.IsReflectingSpells(strongestEnemy)
 		then
-			return BOT_ACTION_DESIRE_HIGH, strongestEnemy
+			return BOT_ACTION_DESIRE_HIGH, strongestEnemy, "retreat"
 		end
 	end
-	local allyTowers = minion:GetNearbyTowers(1600, false)
+	-- Game 085, 12:16: GetNearbyTowers returned nil for a brewling here and the loop stopped MinionThink (x3).
+	local allyTowers = minion:GetNearbyTowers(1600, false) or {}
 	for _, tower in pairs(allyTowers) do
-		local towerTarget = tower:GetAttackTarget()
+		local towerTarget = Fu.IsValidBuilding(tower) and tower:GetAttackTarget() or nil
 		if
 			Fu.IsValidHero(towerTarget)
 			and not towerTarget:IsMagicImmune()
 			and not Fu.IsDisabled(towerTarget)
 			and not Fu.IsReflectingSpells(towerTarget)
 		then
-			return BOT_ACTION_DESIRE_HIGH, towerTarget
+			return BOT_ACTION_DESIRE_HIGH, towerTarget, "tower"
 		end
 	end
 	return 0, nil
@@ -397,7 +427,7 @@ function ConsiderMove(minion)
 	end
 	local botMode = bot:GetActiveMode()
 	if botMode == BOT_MODE_LANING then
-		local enemyTowers = minion:GetNearbyTowers(800, true)
+		local enemyTowers = minion:GetNearbyTowers(800, true) or {}
 		for _, tower in pairs(enemyTowers) do
 			if Fu.IsValidBuilding(tower) then
 				local towerTarget = tower:GetAttackTarget()
