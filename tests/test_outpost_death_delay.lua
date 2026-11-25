@@ -62,7 +62,7 @@ T.test("death delay: the unit GetDesire picked this second is reused", function(
 	T.ok(printed("death-delay src=desire target=sven"), "[SHy-ROAM] death-delay src=desire printed")
 end)
 
-T.test("death delay: no enemy near -> no error, no order from the block", function()
+T.test("death delay: no enemy near -> no error, the rest of the roaming think runs", function()
 	setup(nil)
 	local ok, err = pcall(ThinkGeneralRoaming)
 	T.ok(ok, tostring(err))

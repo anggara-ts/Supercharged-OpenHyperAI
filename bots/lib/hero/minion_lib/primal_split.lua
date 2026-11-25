@@ -382,7 +382,8 @@ function UseHurlBoulder(minion)
 			return BOT_ACTION_DESIRE_HIGH, strongestEnemy, "retreat"
 		end
 	end
-	-- Game 085, 12:16: GetNearbyTowers returned nil for a brewling here and the loop stopped MinionThink (x3).
+	-- GetNearbyTowers is nil for every non-hero (global_overrides.lua), so a brewling never sees a tower here; game
+	-- 085, 12:16: this loop stopped MinionThink with a script error (x3).
 	local allyTowers = minion:GetNearbyTowers(1600, false) or {}
 	for _, tower in pairs(allyTowers) do
 		local towerTarget = Fu.IsValidBuilding(tower) and tower:GetAttackTarget() or nil

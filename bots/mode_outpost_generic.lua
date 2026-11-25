@@ -293,7 +293,7 @@ function GetDesireHelper()
 		local weakestUnit = Fu.GetVulnerableWeakestUnit(bot, true, true, bot:GetAttackRange() + 250)
 		if Fu.IsValidHero(weakestUnit) then
 			bot:SetTarget(weakestUnit)
-			-- Think reuses this unit (game 085, 49:34: Think's own search found nothing and indexed nil).
+			-- Think reuses this unit: its own search is narrower (game 085, 49:34: it found nothing and indexed nil).
 			bot._deathDelayTarget, bot._deathDelayTargetAt = weakestUnit, DotaTime()
 			return BOT_MODE_DESIRE_ABSOLUTE * 2
 		end
@@ -1069,7 +1069,7 @@ local function LogTombstoneSlowHit(where, dist, hitsLeft)
 	)
 end
 -- [SHy-ROAM] t= <hero> death-delay src=proper|desire|search|nearest|none target= dist= (Wraith Delay or Helm of the
--- Undying; on a change of source or target, else at most once per 3s per bot).
+-- Undying; on a change of source or target, else at most once per 3s per bot; never twice within 0.5s).
 local function LogDeathDelayTarget(src, target)
 	local targetName = "-"
 	local dist = -1
@@ -1078,10 +1078,11 @@ local function LogDeathDelayTarget(src, target)
 		dist = GetUnitToUnitDistance(bot, target)
 	end
 	local key = src .. "/" .. targetName
-	if key == bot._deathDelayLogKey and DotaTime() < (bot._deathDelayLogAt or -999) then
+	local sinceLast = DotaTime() - (bot._deathDelayLogAt or -999)
+	if sinceLast < 0.5 or (key == bot._deathDelayLogKey and sinceLast < 3) then
 		return
 	end
-	bot._deathDelayLogKey, bot._deathDelayLogAt = key, DotaTime() + 3
+	bot._deathDelayLogKey, bot._deathDelayLogAt = key, DotaTime()
 	pcall(
 		print,
 		string.format(
@@ -1736,6 +1737,8 @@ function ConsiderGeneralRoamingInConditions()
 		end
 		if Fu.IsValidHero(botTarget) then
 			bot:SetTarget(botTarget)
+			-- Think reuses this unit: this search reaches 1600, Think's own only attack range + 350.
+			bot._deathDelayTarget, bot._deathDelayTargetAt = botTarget, DotaTime()
 			return BOT_ACTION_DESIRE_ABSOLUTE * 2
 		end
 	end
