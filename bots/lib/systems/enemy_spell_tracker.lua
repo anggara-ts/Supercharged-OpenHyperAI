@@ -26,6 +26,8 @@ local EnemySpells = {}
 -- snapfire_spit_creep), and the four the 7.42 datafeed does not list (drow_ranger_silence, techies_stasis_trap,
 -- venomancer_latent_poison, brewmaster_earth_hurl_boulder: a Brewmaster spirit's, not a hero's). Items: 7.42
 -- items.txt in pak01_dir.vpk (read 2026-11-21), AbilityCooldown.
+-- 7.42a (datafeed patchnotes and herodata, 2026-11-25): huskar_life_break, necrolyte_reapers_scythe, riki_smoke_screen
+-- and shadow_shaman_shackles changed.
 EnemySpells.COOLDOWNS = {
 	nyx_assassin_vendetta = { 80, 70, 60 },
 	clinkz_wind_walk = { 24, 21, 18 },
@@ -77,7 +79,7 @@ EnemySpells.COOLDOWNS = {
 	gyrocopter_homing_missile = { 26, 21, 16, 11 }, -- 72
 	hoodwink_bushwhack = { 15, 14, 13, 12 }, -- 123
 	huskar_inner_fire = { 17, 15, 13, 11 }, -- 59
-	huskar_life_break = { 16, 14, 12 }, -- 59
+	huskar_life_break = { 15, 13, 11 }, -- 59
 	invoker_cold_snap = { 19 }, -- 74
 	invoker_tornado = { 27 }, -- 74
 	jakiro_ice_path = { 20, 17, 14, 11 }, -- 64
@@ -103,7 +105,7 @@ EnemySpells.COOLDOWNS = {
 	morphling_adaptive_strike_agi = { 17, 14, 11, 8 }, -- 10
 	muerta_dead_shot = { 16, 14, 12, 10 }, -- 138
 	muerta_the_calling = { 30, 28, 26, 24 }, -- 138
-	necrolyte_reapers_scythe = { 100 }, -- 36
+	necrolyte_reapers_scythe = { 95 }, -- 36
 	nevermore_requiem = { 120, 110, 100 }, -- 11
 	night_stalker_crippling_fear = { 30, 25, 20, 15 }, -- 60
 	night_stalker_void = { 11, 10, 9, 8 }, -- 60
@@ -120,12 +122,12 @@ EnemySpells.COOLDOWNS = {
 	pudge_dismember = { 30, 25, 20 }, -- 14
 	pudge_meat_hook = { 18, 16, 14, 12 }, -- 14
 	rattletrap_hookshot = { 60, 45, 30 }, -- 51
-	riki_smoke_screen = { 15, 14, 13, 12 }, -- 32
+	riki_smoke_screen = { 16, 15, 14, 13 }, -- 32
 	ringmaster_tame_the_beasts = { 16, 14, 12, 10 }, -- 131
 	ringmaster_wheel = { 90, 80, 70 }, -- 131
 	rubick_telekinesis = { 22, 19, 16, 13 }, -- 86
 	sandking_burrowstrike = { 14, 13, 12, 11 }, -- 16
-	shadow_shaman_shackles = { 14, 13, 12, 11 }, -- 27
+	shadow_shaman_shackles = { 15, 14, 13, 12 }, -- 27
 	shadow_shaman_voodoo = { 24, 20, 16, 12 }, -- 27
 	silencer_curse_of_the_silent = { 22, 20, 18, 16 }, -- 75
 	silencer_global_silence = { 120 }, -- 75
