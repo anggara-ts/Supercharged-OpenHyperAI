@@ -450,3 +450,72 @@ T.test("dark willow: the outpost mode takes her during an escape realm (#203 ite
 	local okN, after = pcall(GetDesire)
 	T.ok(okN and after < BOT_DESIRE_OVERRIDE * 1.5, "no hold without a realm: " .. tostring(after))
 end)
+
+T.test("shadow realm: the cornered realm (#203, game 083 47:06)", function()
+	local R = load()
+	local function cornered(over)
+		local o = { enemiesNear = 0, alliesNear = 0, enemies = 0, ourHeroes = 1, jump = false }
+		for k, v in pairs(over) do
+			o[k] = v
+		end
+		return R.Cornered(o)
+	end
+	T.eq(cornered({ enemiesNear = 3, enemies = 3 }), "crowd", "47:07: 3 enemies within 900, no ally")
+	T.eq(cornered({ enemiesNear = 3, enemies = 3, alliesNear = 1, ourHeroes = 2 }), nil, "an ally near: no")
+	T.eq(cornered({ enemiesNear = 2, enemies = 3 }), nil, "only 2 within 900")
+	T.eq(cornered({ charge = 900 }), "charge", "the charge on her, Spirit Breaker 900 away")
+	T.eq(cornered({ charge = 2000 }), nil, "the charge from far: it would land after the realm")
+	T.eq(cornered({ jump = true, enemies = 2 }), "jump", "a jump-in with a second enemy near")
+	T.eq(cornered({ jump = true, enemies = 1 }), nil, "a lone jump-in: the hit rule decides")
+	T.eq(cornered({ jump = true, enemies = 2, ourHeroes = 3 }), nil, "a jump-in into more of ours")
+	-- The jump-in.
+	T.eq(R.Jump(1162, 0.1, 200, 0.1), "jump", "Templar Assassin's blink from 1162")
+	T.eq(R.Jump(nil, nil, 300, 0.1), "appear", "out of the fog next to her")
+	T.eq(R.Jump(700, 0.1, 400, 0.1), nil, "walked 300 closer")
+	T.eq(R.Jump(1300, 0.1, 600, 0.1), nil, "landed 600 away: not next to her")
+	T.eq(R.Jump(nil, nil, 300, 2.0), nil, "her own think had a gap: no read")
+	T.eq(R.Jump(nil, nil, 300, nil), nil, "her first sample")
+	T.eq(R.Jump(1300, 1.0, 300, 0.1), "appear", "last seen 1s ago")
+end)
+
+T.test("dark willow: a cornered realm at full HP, before Bramble Maze (game 083 47:06)", function()
+	local bot, X, used = castBot(BOT_MODE_DEFEND_TOWER_MID, 0.98, false)
+	local maze = bot:GetAbilityByName("dark_willow_bramble_maze")
+	maze.IsFullyCastable = function()
+		return true
+	end
+	local n = 0
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team and n < 3 then
+			n = n + 1
+			hero._loc = bot._loc + Vector(300 * n - 100, 100, 0)
+		end
+	end
+	X.SkillsComplement()
+	T.eq(used[1], "dark_willow_shadow_realm", "the realm, not the maze")
+	local line = printedWith("shadow-realm-cast why=retreat")
+	T.ok(line ~= nil and string.find(line, "rule=cornered", 1, true) ~= nil, tostring(line))
+	line = printedWith("realm-cornered trigger=crowd")
+	T.ok(line ~= nil and string.find(line, "near=3 allies=0", 1, true) ~= nil, tostring(line))
+	T.eq(bot._dwRealm ~= nil and bot._dwRealm.hold, true, "an escape realm: the hold walks her home")
+end)
+
+T.test("dark willow: a jump-in with a second enemy near casts the realm", function()
+	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 0.9, false)
+	local enemies = {}
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team then
+			enemies[#enemies + 1] = hero
+		end
+	end
+	enemies[1]._loc = bot._loc + Vector(800, 0, 0)
+	enemies[2]._loc = bot._loc + Vector(0, 1300, 0)
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm: nobody jumped yet")
+	T.stub.time = T.stub.time + 0.1
+	enemies[2]._loc = bot._loc + Vector(0, 250, 0)
+	X.SkillsComplement()
+	T.eq(used[1], "dark_willow_shadow_realm", "the realm after the blink")
+	local line = printedWith("realm-cornered trigger=jump")
+	T.ok(line ~= nil and string.find(line, "kind=jump from=1300 to=250", 1, true) ~= nil, tostring(line))
+end)

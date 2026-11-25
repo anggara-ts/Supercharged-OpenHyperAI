@@ -105,6 +105,54 @@ function ShadowRealmRules.Escape(o)
 	return nil
 end
 
+-- Cornered realm (#203, game 083 47:06: Puck jaunted to her and rifted, Templar Assassin blinked in, Spirit Breaker
+-- charged her; at hp 0.59 in a defend mode no rule cast the ready realm, and she died at 47:07). At any HP, before
+-- the silence or stun lands. o: enemiesNear (real enemy heroes within CORNER_RADIUS), alliesNear (our other heroes
+-- within CORNER_ALLY_RADIUS), charge (distance to a charging Spirit Breaker while the charge is on her, or nil),
+-- jump (an enemy hero jumped next to her just now, ShadowRealmRules.Jump), enemies / ourHeroes (within FIGHT_RADIUS,
+-- her included in ourHeroes). Returns "charge" | "crowd" | "jump", or nil.
+-- Charge: Charge of Darkness movement_speed bonus 275/325/375/425, windup 1.5s, stun 1.3-2.2s (datafeed hero 71,
+-- read 2026-11-26), so from 1200 it lands in about 1.5-2s, after the 0.3s fade and inside the 5s realm.
+-- Thresholds 900 / 1200 / 3 enemies: the [SHy-CORNERED] counts (ability_context.lua), judgement values.
+ShadowRealmRules.CORNER_RADIUS = 900
+ShadowRealmRules.CORNER_ALLY_RADIUS = 1200
+ShadowRealmRules.CORNER_ENEMIES = 3
+ShadowRealmRules.CHARGE_NEAR = 1200
+function ShadowRealmRules.Cornered(o)
+	if o.charge ~= nil and o.charge <= ShadowRealmRules.CHARGE_NEAR then
+		return "charge"
+	end
+	if o.enemiesNear >= ShadowRealmRules.CORNER_ENEMIES and o.alliesNear == 0 then
+		return "crowd"
+	end
+	-- A jump-in (Blink Dagger, Puck's Ethereal Jaunt, a leap) with a second enemy hero near and no more of ours than
+	-- of theirs: an initiation on her, not a lone harass the hit rule handles.
+	if o.jump and o.enemies >= 2 and o.enemies >= o.ourHeroes then
+		return "jump"
+	end
+	return nil
+end
+
+-- An enemy hero that jumped next to her (no modifier shows a blink or a jaunt): within JUMP_NEAR now, and either
+-- seen JUMP_CLOSED or more farther away within the last JUMP_WINDOW, or not seen at all in that window (blinked in
+-- out of the fog). prevDist / prevAgo: the last sighting (nil: none); trackedAgo: since her own last sample, so a
+-- gap in her think (death, a long stun) does not read every enemy as new. Returns "jump" | "appear" | nil.
+ShadowRealmRules.JUMP_NEAR = 450
+ShadowRealmRules.JUMP_CLOSED = 500
+ShadowRealmRules.JUMP_WINDOW = 0.6
+function ShadowRealmRules.Jump(prevDist, prevAgo, nowDist, trackedAgo)
+	if nowDist > ShadowRealmRules.JUMP_NEAR or trackedAgo == nil or trackedAgo > ShadowRealmRules.JUMP_WINDOW then
+		return nil
+	end
+	if prevDist == nil or prevAgo == nil or prevAgo > ShadowRealmRules.JUMP_WINDOW then
+		return "appear"
+	end
+	if prevDist - nowDist >= ShadowRealmRules.JUMP_CLOSED then
+		return "jump"
+	end
+	return nil
+end
+
 -- The release reasons of one realm, both kept (game 069, 44:59: "release=died" lost the first one).
 function ShadowRealmRules.JoinRelease(previous, reason)
 	if previous == nil or previous == reason then

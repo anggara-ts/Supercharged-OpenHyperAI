@@ -151,6 +151,7 @@ local isInTeamFight
 -- (bThinkWhileInvulnerable lets only this tick run then).
 X["bThinkWhileInvulnerable"] = true
 function X.SkillsComplement()
+	X.TrackEnemyJumps()
 	local okRealm, realmOrder = pcall(X.ShadowRealmTick)
 	if not okRealm then
 		X.LogRealmError(realmOrder)
@@ -164,6 +165,15 @@ function X.SkillsComplement()
 	hpRatio = context.hp
 	isInTeamFight = context.isTeamFight
 	if Fu.CanNotUseAbility(bot) then
+		return
+	end
+	-- Cornered realm first (#203, game 083 47:06): Bramble Maze, Terrorize and Bedlam each return, and the silence
+	-- or stun of the gank lands within a second.
+	local cornerTrigger, cornerInfo = X.ConsiderCorneredRealm()
+	if cornerTrigger ~= nil then
+		X.StartShadowRealm("retreat", nil, "cornered")
+		X.LogCorneredRealm(cornerTrigger, cornerInfo)
+		bot:Action_UseAbility(shadowRealmAbility)
 		return
 	end
 	brambleMazeDesire, brambleMazeLocation = X.ConsiderBrambleMaze()
@@ -315,6 +325,123 @@ function X.ConsiderShadowRealm()
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Every think: the distance of each real enemy hero within 1600, for the jump-in trigger (ShadowRealmRules.Jump: an
+-- enemy within 450 that was 500+ farther 0.6s ago, or not seen in that time). A jump is kept in bot._dwJump.
+function X.TrackEnemyJumps()
+	local now = DotaTime()
+	local trackedAgo = bot._dwTrackAt ~= nil and now - bot._dwTrackAt or nil
+	if trackedAgo ~= nil and trackedAgo <= 0 then
+		return
+	end
+	bot._dwTrackAt = now
+	local seen = bot._dwSeen
+	if seen == nil then
+		seen = {}
+		bot._dwSeen = seen
+	end
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			local name = enemy:GetUnitName()
+			local dist = GetUnitToUnitDistance(bot, enemy)
+			local last = seen[name]
+			local kind = ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo)
+			if kind ~= nil then
+				bot._dwJump = { at = now, hero = name, kind = kind, from = last and last.dist or -1, dist = dist }
+			end
+			if last == nil then
+				last = {}
+				seen[name] = last
+			end
+			last.dist, last.at = dist, now
+		end
+	end
+end
+-- The cornered realm (ShadowRealmRules.Cornered): Spirit Breaker's charge on her with him within 1200, 3+ enemy
+-- heroes within 900 and none of ours within 1200, or an enemy jump-in in the last 0.5s while not outnumbering
+-- them. The charge modifier on the target: the 7.42 server modifier list has both
+-- modifier_spirit_breaker_charge_of_darkness_target (it has a tooltip, "Charge of Darkness Target") and
+-- modifier_spirit_breaker_charge_of_darkness_vision; which one reads through HasModifier is unverified (mod=).
+-- Returns the trigger and the counts, or nil.
+function X.ConsiderCorneredRealm()
+	if not shadowRealmAbility:IsFullyCastable() or Fu.IsRealInvisible(bot) then
+		return nil
+	end
+	local mod = nil
+	if bot:HasModifier("modifier_spirit_breaker_charge_of_darkness_target") then
+		mod = "target"
+	elseif bot:HasModifier("modifier_spirit_breaker_charge_of_darkness_vision") then
+		mod = "vision"
+	end
+	local o = { enemiesNear = 0, alliesNear = 0, enemies = 0, ourHeroes = 1, jump = false, mod = mod }
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			local dist = GetUnitToUnitDistance(bot, enemy)
+			if dist <= ShadowRealmRules.CORNER_RADIUS then
+				o.enemiesNear = o.enemiesNear + 1
+			end
+			if dist <= ShadowRealmRules.FIGHT_RADIUS then
+				o.enemies = o.enemies + 1
+			end
+			if
+				mod ~= nil
+				and enemy:HasModifier("modifier_spirit_breaker_charge_of_darkness")
+				and (o.charge == nil or dist < o.charge)
+			then
+				o.charge = dist
+			end
+		end
+	end
+	local allyRadius = math.max(ShadowRealmRules.CORNER_ALLY_RADIUS, ShadowRealmRules.FIGHT_RADIUS)
+	for _, ally in pairs(Fu.GetNearbyHeroes(bot, allyRadius, false, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+			local dist = GetUnitToUnitDistance(bot, ally)
+			if dist <= ShadowRealmRules.CORNER_ALLY_RADIUS then
+				o.alliesNear = o.alliesNear + 1
+			end
+			if dist <= ShadowRealmRules.FIGHT_RADIUS then
+				o.ourHeroes = o.ourHeroes + 1
+			end
+		end
+	end
+	local jump = bot._dwJump
+	if jump ~= nil and DotaTime() - jump.at <= 0.5 then
+		o.jump = true
+		o.jumpInfo = jump
+	end
+	local trigger = ShadowRealmRules.Cornered(o)
+	if trigger == nil then
+		return nil
+	end
+	return trigger, o
+end
+-- [SHy-DW] t= dark_willow realm-cornered trigger=charge|crowd|jump hp= near= allies= enemies= ours= charge= mod=
+-- jump=<hero> kind=jump|appear from= to= mode=, right after the rule=cornered cast line (once per cast).
+-- near: enemy heroes within 900; allies: ours within 1200 (her not counted); enemies / ours: within 1200 (ours with
+-- her); charge: distance to the charging Spirit Breaker (-1: none); from / to: the jumper's last and current distance
+-- (from=-1: not seen before, kind=appear).
+function X.LogCorneredRealm(trigger, o)
+	local jump = o.jumpInfo
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow realm-cornered trigger=%s hp=%.2f near=%d allies=%d enemies=%d ours=%d charge=%d mod=%s jump=%s kind=%s from=%d to=%d mode=%d",
+			DotaTime(),
+			trigger,
+			Fu.GetHP(bot),
+			o.enemiesNear,
+			o.alliesNear,
+			o.enemies,
+			o.ourHeroes,
+			o.charge or -1,
+			tostring(o.mod or "-"),
+			jump ~= nil and (string.gsub(jump.hero, "npc_dota_hero_", "")) or "-",
+			jump ~= nil and jump.kind or "-",
+			jump ~= nil and jump.from or -1,
+			jump ~= nil and jump.dist or -1,
+			bot:GetActiveMode()
+		)
+	)
+end
 -- Real enemy heroes and our heroes (her included) within ShadowRealmRules.FIGHT_RADIUS (1200).
 function X.FightCounts()
 	local radius = ShadowRealmRules.FIGHT_RADIUS
@@ -369,6 +496,7 @@ function X.StartShadowRealm(why, target, rule)
 	end
 	bot._dwRealm = {
 		why = why or "retreat",
+		rule = rule or why or "retreat",
 		at = DotaTime(),
 		target = target,
 		baseRange = bot:GetAttackRange(),
@@ -418,7 +546,7 @@ function X.StartShadowRealm(why, target, rule)
 		)
 	)
 end
--- [SHy-DW] t= dark_willow shadow-realm why=attack|dodge|retreat held= ended= release= tp= dist= mod= invuln=, one
+-- [SHy-DW] t= dark_willow shadow-realm why=attack|dodge|retreat held= ended= release= tp= dist= mod= invuln= ... rule=, one
 -- line per realm when it ends. held: seconds from the cast to the release order (attack) or to the end; ended: when
 -- the realm was seen to end (the hit landed; about 5.2 when it ran out, or when the modifier was never seen).
 -- release=died: she died in the realm or the tick stopped (her think doesn't run while dead); t=, held= and ended=
@@ -441,7 +569,7 @@ function X.EndShadowRealm(realm, since, endedAt)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s",
+			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s rule=%s",
 			endedAt or DotaTime(),
 			realm.why,
 			realm.releasedAt or since,
@@ -454,7 +582,8 @@ function X.EndShadowRealm(realm, since, endedAt)
 			tostring(realm.invuln == true),
 			realm.orders or 1,
 			realm.tookAt ~= nil and string.format("%.2f", realm.tookAt) or "no",
-			realm.hold and "yes" or "no"
+			realm.hold and "yes" or "no",
+			tostring(realm.rule or realm.why)
 		) .. (realm.drop or "")
 	)
 end
