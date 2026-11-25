@@ -5,6 +5,7 @@ local X = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
+local CastRules = require(GetScriptDirectory() .. "/lib/systems/hero_cast_rules")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -156,8 +157,12 @@ local sunRayDesire, sunRayLocation
 local sunRayStopDesire
 local toggleMovementDesire, toggleMovementState
 local supernovaDesire, supernovaTarget
-local lastDiveTime = -1
-local diveDuration = 2
+-- The dive ordered last (#47): why, where from, its target, and what happened, for the Stop rule and one
+-- [SHy-PHOENIX] dive-result line. Kept from the order to the result, so nothing in between can lose the reason.
+local DIVE_MODIFIER = "modifier_phoenix_icarus_dive"
+local diveRecord = nil
+local diveNotStartedLogAt = -999
+local hasDiveStop = icarusDiveStopAbility:GetName() == "phoenix_icarus_dive_stop"
 local lastLaunchTime = 0
 if bot.sun_ray_target == nil then
 	bot.sun_ray_target = bot
@@ -167,6 +172,7 @@ local isGoingOnSomeone
 local isAttacking
 local hpRatio
 function X.SkillsComplement()
+	X.DiveTick()
 	local context = AbilityContext.Build(bot)
 	isGoingOnSomeone = context.isEngaging
 	isAttacking = Fu.IsAttacking(bot)
@@ -228,7 +234,6 @@ function X.SkillsComplement()
 	icarusDiveStopDesire = X.ConsiderIcarusDiveStop()
 	if icarusDiveStopDesire > 0 then
 		bot:Action_UseAbility(icarusDiveStopAbility)
-		bot.icarus_dive_stuck = false
 		return
 	end
 	if Fu.CanNotUseAbility(bot) then
@@ -275,10 +280,11 @@ function X.SkillsComplement()
 			end
 		end
 	end
-	icarusDiveDesire, icarusDiveLocation = X.ConsiderIcarusDive()
+	local diveWhy, diveTarget
+	icarusDiveDesire, icarusDiveLocation, diveWhy, diveTarget = X.ConsiderIcarusDive()
 	if icarusDiveDesire > 0 then
 		bot:Action_UseAbilityOnLocation(icarusDiveAbility, icarusDiveLocation)
-		lastDiveTime = DotaTime()
+		X.DiveOrdered(icarusDiveLocation, diveWhy, diveTarget)
 		return
 	end
 	sunRayDesire, sunRayLocation = X.ConsiderSunRay()
@@ -291,16 +297,12 @@ function X.ConsiderIcarusDive()
 	if
 		not Fu.CanCastAbility(icarusDiveAbility)
 		or bot:IsRooted()
-		or bot:HasModifier("modifier_phoenix_icarus_dive")
+		or bot:HasModifier(DIVE_MODIFIER)
 		or bot:HasModifier("modifier_phoenix_supernova_hiding")
 		or bot:HasModifier("modifier_bloodseeker_rupture")
 	then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	-- Not diving now: clear the reason flags so a past retreat dive does not make the next engage
-	-- dive stop halfway (they were never reset before).
-	bot.icarus_dive_kill, bot.icarus_dive_engage, bot.icarus_dive_stuck, bot.icarus_dive_retreat =
-		false, false, false, false
 	local dashLength = icarusDiveAbility:GetSpecialValueInt("dash_length")
 	local dashWidth = icarusDiveAbility:GetSpecialValueInt("dash_width")
 	local hpCost = icarusDiveAbility:GetSpecialValueInt("hp_cost_perc") / 100 * bot:GetHealth()
@@ -324,13 +326,11 @@ function X.ConsiderIcarusDive()
 			and not Fu.IsEnemyBlackHoleInLocation(enemy:GetLocation())
 			and hpAfterCast > 0.4
 		then
-			bot.icarus_dive_kill = true
-			return BOT_ACTION_DESIRE_HIGH, enemy:GetLocation()
+			return BOT_ACTION_DESIRE_HIGH, enemy:GetLocation(), "kill", enemy
 		end
 	end
 	if Fu.IsStuck(bot) then
-		bot.icarus_dive_stuck = true
-		return BOT_ACTION_DESIRE_HIGH, Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength)
+		return BOT_ACTION_DESIRE_HIGH, Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength), "stuck"
 	end
 	if Fu.IsInTeamFight(bot, 1200) then
 		local aoe = bot:FindAoELocation(true, true, bot:GetLocation(), dashLength, dashWidth / 1.5, 0, 0)
@@ -340,8 +340,7 @@ function X.ConsiderIcarusDive()
 			and not Fu.IsEnemyBlackHoleInLocation(aoe.targetloc)
 			and hpAfterCast > 0.3
 		then
-			bot.icarus_dive_engage = true
-			return BOT_ACTION_DESIRE_HIGH, aoe.targetloc
+			return BOT_ACTION_DESIRE_HIGH, aoe.targetloc, "engage"
 		end
 	end
 	if isGoingOnSomeone then
@@ -355,8 +354,7 @@ function X.ConsiderIcarusDive()
 			and hpAfterCast > 0.3
 		then
 			if #nearbyAllies >= #nearbyEnemies + 1 then
-				bot.icarus_dive_engage = true
-				return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation()
+				return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation(), "engage", botTarget
 			end
 		end
 	end
@@ -368,46 +366,272 @@ function X.ConsiderIcarusDive()
 				and bot:WasRecentlyDamagedByHero(enemy, 3.0)
 				and hpAfterCast > 0.15
 			then
-				bot.icarus_dive_retreat = true
-				return BOT_ACTION_DESIRE_HIGH, Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength)
+				return BOT_ACTION_DESIRE_HIGH,
+					Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength),
+					"retreat"
 			end
 		end
 		if hpRatio < 0.5 and bot:WasRecentlyDamagedByTower(2.5) and hpAfterCast > 0.2 then
-			bot.icarus_dive_retreat = true
-			return BOT_ACTION_DESIRE_HIGH, Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength)
+			return BOT_ACTION_DESIRE_HIGH,
+				Fu.Site.GetXUnitsTowardsLocation(bot, Fu.GetTeamFountain(), dashLength),
+				"retreat"
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- #47: Icarus Dive and its Stop. Game 085: 36 dive orders, no Stop at all, and two of the three retreat dives
+-- ended where they began, among the enemies, and Phoenix died there within 3s. Game data (datafeed hero 110):
+-- dive_duration 2, hit_radius 200, dash_width 500, dash_length 1100/1200/1300/1400, AbilityCastPoint 0.2,
+-- cooldown 40/35/30/25. Stop now follows the dive itself (when it started, where Phoenix is against where she
+-- started and against the target), not the time of the order, and every order ends in one dive-result line that
+-- says whether the dive started, whether Stop could be cast, and where Phoenix ended.
+local function diveDeaths()
+	local ok, deaths = pcall(GetHeroDeaths, bot:GetPlayerID())
+	return ok and deaths or nil
+end
+-- Phoenix is in the dive: the dive modifier, or the Stop ability shown (it is hidden outside the dive; the API
+-- dump lists phoenix_icarus_dive_stop(h)). Either one is enough, so a wrong modifier name cannot hide the dive.
+function X.InDive()
+	if bot:HasModifier(DIVE_MODIFIER) then
+		return true
+	end
+	return hasDiveStop and not icarusDiveStopAbility:IsNull() and not icarusDiveStopAbility:IsHidden()
+end
+function X.DiveOrdered(location, why, target)
+	if diveRecord ~= nil then
+		X.FinishDive("reordered")
+	end
+	local hitRadius = icarusDiveAbility:GetSpecialValueInt("hit_radius")
+	local dashWidth = icarusDiveAbility:GetSpecialValueInt("dash_width")
+	local duration = icarusDiveAbility:GetSpecialValueFloat("dive_duration")
+	diveRecord = {
+		why = why or "none",
+		orderAt = DotaTime(),
+		from = bot:GetLocation(),
+		aim = location,
+		target = target,
+		dashLength = icarusDiveAbility:GetSpecialValueInt("dash_length"),
+		-- datafeed hero 110: hit_radius 200, dash_width 500, dive_duration 2 (fallbacks when the API reads 0)
+		hitRadius = hitRadius > 0 and hitRadius or 200,
+		dashWidth = dashWidth > 0 and dashWidth or 500,
+		duration = duration > 0 and duration or 2,
+		hpStart = Fu.GetHP(bot),
+		deathsStart = diveDeaths(),
+		thinks = 0,
+		fromStartMax = 0,
+		lastTickAt = DotaTime(),
+	}
+	pcall(
+		print,
+		string.format(
+			"[SHy-PHOENIX] t=%.0f phoenix dive why=%s dist=%.0f target=%s hp=%.2f",
+			DotaTime(),
+			diveRecord.why,
+			GetUnitToLocationDistance(bot, location),
+			Fu.IsValidHero(target) and string.gsub(target:GetUnitName(), "npc_dota_hero_", "") or "-",
+			diveRecord.hpStart
+		)
+	)
+end
+-- Where the dive is going: the target hero while it can be seen, else the spot it was cast at.
+local function diveTargetLocation(rec)
+	if Fu.IsValidHero(rec.target) and rec.target:CanBeSeen() then
+		return rec.target:GetLocation()
+	end
+	return rec.aim
+end
+local function hasDiveTarget(rec)
+	return rec.why == "kill" or rec.why == "engage"
+end
+-- Every think from the order on (top of SkillsComplement, before any early return).
+function X.DiveTick()
+	local rec = diveRecord
+	if rec == nil then
+		return
+	end
+	local now = DotaTime()
+	-- A long gap: Phoenix died, or the think did not run. Close the record with what is known.
+	if now - rec.lastTickAt > 2.5 then
+		X.FinishDive("gap")
+		return
+	end
+	rec.lastTickAt = now
+	-- Past the whole dive and a margin: close it even if the in-dive check still says yes (Stop never hidden).
+	if rec.startedAt ~= nil and now - rec.startedAt > rec.duration + 1.5 then
+		X.FinishDive(rec.inDiveSeen and "overrun" or "never-seen")
+		return
+	end
+	local inDive = X.InDive()
+	local hasModifier = bot:HasModifier(DIVE_MODIFIER)
+	if rec.startedAt == nil and (inDive or icarusDiveAbility:GetCooldownTimeRemaining() > 0) then
+		rec.startedAt = now
+		rec.startHow = hasModifier and "modifier" or inDive and "stop-shown" or "cooldown"
+	end
+	if hasModifier then
+		rec.modifierSeen = true
+	end
+	if inDive then
+		rec.inDiveSeen = true
+		rec.thinks = rec.thinks + 1
+		if rec.stopCastableAt == nil and Fu.CanCastAbility(icarusDiveStopAbility) then
+			rec.stopCastableAt = now
+		end
+		local fromStart = GetUnitToLocationDistance(bot, rec.from)
+		rec.fromStart = fromStart
+		rec.fromStartMax = math.max(rec.fromStartMax, fromStart)
+		if hasDiveTarget(rec) and rec.aim ~= nil then
+			local targetDist = GetUnitToLocationDistance(bot, diveTargetLocation(rec))
+			rec.targetDist = targetDist
+			rec.targetDistMin = math.min(rec.targetDistMin or targetDist, targetDist)
+		end
+		return
+	end
+	if rec.inDiveSeen then
+		X.FinishDive("ended")
+	elseif rec.startedAt == nil and now - rec.orderAt > 1.5 then
+		-- Turn and cast point (0.2s) are over and the dive is not on cooldown: the order never became a cast.
+		X.FinishDive("not-started")
+	end
+end
+-- [SHy-PHOENIX] dive-result: one line per dive order.
+--   started=yes|no (the dive went on cooldown or Phoenix was seen in it), how= (what showed it first)
+--   ended= ended (the dive finished) | not-started | never-seen (on cooldown, never seen in the dive: the in-dive
+--   check is wrong) | overrun (still "in the dive" 1.5s after it should end) | gap (died, or no think for 2.5s) |
+--   reordered
+--   stop= yes (the dive ended within 0.8s of the first Stop order, before its natural end) | no-end (ordered,
+--         the dive went on) | blocked (the rule wanted it, Stop could not be cast) | none (the rule never asked)
+--   rule= why Stop was ordered, orders= Stop orders sent (1-3), stopAt= (first order) / endAt= seconds after the
+--   start, stopCastable= seconds after the start Stop first read castable (- = never), thinks= thinks inside the
+--   dive, away= distance from the start at the end, peak= farthest from the start, targetMin= closest to the target,
+--   hp= before -> after, died=yes|no
+function X.FinishDive(ended)
+	local rec = diveRecord
+	diveRecord = nil
+	if rec == nil then
+		return
+	end
+	local now = DotaTime()
+	local started = rec.startedAt ~= nil
+	if not started then
+		-- Orders that never cast can repeat; print at most one every 3s.
+		if now < diveNotStartedLogAt then
+			return
+		end
+		diveNotStartedLogAt = now + 3
+	end
+	local startAt = rec.startedAt or rec.orderAt
+	local stop = "none"
+	if rec.stopFirstAt ~= nil then
+		-- yes: the dive ended within 0.8s of the first Stop order (room for the two repeats) and clearly before it
+		-- would have ended by itself. A dive that only ended at its natural end after ignored Stops is no-end.
+		local endedByStop = ended == "ended" and now - rec.stopFirstAt <= 0.8 and now - startAt < rec.duration - 0.2
+		stop = endedByStop and "yes" or "no-end"
+	elseif rec.stopBlocked then
+		stop = "blocked"
+	end
+	local deathsNow = diveDeaths()
+	local died = rec.deathsStart ~= nil and deathsNow ~= nil and deathsNow > rec.deathsStart
+	pcall(
+		print,
+		string.format(
+			"[SHy-PHOENIX] t=%.0f phoenix dive-result why=%s started=%s how=%s ended=%s stop=%s rule=%s orders=%d stopAt=%s endAt=%.1f stopCastable=%s modifier=%s thinks=%d away=%.0f peak=%.0f targetMin=%s hp=%.2f->%.2f died=%s",
+			now,
+			rec.why,
+			started and "yes" or "no",
+			rec.startHow or "-",
+			ended,
+			stop,
+			rec.stopRule or "-",
+			rec.stopOrders or 0,
+			rec.stopFirstAt and string.format("%.1f", rec.stopFirstAt - startAt) or "-",
+			now - startAt,
+			rec.stopCastableAt and string.format("%.1f", rec.stopCastableAt - startAt) or "-",
+			rec.modifierSeen and "yes" or "no",
+			rec.thinks,
+			(bot:IsAlive() and not died) and GetUnitToLocationDistance(bot, rec.from) or -1,
+			rec.fromStartMax,
+			rec.targetDistMin and string.format("%.0f", rec.targetDistMin) or "-",
+			rec.hpStart,
+			(bot:IsAlive() and not died) and Fu.GetHP(bot) or 0,
+			died and "yes" or "no"
+		)
+	)
+end
+-- Stop exists only DURING the dive: the old guard returned when Phoenix had the dive modifier, so Stop never
+-- fired, and the later timing (2s after the order for kill / engage, the whole dive) could never be reached.
 function X.ConsiderIcarusDiveStop()
-	-- Stop only exists DURING the dive: the old guard returned when Phoenix had the dive modifier, so Stop
-	-- never fired and a retreat dive (an arc of dive_duration 2s) carried Phoenix back to where it started.
-	if
-		not Fu.CanCastAbility(icarusDiveStopAbility)
-		or not bot:HasModifier("modifier_phoenix_icarus_dive")
-		or bot:HasModifier("modifier_phoenix_supernova_hiding")
-	then
+	local rec = diveRecord
+	if rec == nil or not X.InDive() or bot:HasModifier("modifier_phoenix_supernova_hiding") then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	if bot.icarus_dive_kill or bot.icarus_dive_engage then
-		if DotaTime() > lastDiveTime + diveDuration then
-			return BOT_ACTION_DESIRE_HIGH
-		end
+	local now = DotaTime()
+	-- One order, then up to two repeats 0.3s apart if the dive goes on.
+	if rec.stopOrderedAt ~= nil and (now - rec.stopOrderedAt < 0.3 or (rec.stopOrders or 0) >= 3) then
+		return BOT_ACTION_DESIRE_NONE
 	end
-	if bot.icarus_dive_stuck or bot.icarus_dive_retreat then
-		-- Half of the 2s arc is the far end, nearest the fountain.
-		if DotaTime() > lastDiveTime + diveDuration / 2 then
-			if DotaTime() >= (bot._diveStopLogAt or -999) then
-				bot._diveStopLogAt = DotaTime() + 5
-				pcall(
-					print,
-					string.format("[SHy-PHOENIX] t=%.0f dive-stop at far end hp=%.2f", DotaTime(), Fu.GetHP(bot))
+	local stop, rule = CastRules.IcarusDiveStop({
+		kind = rec.why,
+		elapsed = now - (rec.startedAt or now),
+		duration = rec.duration,
+		fromStart = rec.fromStart or 0,
+		fromStartMax = rec.fromStartMax,
+		dashLength = rec.dashLength,
+		targetDist = rec.targetDist,
+		targetDistMin = rec.targetDistMin,
+		hitRadius = rec.hitRadius,
+		dashWidth = rec.dashWidth,
+	})
+	if not stop then
+		return BOT_ACTION_DESIRE_NONE
+	end
+	local castable = Fu.CanCastAbility(icarusDiveStopAbility)
+	if not castable then
+		if not rec.stopBlocked then
+			rec.stopBlocked = true
+			local stopAbility = icarusDiveStopAbility
+			pcall(
+				print,
+				string.format(
+					"[SHy-PHOENIX] t=%.0f phoenix dive-stop-blocked why=%s rule=%s handle=%s hidden=%s trained=%s castable=%s activated=%s level=%s",
+					now,
+					rec.why,
+					rule,
+					tostring(hasDiveStop),
+					tostring(stopAbility:IsHidden()),
+					tostring(stopAbility:IsTrained()),
+					tostring(stopAbility:IsFullyCastable()),
+					tostring(stopAbility:IsActivated()),
+					tostring(stopAbility:GetLevel())
 				)
-			end
-			return BOT_ACTION_DESIRE_HIGH
+			)
+		end
+		-- Shown but not castable by our check (e.g. it reads untrained): order it anyway, the result line
+		-- says whether the dive ended. Hidden or missing: nothing to order.
+		if not hasDiveStop or icarusDiveStopAbility:IsHidden() then
+			return BOT_ACTION_DESIRE_NONE
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE
+	rec.stopOrders = (rec.stopOrders or 0) + 1
+	if rec.stopOrderedAt == nil then
+		rec.stopRule = rule
+		rec.stopFirstAt = now
+		pcall(
+			print,
+			string.format(
+				"[SHy-PHOENIX] t=%.0f phoenix dive-stop why=%s rule=%s since=%.1f away=%.0f targetDist=%s via=%s hp=%.2f",
+				now,
+				rec.why,
+				rule,
+				now - (rec.startedAt or now),
+				rec.fromStart or 0,
+				rec.targetDist and string.format("%.0f", rec.targetDist) or "-",
+				castable and "castable" or "forced",
+				Fu.GetHP(bot)
+			)
+		)
+	end
+	rec.stopOrderedAt = now
+	return BOT_ACTION_DESIRE_HIGH
 end
 function X.ConsiderFireSpirits()
 	if
