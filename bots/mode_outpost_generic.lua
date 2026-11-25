@@ -1,6 +1,7 @@
 -- Outpost capture mode.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
+local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -1047,6 +1048,24 @@ function TrampleToBase()
 	tramplePoints = {}
 	bot:Action_MoveToLocation(Fu.GetTeamFountain())
 end
+-- [SHy-ROAM] t= <hero> tombstone-slow hit where=think|no-run dist= hits-left= (once per 3s per bot).
+local function LogTombstoneSlowHit(where, dist, hitsLeft)
+	if DotaTime() < (bot._tombstoneSlowLogAt or -999) then
+		return
+	end
+	bot._tombstoneSlowLogAt = DotaTime() + 3
+	pcall(
+		print,
+		string.format(
+			"[SHy-ROAM] t=%.0f %s tombstone-slow hit where=%s dist=%d hits-left=%d",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			where,
+			dist,
+			hitsLeft
+		)
+	)
+end
 function ThinkGeneralRoaming()
 	local hpRatio = Fu.GetHP(bot)
 	if
@@ -1195,6 +1214,14 @@ function ThinkGeneralRoaming()
 		return true
 	end
 	if bot:HasModifier("modifier_undying_tombstone_zombie_deathstrike_slow") then
+		-- #185: a Tombstone within 400 that dies in 3 hits or fewer: kill it (it stops the zombies) instead of
+		-- running to the fountain slowed.
+		local tombstone, dist, hitsLeft = SpecialUnits.TombstoneToHitWhenSlowed(bot)
+		if tombstone ~= nil then
+			LogTombstoneSlowHit("think", dist, hitsLeft)
+			bot:Action_AttackUnit(tombstone, true)
+			return true
+		end
 		bot:Action_MoveToLocation(Fu.GetTeamFountain())
 		return true
 	end
@@ -1832,7 +1859,11 @@ function ConsiderGeneralRoamingInConditions()
 		end
 		if bot:HasModifier("modifier_undying_tombstone_zombie_deathstrike_slow") then
 			lastTombstoneSlowTime = DotaTime()
-			if Fu.IsValidTarget(botTarget) and not Fu.Utils.IsUnitWithName(botTarget, "tombstone") then
+			-- #185: no run while a nearly dead Tombstone is within 400 (team roam's Tombstone rule hits it).
+			local slowTombstone, slowDist, slowHits = SpecialUnits.TombstoneToHitWhenSlowed(bot)
+			if slowTombstone ~= nil then
+				LogTombstoneSlowHit("no-run", slowDist, slowHits)
+			elseif Fu.IsValidTarget(botTarget) and not Fu.Utils.IsUnitWithName(botTarget, "tombstone") then
 				local tombstone = Fu.FindEnemyUnit("tombstone")
 				if not tombstone then
 					tombstone = GetTargetEnemy("npc_dota_hero_undying")
@@ -2409,6 +2440,18 @@ heroSpecificDesire["npc_dota_hero_nevermore"] = function()
 				return BOT_MODE_DESIRE_VERYHIGH
 			end
 		end
+	end
+	return BOT_MODE_DESIRE_NONE
+end
+heroSpecificDesire["npc_dota_hero_alchemist"] = function()
+	-- Concoction keep-range (#34, hero_alchemist.lua X.ConcoctionKeepRange sets bot._alchChaseUntil while it walks
+	-- him back into throw range of a hero): game 063, 7:32, the laning mode's own move replaced that order (dist 606
+	-- -> 1023) and the brew blew up on him. This mode takes him and gives no order meanwhile, so the hero script's
+	-- move stands. 1.05: above the other modes' 1.0 overrides, below retreat's 1.1 (the hero script also stops
+	-- the chase when retreat wants him out).
+	if bot._alchChaseUntil ~= nil and DotaTime() < bot._alchChaseUntil then
+		bot._outpostHoldUntil = DotaTime() + 0.15
+		return BOT_DESIRE_OVERRIDE * 1.05
 	end
 	return BOT_MODE_DESIRE_NONE
 end

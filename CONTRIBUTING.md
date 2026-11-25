@@ -58,7 +58,7 @@ Then on GitHub go to **Settings → SSH and GPG keys → New SSH key**, set **Ke
 
 ### 4. Point Dota at your checkout
 
-Dota loads bot scripts from `dota 2 beta/game/dota/scripts/vscripts/bots`. The usual way is a copy: `node tools/export-bots.js --test-game` copies the bot scripts of the checked-out commit (plus your uncommitted `bots/customize/general.lua` and the build info) there, and nothing else. Run it again after every change; `/prepare-game` does it before a test game. `node tools/export-bots.js` without `--test-game` makes the clean copy of `origin/main` for a Workshop upload (`/prepare-workshop`). Rename an existing `bots` folder first, or let the tool take it over with `--force` (it deletes what is in it).
+Dota loads bot scripts from `dota 2 beta/game/dota/scripts/vscripts/bots`. The usual way is a copy: `node tools/export-bots.js --test-game` copies the bot scripts of the checked-out commit (plus your uncommitted `bots/customize/general.lua`, the build info and `LICENSE`) there, and nothing else. Run it again after every change; `/prepare-game` does it before a test game. `node tools/export-bots.js` without `--test-game` makes the clean copy of `origin/main` for a Workshop upload (`/prepare-workshop`). Rename an existing `bots` folder first, or let the tool take it over with `--force` (it deletes what is in it).
 
 For quick edits you can instead make that folder a link to your clone's `bots/` folder, so the game runs whatever branch you have checked out. Don't name the link `bots` while you use the tool (it refuses to write through a link):
 

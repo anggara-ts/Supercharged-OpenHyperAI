@@ -75,3 +75,205 @@ T.test("GetAlliesNearLoc returns all five", function()
 	end
 	T.eq(#Fu.GetAlliesNearLoc(Vector(0, 0, 0), 500), 5, "allies near the location")
 end)
+
+-- Game 077: the human held Radiant slot 5. The reply member (the bot that installs the team's chat callback) was
+-- picked as a slot after the human count, so it could be the human, and no bot heard `!push` or `!debug`.
+T.test("Role.GetReplyMemberID picks a bot when the human holds the last slot", function()
+	local _, Fu = setup()
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	local seen = {}
+	for _ = 1, 60 do
+		Fu.Role.replyMemberID = nil
+		local picked = Fu.Role.GetReplyMemberID()
+		T.ok(picked ~= nil and picked ~= humanId, "never the human in slot 5")
+		seen[picked or -1] = true
+	end
+	for slot = 1, 4 do
+		T.ok(seen[ids[slot]], "the bot in slot " .. slot .. " can be picked")
+	end
+	-- Humans in slots 1 and 5: only slots 2-4.
+	IsPlayerBot = function(playerId)
+		return playerId ~= ids[1] and playerId ~= ids[5]
+	end
+	for _ = 1, 30 do
+		Fu.Role.replyMemberID = nil
+		local picked = Fu.Role.GetReplyMemberID()
+		T.ok(picked == ids[2] or picked == ids[3] or picked == ids[4], "a bot in slots 2-4")
+	end
+	-- No bot on the team: nobody, and nothing cached.
+	IsPlayerBot = function()
+		return false
+	end
+	Fu.Role.replyMemberID = nil
+	T.eq(Fu.Role.GetReplyMemberID(), nil, "no bot")
+	T.eq(Fu.Role.replyMemberID, nil, "not cached")
+end)
+
+T.test("the reply member installs the chat callback and logs each ! command it hears", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_alchemist", slot = 1, time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId
+	end
+	local callback = nil
+	InstallChatCallback = function(fn)
+		callback = fn
+	end
+	Fu.Role.replyMemberID = bot:GetPlayerID()
+	Stub.printed = {}
+	Usage.SetTalkMessage()
+	T.ok(callback ~= nil, "the chat callback is installed")
+	T.eq(Fu.Role.chatListenerId, bot:GetPlayerID(), "the team's listener is recorded")
+	local listener = 0
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" listener team=radiant id=", 1, true) then
+			listener = listener + 1
+		end
+	end
+	T.eq(listener, 1, "one listener line")
+	if callback == nil then
+		return
+	end
+	Stub.printed = {}
+	callback({ string = "!push bot", player_id = humanId, team_only = true })
+	callback({ string = "gg wp", player_id = humanId, team_only = false })
+	local heard = {}
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" heard ", 1, true) then
+			heard[#heard + 1] = line
+		end
+	end
+	T.eq(#heard, 1, "one heard line for the command, none for plain chat")
+	local humanHero = (string.gsub(GetSelectedHeroName(humanId), "npc_dota_hero_", ""))
+	T.ok(
+		heard[1] ~= nil and heard[1]:find("heard cmd=!push from=" .. humanHero .. " team_only=true", 1, true) ~= nil,
+		"cmd, sender hero and team_only"
+	)
+end)
+
+-- Games 077-078: the first GetReplyMemberID call comes at t=-89, before the team is fully loaded; a pick that read as a
+-- bot then may be the human, and then no bot installs the chat callback.
+T.test("Role.GetReplyMemberID replaces a cached pick that is no longer a bot", function()
+	local _, Fu = setup()
+	local ids = GetTeamPlayers(GetTeam())
+	local humanId = ids[5]
+	local loaded = false
+	IsPlayerBot = function(playerId)
+		return not loaded or playerId ~= humanId
+	end
+	Fu.Role.replyMemberID, Fu.Role.chatListenerId = humanId, nil
+	T.eq(Fu.Role.GetReplyMemberID(), humanId, "early: the human still reads as a bot")
+	loaded = true
+	local picked = Fu.Role.GetReplyMemberID()
+	T.ok(picked ~= nil and picked ~= humanId, "re-picked among the bots once IsPlayerBot reads right")
+	T.eq(Fu.Role.GetReplyMemberID(), picked, "then kept")
+	-- Once a bot listens it stays the reply member (no second callback).
+	Fu.Role.chatListenerId = ids[2]
+	Fu.Role.replyMemberID = humanId
+	T.eq(Fu.Role.GetReplyMemberID(), ids[2], "the listener")
+end)
+
+-- A test bot that listens to team chat: returns Usage, Fu, the installed chat callback and the ids.
+local function chatListener()
+	local bot = Stub.reset({ hero = "npc_dota_hero_alchemist", slot = 1, time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local ids = GetTeamPlayers(GetTeam())
+	local enemyIds = GetTeamPlayers(GetOpposingTeam())
+	local humanId, enemyHumanId = ids[5], enemyIds[5]
+	IsPlayerBot = function(playerId)
+		return playerId ~= humanId and playerId ~= enemyHumanId
+	end
+	local callback = nil
+	InstallChatCallback = function(fn)
+		callback = fn
+	end
+	bot.ActionImmediate_Chat = function() end
+	Fu.Role.replyMemberID, Fu.Role.chatListenerId = bot:GetPlayerID(), nil
+	Usage.SetTalkMessage()
+	T.ok(callback ~= nil, "the chat callback is installed")
+	return bot, Usage, Fu, callback, humanId, enemyHumanId
+end
+
+-- Game 078: the old `!debug` switched the mode at t=700 but its reply never reached the chat (an ActionImmediate_Chat
+-- from inside the chat callback says nothing). The `!chatty` reply is said from the bot's next think.
+-- Maintainer, 2026-11-24: "chatty is for hero chat when doing actions".
+T.test("!chatty toggles the decision chat; its reply is said from the next think", function()
+	local bot, Usage, Fu, callback, humanId = chatListener()
+	if callback == nil then
+		return
+	end
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	local chats = {}
+	bot.ActionImmediate_Chat = function(_, text)
+		chats[#chats + 1] = text
+	end
+	local wasOn = ChatRules.IsChattyChat(Fu.Utils)
+	callback({ string = "!chatty", player_id = humanId, team_only = true })
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), not wasOn, "!chatty: decision chat switched")
+	T.eq(#chats, 0, "nothing said inside the callback")
+	Stub.printed = {}
+	Usage.SetTalkMessage()
+	T.eq(#chats, 1, "said on the next think")
+	local logged = false
+	for _, line in ipairs(Stub.printed) do
+		if line:find("[SHy-CHAT]", 1, true) and line:find(" chatty o", 1, true) and line:find("said=yes", 1, true) then
+			logged = true
+		end
+	end
+	T.ok(logged, "[SHy-CHAT] chatty on|off said=yes")
+	Usage.SetTalkMessage()
+	T.eq(#chats, 1, "once")
+	callback({ string = "!chatty", player_id = humanId, team_only = true })
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), wasOn, "!chatty again: back")
+	Usage.SetTalkMessage()
+end)
+
+-- Maintainer, 2026-11-24: "i dont think we need !debug anymore, we have logger anyway". `!debug` / `!verbose` do
+-- nothing now: no mode switch, no reply, and no small talk (an enemy human's all chat would otherwise get one).
+T.test("!debug and !verbose change nothing and get no reply", function()
+	local bot, Usage, Fu, callback, humanId, enemyHumanId = chatListener()
+	if callback == nil then
+		return
+	end
+	local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+	Fu.Utils.GameStates = Fu.Utils.GameStates or {}
+	local debugBefore, isDebugBefore = Fu.Utils.DebugMode, IsDebug
+	local verboseBefore, chattyBefore = Fu.Utils.GameStates.verboseChat, ChatRules.IsChattyChat(Fu.Utils)
+	local reached = {}
+	local oldSetLast = Fu.Role.SetLastChatString
+	Fu.Role.SetLastChatString = function(text)
+		reached[#reached + 1] = text
+	end
+	local chats = {}
+	bot.ActionImmediate_Chat = function(_, text)
+		chats[#chats + 1] = text
+	end
+	for _, text in ipairs({ "!debug", "!verbose", " !DEBUG " }) do
+		callback({ string = text, player_id = humanId, team_only = true })
+		callback({ string = text, player_id = enemyHumanId, team_only = false })
+	end
+	T.eq(Fu.Utils.DebugMode, debugBefore, "DebugMode untouched")
+	T.eq(IsDebug, isDebugBefore, "IsDebug untouched")
+	T.eq(Fu.Utils.GameStates.verboseChat, verboseBefore, "verboseChat untouched")
+	T.eq(ChatRules.IsChattyChat(Fu.Utils), chattyBefore, "chatty untouched")
+	T.eq(#reached, 0, "!debug never reaches the small-talk path")
+	Stub.printed = {}
+	Stub.time = Stub.time + 10
+	Usage.SetTalkMessage()
+	T.eq(#chats, 0, "nothing said on the next think")
+	for _, line in ipairs(Stub.printed) do
+		T.ok(not line:find("said=", 1, true), "no queued reply: " .. line)
+	end
+	-- Control: a plain line from the same enemy human does reach it.
+	callback({ string = "gg wp", player_id = enemyHumanId, team_only = false })
+	T.eq(#reached, 1, "a plain line reaches the small-talk path")
+	Fu.Role.SetLastChatString = oldSetLast
+end)
