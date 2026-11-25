@@ -381,6 +381,12 @@ T.test("rune rules: the lotus hold pauses for retreat and resumes while the spaw
 	local pugna = { yielding = true }
 	T.eq(R.LotusYieldStep(pugna, 0, true, false, true), "drop", "game 084 t=395: 10562 away, no resume")
 	T.eq(R.LotusYieldStep({}, 0.1, true, false, true), "hold", "never paused: far doesn't matter (beside is 800)")
+	-- A pause belongs to its spawn: game 083 Winter Wyvern resumed at 182 and read gone at 188; at the next spawn the
+	-- old state must not read resumed (a far bot would drop the new spawn as end=far).
+	local old = { mark = 180, resumed = true }
+	T.eq(R.LotusYieldFor(old, 360), nil, "the next spawn: no pause state")
+	T.eq(R.LotusYieldFor(old, 180), old, "the same spawn: kept")
+	T.eq(R.LotusYieldFor(nil, 360), nil, "none")
 
 	-- The ring clock pauses while yielding: 1s stood, a pause 181-184, back in the ring at 184: gone at 1.5s more.
 	local stand = R.NewLotusStand(180, 0)
@@ -433,20 +439,32 @@ T.test("rune rules: no pick-up order where it never worked; let go at once (game
 	T.eq(R.RiverOrderWorks(top, -1, top, water), false, "unknown type: never worked")
 	T.eq(R.RiverOrderWorks(top, water, top, nil), false, "no RUNE_WATER in the API: no order")
 	-- The plan on a spot with the rune up.
-	T.eq(R.RiverTryPlan(true, false, false, 0), "order", "top water rune: the order")
-	T.eq(R.RiverTryPlan(false, false, false, 0), "yield", "horn bounty on the spot: let go at once")
-	T.eq(R.RiverTryPlan(false, false, false, 72), "yield", "game 084 Techies at 72: taken after the release")
-	-- Games 081-084: releases from 167-287 off the spot never got the rune.
-	T.eq(R.RiverTryPlan(false, false, false, 167), "move", "off the spot: step onto it first")
-	T.eq(R.RiverTryPlan(false, false, false, nil), "move", "no distance: step onto it")
-	T.eq(R.RiverTryPlan(false, false, true, 0), "order", "let go and still up: the order once, then the old release")
-	T.eq(R.RiverTryPlan(true, true, false, 0), "yield", "the order failed for this type before: let go instead")
-	T.eq(R.RiverTryPlan(true, true, true, 0), "none", "stopped and already let go: the old stay")
+	T.eq(R.RiverTryPlan(true, false, false), "order", "top water rune: the order")
+	T.eq(R.RiverTryPlan(false, false, false), "yield", "horn bounty: let go at once")
+	T.eq(R.RiverTryPlan(false, false, true), "order", "let go and still up: the order once, then the old release")
+	T.eq(R.RiverTryPlan(true, true, false), "yield", "the order failed for this type before: let go instead")
+	T.eq(R.RiverTryPlan(true, true, true), "none", "stopped and already let go: the old stay")
 	-- The no-order release is short; the old one keeps RELEASE_FOR.
 	local yield = { t0 = 0.2, duration = R.YIELD_FOR }
-	T.eq(R.ReleaseStep(yield, 0.6, true), "hold", "0.4s in")
-	local step, taken = R.ReleaseStep(yield, 0.2 + R.YIELD_FOR, true)
+	T.eq(R.ReleaseStep(yield, 0.6, true, 0), "hold", "0.4s in")
+	local step, taken = R.ReleaseStep(yield, 0.2 + R.YIELD_FOR, true, 0)
 	T.eq(step, "end", "ends after YIELD_FOR")
 	T.eq(taken, false, "not taken")
 	T.ok(R.YIELD_FOR < R.RELEASE_FOR, "shorter than the release after a failed order")
+	-- Games 081-084: releases that began 167-287 off the spot never got the rune. A release off the spot steps back
+	-- onto it first; its let-go clock starts there.
+	local tusk = { t0 = 1.8, step = true }
+	T.eq(R.ReleaseStep(tusk, 1.8, true, 196), "step", "084 Tusk at 196: walk back onto the spot")
+	T.eq(R.ReleaseStep(tusk, 2.3, true, 60), "hold", "on the spot: let go")
+	T.near(tusk.t0, 2.3, 0.001, "the let-go clock starts on the spot")
+	T.near(tusk.stepped, 0.5, 0.001, "stepped= the walk back")
+	T.eq(R.ReleaseStep(tusk, 2.3 + R.RELEASE_FOR - 0.1, true, 0), "hold", "the full release from there")
+	local blocked = { t0 = 0, step = true }
+	T.eq(R.ReleaseStep(blocked, 0, true, 250), "step", "can't get closer yet")
+	T.eq(R.ReleaseStep(blocked, R.RELEASE_STEP_FOR, true, 250), "hold", "after RELEASE_STEP_FOR it lets go anyway")
+	local gone = { t0 = 0, step = true }
+	local gstep, gtaken = R.ReleaseStep(gone, 0.5, false, 250)
+	T.eq(gstep, "end", "taken while stepping back")
+	T.eq(gtaken, true, "taken=yes")
+	T.ok(R.RELEASE_STEP_DESIRE < 0.90, "the step stays under Valve's item mode (0.90)")
 end)

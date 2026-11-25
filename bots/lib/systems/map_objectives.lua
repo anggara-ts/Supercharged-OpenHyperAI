@@ -1225,13 +1225,16 @@ function MapObjectives.ConsiderObjectiveDesireRaw(bot)
 			local friends = bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}
 			local window = spawnOpen and sinceLast >= 0 and sinceLast <= 45
 			-- Paused or resumed for retreat this spawn: the claim holds up to LOTUS_RESUME_DIST (retreat walks it off).
+			-- A pause from an earlier spawn is gone (game 083: Winter Wyvern resumed at 182 and read gone at 188; her
+			-- state would still have read resumed at the next spawn).
+			local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
+			bot._lotusYield = RuneRules.LotusYieldFor(bot._lotusYield, spawnMark)
 			local paused = bot._lotusYield ~= nil
 			local beside = window and (dist <= 800 or paused and dist <= RuneRules.LOTUS_RESUME_DIST)
 			-- Hit at the pool (#32, game 074 3:00-3:19): the hold pauses while retreat asks for it (RuneRules.LotusYieldStep),
 			-- the same as a hit anywhere else, and comes back when retreat drops below the line while the spawn is still
 			-- open. Until then a hit doesn't end the hold: the bot fights from the pool area (ThinkObjective).
 			local yieldNow = false
-			local spawnMark = math.floor(math.max(0, DotaTime()) / lInterval) * lInterval
 			if (beside or paused) and bot._lotusSkipMark ~= spawnMark then
 				local stand = bot._lotusStand
 				if stand ~= nil and stand.mark ~= spawnMark then
@@ -1583,6 +1586,24 @@ function MapObjectives.ThinkObjective(bot, loc, kind)
 		if bot._wisdomStandSince == nil or standFrom ~= bot._wisdomStandSince then
 			-- First think on the shrine, or the mark passed while standing: the clock and the XP baseline start
 			-- now, so creep XP from before the mark doesn't read as the shrine's.
+			-- [SHy-WISDOM] early xp=+N: what a stand gained before the mark (games 083-085 printed 203-679 there as
+			-- `taken ... late=419`: the previous mark's XP left at the shrine, or creep XP; creeps= tells them apart).
+			local before = bot._wisdomXpAtStand
+			if bot._wisdomStandSince ~= nil and before ~= nil then
+				local earlyGain, earlyLevel = RuneRules.XpGain(before.needed, before.level, xp.needed, xp.level)
+				pcall(
+					print,
+					string.format(
+						"[SHy-WISDOM] t=%.0f %s early xp=+%d lvlup=%s stood=%.1f creeps=%d",
+						now,
+						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+						earlyGain,
+						earlyLevel and "yes" or "no",
+						now - bot._wisdomStandSince,
+						#(bot:GetNearbyLaneCreeps(1200, true) or {}) + #(bot:GetNearbyNeutralCreeps(1200) or {})
+					)
+				)
+			end
 			bot._wisdomStandSince = standFrom
 			bot._wisdomXpAtStand = xp
 		else
@@ -1731,6 +1752,9 @@ function MapObjectives.LotusStandThink(bot, loc, dist)
 		return result == "gone" or result == "cap"
 	end
 	stand.logged = result
+	-- The stand has its result: a pause for retreat in this spawn is over (a resumed hold is not dropped as "window"
+	-- once the lotus is taken: the take step leaves a second after the last lotus).
+	bot._lotusYield = nil
 	if not IsMeepoCloneBot(bot) then
 		pcall(
 			print,

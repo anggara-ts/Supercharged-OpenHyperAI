@@ -885,16 +885,8 @@ function RuneMode.RiverPickupTry(id, spawn)
 	local stopped = bot._riverPickupNo ~= nil and bot._riverPickupNo[typeKey] == true
 	local orderWorks = RuneRules.RiverOrderWorks(id, okT and runeType or nil, RUNE_POWERUP_1, RUNE_WATER)
 	local spot = GetRuneSpawnLocation(id)
-	local plan = RuneRules.RiverTryPlan(
-		orderWorks,
-		stopped,
-		bot._riverYielded[key] == true,
-		GetUnitToLocationDistance(bot, spot)
-	)
-	if plan == "move" then
-		bot:Action_MoveToLocation(spot)
-		return false
-	elseif plan == "yield" then
+	local plan = RuneRules.RiverTryPlan(orderWorks, stopped, bot._riverYielded[key] == true)
+	if plan == "yield" then
 		bot._riverYielded[key] = true
 		RuneMode.StartRiverYield(id, spawn, okT and runeType or nil, spot)
 		return true
@@ -922,7 +914,8 @@ function RuneMode.Released(id, spawn)
 	return done ~= nil and done[spawn .. ":" .. id] == true
 end
 -- A release (RuneRules.ReleaseStep) runs from GetDesire, so the timer and the result line run while another mode
--- (the item mode, laning) has the bot: 0 while it lasts, nil once it ended. [SHy-RUNE] river-release-end taken=.
+-- (the item mode, laning) has the bot: 0 while it lasts (RELEASE_STEP_DESIRE while it walks back onto the spot first),
+-- nil once it ended. [SHy-RUNE] river-release-end taken= stepped=.
 function RuneMode.RiverReleaseDesire()
 	local release = bot._riverRelease
 	if release == nil then
@@ -932,7 +925,16 @@ function RuneMode.RiverReleaseDesire()
 		release.itemMode = true
 	end
 	local now = DotaTime()
-	local step, taken = RuneRules.ReleaseStep(release, now, RawGetRuneStatus(release.id) == RUNE_STATUS_AVAILABLE)
+	local step, taken = RuneRules.ReleaseStep(
+		release,
+		now,
+		RawGetRuneStatus(release.id) == RUNE_STATUS_AVAILABLE,
+		GetUnitToLocationDistance(bot, release.loc)
+	)
+	if step == "step" and bot:IsAlive() then
+		-- Back onto the spot first (Think: river-step); a release from off the spot never got the rune.
+		return RuneRules.RELEASE_STEP_DESIRE
+	end
 	if step == "hold" and bot:IsAlive() then
 		return BOT_MODE_DESIRE_NONE
 	end
@@ -946,13 +948,14 @@ function RuneMode.RiverReleaseDesire()
 	pcall(
 		print,
 		string.format(
-			"[SHy-RUNE] t=%.1f %s river-release-end why=%s spot=%d taken=%s held=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
+			"[SHy-RUNE] t=%.1f %s river-release-end why=%s spot=%d taken=%s held=%.1f stepped=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
 			now,
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			release.why or "pickup-failed",
 			release.id,
 			taken and "yes" or "no",
 			now - release.t0,
+			release.stepped or (release.step and now - (release.stepAt or now)) or 0,
 			release.itemMode and "yes" or "no",
 			bot:GetGold() - release.gold,
 			GetUnitToLocationDistance(bot, release.loc),
@@ -989,6 +992,7 @@ function RuneMode.StartRiverYield(id, spawn, runeType, spot)
 		itemMode = false,
 		why = "no-order",
 		duration = RuneRules.YIELD_FOR,
+		step = GetUnitToLocationDistance(bot, spot) > RuneRules.RIVER_YIELD_RADIUS,
 	}
 	pcall(
 		print,
@@ -1055,6 +1059,8 @@ function RuneMode.RiverPickupCheck()
 			t0 = DotaTime(),
 			gold = bot:GetGold(),
 			itemMode = false,
+			-- The order may have walked the bot off the spot (5 of 16 in games 081-085): back onto it first.
+			step = spotDist > RuneRules.RIVER_YIELD_RADIUS,
 		}
 		pcall(
 			print,
@@ -1369,7 +1375,7 @@ function GetDesire()
 		if not okR then
 			bot._riverRelease = nil
 		elseif releaseDesire ~= nil then
-			runeWhy = "river-release"
+			runeWhy = releaseDesire > 0 and "river-step" or "river-release"
 			RuneMode.RuneDbg(releaseDesire)
 			return releaseDesire
 		end
@@ -1992,6 +1998,13 @@ end
 local nextPreHoldMoveTime = -math.huge
 function Think()
 	bot._runeDo = "fall"
+	-- A release stepping back onto its river spot (RuneMode.RiverReleaseDesire).
+	local release = bot._riverRelease
+	if release ~= nil and release.step then
+		bot:Action_MoveToLocation(release.loc)
+		doing("river-step")
+		return
+	end
 	if bot._waterWalk ~= nil then
 		if GetUnitToLocationDistance(bot, bot._waterWalk.loc) > 200 then
 			bot:Action_MoveToLocation(bot._waterWalk.loc)

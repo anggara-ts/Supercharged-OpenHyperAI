@@ -145,11 +145,28 @@ function RuneRules.ReleaseStarts(worked, dist, up)
 	return worked == "no" and up == true and (dist or math.huge) <= RuneRules.RELEASE_RADIUS
 end
 
--- One step of a release (release = { t0 = start, duration = seconds, nil for RELEASE_FOR }): "hold" (keep the desire
--- at 0) or "end" plus taken (true when the rune is gone).
-function RuneRules.ReleaseStep(release, now, up)
+-- One step of a release (release = { t0 = start, duration = seconds or nil for RELEASE_FOR, step = true while the bot
+-- still has to get back onto the spot, stepAt = when that began }): "step" (walk back onto the spot first, at
+-- RELEASE_STEP_DESIRE), "hold" (keep the desire at 0) or "end" plus taken (true when the rune is gone). dist: bot to
+-- the spot. The let-go clock (t0) starts once the bot is within RIVER_YIELD_RADIUS, or after RELEASE_STEP_FOR seconds
+-- of trying: games 081-084, every release that began 167-287 off the spot ended taken=no (5 of 5), every one within 72
+-- but one got the rune.
+RuneRules.RIVER_YIELD_RADIUS = 100
+RuneRules.RELEASE_STEP_FOR = 2
+-- Above laning / ward / farm (0.27-0.60 at the horn in games 081-085), under Valve's item mode (0.90) and fights.
+RuneRules.RELEASE_STEP_DESIRE = 0.65
+function RuneRules.ReleaseStep(release, now, up, dist)
 	if not up then
 		return "end", true
+	end
+	if release.step then
+		release.stepAt = release.stepAt or now
+		if (dist or math.huge) > RuneRules.RIVER_YIELD_RADIUS and now - release.stepAt < RuneRules.RELEASE_STEP_FOR then
+			return "step"
+		end
+		release.step = false
+		release.stepped = now - release.stepAt
+		release.t0 = now
 	end
 	if now - release.t0 >= (release.duration or RuneRules.RELEASE_FOR) then
 		return "end", false
@@ -161,31 +178,28 @@ end
 -- the top spot (RUNE_POWERUP_1): worked=yes 9, unsure 2, no 0. Never anything at the bottom spot (RUNE_POWERUP_2,
 -- id=1: worked=no 14 of 14, bounties and water runes), and never a river bounty (type 5) or an unknown type -1 at the
 -- top spot (worked=no 12, one unsure with others on the spot). There the order only cost time: the bot stood 1.5s on
--- the rune held above the item mode, and in 5 of the 16 releases in games 081-085 it had walked 167-287 off the spot
--- while the order ran (084 Tusk: `[SHy-STUCK] t=1 ... action=2 moved=63`); none of those 5 got the rune
+-- the rune held above the item mode, and in 5 of the 16 failed orders in games 081-085 it had walked 167-287 off the
+-- spot while the order ran (084 Tusk: `[SHy-STUCK] t=1 ... action=2 moved=63`); none of those 5 got the rune
 -- (`river-release-end taken=no`). Released on the spot (dist 0-72), the item mode took it 0.2-0.4s later, 10 of 11.
 -- topId / waterType: RUNE_POWERUP_1 / RUNE_WATER (nil when the API has no RUNE_WATER).
 function RuneRules.RiverOrderWorks(id, runeType, topId, waterType)
 	return id == topId and waterType ~= nil and runeType == waterType
 end
--- The no-order release (`river-release why=no-order`): from within RIVER_YIELD_RADIUS of the spot, for YIELD_FOR
--- seconds. Every take after a release on the spot came within 0.4s.
-RuneRules.RIVER_YIELD_RADIUS = 100
+-- The no-order release (`river-release why=no-order`) lasts YIELD_FOR seconds once on the spot. Every take after a
+-- release on the spot came within 0.4s.
 RuneRules.YIELD_FOR = 1
 -- What the river pick-up step does on a spot with the rune up: "order" (Action_PickUpRune, released if it fails),
--- "move" (step onto the spot first), "yield" (no order: let go at once for Valve's item mode) or "none".
+-- "yield" (no order: let go at once for Valve's item mode; the release steps onto the spot first) or "none".
 -- orderWorks: RiverOrderWorks; stopped: an order for this rune type already failed this game; yielded: this bot already
 -- let go of this spawn's rune without an order. Every quick item-mode take in games 081-085 came right after an order,
 -- so letting go without one is not proven to bring the item mode (game 080: Io stood at dist 0 in laning, 0.27, and it
--- didn't come). When the no-order release ends with the rune still up, the order runs once (then the old release).
-function RuneRules.RiverTryPlan(orderWorks, stopped, yielded, dist)
+-- didn't come). When the no-order release ends with the rune still up, the order runs once (then the old release, which
+-- steps back onto the spot if the order walked the bot off it).
+function RuneRules.RiverTryPlan(orderWorks, stopped, yielded)
 	if orderWorks and not stopped then
 		return "order"
 	end
 	if not yielded then
-		if (dist or math.huge) > RuneRules.RIVER_YIELD_RADIUS then
-			return "move"
-		end
 		return "yield"
 	end
 	if stopped then
@@ -469,6 +483,14 @@ function RuneRules.LotusHoldYields(retreatDesire)
 end
 -- A yielding bot pushed this far by retreat can still resume the hold (beside is 800 otherwise).
 RuneRules.LOTUS_RESUME_DIST = 1600
+-- The pause state for the spawn at `mark`: one from an earlier spawn is dropped (nil). map_objectives also drops it when
+-- the stand gets its result (taken / gone / cap), so a resumed hold isn't ended as "window" after the lotus is taken.
+function RuneRules.LotusYieldFor(state, mark)
+	if state ~= nil and state.mark ~= mark then
+		return nil
+	end
+	return state
+end
 -- The yield is a pause, not the end (coordinator, 2026-11-23): the hold returns 0 while retreat asks for it, and comes
 -- back when retreat drops below the line while the spawn is still open (in its window, no taken / gone / cap). The spawn
 -- is dropped only when it closes (window or cap) during a yield. state: { yielding, resumed } per bot and spawn. open:
