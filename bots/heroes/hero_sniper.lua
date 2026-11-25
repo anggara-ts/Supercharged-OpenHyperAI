@@ -152,13 +152,16 @@ local concussiveGrenadeAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[4
 local assassinateAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "sniper")
 local shrapnelDesire, shrapnelLocation
 local takeAimDesire
-local assassinateDesire, assassinateTarget
+local assassinateDesire, assassinateTarget, assassinateWhy, assassinateVia
+-- The last Assassinate fired by the kill rule (#48), watched until it should have landed: one assassinate-result line.
+local assassinateShot = nil
 local concussiveGrenadeDesire, concussiveGrenadeLocation
 local retainMana, botLevel, nearbyEnemies
 local lastShrapnelTime = 0
 local lastShrapnelLocation = Vector(0, 0)
 local botTarget
 function X.SkillsComplement()
+	X.WatchAssassinate()
 	X.ConsiderTarget()
 	Fu.ConsiderForMkbDisassembleMask(bot)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
@@ -170,10 +173,13 @@ function X.SkillsComplement()
 	botLevel = context.level
 	botTarget = context.target
 	nearbyEnemies = context.enemies
-	assassinateDesire, assassinateTarget = X.ConsiderR()
+	assassinateDesire, assassinateTarget, assassinateWhy, assassinateVia = X.ConsiderR()
 	if assassinateDesire > 0 then
 		Fu.SetQueuePtToINT(bot, true)
 		bot:ActionQueue_UseAbilityOnEntity(assassinateAbility, assassinateTarget)
+		if assassinateWhy == "kill" then
+			X.TrackAssassinate(assassinateTarget, assassinateVia)
+		end
 		return
 	end
 	takeAimDesire = X.ConsiderE()
@@ -414,9 +420,14 @@ function X.AssassinateDamage(enemyHero, bonusDamage)
 end
 -- The kill check counted only the bonus damage. Now the attack counts too, at 90% (damage spread), except on
 -- targets whose defence only the magic check models (Mana Shield, Refraction, Bristleback, Ghost Ship rum).
+-- Returns "magic" (the bonus alone kills), "attack" (the kill needs the shot's attack part) or nil.
+-- Timing: both parts land together when the shot hits (datafeed hero 35: the shot "deals Sniper's attack damage
+-- ... and bonus damage", attack_factor_tooltip 100), hitDelay later (AbilityCastPoint 2.0 plus the flight at
+-- projectile_speed 2500); the target's regen over hitDelay is added to its HP. No right-click Sniper would make
+-- before the shot is counted (the rule only fires outside his attack range).
 function X.AssassinateKills(enemyHero, bonusDamage, hitDelay)
 	if Fu.WillMagicKillTarget(bot, enemyHero, bonusDamage, hitDelay) then
-		return true
+		return "magic"
 	end
 	if
 		enemyHero:HasModifier("modifier_medusa_mana_shield")
@@ -424,15 +435,19 @@ function X.AssassinateKills(enemyHero, bonusDamage, hitDelay)
 		or enemyHero:HasModifier("modifier_kunkka_ghost_ship_damage_delay")
 		or enemyHero:GetUnitName() == "npc_dota_hero_bristleback"
 	then
-		return false
+		return nil
 	end
 	local bonusTaken, attackTaken = X.AssassinateDamage(enemyHero, bonusDamage)
 	local healthAtHit = enemyHero:GetHealth() + enemyHero:GetHealthRegen() * hitDelay
-	return bonusTaken + attackTaken * 0.9 >= healthAtHit
+	if bonusTaken + attackTaken * 0.9 >= healthAtHit then
+		return "attack"
+	end
+	return nil
 end
 -- [SHy-SNIPER] assassinate-kill: a shot fired because it should kill, at most once per 3s. bonus= and attack= are
 -- the two parts of the shot after the target's resistances; hp above bonus means the kill counts on the attack.
-function X.LogAssassinateKill(enemyHero, bonusDamage)
+-- via= magic (the bonus alone kills) or attack (the kill needs the attack part); delay= the expected time to the hit.
+function X.LogAssassinateKill(enemyHero, bonusDamage, via, hitDelay)
 	if DotaTime() < (bot._assassinateLogAt or -999) then
 		return
 	end
@@ -441,13 +456,137 @@ function X.LogAssassinateKill(enemyHero, bonusDamage)
 	pcall(
 		print,
 		string.format(
-			"[SHy-SNIPER] t=%.0f assassinate-kill target=%s hp=%.0f bonus=%.0f attack=%.0f dist=%.0f",
+			"[SHy-SNIPER] t=%.0f assassinate-kill target=%s hp=%.0f bonus=%.0f attack=%.0f dist=%.0f via=%s delay=%.2f",
 			DotaTime(),
 			(string.gsub(enemyHero:GetUnitName(), "npc_dota_hero_", "")),
 			enemyHero:GetHealth(),
 			bonusTaken,
 			attackTaken,
-			GetUnitToUnitDistance(bot, enemyHero)
+			GetUnitToUnitDistance(bot, enemyHero),
+			tostring(via),
+			hitDelay or -1
+		)
+	)
+end
+-- [SHy-SNIPER] assassinate-result (#48): one line per kill shot, 3s after it should have hit (game 085 could not
+-- tell whether a kill that needed the attack part worked: one target lived with a few HP and died to an ally, one
+-- died before the shot could land).
+--   cast=yes|no   Assassinate went on cooldown (the shot left); no = the order never became a cast
+--   died=yes|no|fog  the target died by the expected hit + 3s; fog = not seen at the end, unknown
+--   when=before|hit|later|-  the death came before the expected hit (someone else), within 0.5s after it (the
+--                 shot), or later
+--   hp= the target's HP when last seen; hpOrder= at the order; hpBefore= / hpAfter= the last HP seen before the
+--   expected hit / the first after it; immune=yes when the target was magic immune around the hit; end=checked |
+--   not-cast | replaced (another kill shot was ordered) | gap (no think for 1.5s: Sniper died or was skipped)
+function X.TrackAssassinate(target, via)
+	if not Fu.IsValidHero(target) then
+		return
+	end
+	if assassinateShot ~= nil then
+		if assassinateShot.target == target and assassinateShot.castAt == nil then
+			return
+		end
+		X.FinishAssassinate("replaced")
+	end
+	local castPoint = assassinateAbility:GetCastPoint()
+	local speed = assassinateAbility:GetSpecialValueInt("projectile_speed")
+	assassinateShot = {
+		target = target,
+		name = (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
+		via = via or "-",
+		orderAt = DotaTime(),
+		-- datafeed hero 35: AbilityCastPoint 2, projectile_speed 2500 (fallbacks when the API reads 0)
+		castPoint = castPoint > 0 and castPoint or 2,
+		speed = speed > 0 and speed or 2500,
+		dist = GetUnitToUnitDistance(bot, target),
+		hpOrder = target:GetHealth(),
+		hpLast = target:GetHealth(),
+		seenAt = DotaTime(),
+		lastWatchAt = DotaTime(),
+	}
+end
+function X.WatchAssassinate()
+	local shot = assassinateShot
+	if shot == nil then
+		return
+	end
+	local now = DotaTime()
+	-- No think for a while (Sniper died, or his think was skipped): what happened in between is unknown.
+	if now - shot.lastWatchAt > 1.5 then
+		X.FinishAssassinate("gap")
+		return
+	end
+	shot.lastWatchAt = now
+	local target = shot.target
+	local valid = target ~= nil and not target:IsNull()
+	if shot.castAt == nil and assassinateAbility:GetCooldownTimeRemaining() > 0 then
+		-- The cooldown starts when the cast point ends and the shot leaves; it lands after the flight.
+		shot.castAt = now
+		local dist = (valid and target:CanBeSeen()) and GetUnitToUnitDistance(bot, target) or shot.dist
+		shot.hitAt = now + dist / shot.speed
+	end
+	if valid and not target:IsAlive() then
+		shot.diedAt = shot.diedAt or now
+	elseif valid and target:CanBeSeen() then
+		local hp = target:GetHealth()
+		shot.hpLast, shot.seenAt = hp, now
+		if shot.hitAt == nil or now < shot.hitAt then
+			shot.hpBefore = hp
+		elseif shot.hpAfter == nil then
+			shot.hpAfter = hp
+		end
+		if target:IsMagicImmune() and (shot.hitAt == nil or now <= shot.hitAt + 0.2) then
+			shot.immune = true
+		end
+	end
+	if shot.hitAt ~= nil then
+		if now >= shot.hitAt + 3 then
+			X.FinishAssassinate("checked")
+		end
+	elseif now > shot.orderAt + shot.castPoint + 1.5 then
+		X.FinishAssassinate("not-cast")
+	end
+end
+-- Pure: did the target die by the expected hit + 3s, and when. diedAt / seenAt nil-able game times.
+function X.AssassinateDeath(diedAt, hitAt, seenAt, now)
+	if diedAt ~= nil and diedAt <= hitAt + 3 then
+		if diedAt < hitAt - 0.1 then
+			return "yes", "before"
+		elseif diedAt <= hitAt + 0.5 then
+			return "yes", "hit"
+		end
+		return "yes", "later"
+	end
+	if seenAt == nil or now - seenAt > 0.5 then
+		return "fog", "-"
+	end
+	return "no", "-"
+end
+function X.FinishAssassinate(ending)
+	local shot = assassinateShot
+	assassinateShot = nil
+	if shot == nil then
+		return
+	end
+	local now = DotaTime()
+	local hitAt = shot.hitAt or (shot.orderAt + shot.castPoint + shot.dist / shot.speed)
+	local died, when = X.AssassinateDeath(shot.diedAt, hitAt, shot.seenAt, now)
+	pcall(
+		print,
+		string.format(
+			"[SHy-SNIPER] t=%.0f assassinate-result target=%s via=%s cast=%s died=%s within=3s when=%s hp=%.0f hpOrder=%.0f hpBefore=%s hpAfter=%s immune=%s end=%s",
+			now,
+			shot.name,
+			shot.via,
+			shot.castAt ~= nil and "yes" or "no",
+			died,
+			when,
+			died == "yes" and 0 or shot.hpLast,
+			shot.hpOrder,
+			shot.hpBefore and string.format("%.0f", shot.hpBefore) or "-",
+			shot.hpAfter and string.format("%.0f", shot.hpAfter) or "-",
+			shot.immune and "yes" or "no",
+			ending
 		)
 	)
 end
@@ -484,13 +623,15 @@ function X.ConsiderR()
 			and Fu.CanCastOnNonMagicImmune(enemyHero)
 			and Fu.IsInRange(bot, enemyHero, castRange)
 			and not Fu.IsInRange(bot, enemyHero, attackRange)
-			and X.AssassinateKills(enemyHero, damage, hitDelay)
 			and not enemyHero:HasModifier("modifier_abaddon_borrowed_time")
 			and not enemyHero:HasModifier("modifier_dazzle_shallow_grave")
 			and not enemyHero:HasModifier("modifier_oracle_false_promise_timer")
 		then
-			X.LogAssassinateKill(enemyHero, damage)
-			return BOT_ACTION_DESIRE_HIGH, enemyHero
+			local via = X.AssassinateKills(enemyHero, damage, hitDelay)
+			if via ~= nil then
+				X.LogAssassinateKill(enemyHero, damage, via, hitDelay)
+				return BOT_ACTION_DESIRE_HIGH, enemyHero, "kill", via
+			end
 		end
 	end
 	if Fu.IsValid(weakestEnemy) then
