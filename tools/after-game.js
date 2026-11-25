@@ -12,6 +12,7 @@
 // 4. Script errors grouped by message, log spam (top [SHy-*] tags by peak lines per second), deaths and the
 //    scoreboard from the summary.
 // 4b. Mode flip-flops: tools/flip-report.js's summary of [SHy-FLIP], [SHy-ROAMSTAT] and [SHy-HUNT] (#165).
+// 4c. Ping clicks: the server's click lines per burst against the pings the bot API saw (#222).
 // 5. Maintainer comments on every tracked PR posted since the last review (`lastReviewAt` in
 //    local/verify/tracker.json; set at the end unless --no-mark).
 // 6. Writes local/match-logs/game-NNN_review.md (git-ignored) and prints its path. An existing review file is
@@ -339,6 +340,73 @@ function commentsSection(tracker) {
 }
 
 // --- main ------------------------------------------------------------------------------------------------
+// Ping clicks vs pings the bot API saw (#222, game 078: the maintainer spammed pings, the bots saw one per ~1.5s).
+// The server prints `PR:NotePlayerCommsTime <slot>:[U:1:<account id>] communicated at <time>` for each ping click (and
+// chat line); the scripts print `[SHy-PING] x y z normal= t=` once per new GetMostRecentPing (the trace in
+// ability_item_usage_generic.lua). A burst is clicks of one player slot at most 1s apart; its pings are the trace
+// lines from the burst's first click to 1s after its last (wall clock). The account id is never copied.
+const COMMS = /PR:NotePlayerCommsTime (\d+):\S+ communicated at (\d+(?:\.\d+)?)/;
+const PING_TRACE = /\[SHy-PING\] -?\d+ -?\d+ -?\d+ normal=/;
+function wallSeconds(wall) {
+	const m = wall && wall.match(/(\d+):(\d+):(\d+)$/);
+	return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+}
+function pingsSection(lines) {
+	const bursts = [];
+	const open = new Map();
+	let clock = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (line.includes("[VScript]")) {
+			const t = body(line).match(/\bt=(-?\d+(?:\.\d+)?)/);
+			if (t) clock = Number(t[1]);
+		}
+		const m = line.match(COMMS);
+		if (!m) continue;
+		const slot = m[1];
+		const at = Number(m[2]);
+		const b = open.get(slot);
+		if (b && at - b.last <= 1.0) {
+			b.last = at;
+			b.clicks++;
+			b.lastIndex = i;
+			b.endWall = wallSeconds(wallTime(line));
+		} else {
+			const nb = { slot, first: at, last: at, clicks: 1, firstIndex: i, lastIndex: i, clock, wall: wallTime(line), endWall: wallSeconds(wallTime(line)) };
+			bursts.push(nb);
+			open.set(slot, nb);
+		}
+	}
+	const shown = bursts.filter((b) => b.clicks >= 4);
+	if (!bursts.length) return "No ping clicks in the server log (`PR:NotePlayerCommsTime` lines).";
+	for (const b of shown) {
+		let pings = 0;
+		for (let i = b.firstIndex; i < lines.length; i++) {
+			const w = wallSeconds(wallTime(lines[i]));
+			if (i > b.lastIndex && w != null && b.endWall != null && w > b.endWall + 1) break;
+			if (PING_TRACE.test(lines[i])) pings++;
+		}
+		b.pings = pings;
+	}
+	const clicks = shown.reduce((a, b) => a + b.clicks, 0);
+	const pings = shown.reduce((a, b) => a + b.pings, 0);
+	const head = [
+		`${bursts.length} click burst(s), ${shown.length} with 4+ clicks: ${clicks} clicks, ${pings} pings seen by the bot API` +
+			(pings ? ` (${(clicks / pings).toFixed(1)} clicks per ping seen)` : "") +
+			". A low ratio means the bots see most clicks; a high one that the game passes only some of them on.",
+	];
+	if (!shown.length) return head.join("\n");
+	return head
+		.concat(["", "| game / wall | slot | clicks | span s | pings seen | s per ping |", "|---|---:|---:|---:|---:|---:|"])
+		.concat(
+			shown.map((b) => {
+				const span = b.last - b.first;
+				return `| ${fmtClock(b.clock)} / ${b.wall || "?"} | ${b.slot} | ${b.clicks} | ${span.toFixed(1)} | ${b.pings} | ${b.pings ? (span / b.pings).toFixed(1) : "-"} |`;
+			})
+		)
+		.join("\n");
+}
+
 function main() {
 	const o = parseArgs(process.argv.slice(2));
 	const startedAt = new Date().toISOString();
@@ -396,6 +464,10 @@ function main() {
 		"",
 		flipsSection(lines),
 		"",
+		"## Ping clicks",
+		"",
+		pingsSection(lines),
+		"",
 		"## Maintainer comments",
 		"",
 		commentsSection(tracker),
@@ -429,4 +501,4 @@ if (require.main === module) {
 		process.exit(1);
 	}
 }
-module.exports = { buildSection, errorsSection, spamSection, deathsSection, flipsSection };
+module.exports = { buildSection, errorsSection, spamSection, deathsSection, flipsSection, pingsSection };
