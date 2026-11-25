@@ -1511,7 +1511,7 @@ local function AnnounceObjective(bot, kind)
 			msg = lines
 		end
 	end
-	-- Team chat, only with `!debug`.
+	-- Team chat, only with `!chatty`.
 	require(GetScriptDirectory() .. "/lib/systems/chat_rules").SayDecision(bot, msg, key)
 end
 
