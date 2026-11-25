@@ -1510,8 +1510,9 @@ end
 -- middle of the biggest group of his mines (3 or more within the aura) within 1600 of him, kept until planted or 20s.
 -- Datafeed hero_id=105 (2026-11-25): techies_minefield_sign ability_is_granted_by_scepter=true, max_level 1, cast range
 -- 10, cast point 1.25, cooldown 60, lifetime 240; only one sign at a time, and it is destroyed after its 10s minefield.
--- Game 084: no spot line in 27 minutes with Scepter, while the post-blast sign (same hidden/castable checks) was cast 7
--- times, so the ability was there. `minefield-sign-skip` says which check stops this rule.
+-- Game 084: no spot line in 27 minutes with Scepter, while the post-blast sign (same hidden/castable checks) passed 7
+-- times (ordered; two sign units in the console), so the ability was there. `minefield-sign-skip` says which
+-- check stops this rule.
 function X.ConsiderMineFieldSign()
 	-- Minefield Sign stays hidden without Scepter but still reports castable. Ordering it
 	-- then is refused by the server and freezes Techies in place every think.
@@ -1663,7 +1664,7 @@ function X.MineTriangle(center, radius)
 	return spots
 end
 -- [SHy-TECHIES] minefield-sign-skip: why the standing Minefield Sign rule picked no spot. Only with Scepter, or when
--- the sign is not hidden without one (an API surprise). A new reason prints at once (5s apart at least), the same
+-- the sign is not hidden without one (an API surprise). A new reason prints at once (15s apart at least), the same
 -- reason again after 30s.
 function X.LogSignSkip(why, extra)
 	local scepter = bot:HasScepter()
@@ -1673,7 +1674,7 @@ function X.LogSignSkip(why, extra)
 	end
 	local now = DotaTime()
 	local lastAt = bot._signSkipLogAt or -999
-	if now < lastAt + 5 or (why == bot._signSkipWhy and now < lastAt + 30) then
+	if now < lastAt + 15 or (why == bot._signSkipWhy and now < lastAt + 30) then
 		return
 	end
 	bot._signSkipLogAt, bot._signSkipWhy = now, why
