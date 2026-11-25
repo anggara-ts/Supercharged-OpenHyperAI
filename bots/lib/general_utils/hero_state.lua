@@ -282,11 +282,25 @@ local function installHeroState(Fu)
 		end
 		return false
 	end
+	-- Chain disables (#228, bots/lib/systems/chain_rules.lua): while this bot holds a stun for an enemy hero, that
+	-- hero counts as free once his stun is about to end, so the hero file orders the next stun in time. Loaded on
+	-- first use; with no hold anywhere it costs one compare.
+	local chainRules = nil
 	function Fu.IsDisabled(unit)
 		if not Fu.IsUnitValid(unit) then
 			return false
 		end
 		if unit:GetTeam() ~= GetTeam() and unit:CanBeSeen() then
+			if chainRules == nil then
+				local ok, chain = pcall(require, GetScriptDirectory() .. "/lib/systems/chain_rules")
+				chainRules = ok and chain or false
+			end
+			if chainRules and chainRules.live > 0 then
+				local ok, free = pcall(chainRules.ReleaseEarly, GetBot(), unit)
+				if ok and free then
+					return false
+				end
+			end
 			return unit:IsRooted() or unit:IsStunned() or unit:IsHexed() or unit:IsNightmared() or Fu.IsTaunted(unit)
 		else
 			if unit:IsStunned() and Fu.GetRemainStunTime(unit) > 0.8 then

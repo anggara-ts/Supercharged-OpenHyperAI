@@ -1,0 +1,295 @@
+-- bots/lib/systems/chain_rules.lua (#228, [SHy-CHAIN]): a stun or hex ordered on an enemy hero whose running stun
+-- outlasts the new one's landing is held until the time left is down to what it needs; a disable that goes through
+-- reserves the hero for the team; Fu.IsDisabled calls the hero free for the holding bot once his stun is about to end.
+local T = ...
+local Stub = T.stub
+
+local function load()
+	local bot = Stub.reset({ hero = "npc_dota_hero_sven", time = 600 })
+	local Chain = require(GetScriptDirectory() .. "/lib/systems/chain_rules")
+	Chain.Reset()
+	return bot, Chain
+end
+
+local function lines(text)
+	local found = {}
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, text, 1, true) then
+			found[#found + 1] = line
+		end
+	end
+	return found
+end
+
+-- A plain fake unit: only what chain_rules asks.
+local function fakeHero(props)
+	local unit = {
+		name = props.name,
+		team = props.team,
+		loc = props.loc,
+		stunned = props.stunned or false,
+		hexed = props.hexed or false,
+		channeling = props.channeling or false,
+		mods = props.mods or {},
+		hp = props.hp or 1000,
+		maxHp = props.maxHp or 1000,
+		mode = props.mode or BOT_MODE_ATTACK,
+		attacks = {},
+	}
+	unit._loc = props.loc
+	function unit:GetUnitName()
+		return self.name
+	end
+	function unit:GetTeam()
+		return self.team
+	end
+	function unit:IsNull()
+		return false
+	end
+	function unit:IsHero()
+		return true
+	end
+	function unit:IsIllusion()
+		return false
+	end
+	function unit:IsAlive()
+		return true
+	end
+	function unit:IsStunned()
+		return self.stunned
+	end
+	function unit:IsHexed()
+		return self.hexed
+	end
+	function unit:IsChanneling()
+		return self.channeling
+	end
+	function unit:NumModifiers()
+		return #self.mods
+	end
+	function unit:GetModifierName(i)
+		local mod = self.mods[i + 1]
+		return mod and mod[1] or ""
+	end
+	function unit:GetModifierRemainingDuration(i)
+		local mod = self.mods[i + 1]
+		return mod and mod[2] or -1
+	end
+	function unit:GetHealth()
+		return self.hp
+	end
+	function unit:GetMaxHealth()
+		return self.maxHp
+	end
+	function unit:GetActiveMode()
+		return self.mode
+	end
+	function unit:GetCurrentMovementSpeed()
+		return 300
+	end
+	function unit:GetTarget()
+		return self.target
+	end
+	function unit:Action_AttackUnit(target)
+		self.attacks[#self.attacks + 1] = target
+	end
+	return unit
+end
+
+local function fakeAbility(name, castPoint, values, castRange)
+	return {
+		GetName = function()
+			return name
+		end,
+		GetCastPoint = function()
+			return castPoint
+		end,
+		GetSpecialValueFloat = function(_, key)
+			return values[key] or 0
+		end,
+		GetCastRange = function()
+			return castRange or 600
+		end,
+	}
+end
+
+local function setup()
+	local _, Chain = load()
+	local sven = fakeHero({ name = "npc_dota_hero_sven", team = TEAM_RADIANT, loc = Vector(0, 0, 0) })
+	local lion = fakeHero({ name = "npc_dota_hero_lion", team = TEAM_RADIANT, loc = Vector(300, 0, 0) })
+	local axe = fakeHero({ name = "npc_dota_hero_axe", team = TEAM_DIRE, loc = Vector(600, 0, 0) })
+	local bolt = fakeAbility("sven_storm_bolt", 0.2, { bolt_speed = 1000, bolt_stun_duration = 1.5 })
+	local hex = fakeAbility("lion_voodoo", 0, { duration = 2.4 })
+	return Chain, sven, lion, axe, bolt, hex
+end
+
+local function stun(unit, left, name)
+	unit.stunned = true
+	unit.mods = { { "modifier_item_phase_boots", -1 }, { name or "modifier_stunned", left } }
+end
+
+T.test("chain: need = cast point + delay + travel + walk + margin", function()
+	local _, Chain = load()
+	-- Storm Bolt from 600: 0.2 cast point + 600 / 1000 travel.
+	T.near(Chain.Need(0.2, 0, 600, 1000, 600, 300), 0.2 + 0.6 + Chain.MARGIN, 1e-9, "bolt in range")
+	-- From 900 with 600 range: walk 300 at 300 speed, then 600 of flight.
+	T.near(Chain.Need(0.2, 0, 900, 1000, 600, 300), 0.2 + 0.6 + 1 + Chain.MARGIN, 1e-9, "bolt out of range")
+	-- Light Strike Array: 0.45 cast point + 0.5 delay, no projectile.
+	T.near(Chain.Need(0.45, 0.5, 500, nil, 700, 300), 0.95 + Chain.MARGIN, 1e-9, "LSA")
+end)
+
+T.test("chain: hold while the running stun outlasts the landing, cast near its end", function()
+	local _, Chain = load()
+	T.eq(Chain.Decide(2.0, 0.5, 0, false), "hold", "1.5s too early")
+	T.eq(Chain.Decide(0.6, 0.5, 0, false), "cast", "within MIN_HOLD of the end")
+	T.eq(Chain.Decide(nil, 0.5, 0, false), "cast", "no running stun")
+	T.eq(Chain.Decide(3.0, 0.5, 0, true), "cast", "blocked (channel / retreat / low HP)")
+	T.eq(Chain.Decide(3.0, 0.5, Chain.HOLD_CAP, false), "cast", "held for HOLD_CAP already")
+	T.eq(Chain.SaneLeft(-1), nil, "a permanent modifier reads -1")
+	T.eq(Chain.SaneLeft(30), nil, "a long buff is not a stun")
+	T.eq(Chain.SaneLeft(1.2), 1.2, "a stun")
+end)
+
+T.test("chain: the countdown self-check switches the rule off when the read does not count down", function()
+	local _, Chain = load()
+	T.eq(Chain.Countdown(2.0, 10, 1.5, 10.5), "yes", "0.5s later, 0.5s less")
+	T.eq(Chain.Countdown(2.0, 10, 2.0, 10.5), "no", "the same value 0.5s later")
+	T.eq(Chain.Countdown(2.0, 10, 1.9, 10.1), nil, "too close together")
+	T.eq(Chain.Countdown(1.0, 10, 1.8, 10.5), nil, "a new stun refreshed it")
+	T.eq(Chain.Record("no"), false, "one failure keeps it on")
+	T.eq(Chain.Record("no"), true, "two failures and no pass: off")
+	T.eq(Chain.enabled, false, "off")
+	Chain.Reset()
+	Chain.Record("yes")
+	Chain.Record("no")
+	T.eq(Chain.Record("no"), false, "a passed check keeps it on")
+end)
+
+T.test("chain: Storm Bolt on a hero stunned for 2s more is held; the bot attacks him instead", function()
+	local Chain, sven, _, axe, bolt = setup()
+	stun(axe, 2.0)
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), true, "held")
+	T.eq(#sven.attacks, 1, "one attack order")
+	T.ok(sven.attacks[1] == axe, "on the stunned hero")
+	T.eq(#lines("[SHy-CHAIN] t=600 sven hold hero=axe spell=sven_storm_bolt left=2.00 need=1.05"), 1, "hold line")
+	T.eq(Chain.live, 1, "one live stamp")
+	-- 1.0s later 1.0s is left: still more than the 1.05s need + MIN_HOLD? No: 1.0 - 1.05 < 0.15, so it goes.
+	Stub.time = 601
+	stun(axe, 1.0)
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "cast")
+	local cast = lines("[SHy-CHAIN] t=601 sven cast hero=axe spell=sven_storm_bolt left=1.00 need=1.05 gap=-0.05")
+	T.eq(#cast, 1, "cast line")
+	T.ok(string.find(cast[1], "held=1.00 real=yes", 1, true) ~= nil, "held 1s, the read counted down")
+end)
+
+T.test("chain: no hold on a channelling hero, while retreating or at low HP, or for a damage spell", function()
+	local Chain, sven, _, axe, bolt = setup()
+	stun(axe, 2.0)
+	axe.channeling = true
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "channelling")
+	axe.channeling = false
+	sven.mode = BOT_MODE_RETREAT
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "retreating")
+	sven.mode = BOT_MODE_ATTACK
+	sven.hp = 200
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "low HP")
+	sven.hp = 1000
+	local nuke = fakeAbility("lina_laguna_blade", 0.35, {})
+	T.eq(Chain.OnCast(sven, nuke, axe, "entity"), false, "a damage spell is never held")
+	local ally = fakeHero({ name = "npc_dota_hero_lion", team = TEAM_RADIANT, loc = Vector(100, 0, 0) })
+	stun(ally, 2.0)
+	T.eq(Chain.OnCast(sven, bolt, ally, "entity"), false, "an ally")
+	T.eq(#sven.attacks, 0, "no attack order")
+end)
+
+T.test("chain: a root or silence, an unread time or an unlisted modifier never holds", function()
+	local Chain, sven, _, axe, bolt = setup()
+	axe.mods = { { "modifier_stunned", 2.0 } } -- listed, but the engine does not call him stunned (a root)
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "not stunned")
+	stun(axe, 2.0, "modifier_some_new_stun")
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "unlisted modifier")
+	T.eq(#lines("[SHy-CHAIN] t=600 sven unknown hero=axe spell=sven_storm_bolt mods=modifier_item_phase_boots"), 1)
+	stun(axe, -1)
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "a -1 read")
+end)
+
+T.test("chain: the team reservation holds a second disable until the first one lands and ends", function()
+	local Chain, sven, lion, axe, bolt, hex = setup()
+	-- Sven's bolt goes out (Axe free): lands 0.8s later, stuns 1.5s.
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "bolt goes")
+	-- Lion's hex in the same frame waits: the bolt's stun ends at 600 + 0.8 + 1.5.
+	T.eq(Chain.OnCast(lion, hex, axe, "entity"), true, "hex held")
+	local hold = lines("[SHy-CHAIN] t=600 lion hold hero=axe spell=lion_voodoo left=2.30 need=0.25")
+	T.eq(#hold, 1, "hold line from the claim")
+	T.ok(string.find(hold[1], "src=claim", 1, true) ~= nil, "src=claim")
+	-- Sven's own re-issued order is not held by his own reservation.
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "own claim ignored")
+	-- The bolt landed: Lion's hero file now skips Axe (Fu.IsDisabled), until 0.4s or less are left.
+	Stub.time = 601
+	stun(axe, 1.3)
+	T.eq(Chain.ReleaseEarly(lion, axe), false, "1.3s left: still disabled for Lion")
+	T.eq(Chain.ReleaseEarly(sven, axe), false, "Sven holds nothing")
+	Stub.time = 601.9
+	stun(axe, 0.35)
+	T.eq(Chain.ReleaseEarly(lion, axe), true, "0.35s left: free for Lion")
+	T.eq(Chain.OnCast(lion, hex, axe, "entity"), false, "hex goes")
+	T.eq(#lines("[SHy-CHAIN] t=602 lion cast hero=axe spell=lion_voodoo left=0.35 need=0.25 gap=0.10"), 1)
+	-- The stamp stays until the hex has landed, so the re-issued order keeps going through.
+	T.eq(Chain.ReleaseEarly(lion, axe), true, "still free while the hex is on its way")
+	Stub.time = 602.3
+	axe.hexed, axe.mods = true, { { "modifier_lion_voodoo", 2.0 } }
+	T.eq(Chain.ReleaseEarly(lion, axe), false, "the hex landed")
+end)
+
+T.test("chain: a point disable counts for the bot's target at the point", function()
+	local _, Chain = load()
+	local lina = fakeHero({ name = "npc_dota_hero_lina", team = TEAM_RADIANT, loc = Vector(0, 0, 0) })
+	local axe = fakeHero({ name = "npc_dota_hero_axe", team = TEAM_DIRE, loc = Vector(500, 0, 0) })
+	local lsa = fakeAbility("lina_light_strike_array", 0.45, {
+		light_strike_array_delay_time = 0.5,
+		light_strike_array_stun_duration = 1.6,
+	}, 700)
+	stun(axe, 2.5)
+	T.eq(Chain.OnCast(lina, lsa, Vector(500, 0, 0), "location"), false, "no target: no rule")
+	lina.target = axe
+	T.eq(Chain.OnCast(lina, lsa, Vector(1500, 0, 0), "location"), false, "point far from the target")
+	T.eq(Chain.OnCast(lina, lsa, Vector(520, 0, 0), "location"), true, "held")
+	T.eq(#lines("[SHy-CHAIN] t=600 lina hold hero=axe spell=lina_light_strike_array left=2.50 need=1.20"), 1)
+end)
+
+T.test("chain: Fu.IsDisabled calls a held hero free only for the holding bot", function()
+	local bot, Chain = load()
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	enemy.IsStunned = function()
+		return true
+	end
+	enemy.IsRooted = function()
+		return false
+	end
+	enemy.IsHexed = function()
+		return false
+	end
+	enemy.IsNightmared = function()
+		return false
+	end
+	enemy.NumModifiers = function()
+		return 1
+	end
+	enemy.GetModifierName = function()
+		return "modifier_stunned"
+	end
+	enemy.GetModifierRemainingDuration = function()
+		return 0.3
+	end
+	T.eq(Fu.IsDisabled(enemy), true, "no hold: stunned is disabled")
+	Chain.stamps[bot] =
+		{ hero = enemy:GetUnitName(), spell = "lion_voodoo", need = 0.25, startedAt = 600, untilAt = 602 }
+	Chain.live = 1
+	Stub.time = 600.5
+	T.eq(Fu.IsDisabled(enemy), false, "the holding bot sees him free at 0.3s left")
+	Chain.stamps[bot] = nil
+	Chain.stamps[Stub.teams[TEAM_RADIANT][2]] = { hero = enemy:GetUnitName(), need = 0.25, untilAt = 602 }
+	Stub.time = 600.6
+	T.eq(Fu.IsDisabled(enemy), true, "another bot's hold does not change this bot's answer")
+end)
