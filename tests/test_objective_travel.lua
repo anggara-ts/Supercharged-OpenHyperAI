@@ -113,6 +113,14 @@ local function gateScene(opts)
 	bot:GetAbilityByName("abyssal_underlord_pit_of_malice").GetLevel = function()
 		return 1
 	end
+	-- 7.42: no abyssal_underlord_portal_warp (the stub makes up any name it is asked for).
+	local stubGetAbilityByName = bot.GetAbilityByName
+	bot.GetAbilityByName = function(self, name)
+		if string.find(name, "portal_warp", 1, true) then
+			return nil
+		end
+		return stubGetAbilityByName(self, name)
+	end
 	local ally = T.stub.teams[TEAM_RADIANT][2]
 	local enemy = T.stub.teams[TEAM_DIRE][1]
 	if opts.allyHit then
@@ -164,6 +172,10 @@ T.test("underlord: the first far gate is a self-test that measures whether he te
 	X.GateSelfWatch()
 	T.eq(printed("gate%-self result=yes moved=%d+ at=2000,0 nearTarget=yes"), 1, "teleport seen")
 	T.eq(bot._gateSelf.state, "yes", "from now on a global trip")
+	bot._loc = Vector(-4900, -4950, 0)
+	T.stub.time = 1300
+	T.ok(X.ConsiderFiendsGate() > 0, "the next far ally in trouble: gate trip")
+	T.eq(printed("gate%-travel why=ally target=lina"), 1, "trip logged")
 
 	-- he did not move: "no" after the watch, and the bots-only skip stays
 	X, bot, gate = gateScene({ scepter = false, allyHit = true })

@@ -696,6 +696,19 @@ function X.ConsiderFiendsGate()
 		if travelLocation ~= nil then
 			fiendsGateWhy = (selfTeleports and "travel-" or "selftest-") .. why
 			fiendsGateTarget = target
+			if selfTeleports and DotaTime() >= (bot._gateTravelLogAt or -999) then
+				bot._gateTravelLogAt = DotaTime() + 5
+				pcall(
+					print,
+					string.format(
+						"[SHy-UNDERLORD] t=%.0f abyssal_underlord gate-travel why=%s target=%s dist=%.0f",
+						DotaTime(),
+						why,
+						tostring(target),
+						GetUnitToLocationDistance(bot, travelLocation)
+					)
+				)
+			end
 			return BOT_ACTION_DESIRE_HIGH, travelLocation
 		end
 	end
