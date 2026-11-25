@@ -498,11 +498,12 @@ end
 --   ended= ended (the dive finished) | not-started | never-seen (on cooldown, never seen in the dive: the in-dive
 --   check is wrong) | overrun (still "in the dive" 1.5s after it should end) | gap (died, or no think for 2.5s) |
 --   reordered
---   stop= yes (Stop ordered and the dive ended within 0.5s) | no-end (ordered, the dive went on) |
---         blocked (the rule wanted it, Stop could not be cast) | none (the rule never asked)
---   rule= why Stop was ordered, stopAt= / endAt= seconds after the start, stopCastable= seconds after the start
---   Stop first read castable (- = never), thinks= thinks inside the dive, away= distance from the start at the end,
---   peak= farthest from the start, targetMin= closest to the target, hp= before -> after, died=yes|no
+--   stop= yes (the dive ended within 0.8s of the first Stop order, before its natural end) | no-end (ordered,
+--         the dive went on) | blocked (the rule wanted it, Stop could not be cast) | none (the rule never asked)
+--   rule= why Stop was ordered, orders= Stop orders sent (1-3), stopAt= (first order) / endAt= seconds after the
+--   start, stopCastable= seconds after the start Stop first read castable (- = never), thinks= thinks inside the
+--   dive, away= distance from the start at the end, peak= farthest from the start, targetMin= closest to the target,
+--   hp= before -> after, died=yes|no
 function X.FinishDive(ended)
 	local rec = diveRecord
 	diveRecord = nil
@@ -520,8 +521,11 @@ function X.FinishDive(ended)
 	end
 	local startAt = rec.startedAt or rec.orderAt
 	local stop = "none"
-	if rec.stopOrderedAt ~= nil then
-		stop = (ended == "ended" and now - rec.stopOrderedAt <= 0.5) and "yes" or "no-end"
+	if rec.stopFirstAt ~= nil then
+		-- yes: the dive ended within 0.8s of the first Stop order (room for the two repeats) and clearly before it
+		-- would have ended by itself. A dive that only ended at its natural end after ignored Stops is no-end.
+		local endedByStop = ended == "ended" and now - rec.stopFirstAt <= 0.8 and now - startAt < rec.duration - 0.2
+		stop = endedByStop and "yes" or "no-end"
 	elseif rec.stopBlocked then
 		stop = "blocked"
 	end
@@ -530,7 +534,7 @@ function X.FinishDive(ended)
 	pcall(
 		print,
 		string.format(
-			"[SHy-PHOENIX] t=%.0f phoenix dive-result why=%s started=%s how=%s ended=%s stop=%s rule=%s stopAt=%s endAt=%.1f stopCastable=%s modifier=%s thinks=%d away=%.0f peak=%.0f targetMin=%s hp=%.2f->%.2f died=%s",
+			"[SHy-PHOENIX] t=%.0f phoenix dive-result why=%s started=%s how=%s ended=%s stop=%s rule=%s orders=%d stopAt=%s endAt=%.1f stopCastable=%s modifier=%s thinks=%d away=%.0f peak=%.0f targetMin=%s hp=%.2f->%.2f died=%s",
 			now,
 			rec.why,
 			started and "yes" or "no",
@@ -538,7 +542,8 @@ function X.FinishDive(ended)
 			ended,
 			stop,
 			rec.stopRule or "-",
-			rec.stopOrderedAt and string.format("%.1f", rec.stopOrderedAt - startAt) or "-",
+			rec.stopOrders or 0,
+			rec.stopFirstAt and string.format("%.1f", rec.stopFirstAt - startAt) or "-",
 			now - startAt,
 			rec.stopCastableAt and string.format("%.1f", rec.stopCastableAt - startAt) or "-",
 			rec.modifierSeen and "yes" or "no",
@@ -609,6 +614,7 @@ function X.ConsiderIcarusDiveStop()
 	rec.stopOrders = (rec.stopOrders or 0) + 1
 	if rec.stopOrderedAt == nil then
 		rec.stopRule = rule
+		rec.stopFirstAt = now
 		pcall(
 			print,
 			string.format(
