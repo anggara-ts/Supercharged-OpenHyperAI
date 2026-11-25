@@ -166,11 +166,40 @@ local specialDeliveryDesire
 local isAttacking = false
 local botTarget, hpRatio
 local nearbyAllies, nearbyEnemies
--- #13: ConsiderBodyguard skips allies with "modifier_marci_guardian_buff", the name from when the spell was
--- Sidekick (marci_guardian). Modifier names are not in the game's text files, so this lists the Marci
--- modifiers on the partner once per cast, 1-3s after the order (7.42 npc_abilities: cast point 0.2s,
--- bodyguard_duration 7s), to show in a game whether that name is still the right one.
-local bodyguardOrderTarget, bodyguardOrderAt
+-- #13: Bodyguard's buff on the partner. Modifier names are not in the game's text files. Game 084: all 17
+-- bodyguard-mods lines (the partner's Marci modifiers 1-3s after the cast) read modifier_marci_bodyguarded, none
+-- modifier_marci_guardian_buff (the name from when the spell was Sidekick, marci_guardian), so the old skip never
+-- matched. Both names are read. Datafeed hero_id=136: bodyguard_duration 7s, cooldown 21/20/19/18s, cast point 0.2s.
+local BODYGUARD_MODIFIERS = { "modifier_marci_bodyguarded", "modifier_marci_guardian_buff" }
+local function HasBodyguard(unit)
+	for _, name in ipairs(BODYGUARD_MODIFIERS) do
+		if unit:HasModifier(name) then
+			return true
+		end
+	end
+	return false
+end
+-- An ally the Bodyguard rule would pick but skips because it already has the buff (10s throttle per bot).
+local function SkipForBodyguard(unit)
+	if not HasBodyguard(unit) then
+		return false
+	end
+	if DotaTime() >= (bot._marciBodyguardSkipLogAt or -999) then
+		bot._marciBodyguardSkipLogAt = DotaTime() + 10
+		pcall(
+			print,
+			string.format(
+				"[SHy-MARCI] t=%.0f marci bodyguard-skip why=has-buff ally=%s",
+				DotaTime(),
+				(string.gsub(unit:GetUnitName(), "npc_dota_hero_", ""))
+			)
+		)
+	end
+	return true
+end
+-- The partner's Marci modifiers once per cast, 1-3s after the order; hadBuff= says whether the partner already had
+-- the buff when the order was given (a recast on a partner that has it).
+local bodyguardOrderTarget, bodyguardOrderAt, bodyguardOrderHadBuff
 function X.LogBodyguardModifiers()
 	if bodyguardOrderTarget == nil or DotaTime() < bodyguardOrderAt + 1 then
 		return
@@ -200,9 +229,11 @@ function X.LogBodyguardModifiers()
 	pcall(
 		print,
 		string.format(
-			"[SHy-MARCI] t=%.0f marci bodyguard-mods target=%s guardianBuff=%s mods=%s all=%s",
+			"[SHy-MARCI] t=%.0f marci bodyguard-mods target=%s bodyguarded=%s hadBuff=%s guardianBuff=%s mods=%s all=%s",
 			DotaTime(),
 			(string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
+			tostring(target:HasModifier("modifier_marci_bodyguarded")),
+			tostring(bodyguardOrderHadBuff),
 			tostring(target:HasModifier("modifier_marci_guardian_buff")),
 			#mods > 0 and table.concat(mods, ",") or "none",
 			tostring(#mods == #allMods)
@@ -241,6 +272,7 @@ function X.SkillsComplement()
 		Fu.SetQueuePtToINT(bot, false)
 		bot:ActionQueue_UseAbilityOnEntity(bodyguardAbility, bodyguardTarget)
 		bodyguardOrderTarget, bodyguardOrderAt = bodyguardTarget, DotaTime()
+		bodyguardOrderHadBuff = HasBodyguard(bodyguardTarget)
 		return
 	end
 end
@@ -261,6 +293,7 @@ function X.ConsiderBodyguard()
 			and Fu.IsInRange(bot, ally, castRange)
 			and Fu.GetHP(ally) < 0.5
 			and ally:WasRecentlyDamagedByAnyHero(1.5)
+			and not SkipForBodyguard(ally)
 			and not ally:HasModifier("modifier_necrolyte_reapers_scythe")
 		then
 			if DotaTime() >= (bot._ohaMarciGuardLogAt or -999) then
@@ -301,7 +334,7 @@ function X.ConsiderBodyguard()
 				and Fu.IsInRange(bot, allyHero, castRange)
 				and not allyHero:IsIllusion()
 				and not allyHero:HasModifier("modifier_faceless_void_chronosphere_freeze")
-				and not allyHero:HasModifier("modifier_marci_guardian_buff")
+				and not SkipForBodyguard(allyHero)
 				and not allyHero:HasModifier("modifier_necrolyte_reapers_scythe")
 				and not Fu.IsMeepoClone(allyHero)
 			then
