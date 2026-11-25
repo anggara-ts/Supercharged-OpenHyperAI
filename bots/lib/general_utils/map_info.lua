@@ -183,6 +183,10 @@ local function installMapInfo(Fu)
 		end
 	end
 	local lastRoshanKillTime = 0.0
+	-- Roshan seen alive after his last kill (any unit of ours sees him: the neutral unit list holds the visible ones).
+	-- Without it he counted as dead until the longest respawn wait (11 min), though a bot or the human can see him back
+	-- in the pit from 8 min on (game 082, maintainer: "can't bot see roshan is up even after we peek into his pit?").
+	local roshanSeenAt, roshanScanAt = -math.huge, -math.huge
 	function Fu.IsRoshanAlive()
 		if GetRoshanKillTime() > lastRoshanKillTime then
 			lastRoshanKillTime = GetRoshanKillTime()
@@ -190,7 +194,21 @@ local function installMapInfo(Fu)
 		if GetRoshanKillTime() == 0 or DotaTime() - lastRoshanKillTime > (Fu.IsModeTurbo() and 6 * 60 or 11 * 60) then
 			return true
 		end
-		return false
+		local now = DotaTime()
+		if roshanSeenAt <= lastRoshanKillTime and now >= roshanScanAt then
+			roshanScanAt = now + 1
+			for _, unit in pairs(GetUnitList(UNIT_LIST_NEUTRAL_CREEPS) or {}) do
+				if unit ~= nil and not unit:IsNull() and unit:IsAlive() and unit:GetUnitName() == "npc_dota_roshan" then
+					roshanSeenAt = now
+					pcall(
+						print,
+						string.format("[SHy-ROSH] t=%.0f seen-alive since-kill=%.0f", now, now - lastRoshanKillTime)
+					)
+					break
+				end
+			end
+		end
+		return roshanSeenAt > lastRoshanKillTime
 	end
 	function Fu.IsInLaningPhase()
 		local bot = GetBot()

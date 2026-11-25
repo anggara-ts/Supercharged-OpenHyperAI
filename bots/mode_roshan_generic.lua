@@ -14,6 +14,7 @@ end
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local KillWindow = require(GetScriptDirectory() .. "/lib/systems/kill_window")
 local ObjectiveTravel = require(GetScriptDirectory() .. "/lib/systems/objective_travel")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local isRoshanAlive = false
 Fu.Utils.GameStates = Fu.Utils.GameStates or {}
@@ -115,7 +116,10 @@ function GetDesire()
 	local final = AdjustDesireForHealth(rawDesire)
 	-- A live gather has to beat farm and a one-kill push. VERYHIGH in this engine is ~0.6,
 	-- so clamping the call there is why the rest of the team never leaves the lane.
-	if gatherCall and final >= 0.9 then
+	if type(gatherCall) == "number" then
+		-- A human's Roshan order (#222): its own desire, cut as much as the health check above cut the raw one (0: leave).
+		final = rawDesire > 0 and gatherCall * math.max(0, math.min(1, final / rawDesire)) or 0
+	elseif gatherCall and final >= 0.9 then
 		final = 0.96
 	else
 		final = Clamp(final, 0, BOT_MODE_DESIRE_VERYHIGH)
@@ -500,6 +504,21 @@ function GetDesireHelper()
 	if Fu.GetEnemiesAroundAncient(bot, 2000) > 2 or Fu.GetHP(GetAncient(bot:GetTeam())) < 0.6 then
 		return Ret(BOT_MODE_DESIRE_NONE, "base-threat")
 	end
+	-- The human's Roshan call (#222, bots/lib/systems/human_orders.lua). A Roshan ping the team agreed with (the request
+	-- checks - too early, outnumbered, too few alive - ran when it was made) still needs the damage and a safe pit, as
+	-- before; an insisted ping or `!rosh` goes anyway. Before the early-game and window checks below.
+	-- Its desire is the order's (HumanOrders.RoshCalled: a request 0.75, a forced call 0.97, above the team's own gather
+	-- at 0.96; game 078), passed as the call so GetDesire does not clamp it to VERYHIGH (0.6), as it did to the 0.95
+	-- this returned before.
+	local roshCall, roshOrderDesire = false, nil
+	-- A human call also counts while Roshan may be up (8-11 min after his death), not only after the 11 minutes
+	-- Fu.IsRoshanAlive waits (game 082).
+	if isRoshanAlive or HumanOrders.RoshanMaybeUp() then
+		roshCall, roshOrderDesire = HumanOrders.RoshCalled(bot)
+	end
+	if roshCall == "order" or roshCall == "ping" and hasEnoughDps and IsRoshanEngageSafe(roshanLocation, false) then
+		return Ret(0.95, roshCall, roshOrderDesire)
+	end
 	local alliesInPit = #(Fu.GetAlliesNearLoc(roshanLocation, 1600) or {})
 	local roshLow = Fu.Utils.IsValidUnit(roshan) and (roshan:GetHealth() / roshan:GetMaxHealth()) < 0.8
 	-- Early game: no fresh pit. Only stay if Roshan is already low and allies are in it.
@@ -624,12 +643,8 @@ function GetDesireHelper()
 		if DotaTime() < humanInviteCooldownUntil then
 			return Ret(BOT_ACTION_DESIRE_NONE, "human-cooldown")
 		end
-		local humanPlayer, ping = Fu.GetHumanPing()
-		local isPingAtRoshan = humanPlayer ~= nil
-			and ping ~= nil
-			and ping.normal_ping
-			and Fu.GetDistance(ping.location, Fu.GetCurrentRoshanLocation()) < 600
-			and DotaTime() < ping.time + 5.0
+		-- A Roshan ping the team agreed with, an insisted one or `!rosh` (#222, bots/lib/systems/human_orders.lua).
+		local isPingAtRoshan = HumanOrders.RoshCalled(bot)
 		if not isPingAtRoshan then
 			-- Soft invite without shouting: quiet staging desire only while safe.
 			-- Old behavior announced then dropped after 15s — looked like false invites.
@@ -655,21 +670,6 @@ function GetDesireHelper()
 		end
 	end
 	if isRoshanAlive and hasEnoughDps then
-		local humanPlayer, ping = Fu.GetHumanPing()
-		if humanPlayer ~= nil and DotaTime() > 5.0 then
-			if
-				ping ~= nil
-				and ping.normal_ping
-				and GetUnitToLocationDistance(humanPlayer, roshanLocation) < 4500
-				and Fu.GetDistance(ping.location, roshanLocation) < 600
-				and DotaTime() < ping.time + 5.0
-			then
-				if IsRoshanEngageSafe(roshanLocation, false) then
-					return Ret(0.95, "ping")
-				end
-				return Ret(BOT_MODE_DESIRE_NONE, "ping-unsafe")
-			end
-		end
 		if DotaTime() < (Fu.IsModeTurbo() and 15 * 60 or 20 * 60) and not killRosh then
 			return Ret(BOT_MODE_DESIRE_NONE, "too-early-no-kill")
 		end
@@ -942,7 +942,7 @@ function Think()
 				end
 			end
 			if caller then
-				Fu.ModeAnnounce(bot, "say_roshan", 20)
+				Fu.ModeAnnounce(bot, "say_roshan", 20, true)
 			end
 		end
 		return
@@ -991,4 +991,14 @@ do
 	local Perf = require(GetScriptDirectory() .. "/lib/systems/perf")
 	GetDesire = Perf.Wrap("roshan.GetDesire", GetDesire)
 	Think = Perf.Wrap("roshan.Think", Think)
+end
+-- Strength push (#12, bots/lib/systems/strength_push.lua): while a strength push waits for the Aegis (Roshan first),
+-- the Roshan desire of its bots is raised when the mode passed its safety checks but would not call the take itself.
+-- Log [SHy-ROSH] strength-boost.
+do
+	local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	local roshanGetDesire = GetDesire
+	GetDesire = function(...)
+		return StrengthPush.RoshanDesire(bot, roshanGetDesire(...))
+	end
 end
