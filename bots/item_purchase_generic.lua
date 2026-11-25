@@ -2317,34 +2317,35 @@ function ItemPurchaseThink()
 					)
 				end
 			else
+				-- A mushroom that can't be used here (another hero's Forager's Kit) went back and forth every 4s for the
+				-- rest of the game (game 045: Weaver, 34 swap lines). After 2 swaps of the same forage within 60s, the
+				-- next try leaves it for 120s instead.
+				bot._forageSwaps = bot._forageSwaps or {}
+				local swaps = bot._forageSwaps[forageName]
+				if swaps == nil or now - swaps.since > 60 then
+					swaps = { n = 0, since = now }
+					bot._forageSwaps[forageName] = swaps
+				end
+				if swaps.n >= 2 then
+					bot._forageSwapBackoff = bot._forageSwapBackoff or {}
+					bot._forageSwapBackoff[forageName] = now + 120
+					bot._forageSwaps[forageName] = nil
+					pcall(
+						print,
+						string.format(
+							"[SHy-FORAGE] t=%.0f %s swap-giveup %s why=not-used backoff=120s",
+							now,
+							(string.gsub(botName, "npc_dota_hero_", "")),
+							forageName
+						)
+					)
+					return
+				end
 				ForceSwap(forageSlot, dest)
 				-- A swap the wrapper held (the pair gap, blocked-cooldown) is not a try: game 085 counted 5 of them as
 				-- failed swaps (swap-result ok=no) and gave up after 2.
 				if SwapIssued(forageSlot, dest) then
-					-- A mushroom that can't be used here (another hero's Forager's Kit) went back and forth every 4s for
-					-- the rest of the game (game 045: Weaver, 34 swap lines). After 2 swaps of the same forage within 60s,
-					-- leave it for 120s.
-					bot._forageSwaps = bot._forageSwaps or {}
-					local swaps = bot._forageSwaps[forageName]
-					if swaps == nil or now - swaps.since > 60 then
-						swaps = { n = 0, since = now }
-					end
 					swaps.n = swaps.n + 1
-					bot._forageSwaps[forageName] = swaps
-					if swaps.n >= 2 then
-						bot._forageSwapBackoff = bot._forageSwapBackoff or {}
-						bot._forageSwapBackoff[forageName] = now + 120
-						bot._forageSwaps[forageName] = nil
-						pcall(
-							print,
-							string.format(
-								"[SHy-FORAGE] t=%.0f %s swap-giveup %s why=not-used backoff=120s",
-								now,
-								(string.gsub(botName, "npc_dota_hero_", "")),
-								forageName
-							)
-						)
-					end
 					-- Game 031: Dazzle kept a Forager mushroom in the backpack for the rest of the game, and this step
 					-- never logged a use. Log each try (once per 15s; its own clock: it shared one with the eat line, so no
 					-- eat line printed after a swap in games 073-077), and the slot 0.5s later (swap-result above). The eat
