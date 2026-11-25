@@ -128,7 +128,7 @@ T.test("tempo: the Roshan window call - late, all alive, nothing to defend, no l
 	T.eq(call({ roshAlive = false })[2], "rosh-dead", "Roshan not known up")
 	T.eq(call({ now = 25 * 60 })[2], "early", "before 30:00")
 	T.eq(call({ aliveUs = 4 })[2], "alive", "one of ours dead: no new call")
-	T.eq(call({ aliveUs = 4, active = true })[1], true, "a running call survives one death")
+	T.eq(call({ aliveUs = 4, aliveThem = 4, active = true })[1], true, "a running call survives one death (4 v 4)")
 	T.eq(call({ aliveUs = 4, aliveThem = 5, active = true })[1], false, "but not fewer than them")
 	T.eq(call({ aliveUs = 3, aliveThem = 2, active = true })[2], "alive", "under 4 alive: off")
 	T.eq(call({ defendDesire = 0.5 })[2], "defend", "a lane to defend")
