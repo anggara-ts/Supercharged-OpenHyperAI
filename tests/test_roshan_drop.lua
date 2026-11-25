@@ -68,8 +68,10 @@ local function scene(mainItems, backpackItems)
 	Item.ShouldClaimRoshanDrop = function()
 		return true
 	end
-	function world.putOnGround(name)
-		world.ground[#world.ground + 1] = { item = newItem(name), location = unit:GetLocation() }
+	-- offset: that far east of the hero (default: at its feet).
+	function world.putOnGround(name, offset)
+		local at = unit:GetLocation()
+		world.ground[#world.ground + 1] = { item = newItem(name), location = Vector(at.x + (offset or 0), at.y, at.z) }
 	end
 	-- The last order takes effect.
 	function world.land()
@@ -136,7 +138,9 @@ T.test("roshan drop: one item is dropped for the Aegis, however often the think 
 	T.eq(world.orders[#world.orders], "pick item_aegis", "into the freed slot")
 	world.land()
 	Stub.time = Stub.time + 1.5
-	T.eq(Item.RoshanDropDesire(unit), 0.97, "the desire stays up for the dropped item")
+	T.eq(Item.RoshanDropDesire(unit), 1.02, "the desire stays up for the dropped item, above retreat")
+	T.ok((unit._noTpUntil or -999) > Stub.time, "and no TP before it is back (game 084)")
+	T.eq(world.printed("tp%-hold why=room%-return"), 1, "the hold is logged")
 	T.ok(Item.TryPickupRoshanDrop(unit), "fetches the dropped item")
 	T.eq(world.orders[#world.orders], "pick item_magic_wand", "the Magic Wand again")
 	world.land()
@@ -260,6 +264,33 @@ T.test("roshan drop: with the whole bag full a cheaper backpack item is left for
 	T.eq(world.printed("room dropped"), 1, "one item dropped for the Aegis itself")
 end)
 
+T.test("roshan drop: nothing is put down for the Aegis until the bot stands at it", function()
+	-- Game 084, 35:01: Lina put her Null Talisman down 2s after the claim, on her way, and teleported home.
+	local unit, Item, world = scene(FULL_MAIN, {})
+	world.putOnGround("item_aegis", 500)
+	Stub.time = 2099
+	T.ok(Item.TryPickupRoshanDrop(unit), "walks to the Aegis")
+	T.eq(table.concat(world.orders, ","), "move", "no drop order from 500 away")
+	local at = unit:GetLocation()
+	unit._loc = Vector(at.x + 250, at.y, at.z)
+	Stub.time = 2100
+	Item.TryPickupRoshanDrop(unit)
+	T.eq(world.orders[#world.orders], "drop item_magic_wand", "250 away: the item goes down")
+	T.eq(world.printed("room dropped magic_wand for=aegis .* dist=250 hp=1.00"), 1, "the line says how far")
+end)
+
+T.test("roshan drop: with enemy heroes at our Ancient only Roshan items close by count", function()
+	-- Game 085, 59:00: team roam's ancient-threat gate skipped the whole Roshan drop desire (maxRange now).
+	local unit, Item, world = scene(FULL_MAIN, {})
+	world.putOnGround("item_aegis", 2000)
+	Stub.time = 3540
+	T.eq(Item.RoshanDropDesire(unit), 1.02, "the claimer walks 2000 for it")
+	T.eq(Item.RoshanDropDesire(unit, 1500), 0, "not while the base is under attack")
+	world.ground = {}
+	world.putOnGround("item_aegis", 400)
+	T.eq(Item.RoshanDropDesire(unit, 1500), 1.02, "but takes it from 400")
+end)
+
 -- A team with the Aegis lying next to slot 1, and kills per team slot.
 local function claimScene(killsBySlot)
 	local unit = Stub.reset({ hero = "npc_dota_hero_keeper_of_the_light" })
@@ -341,6 +372,31 @@ T.test("aegis claim: a claimer that makes no progress is released to the next be
 	T.ok(Item.ShouldClaimRoshanDrop(team[2], loc, "item_aegis"), "slot 2 next")
 	T.ok(not Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "slot 3 is out")
 	T.eq(printed("aegis%-claim hero=" .. short(2) .. ".*released=" .. short(3) .. ":stuck"), 1, "the release")
+end)
+
+T.test("aegis claim: no TP while it holds the claim; when it has to leave, the claim passes on at once", function()
+	-- Game 084, 35:01: the claimer Lina teleported home for a heal; Lone Druid stood 207 from the Aegis.
+	local _, Item, team, loc, printed, short = claimScene({ 1, 5, 9, 0, 3 })
+	Stub.time = 1869
+	T.ok(Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "slot 3 first")
+	T.ok((team[3]._noTpUntil or -999) > Stub.time, "no TP while it holds the claim")
+	T.eq(printed("tp%-hold why=aegis%-claim"), 1, "logged")
+	team[3].GetActiveMode = function()
+		return BOT_MODE_RETREAT
+	end
+	Stub.time = 1870
+	T.ok(Item.ShouldClaimRoshanDrop(team[2], loc, "item_aegis"), "slot 2 takes over in the next think")
+	T.eq(
+		printed("aegis%-claim hero=" .. short(2) .. " .*why=handover .*released=" .. short(3) .. ":retreat hp=1%.00"),
+		1,
+		"the handover line"
+	)
+	team[3].GetActiveMode = function()
+		return BOT_MODE_NONE
+	end
+	Stub.time = 1871
+	T.ok(not Item.ShouldClaimRoshanDrop(team[3], loc, "item_aegis"), "and doesn't get it back")
+	T.ok(Item.ShouldClaimRoshanDrop(team[2], loc, "item_aegis"), "slot 2 keeps it")
 end)
 
 T.test("aegis guard: an ally that is not the claimer keeps away from the Aegis", function()

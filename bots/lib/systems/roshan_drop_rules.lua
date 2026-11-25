@@ -12,6 +12,16 @@ local RoshanDropRules = {}
 RoshanDropRules.NEAR = 4000
 -- A claimer keeps the claim while within this range; a new pick only happens when it is released.
 RoshanDropRules.KEEP = 6000
+-- Game 084, 35:00: the claim went to Lina (best KDA) at 23% HP, 1091 from the Aegis, in retreat, while Lone Druid
+-- stood 207 from it; she put her Null Talisman down, teleported home for a heal and the Aegis and the Talisman were
+-- lost. A claimer that can stay comes first: HP at least FIT_HP, not retreating, within FIT_DIST of the Aegis.
+RoshanDropRules.FIT_HP = 0.35
+RoshanDropRules.FIT_DIST = 800
+-- The claimer so far hands the claim over when it has to leave (retreating, or HP under LEAVE_HP: lower than
+-- FIT_HP, so a claimer hit once at the pit doesn't flip it) and an ally who can stay is there.
+RoshanDropRules.LEAVE_HP = 0.25
+-- An item is put on the ground for a Roshan item only this close to it (game 084: Lina dropped hers on the way).
+RoshanDropRules.DROP_RANGE = 300
 
 -- 7.42 game file: ItemDroppable 0. These can't be put on the ground, so they are never the item put aside.
 RoshanDropRules.UNDROPPABLE = {
@@ -27,6 +37,24 @@ end
 
 local function IsCore(c)
 	return (c.pos or 3) <= 3
+end
+
+-- Why this candidate has to leave the pit: "retreat", "low-hp", or nil (it can stay).
+function RoshanDropRules.Leaving(c)
+	if c.retreating then
+		return "retreat"
+	end
+	if (c.hp or 1) < RoshanDropRules.LEAVE_HP then
+		return "low-hp"
+	end
+	return nil
+end
+
+-- Healthy, staying and at the Aegis: the first choice for a new claim.
+function RoshanDropRules.Fit(c)
+	return not c.retreating
+		and (c.hp or 1) >= RoshanDropRules.FIT_HP
+		and (c.dist or math.huge) <= RoshanDropRules.FIT_DIST
 end
 
 -- a goes before b: higher KDA; on a tie a core (pos 1-3) before a support, then the lower position, then
@@ -55,18 +83,27 @@ local function Best(cands, accept)
 end
 
 -- cands: one entry per allied hero: { id, kda, pos, dist (to the Aegis), alive, human, canTake (a free main
--- slot or an item it can put aside) }. o: { current = id of the claimer so far, excluded = { [id] = true }
--- released claimers, humanWait = true while a human near still gets the first go }.
--- Returns the claimer's entry (nil: nobody) and why:
---   kept       the claimer so far, still alive, able and within KEEP
+-- slot or an item it can put aside), hp (0-1), retreating }. o: { current = id of the claimer so far, excluded =
+-- { [id] = true } released claimers, humanWait = true while a human near still gets the first go }.
+-- Returns the claimer's entry (nil: nobody), why, and on a handover why the claimer so far left (Leaving):
+--   kept       the claimer so far, still alive, able and within KEEP (staying, or nobody fit to take over)
+--   handover   the claimer so far has to leave and a fit bot near takes over; the caller excludes the old one
 --   human      a human ally is near and still gets the first go (bots leave it to the player)
---   best-kda   the best KDA of the allies near that can take it
+--   best-kda   the best KDA of the fit bots (Fit: HP, not retreating, within FIT_DIST)
+--   walk       nobody fit: the best KDA of the bots near that can stay (further than FIT_DIST)
+--   weak       nobody near can stay: the best KDA of the bots near (one that has to leave still beats nobody)
 --   far        nobody near can take it: the best KDA of the rest within KEEP
 function RoshanDropRules.AegisClaimer(cands, o)
 	o = o or {}
 	local excluded = o.excluded or {}
 	local function able(c)
 		return c.alive and c.canTake and not excluded[c.id]
+	end
+	local function nearBot(c)
+		return not c.human and able(c) and (c.dist or math.huge) <= RoshanDropRules.NEAR
+	end
+	local function fitBot(c)
+		return nearBot(c) and RoshanDropRules.Fit(c)
 	end
 	if o.current ~= nil then
 		for _, c in ipairs(cands) do
@@ -76,6 +113,15 @@ function RoshanDropRules.AegisClaimer(cands, o)
 				and (c.dist or math.huge) <= RoshanDropRules.KEEP
 				and (not c.human or o.humanWait)
 			then
+				local leaving = not c.human and RoshanDropRules.Leaving(c) or nil
+				if leaving ~= nil then
+					local successor = Best(cands, function(other)
+						return other ~= c and fitBot(other)
+					end)
+					if successor ~= nil then
+						return successor, "handover", leaving
+					end
+				end
 				return c, "kept"
 			end
 		end
@@ -88,11 +134,19 @@ function RoshanDropRules.AegisClaimer(cands, o)
 			return human, "human"
 		end
 	end
-	local near = Best(cands, function(c)
-		return not c.human and able(c) and (c.dist or math.huge) <= RoshanDropRules.NEAR
+	local fit = Best(cands, fitBot)
+	if fit ~= nil then
+		return fit, "best-kda"
+	end
+	local staying = Best(cands, function(c)
+		return nearBot(c) and RoshanDropRules.Leaving(c) == nil
 	end)
+	if staying ~= nil then
+		return staying, "walk"
+	end
+	local near = Best(cands, nearBot)
 	if near ~= nil then
-		return near, "best-kda"
+		return near, "weak"
 	end
 	local far = Best(cands, function(c)
 		return not c.human and able(c) and (c.dist or math.huge) <= RoshanDropRules.KEEP
