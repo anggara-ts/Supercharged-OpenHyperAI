@@ -502,8 +502,9 @@ function X.HuntModeStep(count, mode, modeName)
 	return true
 end
 -- One line per hunt (#94, game 063 item: "24 hunts, 0 hits, about 4 mode changes each" was read off the [SHy-HUNT]
--- trace, which counted every Skeleton Walk, also walks with no hunt; games 064-068 had 32 reveals with 30 hits or
--- kills and about one mode change per locked hunt). From the lock (X.LockHuntTarget) until the hunt lets its target
+-- trace, which counts every Skeleton Walk, also walks with no hunt; games 064-068 had 32 reveals: 15 kills with a
+-- death line, 11 hits, 4 "kills" of a target that only left vision, 1 lost, 1 miss; and game 068 about one mode change
+-- per locked hunt). From the lock (X.LockHuntTarget) until the hunt lets its target
 -- go; a revealed hunt is printed when its result is known (2.5 s after the reveal):
 --   [SHy-CLINKZ] t= hunt-end target= why= hit= flips= lasted= path=
 -- why: the first reason noted (X.NoteHuntEnd): revealed | backup | outnumbered | tower | invis-gone | no-walk (the
@@ -552,11 +553,24 @@ end
 function X.StartHuntCount(name)
 	local count = bot._huntCount
 	if count ~= nil and count.name == name then
+		-- The same hero locked again in the same think it was dropped (HuntTarget: a timeout or too-far, then the
+		-- re-pick): the hunt goes on, so the drop's reason is not its end.
+		if not count.revealed then
+			count.why = nil
+		end
 		return
 	end
 	X.EndHuntCount("retarget")
 	local mode = bot:GetActiveMode()
-	bot._huntCount = { name = name, mode = mode, changes = 0, at = DotaTime(), path = { RoamStats.ModeName(mode) } }
+	bot._huntCount = {
+		name = name,
+		mode = mode,
+		changes = 0,
+		at = DotaTime(),
+		path = { RoamStats.ModeName(mode) },
+		-- Locked during the walk (engage-target hunts): no-walk / hunt invis-gone need to know the walk was up.
+		walked = bot:HasModifier("modifier_clinkz_wind_walk"),
+	}
 end
 -- Why the outpost hold let another mode in during a live, unrevealed hunt (#94, game 068 t=3610-3616: outpost ->
 -- attack -> outpost -> attack 500-967 from Zeus, then the walk ended on an attack on the Radiant Ancient with no
@@ -580,12 +594,15 @@ function X.LogHuntFlip(count, modeName)
 	pcall(
 		print,
 		string.format(
-			"[SHy-CLINKZ] t=%.0f hunt flip target=%s to=%s desire=%.2f beat=%.1f hold=%.1f off=%.1f tgt=%s hp=%.2f outpost=%.2f@%.1f",
+			"[SHy-CLINKZ] t=%.0f hunt flip target=%s to=%s desire=%.2f beat=%.1f busy=%s hold=%.1f off=%.1f tgt=%s hp=%.2f outpost=%.2f@%.1f",
 			now,
 			count.name or "-",
 			modeName,
 			bot:GetActiveModeDesire(),
 			math.min(99, now - (bot._huntBeatAt or -999)),
+			-- beat= over 1.5 with busy=true: the hunt step was blocked (silence, stun, a cast, a queued order); with
+			-- busy=false the spell think was not reached.
+			tostring(Fu.CanNotUseAbility(bot)),
 			(bot._clinkzHuntUntil or now) - now,
 			math.max(0, (bot._huntOffUntil or now) - now),
 			tgt,

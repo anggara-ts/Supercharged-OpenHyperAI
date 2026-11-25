@@ -199,6 +199,12 @@ T.test("clinkz: one hunt-end line per hunt with the first reason, the result and
 	X.CountHuntModes()
 	lines = ends()
 	T.ok(string.find(lines[2] or "", "why=no-walk", 1, true), tostring(lines[2]))
+	-- Dropped (timeout) and the same hero locked again in that think: the hunt goes on, no end reason.
+	X.LockHuntTarget(zeus)
+	X.NoteHuntEnd("timeout")
+	X.LockHuntTarget(zeus)
+	T.eq(bot._huntCount.why, nil, "re-lock on the same hero clears the drop reason")
+	T.eq(#ends(), 2, "no line for the re-lock")
 	-- A revealed hunt prints its result.
 	local line = X.FormatHuntEnd(1366, {
 		name = "alchemist",

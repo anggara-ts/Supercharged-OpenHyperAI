@@ -10,15 +10,16 @@ local HuntTrace = {}
 
 -- target(bot): the hunt's target as the hero script knows it, or nil (an escape cast: no trace).
 local SPECS = {
-	-- Skeleton Walk (clinkz_wind_walk): hero_clinkz.lua's hunt target (bot._huntTarget, #97) only. The bot's target
-	-- or attack target counted walks with no hunt (#94: game 068, 6 of 30 traced walks never had a hunt lock, e.g.
-	-- farm or travel walks with Puck 3289-7533 away), so their cancel / lost ends and mode changes were mixed in.
+	-- Skeleton Walk (clinkz_wind_walk): hero_clinkz.lua's hunt target (bot._huntTarget), else the bot's target or
+	-- attack target, so it traces walks with no hunt too (travel, farm). That stays on purpose: an open trace blocks
+	-- team roam's creep snipes (bot._huntTrace, which would end the walk). Its end why= / changes= are per walk; the
+	-- per-hunt numbers are [SHy-CLINKZ] hunt-end (#94: game 068, 6 of 30 traced walks had no hunt lock).
 	npc_dota_hero_clinkz = {
 		modifier = "modifier_clinkz_wind_walk",
 		spell = "skeleton_walk",
 		noRetreat = true,
 		target = function(bot)
-			return bot._huntTarget
+			return bot._huntTarget or bot:GetTarget() or bot:GetAttackTarget()
 		end,
 	},
 	-- Vendetta: hero_nyx_assassin.lua sets bot.canVendettaKill / bot.vendettaTarget for its kill and engage casts.
