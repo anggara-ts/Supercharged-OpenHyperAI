@@ -356,11 +356,18 @@ T.test("hunt trace: a charge that misses, a gap, Clinkz only with a hero target"
 	clinkz.target = creep
 	H.Tick(clinkz, "farm")
 	T.eq(clinkz._huntTrace, nil, "walk with a creep target: no hunt")
+	-- #94: a hero as the bot's target is not a hunt (game 068: travel walks with Puck 3289-7533 away were traced).
 	clinkz.target = lich
+	H.Tick(clinkz, "attack")
+	T.eq(clinkz._huntTrace, nil, "a hero target without a hunt lock: no hunt")
+	clinkz._huntTarget = lich
 	H.Tick(clinkz, "retreat")
 	T.eq(clinkz._huntTrace, nil, "retreating: no hunt")
 	H.Tick(clinkz, "attack")
-	T.ok(clinkz._huntTrace ~= nil and clinkz._huntTrace.spell == "skeleton_walk", "found the hero during the walk")
+	T.ok(
+		clinkz._huntTrace ~= nil and clinkz._huntTrace.spell == "skeleton_walk",
+		"found the hunt target during the walk"
+	)
 end)
 
 -- The scoreboard's death counts (GetHeroDeaths) for the hunt tests; restore() puts the stub's back.
@@ -393,7 +400,7 @@ T.test("hunt trace: a reveal that kills is a kill, not lost (game 063)", functio
 	deaths[7] = 1
 	local walk = "modifier_clinkz_wind_walk"
 	T.stub.time = 900
-	clinkz.target = sf
+	clinkz._huntTarget = sf
 	clinkz.modifiers[walk] = true
 	H.Tick(clinkz, "attack")
 	T.ok(clinkz._huntTrace ~= nil, "hunt on")
@@ -431,7 +438,7 @@ T.test("hunt trace: a target that teleports or turns invisible is not a kill (ga
 	deaths[8] = 3
 	local walk = "modifier_clinkz_wind_walk"
 	T.stub.time = 745
-	clinkz.target = puck
+	clinkz._huntTarget = puck
 	clinkz.modifiers[walk] = true
 	H.Tick(clinkz, "attack")
 	-- The reveal hits Puck; she teleports home and the handle reads not alive, but the scoreboard has no death.
@@ -512,7 +519,7 @@ T.test("hunt trace: no player ID on the handle: found by hero name, the death st
 	deaths[16] = 2
 	local walk = "modifier_clinkz_wind_walk"
 	T.stub.time = 2645
-	clinkz.target = zeus
+	clinkz._huntTarget = zeus
 	clinkz.modifiers[walk] = true
 	H.Tick(clinkz, "farm")
 	T.ok(clinkz._huntTrace ~= nil and clinkz._huntTrace.pid == 16, "player ID by name")

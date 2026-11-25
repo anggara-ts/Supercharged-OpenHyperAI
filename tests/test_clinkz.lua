@@ -152,3 +152,67 @@ T.test("clinkz: hunt mode changes are counted per hunt", function()
 	T.eq(count.changes, 12, "all changes counted")
 	T.eq(#count.path, 8, "path keeps the first 8")
 end)
+
+T.test("clinkz: hunt result by the scoreboard, not the handle (#94)", function()
+	local X = clinkz()
+	local result = X.HuntResult
+	T.eq(result(true, false, false, 0), "kill", "a new death")
+	-- Games 064 (t=2191, 2846, 2877) and 067 (t=4027): result=kill with no death; the handle reads not-alive out of sight.
+	T.eq(result(false, false, false, 0), "lost", "not-alive handle, no death: out of sight")
+	T.eq(result(nil, false, false, 0), "kill", "unreadable scoreboard: the handle decides")
+	T.eq(result(false, true, true, 491), "hit", "HP lost")
+	T.eq(result(false, true, true, 0), "miss", "no HP lost")
+	T.eq(result(false, true, false, 0), "lost", "alive, out of sight")
+end)
+
+T.test("clinkz: one hunt-end line per hunt with the first reason, the result and the flips (#94)", function()
+	local X = clinkz()
+	local bot = Stub.bot
+	local dire = Stub.teams[bot:GetTeam() == 2 and 3 or 2]
+	local zeus = dire[2]
+	local function ends()
+		local out = {}
+		for _, line in ipairs(Stub.printed) do
+			if string.find(line, "hunt-end", 1, true) then
+				out[#out + 1] = line
+			end
+		end
+		return out
+	end
+	-- A backup cancel: the first reason stays, later ones don't replace it.
+	Stub.time = 1180
+	X.LockHuntTarget(zeus)
+	T.ok(bot._huntCount ~= nil, "counted from the lock")
+	bot._huntCount.walked = true
+	X.NoteHuntEnd("backup")
+	X.NoteHuntEnd("timeout")
+	bot._huntTarget = nil
+	Stub.time = 1184
+	X.CountHuntModes()
+	local lines = ends()
+	T.eq(#lines, 1, "one line")
+	T.ok(string.find(lines[1], "hunt-end target=zuus why=backup hit=none flips=0 lasted=4.0", 1, true), lines[1])
+	-- The walk never came up: invis-gone on a hunt that never saw the modifier is no-walk.
+	X.LockHuntTarget(zeus)
+	X.NoteHuntEnd("invis-gone")
+	bot._huntTarget = nil
+	X.CountHuntModes()
+	lines = ends()
+	T.ok(string.find(lines[2] or "", "why=no-walk", 1, true), tostring(lines[2]))
+	-- A revealed hunt prints its result.
+	local line = X.FormatHuntEnd(1366, {
+		name = "alchemist",
+		why = "revealed",
+		revealed = true,
+		hit = "hit",
+		changes = 1,
+		at = 1356,
+		endAt = 1366,
+		path = { "push_tower_mid", "outpost" },
+	})
+	T.eq(
+		line,
+		"[SHy-CLINKZ] t=1366 hunt-end target=alchemist why=revealed hit=hit flips=1 lasted=10.0 path=push_tower_mid>outpost",
+		"format"
+	)
+end)
