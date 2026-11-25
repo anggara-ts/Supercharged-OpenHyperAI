@@ -201,7 +201,7 @@ local function installDebugHelpers(Fu)
 		end
 		return false, bot, currentName
 	end
-	-- decisionOnly: a decision line, said only with `!debug` (bots/lib/systems/chat_rules.lua SayDecision).
+	-- decisionOnly: a decision line, said only with `!chatty` (bots/lib/systems/chat_rules.lua SayDecision).
 	function Fu.ModeAnnounce(bot, modeKey, cooldown, decisionOnly)
 		local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
 		if bot.lastModeChatTime == nil then

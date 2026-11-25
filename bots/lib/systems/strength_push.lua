@@ -11,7 +11,10 @@
 -- the six slots + backpack (unit:GetItemInSlot, GetItemCost) for both teams, the highest seen per enemy, and to
 -- levels only when an enemy has not been seen for 2 minutes. Enemy ultimates are not readable (no enemy cooldowns).
 --
--- Logs: [SHy-PUSH] strength-push (start), strength-end why=, strength-skip why= / strength-compare (the compare once
+-- Late-even (#12, StrengthRules.LateEven): after 35:00 an even game with all five alive and 3+ ultimates ready also opens a
+-- window (strength-push why=late-even), for the whole team; it ends on a lost fight and re-arms after 90s.
+--
+-- Logs: [SHy-PUSH] strength-push why=lead|late-even (start), strength-end why= kind=, strength-skip why= / strength-compare (the compare once
 -- per 30s per team, always), strength-join (a bot raised by a window), strength-nw-probe; [SHy-FARM]
 -- yield-strength-push.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
@@ -131,16 +134,17 @@ local function ReadNetWorth(state, team, now)
 		end
 	end
 	local maxAge = Rules.DEFAULTS.maxNwAge
+	local maxStale = Rules.DEFAULTS.maxStaleHeroes
 	local ourNw = Rules.TeamTotal(allyIds, state.allyNw, now, nil)
-	local theirNw = Rules.TeamTotal(enemyIds, state.enemyNw, now, maxAge)
+	local theirNw, nwStale = Rules.TeamTotal(enemyIds, state.enemyNw, now, maxAge, maxStale)
 	if ourNw ~= nil and theirNw ~= nil then
-		return ourNw, theirNw, "nw"
+		return ourNw, theirNw, nwStale > 0 and ("nw-stale" .. nwStale) or "nw"
 	end
-	-- Like with like: our items against their items seen.
+	-- Like with like: our items against their items seen (an enemy unseen for a while counts with its last items).
 	local ourItems = Rules.TeamTotal(allyIds, state.allyItems, now, nil)
-	local theirItems = Rules.TeamTotal(enemyIds, state.enemyItems, now, maxAge)
+	local theirItems, itemsStale = Rules.TeamTotal(enemyIds, state.enemyItems, now, maxAge, maxStale)
 	if ourItems ~= nil and theirItems ~= nil then
-		return ourItems, theirItems, "items"
+		return ourItems, theirItems, itemsStale > 0 and ("items-stale" .. itemsStale) or "items"
 	end
 	return ourItems, nil, "unknown"
 end
@@ -170,28 +174,30 @@ local function AliveCount(team)
 	end
 	return count
 end
--- Our alive cores' ultimates: ready, learned.
+-- Our alive cores' ultimates: ready, learned; then the same over all our alive heroes (the late-even push, #12).
 local function UltsReady(team)
-	local ready, total = 0, 0
+	local ready, total, readyAll, totalAll = 0, 0, 0, 0
 	for i = 1, #(GetTeamPlayers(team) or {}) do
 		local member = GetTeamMember(i)
-		if member ~= nil and member:IsAlive() and Fu.IsCore(member) then
+		if member ~= nil and member:IsAlive() then
+			local core = Fu.IsCore(member)
 			for slot = 0, 5 do
 				local ability = member:GetAbilityInSlot(slot)
 				if ability ~= nil and ability:IsUltimate() and not ability:IsHidden() and ability:GetLevel() > 0 then
-					total = total + 1
-					if
-						ability:IsPassive()
+					local isReady = ability:IsPassive()
 						or ability:GetCooldownTimeRemaining() <= 0 and member:GetMana() >= ability:GetManaCost()
-					then
-						ready = ready + 1
+					totalAll = totalAll + 1
+					readyAll = readyAll + (isReady and 1 or 0)
+					if core then
+						total = total + 1
+						ready = ready + (isReady and 1 or 0)
 					end
 					break
 				end
 			end
 		end
 	end
-	return ready, total
+	return ready, total, readyAll, totalAll
 end
 -- The lane's next enemy building: tier 1-3 tower, else 4 (barracks, T4, Ancient).
 local LANE_TOWERS = {
@@ -280,8 +286,12 @@ local function ReadInputs(state, team, bot, now)
 	end
 	local ourAncient = GetAncient(team)
 	local baseHeroes = ourAncient ~= nil and Utils.CountEnemyHeroesNear(ourAncient:GetLocation(), BASE_HERO_RADIUS) or 0
-	local ultsReady, ultsTotal = UltsReady(team)
+	local ultsReady, ultsTotal, ultsReadyAll, ultsTotalAll = UltsReady(team)
 	return {
+		now = now,
+		teamSize = #(GetTeamPlayers(team) or {}),
+		ultsReadyAll = ultsReadyAll,
+		ultsTotalAll = ultsTotalAll,
 		laning = Fu.IsInLaningPhase(),
 		baseThreat = baseHeroes >= 1 or Utils.BaseUnderCreeps(bot),
 		defendPing = DefendPinged(),
@@ -302,7 +312,7 @@ local function ReadInputs(state, team, bot, now)
 end
 local function Fields(i, nwPct, lvlLead)
 	return string.format(
-		"nw=%s/%s nwsrc=%s nwLead=%s lvl=%.1f/%.1f lvlLead=%.1f ults=%d/%d alive=%d/%d humans=%d/%d aegis=%s defend=%.2f scale=%.2f",
+		"nw=%s/%s nwsrc=%s nwLead=%s lvl=%.1f/%.1f lvlLead=%.1f ults=%d/%d ultsAll=%d/%d alive=%d/%d humans=%d/%d aegis=%s defend=%.2f scale=%.2f late=%s",
 		i.ourNw ~= nil and string.format("%.0f", i.ourNw) or "-",
 		i.theirNw ~= nil and string.format("%.0f", i.theirNw) or "-",
 		tostring(i.nwSrc),
@@ -312,13 +322,16 @@ local function Fields(i, nwPct, lvlLead)
 		lvlLead or 0,
 		i.ultsReady or 0,
 		i.ultsTotal or 0,
+		i.ultsReadyAll or 0,
+		i.ultsTotalAll or 0,
 		i.aliveUs or 0,
 		i.aliveThem or 0,
 		i.humansUs or 0,
 		i.humansThem or 0,
 		tostring(i.aegis),
 		i.defendDesire or 0,
-		Rules.GetScale()
+		Rules.GetScale(),
+		tostring(i.lateWhy or "-")
 	)
 end
 local function TargetName(target)
@@ -329,13 +342,14 @@ local function TargetName(target)
 end
 local function EndWindow(state, team, now, why, i)
 	state.active = false
-	state.cooldownUntil = now + Rules.Cooldown(why)
+	state.cooldownUntil = now + Rules.Cooldown(why, state.kind)
 	print(
 		string.format(
-			"[SHy-PUSH] t=%.0f %s strength-end why=%s lane=%s target=%s targetHp=%.2f held=%.0f gathered=%s front=%d/%d alive=%d/%d",
+			"[SHy-PUSH] t=%.0f %s strength-end why=%s kind=%s lane=%s target=%s targetHp=%.2f held=%.0f gathered=%s front=%d/%d alive=%d/%d",
 			now,
 			TeamName(team),
 			why,
+			tostring(state.kind or "lead"),
 			tostring(state.lane),
 			state.targetName or "-",
 			state.lastTargetHp or 0,
@@ -476,7 +490,8 @@ local function TickTeam(bot)
 		end
 		return state
 	end
-	local ok, why, nwPct, lvlLead = Rules.Decide(i)
+	local ok, why, nwPct, lvlLead, lateWhy = Rules.Decide(i)
+	i.lateWhy = lateWhy
 	-- The Aegis taken during a Roshan first: push at once (the Aegis thresholds already apply in Decide).
 	local afterAegis = ok and i.aegis and state.roshanFirstAt ~= nil
 	state.roshanFirstOn = false
@@ -491,7 +506,7 @@ local function TickTeam(bot)
 	if ok and now < state.cooldownUntil and not afterAegis then
 		ok, why = false, "cooldown"
 	end
-	local pick = ok and Rules.PickLane(LaneEntries(team)) or nil
+	local pick = ok and Rules.PickLane(LaneEntries(team), why) or nil
 	if ok and pick == nil then
 		ok, why = false, "no-target"
 	end
@@ -500,6 +515,8 @@ local function TickTeam(bot)
 		return state
 	end
 	state.active = true
+	-- A late-even window (StrengthRules.LateEven, #12): no lead, everyone joins, no lead check at the end.
+	state.kind = why == "late-even" and "late-even" or "lead"
 	state.lane = pick.lane
 	state.target = pick.target
 	state.targetName = TargetName(pick.target)
@@ -510,9 +527,10 @@ local function TickTeam(bot)
 	state.roshanFirstAt = nil
 	print(
 		string.format(
-			"[SHy-PUSH] t=%.0f %s strength-push lead=%s %s lane=%d target=%s tier=%d targetHp=%.2f allyDist=%.0f after=%s rosh=%s",
+			"[SHy-PUSH] t=%.0f %s strength-push why=%s lead=%s %s lane=%d target=%s tier=%d targetHp=%.2f allyDist=%.0f after=%s rosh=%s",
 			now,
 			TeamName(team),
+			state.kind,
 			tostring(why),
 			Fields(i, nwPct, lvlLead),
 			pick.lane,
@@ -527,9 +545,10 @@ local function TickTeam(bot)
 	return state
 end
 
--- Whether this bot joins the window: a core, or a support within SUPPORT_RANGE of the lane front; alive, level 6+,
--- HP 45%+, not at Roshan or defending, not outnumbered where it stands.
-local function Joins(bot, lane)
+-- Whether this bot joins the window: a core, or a support within SUPPORT_RANGE of the lane front (everyone in a
+-- late-even window: the whole team groups); alive, level 6+, HP 45%+, not at Roshan or defending, not outnumbered where
+-- it stands.
+local function Joins(bot, lane, everyone)
 	if not bot:IsAlive() or bot:IsIllusion() or bot:GetLevel() < 6 or Fu.GetHP(bot) < MIN_HP then
 		return false
 	end
@@ -550,7 +569,9 @@ local function Joins(bot, lane)
 	if enemiesNear >= 2 and enemiesNear > #Fu.GetAlliesNearLoc(location, 1600) then
 		return false
 	end
-	return Fu.IsCore(bot) or GetUnitToLocationDistance(bot, GetLaneFrontLocation(GetTeam(), lane, 0)) <= SUPPORT_RANGE
+	return everyone
+		or Fu.IsCore(bot)
+		or GetUnitToLocationDistance(bot, GetLaneFrontLocation(GetTeam(), lane, 0)) <= SUPPORT_RANGE
 end
 
 -- The lane push desire with the strength push: baseDesire (Push.GetPushDesire) raised to FLOOR on the window's lane
@@ -565,7 +586,7 @@ function StrengthPush.LaneDesire(bot, lane, baseDesire)
 		end
 		return baseDesire
 	end
-	if not state.active or state.lane ~= lane or not Joins(bot, lane) then
+	if not state.active or state.lane ~= lane or not Joins(bot, lane, state.kind == "late-even") then
 		return baseDesire
 	end
 	local now = DotaTime()
@@ -584,10 +605,11 @@ function StrengthPush.LaneDesire(bot, lane, baseDesire)
 		bot._strengthJoinedAt = state.startedAt
 		print(
 			string.format(
-				"[SHy-PUSH] t=%.0f %s strength-join lane=%d desire=%.2f was=%.2f hp=%.2f core=%s target=%s",
+				"[SHy-PUSH] t=%.0f %s strength-join lane=%d kind=%s desire=%.2f was=%.2f hp=%.2f core=%s target=%s",
 				now,
 				ShortName(bot),
 				lane,
+				tostring(state.kind or "lead"),
 				floor,
 				base,
 				Fu.GetHP(bot),
@@ -636,7 +658,7 @@ function StrengthPush.RoshanDesire(bot, desire)
 	if state == nil or not state.roshanFirstOn or now - state.lastTick > 2 * TICK_SECONDS + 1 then
 		return desire
 	end
-	if not Rules.ROSH_BOOSTABLE[bot._roshWhy or ""] then
+	if not Rules.ROSH_BOOSTABLE[Rules.RoshBase(bot._roshWhy)] then
 		return desire
 	end
 	if not bot:IsAlive() or bot:IsIllusion() or bot:GetLevel() < 6 or Fu.GetHP(bot) < MIN_HP then
