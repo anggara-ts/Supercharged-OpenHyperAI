@@ -19,7 +19,7 @@ on an earlier or general approval.
   - `bots/customize/version.lua`, `number = "YYYY.MM.DD-NNN"`: the release date, and NNN = the previous NNN plus the
     number of commits on main since the last tag (`git rev-list --count <tag>..origin/main`), zero-padded to 3.
   - `bots/customize/version.lua`, `release = "vX.Y"`: the new tag. A Workshop copy's start-of-game welcome shows it with
-    the date of `number`: "Supercharged OpenHyperAI vX.Y (update: D Mon YYYY)" (`bots/lib/systems/chat_rules.lua`;
+    the date of `number`: "Supercharged OpenHyperAI vX.Y (D Mon YYYY)" (`bots/lib/systems/chat_rules.lua`;
     a git build with `bots/customize/build_info.lua` shows "dev <commit date>-<sha>" instead).
   - `bots/lib/systems/version.lua`, `Version.number = "0.<game patch> - YYYY/MM/DD"`: the Dota patch the release is
     for (e.g. `0.7.42`) and the release date.
