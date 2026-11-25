@@ -26,6 +26,83 @@ T.test("hoodwink: Sharpshooter release reason", function()
 	T.eq(reason(0.2, 3, true, true, true, true, true), nil, "no release in the first half second")
 	T.eq(reason(1.5, 3, true, true, false, true, true), "leaving", "target about to outrun the bolt")
 	T.eq(reason(1.5, 3, true, false, false, true, true), nil, "leaving but off the line: a miss anyway")
+	-- target dead (#7, games 064-065: 3 of 5 target=none releases came 1-3s after the target died)
+	T.eq(reason(1.0, 3, false, false, false, false, true, true), "target-dead", "target died, nobody else in sight")
+	T.eq(reason(0.3, 3, false, false, false, false, true, true), nil, "target died in the first half second")
+	T.eq(reason(1.0, 3, false, false, false, false, true, false), nil, "target out of sight but alive: keep charging")
+	T.eq(reason(1.0, 3, true, false, false, false, true, true), nil, "another enemy in sight: turn onto it")
+end)
+
+local function printedLine(pattern)
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, pattern) then
+			return line
+		end
+	end
+	return nil
+end
+
+T.test("planted trees: Sprout duration, spot checks, expiry", function()
+	Stub.reset({ hero = "npc_dota_hero_hoodwink", slot = 4 })
+	local P = require(GetScriptDirectory() .. "/lib/systems/planted_trees")
+	P.Clear()
+	-- datafeed hero_id=53 (7.42): duration 2.5/3/3.5/4
+	T.eq(P.SproutDuration(3), 3.5, "level 3")
+	T.eq(P.SproutDuration(-1), 2.5, "level -1 (cast callback handle): shortest")
+	T.eq(P.SproutDuration(nil), 2.5, "no level: shortest")
+	T.eq(P.SpotProblem(nil, nil, 1250), "no-location", "no location")
+	T.eq(P.SpotProblem(Vector(0, 0, 0), Vector(100, 100, 0), 1250), "origin", "an unset vector")
+	T.eq(P.SpotProblem(Vector(3000, 0, 0), Vector(0, 100, 0), 1250), "far", "beyond Sprout's reach")
+	T.eq(P.SpotProblem(Vector(800, 0, 0), Vector(0, 0, 0), 1250), nil, "in reach")
+	T.eq(P.SpotProblem(Vector(800, 0, 0), nil, 1250), nil, "caster spot unknown: kept")
+	P.Add("sprout", Vector(1000, 1000, 0), 100, 3, 2)
+	P.Add("acorn", Vector(-1000, 1000, 0), 100, 20, 2)
+	T.eq(#P.Near(Vector(1100, 1000, 0), 150, 101), 1, "the sprout spot 100 away")
+	T.eq(#P.Near(Vector(1300, 1000, 0), 150, 101), 0, "300 away: not near")
+	T.eq(#P.Near(Vector(1100, 1000, 0), 150, 101, 103.5), 0, "gone before the net lands")
+	T.eq(#P.Near(Vector(1100, 1000, 0), 150, 104), 0, "expired")
+	T.eq(P.Near(Vector(-1000, 1100, 0), 150, 110)[1].kind, "acorn", "the acorn tree stands 20s")
+	P.Clear()
+end)
+
+T.test("planted trees: a Sprout from the cast callback is remembered, and Bushwhack goes for the hero in it", function()
+	Stub.reset({ hero = "npc_dota_hero_hoodwink", slot = 4 })
+	local captured = nil
+	_G.InstallCastCallback = function(_, callback)
+		captured = callback
+	end
+	local ok, X = Stub.load("bots/heroes/hero_hoodwink")
+	T.ok(ok, tostring(X))
+	local P = require(GetScriptDirectory() .. "/lib/systems/planted_trees")
+	P.Clear()
+	T.ok(captured ~= nil, "one cast callback, through enemy_spell_tracker")
+	local bot = Stub.bot
+	local enemy = Stub.teams[GetOpposingTeam()][1]
+	enemy._loc = bot._loc + Vector(600, 0, 0)
+	local furion = Stub.teams[GetTeam()][2]
+	furion._loc = bot._loc + Vector(100, 0, 0)
+	local sprout = Stub.newAbility("furion_sprout", furion, false)
+	sprout.GetLevel = function()
+		return 2
+	end
+	Stub.time = 300
+	captured({ unit = furion, ability = sprout, location = enemy._loc })
+	T.ok(printedLine("%[SHy%-TREES%] t=300 %S+ sprout kept=true why=ok .* level=2 dur=3%.0"), "sprout line")
+	local spots = P.Near(enemy._loc, 50, 300)
+	T.eq(#spots, 1, "remembered at the cast spot")
+	T.eq(spots[1].expiresAt, 303, "level 2: 3s (datafeed hero_id=53)")
+	local desire, center, target = X.ConsiderBushwhackInSprout({ enemy }, 0.2, 1200)
+	T.ok(desire > 0, "net on the hero inside the ring")
+	T.eq(target, enemy, "that hero")
+	T.ok(center ~= nil, "a centre")
+	Stub.time = 302.5
+	desire = X.ConsiderBushwhackInSprout({ enemy }, 0.2, 1200)
+	T.eq(desire, 0, "the ring is gone before the net lands")
+	captured({ unit = furion, ability = sprout, location = Vector(0, 0, 0) })
+	T.ok(printedLine("sprout kept=false why=origin"), "an unset location is not kept")
+	captured({ unit = furion, ability = Stub.newAbility("furion_teleportation", furion, false), location = enemy._loc })
+	T.eq(#P.Near(enemy._loc, 50, 302.5), 1, "other spells are not trees")
+	P.Clear()
 end)
 
 T.test("hoodwink: Acorn Shot mode", function()

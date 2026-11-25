@@ -636,7 +636,9 @@ end
 --                                    the first 5 calls, and the first 5 calls for an enemy caster (team=unknown: the
 --                                    caster's team could not be read)
 -- An enemy hero's cast of a spell in COOLDOWNS or in the caller's `interest` name set is recorded with via=callback.
+-- Listeners (EnemySpells.AddCastListener) get every cast of either team, before that filter.
 local probeInstalled = false
+local castListeners = {}
 local callbackCount = 0
 local enemyCallbackCount = 0
 local probeInterest = {}
@@ -677,6 +679,22 @@ local function OnCast(info)
 		heroName = okName and name or heroName
 	end
 	local enemy = casterTeam ~= nil and casterTeam ~= probeTeam
+	if #castListeners > 0 and spell ~= nil then
+		local cast = {
+			spell = spell,
+			caster = caster,
+			heroName = heroName,
+			team = casterTeam,
+			ability = ability,
+			location = type(info) == "table" and info.location or nil,
+		}
+		for _, listener in ipairs(castListeners) do
+			local okListener, errListener = pcall(listener, cast)
+			if not okListener then
+				LogError("callback", "cast-listener", errListener)
+			end
+		end
+	end
 	if enemy then
 		enemyCallbackCount = enemyCallbackCount + 1
 	end
@@ -745,6 +763,14 @@ function EnemySpells.InstallCastProbe(interest)
 			ok and "-" or tostring(err)
 		)
 	)
+end
+
+-- Another system that wants every cast (both teams) adds a listener: fn({ spell, caster, heroName, team, ability,
+-- location }), `team` the caster's team or nil. It shares the one cast callback (installed here if not yet), so
+-- callers never install a second one (planted_trees.lua, #7).
+function EnemySpells.AddCastListener(fn)
+	castListeners[#castListeners + 1] = fn
+	EnemySpells.InstallCastProbe({})
 end
 
 return EnemySpells
