@@ -34,6 +34,7 @@ unverified secondary source: its claims that matter to us are listed on #243 to 
   - A mode file that defines only `GetDesire` still replaces that Valve mode entirely: Valve's `Think` does not run behind it (the item-mode trial, #141, game 063).
   - No hidden item or extra ability gives outpost capture or watcher use: every bot's slots 17-25 are empty and there is no `capture` / `lamp` / `watcher` ability beyond the normal slots (`[SHy-API] slots`, #172, game 064).
   - Unconfirmed: `IsAlive()` on an enemy hero handle may read false after it TPs out, turns invisible or leaves vision (seen 5 times in game 064's hunt trace).
+- **`GetRoshanKillTime()` is not on the `DotaTime()` clock** (game 084, #12): it read about 195s ahead for both kills. The kill at t~2097 (Aegis claimed at t=2099) was counted from 2292, so the "11 minutes after the kill" call came at t=2952 (2292 + 660). The kill at t~3016 (Aegis claimed at t=3018) gave `[SHy-ROSH] seen-alive since-kill=406` at t=3617, so a kill time of 3211. That fits `GameTime()`, which also counts the time before the horn, but it is unverified. `Fu.GetRoshanKillTime()` (`bots/lib/general_utils/map_info.lua`) keeps the `DotaTime()` of the first read of a new value instead, and logs `[SHy-ROSH] kill-time raw= dota= game= rawAhead=` once per kill to settle it.
 
 ## 7.42 check (2026-11-19)
 
