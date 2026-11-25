@@ -128,7 +128,7 @@ LargoRules.TOP_UP_KEEP_HP = 0.9
 LargoRules.TOP_UP_KEEP_STRUMS = 2
 LargoRules.TOP_UP_KEEP_MP = 0.3
 -- After a song ended with no reason (idle) or with no song going out (silent), no new top-up for this long. Games 081
--- and 083: 5 top-up songs started 1.5-2.0s after an idle toggle-off: a camp's hit on Largo while farming (083
+-- and 083: 5 top-up songs started 1.5-2.0s after an idle toggle-off: likely a camp's hit on Largo (083
 -- t=1800-1801: lowest 0.98 -> 0.80, healers=1), the fight going on (083 t=1893-1895), allies walking in (081 t=1630,
 -- 083 t=3297), mana back over the bar (083 t=982-984). None urgent (the urgent and in-fight heals don't wait), and a
 -- wait under the 5s stack_duration keeps the lingering Groovin' stacks (datafeed hero_id=155).
