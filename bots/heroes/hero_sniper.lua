@@ -474,10 +474,15 @@ end
 --   cast=yes|no   Assassinate went on cooldown (the shot left); no = the order never became a cast
 --   died=yes|no|fog  the target died by the expected hit + 3s; fog = not seen at the end, unknown
 --   when=before|hit|later|-  the death came before the expected hit (someone else), within 0.5s after it (the
---                 shot), or later
+--                 shot), or later; offset= the death time minus the expected hit (the hit time is taken on the
+--                 first think after the cooldown starts, so it can run a think late: "before" allows 0.3s)
 --   hp= the target's HP when last seen; hpOrder= at the order; hpBefore= / hpAfter= the last HP seen before the
---   expected hit / the first after it; immune=yes when the target was magic immune around the hit; end=checked |
---   not-cast | replaced (another kill shot was ordered) | gap (no think for 1.5s: Sniper died or was skipped)
+--   expected hit / the first after it; immune=yes when the target was magic immune around the hit; gap=yes when
+--   Sniper's think did not run for 1.5s or more on the way (Sniper died, or the think was skipped); end=checked |
+--   not-cast | replaced (another kill shot was ordered)
+-- A death is the target's death count going up (GetHeroDeaths); IsAlive() on an enemy hero may read false when it
+-- only left vision (docs/BOT_API_RUNTIME.md), so it counts only when the death count cannot be read and the target
+-- was seen in the last 0.5s.
 function X.TrackAssassinate(target, via)
 	if not Fu.IsValidHero(target) then
 		return
@@ -503,7 +508,17 @@ function X.TrackAssassinate(target, via)
 		hpLast = target:GetHealth(),
 		seenAt = DotaTime(),
 		lastWatchAt = DotaTime(),
+		deathsStart = X.EnemyDeaths(target),
 	}
+end
+function X.EnemyDeaths(target)
+	local ok, deaths = pcall(function()
+		return GetHeroDeaths(target:GetPlayerID())
+	end)
+	if ok and type(deaths) == "number" then
+		return deaths
+	end
+	return nil
 end
 function X.WatchAssassinate()
 	local shot = assassinateShot
@@ -511,10 +526,9 @@ function X.WatchAssassinate()
 		return
 	end
 	local now = DotaTime()
-	-- No think for a while (Sniper died, or his think was skipped): what happened in between is unknown.
+	-- No think for a while (Sniper died, or his think was skipped): keep watching, but say so on the line.
 	if now - shot.lastWatchAt > 1.5 then
-		X.FinishAssassinate("gap")
-		return
+		shot.gap = true
 	end
 	shot.lastWatchAt = now
 	local target = shot.target
@@ -525,9 +539,15 @@ function X.WatchAssassinate()
 		local dist = (valid and target:CanBeSeen()) and GetUnitToUnitDistance(bot, target) or shot.dist
 		shot.hitAt = now + dist / shot.speed
 	end
-	if valid and not target:IsAlive() then
+	local deaths = valid and shot.deathsStart ~= nil and X.EnemyDeaths(target) or nil
+	if deaths ~= nil then
+		if deaths > shot.deathsStart then
+			shot.diedAt = shot.diedAt or now
+		end
+	elseif valid and not target:IsAlive() and now - shot.seenAt <= 0.5 then
 		shot.diedAt = shot.diedAt or now
-	elseif valid and target:CanBeSeen() then
+	end
+	if shot.diedAt == nil and valid and target:CanBeSeen() then
 		local hp = target:GetHealth()
 		shot.hpLast, shot.seenAt = hp, now
 		if shot.hitAt == nil or now < shot.hitAt then
@@ -550,7 +570,7 @@ end
 -- Pure: did the target die by the expected hit + 3s, and when. diedAt / seenAt nil-able game times.
 function X.AssassinateDeath(diedAt, hitAt, seenAt, now)
 	if diedAt ~= nil and diedAt <= hitAt + 3 then
-		if diedAt < hitAt - 0.1 then
+		if diedAt < hitAt - 0.3 then
 			return "yes", "before"
 		elseif diedAt <= hitAt + 0.5 then
 			return "yes", "hit"
@@ -574,18 +594,20 @@ function X.FinishAssassinate(ending)
 	pcall(
 		print,
 		string.format(
-			"[SHy-SNIPER] t=%.0f assassinate-result target=%s via=%s cast=%s died=%s within=3s when=%s hp=%.0f hpOrder=%.0f hpBefore=%s hpAfter=%s immune=%s end=%s",
+			"[SHy-SNIPER] t=%.0f assassinate-result target=%s via=%s cast=%s died=%s within=3s when=%s offset=%s hp=%.0f hpOrder=%.0f hpBefore=%s hpAfter=%s immune=%s gap=%s end=%s",
 			now,
 			shot.name,
 			shot.via,
 			shot.castAt ~= nil and "yes" or "no",
 			died,
 			when,
+			shot.diedAt and string.format("%.1f", shot.diedAt - hitAt) or "-",
 			died == "yes" and 0 or shot.hpLast,
 			shot.hpOrder,
 			shot.hpBefore and string.format("%.0f", shot.hpBefore) or "-",
 			shot.hpAfter and string.format("%.0f", shot.hpAfter) or "-",
 			shot.immune and "yes" or "no",
+			shot.gap and "yes" or "no",
 			ending
 		)
 	)
