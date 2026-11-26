@@ -329,6 +329,128 @@ end
 -- Keyed by the unit handle (weak keys, like channel_save.lua), not the name: two units of one name (Meepo, a Tempest
 -- Double, an illusion IsSuspiciousIllusion misses) would read each other's distance as a jump.
 local enemySeen = setmetatable({}, { __mode = "k" })
+-- A unit handle does not carry a sighting across the fog (an enemy hero's handle can read IsNull out of vision,
+-- docs/BOT_API_RUNTIME.md "Enemy hero handles"; game 087 t=1108 kind=appear from=-1). So an "appear" is checked
+-- against his player's last-seen spot (GetHeroLastSeenInfo, team vision), sampled every LAST_SEEN_EVERY before the
+-- sighting: player ID -> { loc, ago (time_since_seen then), at (DotaTime of the sample) }.
+local enemyLastSeen = {}
+local LAST_SEEN_EVERY = 0.2
+-- Jump items and spells for ShadowRealmRules.AppearIsJump: a hero that has one can land next to her out of the fog.
+-- A judgement list (spells that move the caster to a spot or a unit at once or nearly: blinks, leaps, dashes, rolls,
+-- the Teleportation TP); the ability names are the ones our hero files cast (bots/heroes/hero_<name>.lua). Whether an
+-- enemy's item slots read is unsettled (docs/BOT_API_RUNTIME.md: enemy items read nothing in game 068), so the
+-- jump-skip and realm-cornered lines print jumper= for a game to show it.
+local JUMP_ITEMS = {
+	"item_blink",
+	"item_overwhelming_blink",
+	"item_swift_blink",
+	"item_arcane_blink",
+	"item_force_staff",
+	"item_hurricane_pike",
+}
+local JUMP_SPELLS = {
+	antimage_blink = true,
+	queenofpain_blink = true,
+	faceless_void_time_walk = true,
+	puck_illusory_orb = true,
+	mirana_leap = true,
+	slark_pounce = true,
+	magnataur_skewer = true,
+	sandking_burrowstrike = true,
+	storm_spirit_ball_lightning = true,
+	ember_spirit_fire_remnant = true,
+	void_spirit_astral_step = true,
+	earth_spirit_rolling_boulder = true,
+	pangolier_swashbuckle = true,
+	morphling_waveform = true,
+	phoenix_icarus_dive = true,
+	tusk_snowball = true,
+	riki_blink_strike = true,
+	phantom_assassin_phantom_strike = true,
+	chaos_knight_reality_rift = true,
+	monkey_king_tree_dance = true,
+	rattletrap_hookshot = true,
+	primal_beast_onslaught = true,
+	marci_companion_run = true,
+	kez_grappling_claw = true,
+	huskar_life_break = true,
+	furion_teleportation = true,
+	spirit_breaker_charge_of_darkness = true,
+}
+-- The first jump item or learned jump spell of an enemy hero, or nil.
+function X.EnemyJumper(enemy)
+	for _, name in ipairs(JUMP_ITEMS) do
+		local ok, slot = pcall(enemy.FindItemSlot, enemy, name)
+		if ok and slot ~= nil and slot >= 0 and slot <= 5 then
+			return name
+		end
+	end
+	for slot = 0, 8 do
+		local ability = enemy:GetAbilityInSlot(slot)
+		if ability ~= nil and JUMP_SPELLS[ability:GetName()] and ability:GetLevel() > 0 then
+			return ability:GetName()
+		end
+	end
+	return nil
+end
+function X.SampleEnemyLastSeen(now)
+	if now - (bot._dwLastSeenAt or -999) < LAST_SEEN_EVERY then
+		return
+	end
+	bot._dwLastSeenAt = now
+	for _, playerId in ipairs(GetTeamPlayers(GetOpposingTeam()) or {}) do
+		local info = GetHeroLastSeenInfo(playerId)
+		local seen = info ~= nil and info[1] or nil
+		if seen ~= nil and seen.location ~= nil then
+			local sample = enemyLastSeen[playerId]
+			if sample == nil then
+				sample = {}
+				enemyLastSeen[playerId] = sample
+			end
+			sample.loc, sample.ago, sample.at = seen.location, seen.time_since_seen or 0, now
+		end
+	end
+end
+-- An "appear" read: ShadowRealmRules.AppearIsJump with his last-seen sample and his jump item or spell. Returns
+-- accepted, why, and the fields for the logs (seen: her distance to his last-seen spot, -1 none; ago; jumper).
+function X.CheckAppear(enemy, dist, now)
+	local playerId = enemy:GetPlayerID()
+	local sample = playerId ~= nil and enemyLastSeen[playerId] or nil
+	local seenDist = sample ~= nil and GetUnitToLocationDistance(bot, sample.loc) or nil
+	local seenAgo = sample ~= nil and sample.ago + now - sample.at or nil
+	local jumper = X.EnemyJumper(enemy)
+	local accepted, why = ShadowRealmRules.AppearIsJump({
+		seenDist = seenDist,
+		seenAgo = seenAgo,
+		nowDist = dist,
+		speed = enemy:GetCurrentMovementSpeed() or 0,
+		jumper = jumper ~= nil,
+	})
+	return accepted, why, { seen = seenDist or -1, ago = seenAgo or -1, jumper = jumper or "-" }
+end
+-- [SHy-DW] t= dark_willow jump-skip hero= why=walked|unseen|near|walk-reach to= seen= ago= jumper=: an enemy came
+-- out of the fog next to her and it was read as a walk, not a jump-in (at most once per 3s per enemy).
+function X.LogJumpSkip(enemy, why, dist, info)
+	local name = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
+	bot._dwJumpSkipLog = bot._dwJumpSkipLog or {}
+	if DotaTime() - (bot._dwJumpSkipLog[name] or -999) < 3 then
+		return
+	end
+	bot._dwJumpSkipLog[name] = DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow jump-skip hero=%s why=%s to=%d seen=%d ago=%.1f jumper=%s",
+			DotaTime(),
+			name,
+			why,
+			dist,
+			info.seen,
+			info.ago,
+			info.jumper
+		)
+	)
+end
 function X.TrackEnemyJumps()
 	local now = DotaTime()
 	local trackedAgo = bot._dwTrackAt ~= nil and now - bot._dwTrackAt or nil
@@ -341,9 +463,27 @@ function X.TrackEnemyJumps()
 			local dist = GetUnitToUnitDistance(bot, enemy)
 			local last = enemySeen[enemy]
 			local kind = ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo)
+			local why, info = nil, nil
+			if kind == "appear" then
+				local accepted
+				accepted, why, info = X.CheckAppear(enemy, dist, now)
+				if not accepted then
+					X.LogJumpSkip(enemy, why, dist, info)
+					kind = nil
+				end
+			end
 			if kind ~= nil then
-				bot._dwJump =
-					{ at = now, hero = enemy:GetUnitName(), kind = kind, from = last and last.dist or -1, dist = dist }
+				bot._dwJump = {
+					at = now,
+					hero = enemy:GetUnitName(),
+					kind = kind,
+					from = last and last.dist or -1,
+					dist = dist,
+					why = why or "-",
+					seen = info and info.seen or -1,
+					ago = info and info.ago or -1,
+					jumper = info and info.jumper or "-",
+				}
 			end
 			if last == nil then
 				last = {}
@@ -352,6 +492,7 @@ function X.TrackEnemyJumps()
 			last.dist, last.at = dist, now
 		end
 	end
+	X.SampleEnemyLastSeen(now)
 end
 -- The cornered realm (ShadowRealmRules.Cornered): Spirit Breaker's charge on her with him within 1200, 3+ enemy
 -- heroes within 900 and none of ours within 1200, or an enemy jump-in in the last 0.5s with more of them than of
@@ -412,16 +553,17 @@ function X.ConsiderCorneredRealm()
 	return trigger, o
 end
 -- [SHy-DW] t= dark_willow realm-cornered trigger=charge|crowd|jump hp= near= allies= enemies= ours= charge= mod=
--- jump=<hero> kind=jump|appear from= to= mode=, right after the rule=cornered cast line (once per cast).
+-- jump=<hero> kind=jump|appear from= to= seen= ago= why= jumper= mode=, right after the rule=cornered cast line (once per cast).
 -- near: enemy heroes within 900; allies: ours within 1200 (her not counted); enemies / ours: within 1200 (ours with
 -- her); charge: distance to the charging Spirit Breaker (-1: none); from / to: the jumper's last and current distance
--- (from=-1: not seen before, kind=appear).
+-- (from=-1: not seen before, kind=appear); seen / ago: for kind=appear, her distance to his last-seen spot and its age
+-- (GetHeroLastSeenInfo); why: last-seen | jumper (ShadowRealmRules.AppearIsJump); jumper: his jump item or spell.
 function X.LogCorneredRealm(trigger, o)
 	local jump = o.jumpInfo
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow realm-cornered trigger=%s hp=%.2f near=%d allies=%d enemies=%d ours=%d charge=%d mod=%s jump=%s kind=%s from=%d to=%d mode=%d",
+			"[SHy-DW] t=%.0f dark_willow realm-cornered trigger=%s hp=%.2f near=%d allies=%d enemies=%d ours=%d charge=%d mod=%s jump=%s kind=%s from=%d to=%d seen=%d ago=%.1f why=%s jumper=%s mode=%d",
 			DotaTime(),
 			trigger,
 			Fu.GetHP(bot),
@@ -435,6 +577,10 @@ function X.LogCorneredRealm(trigger, o)
 			jump ~= nil and jump.kind or "-",
 			jump ~= nil and jump.from or -1,
 			jump ~= nil and jump.dist or -1,
+			jump ~= nil and jump.seen or -1,
+			jump ~= nil and jump.ago or -1,
+			jump ~= nil and jump.why or "-",
+			jump ~= nil and jump.jumper or "-",
 			bot:GetActiveMode()
 		)
 	)
@@ -566,13 +712,14 @@ function X.EndShadowRealm(realm, since, endedAt)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s rule=%s",
+			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s threat=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s rule=%s",
 			endedAt or DotaTime(),
 			realm.why,
 			realm.releasedAt or since,
 			since,
 			tostring(realm.released or "-"),
 			tostring(realm.tp),
+			tostring(realm.tpBy or "-"),
 			target ~= nil and not target:IsNull() and (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")) or "-",
 			dist,
 			realm.modSeen ~= nil and string.format("%.2f", realm.modSeen) or "no",
@@ -583,6 +730,28 @@ function X.EndShadowRealm(realm, since, endedAt)
 			tostring(realm.rule or realm.why)
 		) .. (realm.drop or "")
 	)
+end
+-- What hurt or threatens her, for the realm TP: an enemy hero's hit in the last 6s, a tower's, an enemy summon within
+-- 900 (ShadowRealmRules.IsSummon: a brewling, a treant, a dominated neutral; not a lane creep or a ward) or a creep's
+-- hit. Whether WasRecentlyDamagedByCreep counts a summon's hit is unverified, so the summon test comes first.
+-- Returns "hero" | "tower" | "summon" | "creep", or nil.
+function X.RealmThreat()
+	if bot:WasRecentlyDamagedByAnyHero(6.0) then
+		return "hero"
+	end
+	if bot:WasRecentlyDamagedByTower(6.0) then
+		return "tower"
+	end
+	local enemyTeam = GetOpposingTeam()
+	for _, unit in pairs(bot:GetNearbyCreeps(900, true) or {}) do
+		if Fu.IsValid(unit) and ShadowRealmRules.IsSummon(unit:GetUnitName(), unit:GetTeam() == enemyTeam) then
+			return "summon"
+		end
+	end
+	if bot:WasRecentlyDamagedByCreep(6.0) then
+		return "creep"
+	end
+	return nil
 end
 -- Another allied hero within 1500 in the attack mode (the TP rule's attackingAllies, without herself).
 function X.AllyFighting()
@@ -614,8 +783,16 @@ end
 -- channel gates that still apply (Usage.TpGatesClosed: rooted, already teleporting, Nethertoxin, Macropyre) plus a
 -- hero script's own TP hold (bot._noTpUntil). tp=ordered until the channel shows; up to 3 orders while it fits
 -- (a TP scroll can't start rooted: items_all.txt ROOT_DISABLES), then tp=now, or tp=failed.
+-- "Hit by a hero" also takes a tower's hit, an enemy summon within 900 or a creep's hit (X.RealmThreat, threat= on the
+-- end line), and a skip-safe is looked at again every 0.25s while the TP still fits (#203, game 087 28:29: cast at
+-- 0.31 HP after her T3 dive, tp=skip-safe on the first tick, then a storm brewling's Cyclone at 28:33 and an earth
+-- brewling's Hurl Boulder at 28:34; she died to brewlings and lane creeps at 28:37 with no enemy hero near).
 function X.ShadowRealmTeleport(realm, since, castDone)
-	if not castDone or realm.tp ~= "-" and realm.tp ~= "ordered" then
+	local recheck = realm.tp == "skip-safe"
+	if not castDone or realm.tp ~= "-" and realm.tp ~= "ordered" and not recheck then
+		return false
+	end
+	if recheck and since - (realm.tpCheckAt or 0) < 0.25 then
 		return false
 	end
 	if realm.tp == "ordered" and since - realm.tpAt < 0.4 then
@@ -628,6 +805,14 @@ function X.ShadowRealmTeleport(realm, since, castDone)
 			return false
 		end
 	else
+		realm.tpCheckAt = since
+		if recheck and not fits then
+			-- Keep skip-safe: the reason it never went out.
+			return false
+		end
+		realm.tp = "-"
+		local threat = X.RealmThreat()
+		realm.tpBy = threat
 		local enemyCount = #Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 		local hpLine = math.min(0.15 + 0.24 * enemyCount, 0.45)
 		local tp = X.TeleportItem()
@@ -639,7 +824,7 @@ function X.ShadowRealmTeleport(realm, since, castDone)
 			realm.tp = "skip-hp"
 		elseif bot:DistanceFromFountain() <= 4900 then
 			realm.tp = "skip-near"
-		elseif not bot:WasRecentlyDamagedByAnyHero(6.0) then
+		elseif threat == nil then
 			realm.tp = "skip-safe"
 		elseif X.AllyFighting() then
 			realm.tp = "skip-allies"

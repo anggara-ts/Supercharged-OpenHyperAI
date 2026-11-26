@@ -138,6 +138,7 @@ end
 -- seen JUMP_CLOSED or more farther away within the last JUMP_WINDOW, or not seen at all in that window (blinked in
 -- out of the fog). prevDist / prevAgo: the last sighting (nil: none); trackedAgo: since her own last sample, so a
 -- gap in her think (death, a long stun) does not read every enemy as new. Returns "jump" | "appear" | nil.
+-- An "appear" counts only after ShadowRealmRules.AppearIsJump (his last-seen spot, or a Blink or jump spell).
 ShadowRealmRules.JUMP_NEAR = 450
 ShadowRealmRules.JUMP_CLOSED = 500
 ShadowRealmRules.JUMP_WINDOW = 0.6
@@ -160,6 +161,60 @@ function ShadowRealmRules.JoinRelease(previous, reason)
 		return reason
 	end
 	return previous .. "+" .. reason
+end
+
+-- An "appear" (ShadowRealmRules.Jump: within JUMP_NEAR with no sighting of his unit in the window) is a jump-in only
+-- when it can't have been a walk out of the fog (#203, game 087 t=1108: Brewmaster walked in on lane-defend move
+-- orders, kind=appear from=-1, no Blink until 31:32, and the realm went out at full HP in a 2v1). o: seenDist (her
+-- distance now to his last-seen spot, GetHeroLastSeenInfo sampled before this sighting; nil: never seen), seenAgo
+-- (seconds since that sighting), nowDist, speed (his move speed), jumper (he has a Blink item or a jump spell).
+-- Proven by the last-seen spot: JUMP_CLOSED (500) or more closer, and more than he could walk in that time + 100.
+-- Else a hero with a jump counts, unless he was seen within APPEAR_RECENT less than 500 farther (that was a walk).
+-- Returns true, "last-seen" | "jumper", or false, "walked" | "unseen" | "near" | "walk-reach".
+ShadowRealmRules.APPEAR_WALK_MARGIN = 100
+ShadowRealmRules.APPEAR_RECENT = 2.0
+function ShadowRealmRules.AppearIsJump(o)
+	local closed = nil
+	if o.seenDist ~= nil and o.seenAgo ~= nil then
+		closed = o.seenDist - o.nowDist
+	end
+	if
+		closed ~= nil
+		and closed >= ShadowRealmRules.JUMP_CLOSED
+		and closed > (o.speed or 0) * o.seenAgo + ShadowRealmRules.APPEAR_WALK_MARGIN
+	then
+		return true, "last-seen"
+	end
+	if o.jumper then
+		if closed ~= nil and o.seenAgo <= ShadowRealmRules.APPEAR_RECENT and closed < ShadowRealmRules.JUMP_CLOSED then
+			return false, "walked"
+		end
+		return true, "jumper"
+	end
+	if closed == nil then
+		return false, "unseen"
+	end
+	if closed < ShadowRealmRules.JUMP_CLOSED then
+		return false, "near"
+	end
+	return false, "walk-reach"
+end
+
+-- An enemy summon for the realm TP gate (#203, game 087 28:29-28:37: a storm brewling's Cyclone and an earth
+-- brewling's Hurl Boulder on her, the realm TP read skip-safe, and she died with no enemy hero near): a unit of the
+-- enemy team that is not a lane creep (npc_dota_creep_*, the *_siege* catapults) or a ward. A neutral on their team
+-- is a dominated one, so it counts. name: the unit name; enemyTeam: the unit is on the other team.
+function ShadowRealmRules.IsSummon(name, enemyTeam)
+	if not enemyTeam or name == nil or name == "" then
+		return false
+	end
+	if string.find(name, "npc_dota_creep_", 1, true) or string.find(name, "_siege", 1, true) then
+		return false
+	end
+	if string.find(name, "_wards", 1, true) then
+		return false
+	end
+	return true
 end
 
 -- The realm modifier dropped while nothing in our code released it and before it could run out (game 069 5:03,

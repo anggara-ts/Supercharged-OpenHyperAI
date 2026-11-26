@@ -550,3 +550,139 @@ T.test("dark willow: two enemies of one name are not read as a jump", function()
 	T.eq(#used, 0, "no realm: nobody jumped")
 	T.eq(printedWith("realm-cornered"), nil, "no cornered line")
 end)
+
+T.test("shadow realm: an appear is a jump-in only when it can't be a walk (#203, game 087 t=1108)", function()
+	local R = load()
+	local function appear(over)
+		local o = { nowDist = 418, speed = 310, jumper = false }
+		for k, v in pairs(over) do
+			o[k] = v
+		end
+		return R.AppearIsJump(o)
+	end
+	-- Game 087: Brewmaster out of the fog at 418, last seen far away long before, no Blink: a walk.
+	local ok, why = appear({ seenDist = 3000, seenAgo = 20 })
+	T.eq(ok, false, "seen 3000 away 20s ago: he could have walked it")
+	T.eq(why, "walk-reach", "walk-reach")
+	ok, why = appear({ seenDist = 1400, seenAgo = 0.3 })
+	T.eq(ok, true, "seen 1400 away 0.3s ago: no walk covers 980")
+	T.eq(why, "last-seen", "last-seen")
+	ok, why = appear({})
+	T.eq(ok, false, "never seen, no jump: no")
+	T.eq(why, "unseen", "unseen")
+	ok, why = appear({ seenDist = 700, seenAgo = 10 })
+	T.eq(ok, false, "last seen near her")
+	T.eq(why, "near", "near")
+	ok, why = appear({ jumper = true })
+	T.eq(ok, true, "never seen, has a Blink: yes")
+	T.eq(why, "jumper", "jumper")
+	ok, why = appear({ jumper = true, seenDist = 700, seenAgo = 1 })
+	T.eq(ok, false, "a jumper seen 700 away 1s ago walked")
+	T.eq(why, "walked", "walked")
+	ok = appear({ jumper = true, seenDist = 3000, seenAgo = 20 })
+	T.eq(ok, true, "a jumper last seen far away: the jump counts")
+end)
+
+T.test("shadow realm: a summon for the realm TP gate (#203, game 087 28:29)", function()
+	local R = load()
+	T.eq(R.IsSummon("npc_dota_brewmaster_earth_3", true), true, "an earth brewling")
+	T.eq(R.IsSummon("npc_dota_furion_treant", true), true, "a treant")
+	T.eq(R.IsSummon("npc_dota_neutral_centaur_khan", true), true, "a dominated neutral on their team")
+	T.eq(R.IsSummon("npc_dota_neutral_centaur_khan", false), false, "a neutral camp creep")
+	T.eq(R.IsSummon("npc_dota_creep_goodguys_melee", true), false, "a lane creep")
+	T.eq(R.IsSummon("npc_dota_badguys_siege", true), false, "a catapult")
+	T.eq(R.IsSummon("npc_dota_observer_wards", true), false, "an observer ward")
+	T.eq(R.IsSummon(nil, true), false, "no name")
+end)
+
+-- Two enemies: one 800 from her, one out of her view; GetHeroLastSeenInfo answers lastSeen for the second.
+local function appearBot(lastSeen)
+	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 1.0, false)
+	local near, walker = nil, nil
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team then
+			if near == nil then
+				near = hero
+			elseif walker == nil then
+				walker = hero
+			end
+		end
+	end
+	near._loc = bot._loc + Vector(800, 0, 0)
+	walker._loc = bot._loc + Vector(0, 3000, 0)
+	-- No jump spell (the stub's heroes may carry one), no item.
+	walker.GetAbilityInSlot = function()
+		return nil
+	end
+	local original = GetHeroLastSeenInfo
+	rawset(_G, "GetHeroLastSeenInfo", function(playerId)
+		if playerId == walker:GetPlayerID() then
+			return { { location = bot._loc + lastSeen.offset, time_since_seen = lastSeen.ago } }
+		end
+		return original(playerId)
+	end)
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm before he shows")
+	T.stub.time = T.stub.time + 0.1
+	walker._loc = bot._loc + Vector(0, 418, 0)
+	X.SkillsComplement()
+	return bot, X, used
+end
+
+T.test("dark willow: a walk out of the fog is not a jump-in (#203, game 087 t=1108)", function()
+	local _, _, used = appearBot({ offset = Vector(0, 3000, 0), ago = 20 })
+	T.eq(#used, 0, "no realm for a walk-in")
+	T.eq(printedWith("realm-cornered"), nil, "no cornered line")
+	local line = printedWith("jump-skip hero=")
+	T.ok(line ~= nil and string.find(line, "why=walk-reach to=418 seen=3000", 1, true) ~= nil, tostring(line))
+end)
+
+T.test("dark willow: out of the fog from a spot he can't have walked from is a jump-in", function()
+	local _, _, used = appearBot({ offset = Vector(0, 1400, 0), ago = 0.2 })
+	T.eq(used[1], "dark_willow_shadow_realm", "the realm after the jump-in")
+	local line = printedWith("realm-cornered trigger=jump")
+	T.ok(line ~= nil and string.find(line, "kind=appear from=-1 to=418 seen=1400", 1, true) ~= nil, tostring(line))
+	T.ok(line ~= nil and string.find(line, "why=last-seen", 1, true) ~= nil, tostring(line))
+end)
+
+T.test("dark willow: the realm TP counts a summon near her (#203, game 087 28:29)", function()
+	local bot, X, orders = realmBot()
+	bot._hp = 100
+	for _, ally in ipairs(T.stub.teams[bot._team]) do
+		if ally ~= bot then
+			ally._loc = Vector(0, 0, 0)
+		end
+	end
+	bot.DistanceFromFountain = function()
+		return 9000
+	end
+	bot.WasRecentlyDamagedByAnyHero = function()
+		return false
+	end
+	local scroll = T.stub.newAbility("item_tpscroll", bot, false)
+	scroll.IsFullyCastable = function()
+		return true
+	end
+	bot._items[15] = scroll
+	bot.FindItemSlot = function(_, name)
+		return name == "item_tpscroll" and 15 or -1
+	end
+	X.StartShadowRealm("retreat", nil)
+	T.stub.time = 100.1
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm.tp, "skip-safe", "no hero, tower, summon or creep: no TP yet")
+	local enemyTeam = bot._team == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT
+	local brewling = T.stub.newUnit({
+		name = "npc_dota_brewmaster_earth_3",
+		team = enemyTeam,
+		loc = bot._loc + Vector(300, 0, 0),
+	})
+	bot.GetNearbyCreeps = function()
+		return { brewling }
+	end
+	T.stub.time = 100.5
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm.tp, "ordered", "the skip-safe is looked at again: a brewling near her")
+	T.eq(orders[#orders], "use:item_tpscroll", "TP scroll used")
+	T.eq(bot._dwRealm.tpBy, "summon", "threat=summon")
+end)
