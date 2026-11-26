@@ -48,7 +48,8 @@ file) and rebuild after each wave, so a usage limit mid-night still leaves a pla
    - **skip**: needs a decision or a game first. Say why in the report.
 2. **Branch**: reuse the issue's PR branch (merge `origin/main` into it first; a branch from before #221:
    `node tools/restructure.js --migrate-branch`, AGENTS.md), or start it with
-   `node tools/issue-prs.js <N>` and check out its branch. One issue per PR. Several small issues in one area
+   `node tools/issue-prs.js <N>`. Edit in that issue's worktree (`git worktree add .worktree/oha-issue-<N> <branch>`,
+   AGENTS.md step 3), not in the main clone and not on another issue's checkout. One issue per PR. Several small issues in one area
    may share a PR only if they share the cause.
 3. **Code** by the AGENTS.md rules: readable names, no globals, slots not player IDs, nil guards, facts from
    game data with a source comment. Pure logic gets a test in `tests/`. Every new behaviour gets a throttled

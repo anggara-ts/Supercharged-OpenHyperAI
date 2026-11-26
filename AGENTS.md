@@ -235,7 +235,12 @@ Tools: `gh` (GitHub CLI, logged in), `tools/issue-prs.js`, `tools/verify.js`, `t
    template and **`Refs #N`** (never `Closes #N`: merging a PR must not close the issue). Run without numbers it
    only copies each issue's priority label to its PRs and lists untriaged issues. It runs locally, not as a GitHub
    Action, because commits must be signed with the maintainer's key.
-3. **Work on the PR branch.** Before the first real commit, merge `origin/main` into it if `main` moved (a branch
+3. **Work on the PR branch, in its own worktree** (maintainer, 2026-11-26). Edit an issue's code only in
+   `.worktree/oha-issue-<N>` inside this clone. That folder is gitignored. Never edit it in the main clone, and
+   never on another issue's checkout: the main clone stays on `test/next` with the uncommitted lineup.
+   `node tools/issue-prs.js <N>` creates the branch without switching the checkout. Then
+   `git worktree add .worktree/oha-issue-<N> <branch>` and do the edits there. One issue card, one worktree.
+   Before the first real commit, merge `origin/main` into it if `main` moved (a branch
    from before #221: `--migrate-branch`, see Branches and pull requests). Commit
    (signed, pre-commit hooks), push, keep CI green, and fill the PR description in the change-log format
    (see Branches and pull requests). Mark the PR ready for review when the code is done.
@@ -361,8 +366,9 @@ came with (or a small `docs/` PR).
   component list: use cost arithmetic for recipes) and `.../datafeed/itemlist?language=english` (item ids). Herodata
   enum fields: `damage` 2 = magical, 4 = pure; `immunity` 3 = pierces debuff immunity, 4 = does not; `dispellable`
   3 = not dispellable. When the data can't settle a point, say it is unverified.
-- **Parallel agents** (used by `/goodnight` and fix rounds): one issue per agent, each in its own `git worktree`
-  branched from `origin/main`, never in the main clone (it stays on `test/next` with the uncommitted lineup). Give
+- **Parallel agents** (used by `/goodnight` and fix rounds): one issue per agent, each in
+  `.worktree/oha-issue-<N>` (step 3), branched from `origin/main`, never in the main clone (it stays on
+  `test/next` with the uncommitted lineup). Give
   every agent one shared brief file (these rules, the latest game's log and review, which files another agent owns)
   and name only its issue in the prompt. Run waves of a few agents, highest priority first; an agent stopped by a
   usage limit keeps its worktree and is resumed, not restarted. Check each result yourself (CI, diff against the
@@ -391,6 +397,7 @@ came with (or a small `docs/` PR).
 - Do not force-push, rewrite published history, or skip signing.
 - Do not change a mechanic from memory; check the game data.
 - Do not stack branches on unmerged branches; use `test-build.js` to test several PRs together.
+- Do not edit an issue's code in the main clone or on another issue's checkout. Use `.worktree/oha-issue-<N>`.
 - Do not merge a PR with game-visible changes before its tracker items pass in a game.
 - Do not close an issue while any of its task items is open; do not write `Closes #N` in a PR.
 - Do not push `test/next`, and do not change code while a test game is running.
