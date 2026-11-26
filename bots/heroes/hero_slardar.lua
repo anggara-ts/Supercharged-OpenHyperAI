@@ -178,14 +178,11 @@ function X.ConsiderQ()
 		return 0
 	end
 	local abilityLevel = guardianSprintAbility:GetLevel()
-	local castRange = guardianSprintAbility:GetCastRange()
 	local radius = 600
 	local castPoint = guardianSprintAbility:GetCastPoint()
 	local manaCost = guardianSprintAbility:GetManaCost()
 	local damage = 0
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInBonusRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castLog = nil
 	if Fu.IsGoingOnSomeone(bot) and Fu.IsRunning(bot) then

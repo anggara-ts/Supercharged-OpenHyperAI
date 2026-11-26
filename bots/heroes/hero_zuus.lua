@@ -483,7 +483,6 @@ function X.ConsiderR()
 	if not wrathAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 1600
 	local castPoint = wrathAbility:GetCastPoint()
 	local manaCost = wrathAbility:GetManaCost()
 	-- The +damage talent was read from sTalentList[5], which in the current talent order

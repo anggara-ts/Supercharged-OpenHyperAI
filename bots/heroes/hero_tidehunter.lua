@@ -392,7 +392,6 @@ function X.ConsiderE()
 	local damage = anchorSmashAbility:GetSpecialValueInt("attack_damage") + bot:GetAttackDamage()
 	local damageType = DAMAGE_TYPE_PHYSICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange - 40)
-	local enemiesInWideRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local target = nil
 	local reason = nil
 	for _, enemy in pairs(enemiesInRange) do

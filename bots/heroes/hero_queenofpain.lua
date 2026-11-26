@@ -308,7 +308,6 @@ function X.ConsiderW()
 	-- datafeed: Scream of Pain has no AbilityDamage; its damage is the special value "damage" (90/175/260/345).
 	local screamDamage = screamOfPainAbility:GetSpecialValueInt("damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local castLocation = nil
 	local debugText = nil
 	if Fu.IsStuck(bot) then
@@ -430,7 +429,6 @@ function X.ConsiderE()
 		return 0
 	end
 	local abilityLevel = screamOfPainAbility:GetLevel()
-	local castRange = screamOfPainAbility:GetCastRange()
 	local castPoint = screamOfPainAbility:GetCastPoint()
 	local radius = screamOfPainAbility:GetSpecialValueInt("area_of_effect")
 	local manaCost = screamOfPainAbility:GetManaCost()
@@ -439,7 +437,6 @@ function X.ConsiderE()
 	local damage = screamOfPainAbility:GetSpecialValueInt("damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(radius - 30)
-	local enemiesNearby = Fu.GetAroundEnemyHeroList(radius + 200)
 	local castTarget = nil
 	local debugText = nil
 	for _, enemyHero in pairs(enemiesInRange) do

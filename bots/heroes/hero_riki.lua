@@ -485,7 +485,6 @@ function X.ConsiderE()
 	local manaCost = tricksOfTheTradeAbility:GetManaCost()
 	local damage = tricksOfTheTradeAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local radius = tricksOfTheTradeAbility:GetSpecialValueInt("radius") -- datafeed: Tricks of the Trade has "radius" (425), no "range" (read 0)
 	local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, Fu.GetTeamFountain(), castRange)
 	local castLocation = nil

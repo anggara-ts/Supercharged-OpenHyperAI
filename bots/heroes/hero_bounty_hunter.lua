@@ -215,7 +215,6 @@ function X.ConsiderQ()
 	local manaCost = shurikenTossAbility:GetManaCost()
 	local damage = shurikenTossAbility:GetSpecialValueInt("bonus_damage") + bonusShurikenDamage
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local castTarget = nil
 	local bounceRadius = shurikenTossAbility:GetSpecialValueInt("bounce_aoe")
 	local nearbyUnits = Fu.GetAroundBotUnitList(bot, castRange + 100, true)

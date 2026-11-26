@@ -599,7 +599,6 @@ function X.ConsiderE()
 	local manaCost = manaDrainAbility:GetManaCost()
 	local damage = manaDrainAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local duration = manaDrainAbility:GetSpecialValueFloat("duration")
 	local drainAmount = manaDrainAbility:GetSpecialValueInt("mana_per_second") * duration
 	local missingMana = bot:GetMaxMana() - bot:GetMana()

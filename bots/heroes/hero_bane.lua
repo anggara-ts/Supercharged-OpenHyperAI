@@ -474,7 +474,6 @@ function X.ConsiderQ()
 	local damage = 0
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInRangeWide = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil
 	if Fu.IsGoingOnSomeone(bot) then
@@ -517,7 +516,6 @@ function X.ConsiderR()
 	local manaCost = fiendsGripAbility:GetManaCost()
 	local damage = fiendsGripAbility:GetSpecialValueInt("fiend_grip_damage") * 6
 	local damageType = DAMAGE_TYPE_PURE
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local enemiesInRangeWide = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil

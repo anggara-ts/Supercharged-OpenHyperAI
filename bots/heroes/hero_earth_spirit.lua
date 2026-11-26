@@ -219,7 +219,6 @@ function X.ConsiderBoulderSmash()
 	if not boulderSmashAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE, 0, false, false
 	end
-	local castRange = boulderSmashAbility:GetCastRange()
 	local attackRange = bot:GetAttackRange()
 	local speed = boulderSmashAbility:GetSpecialValueInt("speed")
 	local rockDamage = boulderSmashAbility:GetSpecialValueInt("rock_damage")

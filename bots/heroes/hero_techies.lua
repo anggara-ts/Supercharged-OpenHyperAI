@@ -773,7 +773,6 @@ function X.ConsiderStickyBomb()
 	end
 	if Fu.IsLaning(bot) then
 		local killableCreeps = {}
-		local laneCreeps = bot:GetNearbyLaneCreeps(castRange, true)
 		local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 		for _, enemyHero in pairs(enemiesInRange) do
 			if

@@ -1008,14 +1008,11 @@ function X.ConsiderR()
 		return 0
 	end
 	local abilityLevel = moonlightShadowAbility:GetLevel()
-	local castRange = moonlightShadowAbility:GetCastRange()
 	local radius = 600
 	local castPoint = moonlightShadowAbility:GetCastPoint()
 	local manaCost = moonlightShadowAbility:GetManaCost()
 	local damage = moonlightShadowAbility:GetSpecialValueInt("dam")
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil
 	for i = 1, #GetTeamPlayers(GetTeam()) do

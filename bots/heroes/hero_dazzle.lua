@@ -479,8 +479,6 @@ function X.ConsiderW()
 	local manaCost = shallowGraveAbility:GetManaCost()
 	local nDamage = shallowGraveAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_PHYSICAL
-	local enemiesInCastRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil
 	for _, ally in pairs(nearbyAllies) do

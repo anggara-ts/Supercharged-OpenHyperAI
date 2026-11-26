@@ -196,7 +196,6 @@ function X.ConsiderQ()
 	local damage = 0
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(radius)
-	local enemiesNearby = Fu.GetAroundEnemyHeroList(radius + 200)
 	local castTarget = nil
 	local debugText = nil
 	if hpRatio < 0.85 and Fu.IsStunProjectileIncoming(bot, 1000) then
@@ -287,14 +286,11 @@ function X.ConsiderW()
 		return 0
 	end
 	local abilityLevel = healingWardAbility:GetLevel()
-	local castRange = healingWardAbility:GetCastRange()
 	local radius = 600
 	local castPoint = healingWardAbility:GetCastPoint()
 	local manaCost = healingWardAbility:GetManaCost()
 	local damage = healingWardAbility:GetSpecialValueInt("dam")
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesNearby = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castLocation = nil
 	local debugText = nil
 	if Fu.IsInTeamFight(bot, 1200) then

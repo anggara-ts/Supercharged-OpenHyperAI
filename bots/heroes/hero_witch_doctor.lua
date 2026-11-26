@@ -559,7 +559,6 @@ function X.ConsiderE()
 	local manaCost = maledictAbility:GetManaCost()
 	local damage = maledictAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 32, true, BOT_MODE_NONE)
 	local radius = maledictAbility:GetSpecialValueInt("radius")
 	if Fu.IsInTeamFight(bot, 1200) then
 		local aoeLocation = Fu.GetAoeEnemyHeroLocation(bot, castRange, radius, 2)
@@ -653,7 +652,6 @@ function X.ConsiderAS()
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	local radius = 700
-	local castRange = voodooSwitcherooAbility:GetCastRange()
 	local castPoint = voodooSwitcherooAbility:GetCastPoint()
 	local manaCost = voodooSwitcherooAbility:GetManaCost()
 	local enemiesNearby = Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)

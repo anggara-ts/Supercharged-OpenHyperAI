@@ -471,8 +471,6 @@ function X.ConsiderR()
 	local castRange = psionicTrapAbility:GetCastRange()
 	local castPoint = psionicTrapAbility:GetCastPoint()
 	local abilityLevel = psionicTrapAbility:GetLevel()
-	local enemyCreeps = bot:GetNearbyCreeps(1000, true)
-	local closeEnemies = Fu.GetNearbyHeroes(bot, 600, true, BOT_MODE_NONE)
 	if Fu.IsRetreating(bot) then
 		local enemyHeroes = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 		for _, enemyHero in pairs(enemyHeroes) do

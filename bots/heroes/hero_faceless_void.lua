@@ -303,7 +303,6 @@ function X.ConsiderTimeWalk()
 		end
 	end
 	if Fu.IsLaning(bot) then
-		local laneCreeps = bot:GetNearbyLaneCreeps(range, true)
 		if
 			(bot:GetMana() - timeWalkAbility:GetManaCost()) / bot:GetMaxMana() > 0.85
 			and bot:DistanceFromFountain() > 100

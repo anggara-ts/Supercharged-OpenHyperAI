@@ -143,7 +143,6 @@ function X.ConsiderQ()
 		return 0
 	end
 	local abilityLevel = mirrorImageAbility:GetLevel()
-	local castRange = mirrorImageAbility:GetCastRange()
 	local castPoint = mirrorImageAbility:GetCastPoint()
 	local manaCost = mirrorImageAbility:GetManaCost()
 	local damage = mirrorImageAbility:GetAbilityDamage()
@@ -347,13 +346,11 @@ function X.ConsiderR()
 	end
 	local abilityLevel = songOfTheSirenAbility:GetLevel()
 	local radius = songOfTheSirenAbility:GetSpecialValueInt("radius")
-	local castRange = radius
 	local castPoint = songOfTheSirenAbility:GetCastPoint()
 	local manaCost = songOfTheSirenAbility:GetManaCost()
 	local damage = 0
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local nearbyEnemies = Fu.GetAroundEnemyHeroList(radius - 200)
-	local enemiesInRadius = Fu.GetAroundEnemyHeroList(radius)
 	local castTarget = nil
 	local castReason = nil
 	-- Team save: in a fight, 2+ enemy heroes inside the Song radius and an allied hero (Naga too) under

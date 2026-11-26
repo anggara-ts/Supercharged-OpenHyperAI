@@ -157,7 +157,6 @@ function X.ConsiderGorgonGrasp()
 	-- Float: duration is 0.8/1.2/1.6/2.0 (game data); the Int read gave 0/1/1/2 and undercounted the kill damage.
 	local duration = gorgonGraspAbility:GetSpecialValueFloat("duration")
 	botTarget = Fu.GetProperTarget(bot)
-	local nearbyAllyHeroes = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	local totalDelay = castPoint + delay
 	for _, enemyHero in pairs(nearbyEnemyHeroes) do

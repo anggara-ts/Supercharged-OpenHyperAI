@@ -344,7 +344,6 @@ function X.ConsiderW()
 	local castRange = doppelwalkAbility:GetCastRange() + aetherRange
 	local castPoint = doppelwalkAbility:GetCastPoint()
 	local manaCost = doppelwalkAbility:GetManaCost()
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, Fu.GetTeamFountain(), castRange)
 	if
 		Fu.IsNotAttackProjectileIncoming(bot, 500)

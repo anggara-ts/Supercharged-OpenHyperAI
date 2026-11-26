@@ -1076,7 +1076,6 @@ function X.ConsiderDismember(dismemberAbility, botTarget, hpRatio, enemiesInRotR
 		end
 	end
 	if isRetreating then
-		local nearbyAllyHeroes = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 		local weakestEnemy = Fu.GetAttackableWeakestUnit(bot, castRange, true, true)
 		if
 			Fu.IsValidTarget(weakestEnemy)
