@@ -1214,16 +1214,23 @@ function X.OffensiveRiftBlocked(branch)
 	end
 	return true
 end
+-- A tower that stands and shoots: not null, alive, a building. Not Fu.IsValidBuilding, which also rejects an
+-- invulnerable unit: a tier-2 tower is invulnerable while its tier 1 stands, or under Glyph, and still shoots (#36,
+-- game 087, t=29: tp-hold why=tower towerAge=0.0 under the Dire mid T2 at 0.59 HP, but tower-check found=no
+-- why=none; dead at 0:31).
+function X.TowerStanding(tower)
+	return tower ~= nil and not tower:IsNull() and tower:IsAlive() and tower:IsBuilding()
+end
 -- The enemy tower within 1600 that is hitting her: it targets her, or it hit her in the last second with no allied
 -- lane creep or other allied hero inside its range to take the shots. Returns tower, distance, range (its attack
 -- range from the handle), or nil and a note for the tower-check line (out | tanked | other | none).
--- Fu.IsValidBuilding, not Fu.IsValid: Fu.IsValid is false for every building, so from the first build of this rule
+-- X.TowerStanding, not Fu.IsValid: Fu.IsValid is false for every building, so from the first build of this rule
 -- (game 072) to game 079 no tower was ever found, and no tower-escape or tower-hop line printed (078 t=493: the
 -- laning log had the mid T1 on her at 0.56 HP, holders=0, and no tower-escape line).
 function X.TowerOnHer()
 	local note = "none"
 	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if Fu.IsValidBuilding(tower) then
+		if X.TowerStanding(tower) then
 			local range = tower:GetAttackRange()
 			local dist = GetUnitToUnitDistance(bot, tower)
 			if dist <= range + EscapeRules.TOWER_MARGIN then
@@ -1311,6 +1318,35 @@ function X.LogTowerEscape(via, why, tower, dist, out, loss)
 		)
 	)
 end
+-- Her Rift or Orb not out yet (EscapeRules.CastPending): the spell's name while it is in its ability phase (any
+-- caller's order), or while a tower step's own order (bot._towerCastOrder) is younger than its cast point + slack and
+-- the spell is not on cooldown yet; else nil.
+function X.TowerCastPending()
+	for _, ability in ipairs({ waningRiftAbility, illusoryOrbAbility }) do
+		if ability ~= nil and not ability:IsNull() and ability:IsInAbilityPhase() then
+			return ability:GetName()
+		end
+	end
+	local order = bot._towerCastOrder
+	if order == nil then
+		return nil
+	end
+	local ability = order.ability
+	if
+		ability ~= nil
+		and not ability:IsNull()
+		and EscapeRules.CastPending(
+			false,
+			DotaTime() - order.at,
+			ability:GetCastPoint(),
+			ability:GetCooldownTimeRemaining() > 0
+		)
+	then
+		return ability:GetName()
+	end
+	bot._towerCastOrder = nil
+	return nil
+end
 -- Out of an enemy tower's range at once when it hits her and nothing tanks it (EscapeRules.TowerEscape, game 072
 -- 19:56-20:05). No TP while it hits her (bot._noTpUntil; the TP channel is 3s, 7.42 items). A walk is held by the
 -- outpost mode's hold (bot._phaseHoldAskUntil: its Think gives no order), so the push or retreat Think does not walk
@@ -1328,6 +1364,21 @@ function X.TowerEscape(canCast)
 	bot._noTpUntil = math.max(bot._noTpUntil or -999, now + 1.0)
 	local loss = X.HpLoss()
 	local out = range + EscapeRules.TOWER_MARGIN - dist
+	-- Her Rift or Orb still in its cast point: no new order, or the walk cancels it (game 087, t=740-741).
+	local pending = X.TowerCastPending()
+	if pending ~= nil then
+		X.LogTowerEscape("wait-cast", pending, tower, dist, out, loss)
+		return true
+	end
+	-- The Orb of a tower escape in flight: the Jaunt once it is out of range comes before another walk order.
+	if canCast and bot._towerOrb ~= nil then
+		local okJ, jaunted = pcall(X.TowerOrbJaunt)
+		if not okJ then
+			X.LogStepError("TowerOrbJaunt", jaunted)
+		elseif jaunted then
+			return true
+		end
+	end
 	local orbJauntReady = canCast
 		and illusoryOrbAbility:IsFullyCastable()
 		and etherealJauntAbility:IsFullyCastable()
@@ -1338,7 +1389,8 @@ function X.TowerEscape(canCast)
 	if riftDistance == nil or riftDistance <= 0 then
 		riftDistance = 350
 	end
-	local via = EscapeRules.TowerEscape(true, Fu.GetHP(bot), loss, out, orbJauntReady, riftReady, riftDistance)
+	-- The jump the Rift below makes (X.EscapePoint(riftDistance - 10)): a Rift only when that gets her out.
+	local via = EscapeRules.TowerEscape(true, Fu.GetHP(bot), loss, out, orbJauntReady, riftReady, riftDistance - 10)
 	if via == nil then
 		X.LogTowerCheck(true, "hp-ok", tower, dist, range, loss)
 		return false
@@ -1349,6 +1401,7 @@ function X.TowerEscape(canCast)
 		X.LogTowerEscape(via, "hit", tower, dist, out, loss)
 		local point = X.EscapePoint(riftDistance - 10, threats)
 		X.LogEscapeAction("rift", "tower", point)
+		bot._towerCastOrder = { at = now, ability = waningRiftAbility }
 		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
 		return true
 	end
@@ -1359,6 +1412,7 @@ function X.TowerEscape(canCast)
 		X.NoteOrbCast(point, "tower")
 		bot._towerOrb = { at = now, x = towerAt.x, y = towerAt.y, range = range, why = "hit" }
 		X.LogEscapeAction("orb", "tower", point)
+		bot._towerCastOrder = { at = now, ability = illusoryOrbAbility }
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
 		return true
 	end
@@ -1396,7 +1450,7 @@ function X.TowerHop(canCast)
 	local homeDist = GetUnitToLocationDistance(bot, home)
 	local castRange = Fu.GetProperCastRange(false, bot, illusoryOrbAbility:GetCastRange())
 	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if Fu.IsValidBuilding(tower) then
+		if X.TowerStanding(tower) then
 			local towerAt = tower:GetLocation()
 			local range = tower:GetAttackRange()
 			local towerDist = GetUnitToUnitDistance(bot, tower)
@@ -1427,6 +1481,7 @@ function X.TowerHop(canCast)
 					}
 					X.LogTowerEscape("orb-hop", "behind-tower", tower, towerDist, hopAt, X.HpLoss())
 					X.LogEscapeAction("orb", "tower-hop", point)
+					bot._towerCastOrder = { at = DotaTime(), ability = illusoryOrbAbility }
 					bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
 					return true
 				end

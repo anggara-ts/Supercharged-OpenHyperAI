@@ -146,8 +146,9 @@ end
 -- allied creep or other hero in its range to take the shots. Only when her HP is under TOWER_ESCAPE_HP or fell more
 -- than TOWER_ESCAPE_LOSS in the last second. outDist: how far she has to move to leave its range (+ a margin). The
 -- fastest way: walk when she is within TOWER_WALK_EDGE of the edge, a Rift (max_distance 350, datafeed hero 13)
--- when it gets her out, else the Orb toward safety and a Jaunt once it is out of range, else the Rift anyway, else
--- walk. Returns nil | "walk" | "rift" | "orb-jaunt".
+-- when it gets her out, else the Orb toward safety and a Jaunt once it is out of range, else walk. No Rift that
+-- lands her still inside (game 087, t=740: out=455 against a 340 jump; the Rift was ordered three times, she walked
+-- anyway and lost 0.76 -> 0.57 HP). Returns nil | "walk" | "rift" | "orb-jaunt".
 EscapeRules.TOWER_ESCAPE_HP = 0.65
 EscapeRules.TOWER_ESCAPE_LOSS = 0.10
 EscapeRules.TOWER_WALK_EDGE = 200
@@ -168,10 +169,22 @@ function EscapeRules.TowerEscape(towerOnHer, hp, loss, outDist, orbJauntReady, r
 	if orbJauntReady == true then
 		return "orb-jaunt"
 	end
-	if riftReady == true then
-		return "rift"
-	end
 	return "walk"
+end
+-- A Rift or Orb of hers not out yet (#36, game 087, t=740-741): in its cast point the bot can't cast (canCast is
+-- false), so the tower escape fell back to a walk order, which cancelled the Rift; three Rift orders, none went out.
+-- No new order while the spell is in its ability phase, or while her own order is younger than the cast point +
+-- CAST_ORDER_SLACK and the spell is not on cooldown yet (the order is taken a think later). A spell that never
+-- starts (a held or dropped order) stops holding after that window, and the walk goes out.
+EscapeRules.CAST_ORDER_SLACK = 0.2
+function EscapeRules.CastPending(inPhase, orderAge, castPoint, onCooldown)
+	if inPhase == true then
+		return true
+	end
+	if orderAge == nil or onCooldown == true then
+		return false
+	end
+	return orderAge < (castPoint or 0) + EscapeRules.CAST_ORDER_SLACK
 end
 -- Behind an enemy tower on the way home (#36, game 072, 19:56-20:05: after the team's dive past Dire's mid T2 and
 -- the kill, her walk home crossed the T2's range and the tower hit her alone): hop over its range with the Orb and a

@@ -302,7 +302,10 @@ T.test("escape rules: out of an enemy tower's range, hop over it on the way home
 	local R = load()
 	-- t=1196: the Dire mid T2 (attack range 700 from the handle) hit her alone at 320, HP 0.49, out = 700 + 150 - 320.
 	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, true, true, 350), "orb-jaunt", "530 to go: the Orb and a Jaunt")
-	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, false, true, 350), "rift", "Orb down: the Rift")
+	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, false, true, 350), "walk", "Orb down, 530 past a 350 jump: walk")
+	-- Game 087, t=740: the mid T1 on her at 395 (out 455), Rift jump 340, Orb down: a walk, no Rift that lands inside.
+	T.eq(R.TowerEscape(true, 0.76, 0.14, 455, false, true, 340), "walk", "game 087: out 455 > jump 340")
+	T.eq(R.TowerEscape(true, 0.76, 0.14, 330, false, true, 340), "rift", "out 330 <= jump 340: the Rift")
 	T.eq(R.TowerEscape(true, 0.49, 0.05, 300, true, true, 350), "rift", "300 to go: the Rift gets her out")
 	T.eq(R.TowerEscape(true, 0.49, 0.05, 150, true, true, 350), "walk", "at the edge: walk")
 	T.eq(R.TowerEscape(true, 0.49, 0.05, 530, false, false, 350), "walk", "nothing ready: walk")
@@ -319,6 +322,16 @@ T.test("escape rules: out of an enemy tower's range, hop over it on the way home
 	T.ok(dx ~= nil and hopAt == 1800, "straight home, Jaunt 1800 along: " .. tostring(hopAt))
 	T.ok(dx < 0 and dy < 0, "toward home")
 	T.eq((R.HopDirection(3519, 2718, 1300, 700, 700, -6619, -6336, 1950)), nil, "3000 away: no line clears it")
+end)
+
+T.test("escape rules: no new order while her Rift or Orb is in its cast point (game 087, t=740-741)", function()
+	local R = load()
+	T.eq(R.CastPending(true, nil, 0.1, false), true, "in its ability phase (any caller's order)")
+	T.eq(R.CastPending(false, 0.03, 0.1, false), true, "own order a think ago, not started yet")
+	T.eq(R.CastPending(false, 0.25, 0.1, false), true, "within cast point + slack")
+	T.eq(R.CastPending(false, 0.35, 0.1, false), false, "never started (held or dropped): the walk goes out")
+	T.eq(R.CastPending(false, 0.1, 0.1, true), false, "on cooldown: the spell went out")
+	T.eq(R.CastPending(false, nil, 0.1, false), false, "no order, not casting")
 end)
 
 T.test("puck: the escape helpers run on the stub", function()
@@ -341,6 +354,8 @@ T.test("puck: the escape helpers run on the stub", function()
 		"OffensiveRiftBlocked",
 		"SafePoint",
 		"TowerOnHer",
+		"TowerStanding",
+		"TowerCastPending",
 		"TowerEscape",
 		"TowerHop",
 		"TowerOrbJaunt",
