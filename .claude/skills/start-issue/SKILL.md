@@ -16,8 +16,7 @@ Rules live in `AGENTS.md` ("Issue -> PR -> game test -> merge", step 1-2). This 
    Dota facts must come from game data or the Valve datafeed, not memory.
 3. **Labels:** `bug` or `enhancement`, plus `game-review` (from watching/reviewing a game),
    `needs-confirmation` (verify next game), `design` (needs the maintainer's decision), `no-pr` (no draft PR).
-4. **Create** with `gh issue create --title ... --body-file ... --label ...` (gh is logged in; on Windows use
-   `C:\Program Files\GitHub CLI\gh.exe`).
+4. **Create** with `gh_personal issue create --title ... --body-file ... --label ...`.
 5. **No PR yet.** Filing a card opens no PR. Work starts later with `node tools/issue-prs.js <N>` (branch + draft PR,
    `Refs #N`, never `Closes #N`), from `/create-pr` or `/goodnight`.
 6. Tell the user the issue numbers and priorities in a short table.
