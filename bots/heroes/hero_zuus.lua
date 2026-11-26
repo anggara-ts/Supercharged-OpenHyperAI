@@ -153,7 +153,6 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 X["bDeafaultItem"] = true
 function X.MinionThink(hMinionUnit)
 	if Minion.IsValidUnit(hMinionUnit) and hMinionUnit:GetUnitName() ~= "npc_dota_zeus_cloud" then
