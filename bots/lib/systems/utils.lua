@@ -1395,13 +1395,26 @@ function Utils.HasAnyEffect(unit, ...)
 		return unit:HasModifier(modifierName)
 	end)
 end
-function Utils.IsModeTurbo()
+local function ScanForTurbo()
 	for _, unit in ipairs(GetUnitList(UnitType.Allies)) do
 		if unit and unit:GetUnitName() == "npc_dota_courier" and unit:GetCurrentMovementSpeed() == 1100 then
 			return true
 		end
 	end
 	return false
+end
+-- The answer of this frame is kept (#52): the map-objective modes ask it 7 times per bot per frame (counted in the
+-- tests' stub API), and every call read each allied unit on the map. Within a frame (GameTime()) a new scan would say
+-- the same. Measured in games 083 and 084 (#251): 3.1% to 3.7% less script time per frame. Kept per frame, not once
+-- per game: the answer comes from the courier's speed, and a scan while no courier is on the allied list (before it
+-- spawns; while it is dead, unverified) says false.
+local turboAt, turboNow = nil, false
+function Utils.IsModeTurbo()
+	local now = GameTime()
+	if now ~= turboAt then
+		turboAt, turboNow = now, ScanForTurbo()
+	end
+	return turboNow
 end
 function Utils.DetermineEnemyBotRole(bot)
 	local unitName = bot:GetUnitName()

@@ -701,7 +701,7 @@ function Orders.Start(kind, via, human, loc, found, tickBot, tier, count, acked)
 	}
 	if kind == "rosh" then
 		-- Refuse only while Roshan is surely dead: between 8 and 11 minutes he may be up (Rules.RoshanSurelyDead).
-		facts.roshanAlive = not Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
+		facts.roshanAlive = not Rules.RoshanSurelyDead(Fu.GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
 	end
 	local need = Rules.Need(kind, facts)
 	local obey, queue, ignore, decisions =
@@ -1025,7 +1025,7 @@ local function KeepOrder()
 	if order.kind == "push" and order.building ~= nil and (order.building:IsNull() or not order.building:IsAlive()) then
 		return EndOrder("building-dead")
 	end
-	if order.kind == "rosh" and Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo()) then
+	if order.kind == "rosh" and Rules.RoshanSurelyDead(Fu.GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo()) then
 		return EndOrder("roshan-dead")
 	end
 	if order.kind == "defend" and now - order.startedAt > 8 then
@@ -1388,7 +1388,7 @@ end
 -- Roshan may be up (not killed in the last 8 minutes; turbo 4): a human's Roshan call is followed then, even before
 -- Fu.IsRoshanAlive's 11-minute mark (game 082, 24:05).
 function Orders.RoshanMaybeUp()
-	return not Rules.RoshanSurelyDead(GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
+	return not Rules.RoshanSurelyDead(Fu.GetRoshanKillTime(), DotaTime(), Fu.IsModeTurbo())
 end
 function Orders.RoshCalled(bot)
 	local order, entry = Orders.ForBot(bot)
