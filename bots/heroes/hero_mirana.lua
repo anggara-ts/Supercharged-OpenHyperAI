@@ -133,8 +133,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minion)
 	if Minion.IsValidUnit(minion) then
 		Minion.IllusionThink(minion)
@@ -1009,14 +1008,11 @@ function X.ConsiderR()
 		return 0
 	end
 	local abilityLevel = moonlightShadowAbility:GetLevel()
-	local castRange = moonlightShadowAbility:GetCastRange()
 	local radius = 600
 	local castPoint = moonlightShadowAbility:GetCastPoint()
 	local manaCost = moonlightShadowAbility:GetManaCost()
 	local damage = moonlightShadowAbility:GetSpecialValueInt("dam")
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil
 	for i = 1, #GetTeamPlayers(GetTeam()) do
