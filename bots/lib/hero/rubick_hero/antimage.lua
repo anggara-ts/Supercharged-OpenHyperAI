@@ -163,7 +163,6 @@ function X.ConsiderBlink()
 	if Fu.IsPushing(bot) and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_HIGH then
 		local nearbyAllies = Fu.GetAlliesNearLoc(bot:GetLocation(), 600)
 		local nearbyEnemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
-		local nearbyEnemyTowers = bot:GetNearbyTowers(700, true)
 		local nearbyLaneCreeps = bot:GetNearbyLaneCreeps(1200, true)
 		if
 			nearbyLaneCreeps ~= nil
