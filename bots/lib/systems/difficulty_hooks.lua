@@ -246,9 +246,10 @@ function H.ReactiveAllowed(bot, profile, what)
 	return allowed
 end
 
--- Every frame (ItemUsageThink and BuybackUsageThink, which also runs while the bot is dead): remembers when the bot
--- was last in retreat or evasive mode (a cast up to D.REACTIVE_RECENT later is still reactive) and ends the danger
--- episode on time. Unfair returns first: no state.
+-- Every frame (ItemUsageThink and BuybackUsageThink; unverified that the buyback think runs while the bot is dead:
+-- if not, an episode open at a death ends why=cap after the respawn): remembers when the bot was last in retreat or
+-- evasive mode (a cast up to D.REACTIVE_RECENT later is still reactive) and ends the danger episode on time. Unfair
+-- returns first: no state.
 function H.Tick(bot)
 	if bot == nil then
 		return

@@ -11766,7 +11766,8 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
-	-- Difficulty (#232): also while dead, so a danger episode ends with why=dead.
+	-- Difficulty (#232): the danger-episode tick here too, so an episode can end why=dead (if this think runs while
+	-- the bot is dead; unverified).
 	pcall(Usage.Difficulty.Tick, bot)
 	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
