@@ -2218,50 +2218,217 @@ function X.ConsiderChemicalRage()
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Berserk Potion (Aghanim's Shard, #184). Game data in bots/lib/systems/berserk_potion_rules.lua: ally or himself,
+-- spell-immune allies too, range 800, cooldown 35, mana 75, basic dispel, +50 attack speed, +30% move speed,
+-- +40 HP regen for 15 s. The rules, in this order: dispel an ally (or himself) under a basic-dispellable root,
+-- silence or slow; save a hurt ally chased by enemy heroes; buff a core hitting an enemy hero.
+local BerserkPotionRules = require(GetScriptDirectory() .. "/lib/systems/berserk_potion_rules")
+local hasDispelLib, DispelLib = pcall(require, GetScriptDirectory() .. "/lib/systems/dispel")
+-- 7.42 abilities_english.txt: DOTA_Tooltip_modifier_alchemist_berserk_potion.
+local BERSERK_POTION_MODIFIER = "modifier_alchemist_berserk_potion"
+-- A target whose order was refused (BerserkPotionRules.OrderStep) is left out for this many seconds.
+local BERSERK_POTION_REFUSED_HOLD = 10
+local function shortName(unit)
+	return unit ~= nil and (string.gsub(unit:GetUnitName(), "npc_dota_hero_", "")) or "-"
+end
+-- [SHy-ALCHEMIST] berserk-skip: why the potion is not thrown, only when the reason changes (at most every 2 s).
+function X.LogBerserkSkip(why)
+	if bot._potionSkipWhy == why or DotaTime() < (bot._potionSkipLogAt or -999) then
+		return
+	end
+	bot._potionSkipWhy = why
+	bot._potionSkipLogAt = DotaTime() + 2
+	pcall(
+		print,
+		string.format(
+			"[SHy-ALCHEMIST] t=%.0f alchemist berserk-skip why=%s level=%d mana=%d hp=%.2f",
+			DotaTime(),
+			why,
+			berserkPotionAbility:GetLevel() or 0,
+			math.floor(bot:GetMana()),
+			hpRatio or 0
+		)
+	)
+end
+-- Why the potion cannot be thrown now, or nil. The first time it can (the Shard granted it), one berserk-ready line.
+function X.BerserkPotionBlocked()
+	local ability = berserkPotionAbility
+	-- The safe proxy (SafeAbility) has no name.
+	if ability == nil or ability:GetName() ~= "alchemist_berserk_potion" or ability:IsNull() then
+		return "missing"
+	end
+	if ability:IsHidden() then
+		return "hidden"
+	end
+	if not ability:IsTrained() then
+		return "untrained"
+	end
+	if not bot._potionReadyLogged then
+		bot._potionReadyLogged = true
+		pcall(
+			print,
+			string.format(
+				"[SHy-ALCHEMIST] t=%.0f alchemist berserk-ready level=%d range=%d mana=%d cooldown=%.0f",
+				DotaTime(),
+				ability:GetLevel() or 0,
+				ability:GetCastRange() or 0,
+				ability:GetManaCost() or 0,
+				ability:GetCooldown() or 0
+			)
+		)
+	end
+	if not ability:IsCooldownReady() then
+		return "cooldown"
+	end
+	if bot:GetMana() < (ability:GetManaCost() or 0) then
+		return "mana"
+	end
+	if not ability:IsFullyCastable() or not ability:IsActivated() then
+		return "not-castable"
+	end
+	return nil
+end
 function X.ConsiderBerserkPotion()
-	if not berserkPotionAbility:IsTrained() or not berserkPotionAbility:IsFullyCastable() then
+	local blocked = X.BerserkPotionBlocked()
+	if blocked ~= nil then
+		X.LogBerserkSkip(blocked)
+		return BOT_ACTION_DESIRE_NONE, nil
+	end
+	-- Every rule needs an enemy hero near: none within 1600, nothing to read.
+	local enemies = {}
+	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemyHero) then
+			enemies[#enemies + 1] = enemyHero
+		end
+	end
+	if #enemies == 0 then
+		X.LogBerserkSkip("no-enemies")
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
 	local castRange = berserkPotionAbility:GetCastRange()
-	local nearbyAllies = Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE)
-	for _, allyHero in pairs(nearbyAllies) do
-		if
-			Fu.IsValidHero(allyHero)
-			and Fu.IsInRange(bot, allyHero, castRange)
-			and not allyHero:HasModifier("modifier_legion_commander_press_the_attack")
-			and not allyHero:HasModifier("modifier_item_satanic_unholy")
-			and not allyHero:IsMagicImmune()
-			and not allyHero:IsInvulnerable()
-			and not allyHero:IsIllusion()
-			and allyHero:CanBeSeen()
-		then
-			if Fu.IsDisabled(allyHero) then
-				return BOT_ACTION_DESIRE_HIGH, allyHero
-			end
-			if
-				Fu.IsRetreating(allyHero)
-				and Fu.IsRunning(allyHero)
-				and Fu.GetHP(allyHero) < 0.6
-				and allyHero:WasRecentlyDamagedByAnyHero(2.5)
-				and allyHero:IsFacingLocation(GetAncient(GetTeam()):GetLocation(), 45)
-			then
-				return BOT_ACTION_DESIRE_HIGH, allyHero
-			end
-			if Fu.IsGoingOnSomeone(allyHero) then
-				local allyTarget = Fu.GetProperTarget(allyHero)
-				if
-					Fu.IsValidHero(allyTarget)
-					and allyHero:IsFacingLocation(allyTarget:GetLocation(), 20)
-					and Fu.IsInRange(allyHero, allyTarget, allyHero:GetAttackRange() + 100)
-				then
-					return BOT_ACTION_DESIRE_HIGH, allyHero
-				end
-				if Fu.GetHP(allyHero) < 0.33 then
-					return BOT_ACTION_DESIRE_HIGH, allyHero
-				end
-			end
+	local allies = Fu.GetNearbyHeroes(bot, castRange + 100, false, BOT_MODE_NONE) or {}
+	local hasSelf = false
+	for _, allyHero in pairs(allies) do
+		if allyHero == bot then
+			hasSelf = true
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE, nil
+	if not hasSelf then
+		allies[#allies + 1] = bot
+	end
+	local refused = bot._potionRefused or {}
+	local units, candidates = {}, {}
+	for _, allyHero in pairs(allies) do
+		if
+			Fu.IsValidHero(allyHero)
+			and not allyHero:IsIllusion()
+			and not allyHero:IsInvulnerable()
+			and DotaTime() >= (refused[shortName(allyHero)] or -999)
+			-- Press the Attack already dispels and gives attack speed.
+			and not allyHero:HasModifier("modifier_legion_commander_press_the_attack")
+		then
+			local threatNear, chasers = false, 0
+			for _, enemyHero in pairs(enemies) do
+				local dist = GetUnitToUnitDistance(allyHero, enemyHero)
+				if dist <= 1200 then
+					threatNear = true
+				end
+				if dist <= 900 then
+					chasers = chasers + 1
+				end
+			end
+			local recentlyHit = allyHero:WasRecentlyDamagedByAnyHero(2.0)
+			local attackTarget = Fu.GetProperTarget(allyHero)
+			local fighting = Fu.IsValidHero(attackTarget)
+				and attackTarget:GetTeam() ~= bot:GetTeam()
+				and GetUnitToUnitDistance(allyHero, attackTarget) <= allyHero:GetAttackRange() + 150
+			-- The debuff scan (32 modifier reads) only where the dispel rule can fire.
+			local analysis = hasDispelLib and (threatNear or recentlyHit) and DispelLib.AnalyzeDebuffs(allyHero) or nil
+			units[#units + 1] = allyHero
+			candidates[#candidates + 1] = {
+				buffed = allyHero:HasModifier(BERSERK_POTION_MODIFIER),
+				basicScore = analysis and analysis.basicScore or 0,
+				rootSilence = (allyHero:IsRooted() or allyHero:IsSilenced())
+					and not allyHero:IsStunned()
+					and not allyHero:IsHexed(),
+				threatened = threatNear or recentlyHit,
+				hp = Fu.GetHP(allyHero),
+				chasers = chasers,
+				recentlyHit = recentlyHit,
+				core = Fu.IsCore(allyHero),
+				fighting = fighting,
+			}
+		end
+	end
+	local index, why = BerserkPotionRules.Pick(candidates)
+	if index == nil then
+		X.LogBerserkSkip("no-target")
+		return BOT_ACTION_DESIRE_NONE, nil
+	end
+	local target = units[index]
+	if X.NoteBerserkPotionOrder(target, why) then
+		return BOT_ACTION_DESIRE_NONE, nil
+	end
+	return BOT_ACTION_DESIRE_HIGH, target
+end
+-- A brew in hand: another change may hold the other casts while brewing, so those seconds are not an order.
+-- 7.42 abilities_english.txt: DOTA_Tooltip_modifier_alchemist_unstable_concoction; the throw ability is shown only
+-- while brewing (datafeed note: "While brewing, this ability is replaced by Unstable Concoction Throw").
+function X.IsBrewingForPotion()
+	return bot:HasModifier("modifier_alchemist_unstable_concoction")
+		or (unstableConcoctionThrowAbility:GetCastRange() > 0 and not unstableConcoctionThrowAbility:IsHidden())
+end
+-- The throw ConsiderBerserkPotion returns (SkillsComplement casts it): log it at most once per 3 s. A target ordered
+-- for 3 s in range with no throw was refused: it is left out for BERSERK_POTION_REFUSED_HOLD s (berserk-refused) and
+-- this returns true. Not counted while brewing (X.IsBrewingForPotion).
+function X.NoteBerserkPotionOrder(target, why)
+	local name = shortName(target)
+	if X.IsBrewingForPotion() then
+		bot._potionOrder = nil
+		return false
+	end
+	local inRange = GetUnitToUnitDistance(bot, target) <= berserkPotionAbility:GetCastRange()
+	local order, refused = BerserkPotionRules.OrderStep(
+		bot._potionOrder,
+		name,
+		DotaTime(),
+		inRange,
+		berserkPotionAbility:IsCooldownReady()
+	)
+	bot._potionOrder = order
+	if refused then
+		bot._potionRefused = bot._potionRefused or {}
+		bot._potionRefused[name] = DotaTime() + BERSERK_POTION_REFUSED_HOLD
+		pcall(
+			print,
+			string.format(
+				"[SHy-ALCHEMIST] t=%.0f alchemist berserk-refused target=%s why=%s self=%s hold=%d",
+				DotaTime(),
+				name,
+				why or "-",
+				tostring(target == bot),
+				BERSERK_POTION_REFUSED_HOLD
+			)
+		)
+		return true
+	end
+	bot._potionSkipWhy = nil
+	if DotaTime() >= (bot._potionLogAt or -999) then
+		bot._potionLogAt = DotaTime() + 3
+		pcall(
+			print,
+			string.format(
+				"[SHy-ALCHEMIST] t=%.0f alchemist berserk-potion target=%s why=%s hp=%.2f self=%s dist=%d mana=%d",
+				DotaTime(),
+				name,
+				why or "-",
+				Fu.GetHP(target),
+				tostring(target == bot),
+				math.floor(GetUnitToUnitDistance(bot, target)),
+				math.floor(bot:GetMana())
+			)
+		)
+	end
+	return false
 end
 return X
