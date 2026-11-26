@@ -119,8 +119,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -242,7 +241,6 @@ function X.ConsiderQ()
 	local damage = fortunesEndAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local radius = 300
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	-- Save (datafeed: on an ally it only dispels debuffs): an ally in range who is rooted or silenced
 	-- with an enemy hero within 900 of him.
 	for _, ally in pairs(nearbyAllies or {}) do
@@ -479,7 +477,6 @@ function X.ConsiderR()
 	local manaCost = falsePromiseAbility:GetManaCost()
 	local damage = falsePromiseAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsInRange(bot, allyHero, castRange + 50)
