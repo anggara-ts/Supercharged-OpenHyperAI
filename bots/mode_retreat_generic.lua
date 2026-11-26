@@ -3,7 +3,6 @@ local Retreat = {}
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local LaneTowerRules = require(GetScriptDirectory() .. "/lib/systems/lane_tower_rules")
 local RetreatRules = require(GetScriptDirectory() .. "/lib/systems/retreat_rules")
-local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
 local bot = GetBot()
 local hpRatio, mpRatio, botName, botHealth, healthRegen, manaRegen, botLocation, botTarget
 local botLevel, activeMode
@@ -1208,6 +1207,7 @@ function Retreat.ShouldRun()
 		-- tier-2 rule below never ran before the T1 fell (no `anti-dive why=tower-tier2` line in games 086 / 087).
 		-- The deep tower is read by its id instead (bots/lib/systems/deep_tower.lua), with the same reach.
 		if not isDivingTower and Fu.IsValidHero(botTarget) then
+			local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
 			diveTower = DeepTower.InReach(bot:GetLocation())
 			isDivingTower = diveTower ~= nil
 		end
