@@ -32,7 +32,7 @@ const START = new Set(
 		.filter((a) => /^\d+$/.test(a))
 		.map(Number)
 );
-const GH = process.env.GH || (process.platform === "win32" ? "C:\\Program Files\\GitHub CLI\\gh.exe" : "gh");
+const GH = process.env.GH || "gh_personal";
 const ROOT = path.join(__dirname, "..");
 
 const gh = (args) => cp.execFileSync(GH, args, { encoding: "utf8", cwd: ROOT });

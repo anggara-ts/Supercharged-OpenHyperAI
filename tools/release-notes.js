@@ -22,7 +22,7 @@ const cp = require("child_process");
 const argv = process.argv.slice(2);
 const option = (name) => (argv.indexOf(name) >= 0 ? argv[argv.indexOf(name) + 1] : undefined);
 const sh = (cmd, args) => cp.execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const GH = process.platform === "win32" ? "C:/Program Files/GitHub CLI/gh.exe" : "gh";
+const GH = process.env.GH || "gh_personal";
 
 function lastTag() {
 	const tags = sh("git", ["tag", "--list", "v*", "--sort=-v:refname"]).split("\n").filter(Boolean);

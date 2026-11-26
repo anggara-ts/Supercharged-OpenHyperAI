@@ -12,7 +12,7 @@ which both people and AI coding agents follow. Read it once before your first PR
 | Git 2.40+ | version control; commits must be **signed** | yes |
 | Node.js 18+ | the developer tools in `tools/` (log splitter, tracker, build helpers) | yes |
 | Python 3.9+ and [pre-commit](https://pre-commit.com) | git hooks: StyLua formatting, no commits on `main`, file-size limit, build info | yes |
-| [GitHub CLI](https://cli.github.com) (`gh`) | issues and PRs from the terminal, used by `tools/issue-prs.js` and `tools/after-game.js` | recommended |
+| [GitHub CLI](https://cli.github.com) via `gh_personal` | issues and PRs as the anggara-ts login; used by `tools/issue-prs.js` and `tools/after-game.js` | recommended |
 | LuaJIT | run the tests locally (`luajit tests/run.lua`); CI runs them anyway | optional |
 | luacheck | lint locally; CI runs it anyway | optional |
 
