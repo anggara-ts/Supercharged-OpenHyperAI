@@ -121,7 +121,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minion)
 	Minion.MinionThink(minion)
 end
@@ -249,12 +249,12 @@ function X.ConsiderQ()
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + radius, true, BOT_MODE_NONE)
 	local enemiesInExtendedRange = Fu.GetNearbyHeroes(bot, castRange + radius + 150, true, BOT_MODE_NONE)
 	local enemiesNearby = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInRange)
-	local weakestExtendedEnemy, weakestExtendedEnemyHealth = X.cm_GetWeakestUnit(enemiesInExtendedRange)
+	local weakestEnemy = X.cm_GetWeakestUnit(enemiesInRange)
+	local weakestExtendedEnemy = X.cm_GetWeakestUnit(enemiesInExtendedRange)
 	local laneCreeps = bot:GetNearbyLaneCreeps(castRange + radius, true)
 	local extendedLaneCreeps = bot:GetNearbyLaneCreeps(castRange + radius + 200, true)
-	local weakestCreep, weakestCreepHealth = X.cm_GetWeakestUnit(laneCreeps)
-	local weakestExtendedCreep, weakestExtendedCreepHealth = X.cm_GetWeakestUnit(extendedLaneCreeps)
+	local weakestCreep = X.cm_GetWeakestUnit(laneCreeps)
+	local weakestExtendedCreep = X.cm_GetWeakestUnit(extendedLaneCreeps)
 	local enemyTowers = bot:GetNearbyTowers(1000, true)
 	local killHeroAoe = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0.8, damage)
 	local heroAoe = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0.8, 0)
@@ -451,8 +451,8 @@ function X.ConsiderW()
 	end
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local enemiesInExtendedRange = Fu.GetNearbyHeroes(bot, castRange + 200, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInRange)
-	local weakestExtendedEnemy, weakestExtendedEnemyHealth = X.cm_GetWeakestUnit(enemiesInExtendedRange)
+	local weakestEnemy = X.cm_GetWeakestUnit(enemiesInRange)
+	local weakestExtendedEnemy = X.cm_GetWeakestUnit(enemiesInExtendedRange)
 	local creepsInRange = bot:GetNearbyCreeps(castRange + 100, true)
 	local creepsNearby = bot:GetNearbyCreeps(1400, true)
 	local strongestCreep, strongestCreepHealth = X.cm_GetStrongestUnit(creepsInRange)
@@ -651,7 +651,6 @@ function X.ConsiderR()
 	local radius = freezingFieldAbility:GetAOERadius() * 0.88
 	local nearbyAllyHeroes = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInRange)
 	local trappedEnemyCount = 0
 	for _, enemyHero in pairs(enemiesInRange) do
 		if

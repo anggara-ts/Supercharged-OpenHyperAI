@@ -122,7 +122,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -221,7 +221,6 @@ function X.ConsiderQ()
 		return 0
 	end
 	local abilityLevel = darkPactAbility:GetLevel()
-	local castRange = darkPactAbility:GetCastRange()
 	local radius = darkPactAbility:GetSpecialValueInt("radius")
 	local castPoint = darkPactAbility:GetCastPoint()
 	local manaCost = darkPactAbility:GetManaCost()
@@ -230,7 +229,6 @@ function X.ConsiderQ()
 	-- was predicted half a second early.
 	local delay = darkPactAbility:GetSpecialValueFloat("delay")
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRadius = Fu.GetAroundEnemyHeroList(radius)
 	local enemiesNearby = Fu.GetAroundEnemyHeroList(800)
 	local target = nil
 	local reason = nil
@@ -398,7 +396,6 @@ function X.ConsiderAS()
 		return 0
 	end
 	local castRange = depthShroudAbility:GetCastRange() + aetherRange
-	local enemiesNear = Fu.GetAroundEnemyHeroList(600)
 	local enemiesNearby = Fu.GetAroundEnemyHeroList(800)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
@@ -433,13 +430,11 @@ function X.ConsiderR()
 		return 0
 	end
 	local abilityLevel = shadowDanceAbility:GetLevel()
-	local castRange = shadowDanceAbility:GetCastRange()
 	local radius = 600
 	local castPoint = shadowDanceAbility:GetCastPoint()
 	local manaCost = shadowDanceAbility:GetManaCost()
 	local damage = 0
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesNear = Fu.GetAroundEnemyHeroList(600)
 	local enemiesNearby = Fu.GetAroundEnemyHeroList(1000)
 	local target = nil
 	local reason = nil

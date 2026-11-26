@@ -134,7 +134,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minion)
 	Minion.MinionThink(minion)
 end
@@ -773,7 +773,6 @@ function X.ConsiderStickyBomb()
 	end
 	if Fu.IsLaning(bot) then
 		local killableCreeps = {}
-		local laneCreeps = bot:GetNearbyLaneCreeps(castRange, true)
 		local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 		for _, enemyHero in pairs(enemiesInRange) do
 			if

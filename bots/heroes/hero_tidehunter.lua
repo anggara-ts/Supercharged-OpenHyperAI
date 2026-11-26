@@ -135,7 +135,7 @@ nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "tidehunter_ravage", kind = "none" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -392,7 +392,6 @@ function X.ConsiderE()
 	local damage = anchorSmashAbility:GetSpecialValueInt("attack_damage") + bot:GetAttackDamage()
 	local damageType = DAMAGE_TYPE_PHYSICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange - 40)
-	local enemiesInWideRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local target = nil
 	local reason = nil
 	for _, enemy in pairs(enemiesInRange) do

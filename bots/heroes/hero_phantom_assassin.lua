@@ -121,7 +121,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -430,8 +430,6 @@ function X.ConsiderW()
 	local damageType = DAMAGE_TYPE_PHYSICAL
 	local alliesNearby = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 	local enemiesNearby = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 50, true, BOT_MODE_NONE)
-	local enemiesInWideRange = Fu.GetNearbyHeroes(bot, castRange + 300, true, BOT_MODE_NONE)
 	local enemyTowers = bot:GetNearbyTowers(1400, true)
 	local aliveEnemyCount = Fu.GetNumOfAliveHeroes(true)
 	local target = Fu.GetProperTarget(bot)

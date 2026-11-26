@@ -117,7 +117,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	if Minion.IsValidUnit(minionUnit) then
 		Minion.IllusionThink(minionUnit)
@@ -166,8 +166,6 @@ function X.SkillsComplement()
 		SafeAbility(bot:GetAbilityByName("pangolier_gyroshell_stop"), "pangolier_gyroshell_stop", "pangolier")
 	botTarget = Fu.GetProperTarget(bot)
 	local botHp = hpRatio
-	local allyHeroes = Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_NONE)
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 	endRollUpDesire = X.ConsiderEndRollUp()
 	if endRollUpDesire > 0 then
 		bot:Action_UseAbility(endRollUpAbility)
