@@ -1,13 +1,13 @@
--- Bot chat rules (#182): decision lines only with `!debug`, and the welcome's version line.
+-- Bot chat rules (#182): decision lines only with `!chatty`, and the welcome's version line.
 -- Pure functions (plain values in) except SayDecision, so tests/test_chat_rules.lua can run them.
 local ChatRules = {}
 
 -- Seconds between two [SHy-CHAT] decision lines of one bot.
 ChatRules.LOG_GAP = 10
 
--- Is the `!debug` chat mode on? The team chat command (`!debug` / `!verbose`, ability_item_usage_generic.lua
--- Usage.SetReplyHumanTime) sets Utils.DebugMode and Utils.GameStates.verboseChat; mode_ward_generic.lua reads the
--- same two flags for its ward-coordinates line.
+-- Is the old debug mode on (Utils.DebugMode or Utils.GameStates.verboseChat)? Nothing switches it on any more: the
+-- `!debug` / `!verbose` chat commands were removed (maintainer, 2026-11-24: "i dont think we need !debug anymore, we
+-- have logger anyway"). Kept for code that still reads it; it never turns the decision chat on.
 function ChatRules.IsDebugChat(utils)
 	if type(utils) ~= "table" then
 		return false
@@ -15,15 +15,21 @@ function ChatRules.IsDebugChat(utils)
 	return utils.DebugMode == true or (type(utils.GameStates) == "table" and utils.GameStates.verboseChat == true)
 end
 
+-- Is the team's `!chatty` mode on (the heroes' decision chat)? The team chat command `!chatty` toggles
+-- Utils.GameStates.chattyChat (maintainer, 2026-11-24: "chatty is for hero chat when doing actions").
+function ChatRules.IsChattyChat(utils)
+	return type(utils) == "table" and type(utils.GameStates) == "table" and utils.GameStates.chattyChat == true
+end
+
 -- A decision line ("Going for X", "Harassing X", "Pushing top", "Defend mid", lotus / wisdom shrine, leaving farm):
--- said in team chat only while `!debug` is on. "make bots less chatty ... belong to `!debug`" (maintainer,
--- 2026-11-23). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
+-- said in team chat only while `!chatty` is on ("make bots less chatty ... belong to `!debug`", maintainer
+-- 2026-11-23; moved from the removed `!debug` to `!chatty` on 2026-11-24). Returns true when it was said. [SHy-CHAT] decision key= said=yes|no, at most once per LOG_GAP per bot.
 function ChatRules.SayDecision(bot, text, key)
 	if bot == nil or text == nil then
 		return false
 	end
 	local utilsOk, utils = pcall(require, GetScriptDirectory() .. "/lib/systems/utils")
-	local on = utilsOk and ChatRules.IsDebugChat(utils)
+	local on = utilsOk and ChatRules.IsChattyChat(utils)
 	if on then
 		bot:ActionImmediate_Chat(text, false)
 	end
@@ -44,9 +50,14 @@ function ChatRules.SayDecision(bot, text, key)
 	return on
 end
 
--- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game (game 075: t=-80, about
--- 9s after the bots' first "I will play position N" lines).
-ChatRules.WELCOME_START = -80
+-- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game: at -1:00, after the bots'
+-- "I will play position N" lines (t=-89 to -80) have settled. Maintainer 2026-11-24: "send welcome message (bot version
+-- etc) at -0:30. now it's crowded with bot position", then (game 082, -0:30 worked) "move the welcome message to -1:00".
+-- It was -80, right with the position lines.
+ChatRules.WELCOME_START = -60
+-- Whether the first position line waits for the welcome's version line (maintainer 2026-11-23: version first). Off
+-- since the welcome moved after them (2026-11-24): the position lines go out at once, the welcome comes later on its own.
+ChatRules.POSITION_WAITS_FOR_WELCOME = false
 -- The first position line waits at most this many seconds for the team's welcome version line, counted from the
 -- welcome's start (or from the bot's first try, when that is later), so a missing welcome never blocks it.
 ChatRules.WELCOME_FIRST_WAIT = 5
@@ -56,6 +67,9 @@ ChatRules.WELCOME_FIRST_WAIT = 5
 -- line was said; firstTryAt: when the bot first wanted to say its line; welcomeStart and now: DotaTime(). Returns
 -- true while it waits, else false and why it stopped waiting: "welcome" or "timeout".
 function ChatRules.PositionLineWaits(versionSaid, firstTryAt, welcomeStart, now)
+	if not ChatRules.POSITION_WAITS_FOR_WELCOME then
+		return false, "off"
+	end
 	if versionSaid then
 		return false, "welcome"
 	end
@@ -106,6 +120,21 @@ function ChatRules.FillWelcomeLine(line, versionText, dateText)
 		return nil
 	end)
 	return filled
+end
+
+-- Does a bot answer a chat line with small talk / trash talk (Fu.Chat.GetReplyString)? Only an enemy human's all chat
+-- (maintainer, game 080: "sending team chat make them reply trashtalk to ally"; "enemy bot can reply with trashtalk
+-- when human chat-all"). A bot's line, team chat and an ally's all chat get none: false and why (bot / ally).
+-- Commands and their replies are handled before this.
+ChatRules.SMALLTALK_SKIP_LOG_GAP = 30
+function ChatRules.SmallTalkReply(senderIsBot, teamOnly, senderIsEnemy)
+	if senderIsBot then
+		return false, "bot"
+	end
+	if teamOnly or not senderIsEnemy then
+		return false, "ally"
+	end
+	return true, nil
 end
 
 return ChatRules

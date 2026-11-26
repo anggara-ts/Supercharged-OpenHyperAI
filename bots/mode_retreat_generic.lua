@@ -2,6 +2,7 @@
 local Retreat = {}
 Retreat.Difficulty = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+local LaneTowerRules = require(GetScriptDirectory() .. "/lib/systems/lane_tower_rules")
 local RetreatRules = require(GetScriptDirectory() .. "/lib/systems/retreat_rules")
 local bot = GetBot()
 local hpRatio, mpRatio, botName, botHealth, healthRegen, manaRegen, botLocation, botTarget
@@ -278,6 +279,67 @@ local function CountRealHeroes(radius, enemy)
 	end
 	return count
 end
+-- Retreat over evasive inside an enemy tower's range in the laning phase (#71, game 071 5:47-5:55: Largo, 58% HP, in
+-- Dire's top T1 range and hit by Phantom Assassin, stayed in Valve's evasive mode at 0.60 and died there). Under 60% HP,
+-- inside the tower's reach + 100 (LaneTowerRules) and hit there (the tower shoots it, or a hero hit it in the last
+-- 1.5s): the same 1.25 desire as OverEvasiveDesire. Held while retreat is the active mode, still in the zone and under
+-- 60% HP; once out of the zone the hold ends, so the bot is not sent home. Its own log line: the over-evasive one is
+-- muted (OHA_MUTED). [SHy-RETREAT] tower-escape start|hold, at most every 3s.
+local function TowerEscapeDesire()
+	if not Fu.IsInLaningPhase() then
+		bot._towerEscapeUntil = nil
+		return 0
+	end
+	local now = DotaTime()
+	local inZone, towerOnMe, towerName, dist, reach = false, false, "-", 0, 0
+	for _, tower in pairs(bot:GetNearbyTowers(1200, true) or {}) do
+		if Fu.IsValidBuilding(tower) and tower:IsAlive() then
+			local okRange, rawRange = pcall(function()
+				return tower:GetAttackRange()
+			end)
+			local towerReach =
+				LaneTowerRules.Reach(okRange and rawRange or nil, tower:GetBoundingRadius(), bot:GetBoundingRadius())
+			local towerDist = GetUnitToUnitDistance(bot, tower)
+			if LaneTowerRules.InZone(towerDist, towerReach) then
+				inZone = true
+				towerOnMe = tower:GetAttackTarget() == bot
+				towerName = (string.gsub(tower:GetUnitName(), "npc_dota_", ""))
+				dist, reach = towerDist, towerReach
+				break
+			end
+		end
+	end
+	local hp = Fu.GetHP(bot)
+	local hit = towerOnMe or bot:WasRecentlyDamagedByAnyHero(1.5)
+	local holding = bot._towerEscapeUntil ~= nil and now < bot._towerEscapeUntil and activeMode == BOT_MODE_RETREAT
+	local state = LaneTowerRules.TowerEscape(activeMode == BOT_MODE_EVASIVE_MANEUVERS, holding, inZone, hp, hit)
+	if state == nil then
+		bot._towerEscapeUntil = nil
+		return 0
+	end
+	bot._towerEscapeUntil = now + 3
+	if now >= (bot._towerEscapeLogAt or -999) then
+		bot._towerEscapeLogAt = now + 3
+		pcall(
+			print,
+			string.format(
+				"[SHy-RETREAT] t=%.0f %s tower-escape %s hp=%.2f towerOnMe=%s hit=%s enemies=%d dist=%d reach=%d tower=%s mode=%d",
+				now,
+				HeroName(),
+				state,
+				hp,
+				tostring(towerOnMe),
+				tostring(hit),
+				CountRealHeroes(1200, true),
+				math.floor(dist),
+				math.floor(reach),
+				towerName,
+				activeMode or -1
+			)
+		)
+	end
+	return BOT_DESIRE_OVERRIDE * 1.25
+end
 -- Valve's evasive mode turns this file off (tag 142). Game 037: 33 of 52 Radiant deaths ended in it,
 -- and those bots lost ground to the fountain in their last 3.5s (retreat deaths gained ~200). Low
 -- (under 40%) with enemy heroes near and outnumbered or being hit: retreat above evasive (it reads
@@ -464,6 +526,7 @@ function GetDesire()
 	local now = DotaTime()
 	if not bot:IsAlive() then
 		bot._retreatDeadAt = now
+		bot._towerEscapeUntil = nil
 		bot._hardRetreatUntil = nil
 		bot._overEvasiveUntil = nil
 	end
@@ -561,9 +624,33 @@ function GetDesireHelper()
 		or Fu.GetModifierTime(bot, "modifier_oracle_false_promise_timer") > 3
 		or JinguFightOn()
 	then
+		bot._towerEscapeUntil = nil
 		bot._hardRetreatUntil = nil
 		bot._overEvasiveUntil = nil
 		return RetreatTag(142, BOT_MODE_DESIRE_NONE)
+	end
+	if activeMode == BOT_MODE_EVASIVE_MANEUVERS or bot._towerEscapeUntil ~= nil then
+		local okEscape, towerEscape = pcall(TowerEscapeDesire)
+		if not okEscape then
+			if not bot._towerEscapeErr then
+				-- Once per bot: a broken rule must not take the retreat desire down with it.
+				bot._towerEscapeErr = true
+				pcall(
+					print,
+					string.format(
+						"[SHy-RETREAT] t=%.0f %s tower-escape error=%s",
+						DotaTime(),
+						HeroName(),
+						tostring(towerEscape)
+					)
+				)
+			end
+			bot._towerEscapeUntil = nil
+			towerEscape = 0
+		end
+		if towerEscape > 0 then
+			return RetreatTag(145, towerEscape)
+		end
 	end
 	if activeMode == BOT_MODE_EVASIVE_MANEUVERS or bot._overEvasiveUntil ~= nil then
 		local overEvasive = OverEvasiveDesire()
@@ -1143,6 +1230,30 @@ function Retreat.ShouldRun()
 			local towerOnUs = tower:GetAttackTarget() == bot
 			local killable = teamDamage >= botTarget:GetHealth()
 			local lowTarget = Fu.GetHP(botTarget) < 0.25 and not towerOnUs
+			-- #12, game 084 1:21-1:34 (maintainer: "just dont dive t2 early game, the damage is too big"): the
+			-- killable / low-target exceptions hold for a tier-1 tower only (bots/lib/systems/tempo_rules.lua).
+			local TempoRules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
+			local towerTier = TempoRules.TowerTier(tower:GetUnitName())
+			if not TempoRules.EarlyDiveAllowed(towerTier, killable, lowTarget) and (killable or lowTarget) then
+				if DotaTime() >= (bot._antiDiveLogAt or -999) then
+					bot._antiDiveLogAt = DotaTime() + 5
+					pcall(
+						print,
+						string.format(
+							"[SHy-RETREAT] t=%.0f %s anti-dive why=tower-tier2 tier=%d target=%s hp=%.2f killable=%s low=%s towerOnUs=%s",
+							DotaTime(),
+							(string.gsub(botName, "npc_dota_hero_", "")),
+							towerTier or 0,
+							(string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "")),
+							Fu.GetHP(botTarget),
+							tostring(killable),
+							tostring(lowTarget),
+							tostring(towerOnUs)
+						)
+					)
+				end
+				return 2.88
+			end
 			if not killable and not lowTarget then
 				if DotaTime() >= (bot._antiDiveLogAt or -999) then
 					bot._antiDiveLogAt = DotaTime() + 5
