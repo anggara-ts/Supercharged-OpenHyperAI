@@ -1,6 +1,6 @@
 -- Casts abilities and uses items while the bot is already in some other mode.
 local Usage = {}
--- Difficulty levels (#232): dodge share, reaction delay, smoke gate, late last hits (a field: this chunk is near the
+-- Difficulty levels (#232): reactive and cast rolls, smoke gate, late last hits (a field: this chunk is near the
 -- 200-locals limit).
 Usage.Difficulty = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
 local PerfParts = require(GetScriptDirectory() .. "/lib/systems/perf")
@@ -2436,7 +2436,7 @@ function Usage.TimedTrackingProjectile(item, target, finder, searchRange)
 		return nil
 	end
 	if found ~= nil then
-		-- Difficulty (#232): Easy never reacts, Medium to half the threats ([SHy-DIFF] held kind=dodge-off).
+		-- Difficulty (#232): the bot's reactive roll for this danger episode ([SHy-DIFF] roll kind=reactive).
 		if not Usage.Difficulty.DodgeAllowed(target, "item-tracking") then
 			return nil
 		end
@@ -11463,6 +11463,8 @@ function ItemUsageThink()
 		end
 	end
 	MatchTrace.Tick(bot)
+	-- Difficulty (#232): danger episodes end on time; recent retreat / evasive mode for the reactive casts.
+	pcall(Usage.Difficulty.Tick, bot)
 	pcall(MuteCloneChat)
 	pcall(TrackCyclone)
 	-- Ability charges for every bot (the API has no ability-charge read); before any gate below.
@@ -11764,6 +11766,8 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	-- Difficulty (#232): also while dead, so a danger episode ends with why=dead.
+	pcall(Usage.Difficulty.Tick, bot)
 	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
 		bot.lastBuybackFrameProcessTime = DotaTime()

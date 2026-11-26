@@ -45,6 +45,24 @@ local function countRandom()
 	return count
 end
 
+-- math.random returns `values` in order (the last one repeats); count.n counts the draws.
+local function scriptedRandom(values)
+	local count = { n = 0 }
+	math.random = function()
+		count.n = count.n + 1
+		return values[math.min(count.n, #values)]
+	end
+	return count
+end
+
+local function counter(values)
+	local count = { n = 0 }
+	return function()
+		count.n = count.n + 1
+		return values[math.min(count.n, #values)]
+	end, count
+end
+
 T.test("difficulty: API values map to levels (NPX 9 = newplayer), anything else to unfair (default)", function()
 	local _, D = load()
 	local names = { [0] = "passive", "easy", "medium", "hard", "unfair" }
@@ -71,22 +89,27 @@ T.test("difficulty: API values map to levels (NPX 9 = newplayer), anything else 
 	T.eq(src, "default", "failed call src")
 end)
 
-T.test("difficulty: only Unfair is neutral, lower levels only take away", function()
+T.test("difficulty: only Unfair is neutral, lower levels only take away, the chances per level", function()
 	local _, D = load()
 	T.ok(D.PROFILES.unfair.neutral, "unfair neutral")
 	local order = { "newplayer", "passive", "easy", "medium", "hard", "unfair" }
+	-- Maintainer, 2026-11-27: reactive (escape, dodge, save, interrupt) and other casts, success chance per level.
+	local reactive = { newplayer = 0.15, passive = 0.25, easy = 0.25, medium = 0.5, hard = 0.85, unfair = 1 }
+	local other = { newplayer = 0.55, passive = 0.65, easy = 0.65, medium = 0.85, hard = 0.95, unfair = 1 }
 	local rank = { off = 0, careful = 1, on = 2 }
 	for i, name in ipairs(order) do
 		local p = D.PROFILES[name]
+		T.eq(p.reactiveChance, reactive[name], name .. " reactive chance")
+		T.eq(p.castChance, other[name], name .. " cast chance")
+		T.eq(p.reactionDelay, nil, name .. ": no reaction delay")
 		if name ~= "unfair" then
 			T.ok(not p.neutral, name .. " not neutral")
 		end
 		local nextP = D.PROFILES[order[i + 1]]
 		if nextP ~= nil then
-			T.ok(p.reactionDelay >= nextP.reactionDelay, name .. " reaction")
-			T.ok(p.castSkipChance >= nextP.castSkipChance, name .. " skip")
+			T.ok(p.reactiveChance <= nextP.reactiveChance, name .. " reactive")
+			T.ok(p.castChance <= nextP.castChance, name .. " cast")
 			T.ok(p.lastHitError >= nextP.lastHitError, name .. " last hit")
-			T.ok(p.dodgeChance <= nextP.dodgeChance, name .. " dodge")
 			for _, gate in ipairs({ "hunt", "smoke", "dive" }) do
 				T.ok(rank[p[gate]] <= rank[nextP[gate]], name .. " " .. gate)
 			end
@@ -95,154 +118,139 @@ T.test("difficulty: only Unfair is neutral, lower levels only take away", functi
 	T.eq(D.PROFILES.passive.fightHeroes, false, "passive does not fight")
 end)
 
-T.test("difficulty: cast hold waits the reaction delay per decision, a gap starts a new one", function()
+T.test("difficulty: a per-frame caller does not re-roll its cast decision", function()
 	local _, D = load()
-	local easy = D.PROFILES.easy
-	local never = function()
-		return 0.99
-	end
-	local state = {}
-	local ok, why = D.CastStep(state, 10, easy, never)
-	T.eq(ok, false, "held at first")
-	T.eq(why, "reaction", "reaction")
-	T.eq(D.CastStep(state, 10.3, easy, never), false, "0.3s")
-	T.eq(D.CastStep(state, 10.6, easy, never), false, "0.6s")
-	T.eq(D.CastStep(state, 10.8, easy, never), true, "0.8s: goes out")
-	T.eq(D.CastStep(state, 11.0, easy, never), true, "same decision stays allowed")
-	T.eq(D.CastStep(state, 12.0, easy, never), false, "1s gap: a new decision, held again")
-	T.eq(D.CastStep({}, 0, D.PROFILES.unfair, never), true, "unfair: at once")
-end)
-
-T.test("difficulty: a skipped decision is held, then decided again", function()
-	local _, D = load()
-	local easy = D.PROFILES.easy
-	local rolls = { 0.1, 0.9 }
-	local i = 0
-	local roll = function()
-		i = i + 1
-		return rolls[i]
-	end
-	local state = {}
-	local ok, why = D.CastStep(state, 0, easy, roll)
-	T.eq(ok, false, "skipped")
-	T.eq(why, "skip", "skip")
-	T.eq(D.CastStep(state, 0.5, easy, roll), false, "still skipped at 0.5")
-	T.eq(D.CastStep(state, 1.0, easy, roll), false, "still skipped at 1.0")
-	T.eq(D.CastStep(state, 1.5, easy, roll), false, "still skipped at 1.5")
-	ok, why = D.CastStep(state, 1.8, easy, roll)
-	T.eq(ok, false, "new decision at 1.8 (0.8 + 1.0)")
-	T.eq(why, "reaction", "the re-roll passed, waits the reaction delay")
-	T.eq(i, 2, "two rolls")
-	T.eq(D.CastStep(state, 2.2, easy, roll), false, "2.2: waiting")
-	T.eq(D.CastStep(state, 2.65, easy, roll), true, "goes out")
-end)
-
--- Game 080 (Hard): Largo ordered Amphibian Rhapsody once a second; every order was a new decision and held again.
-T.test("difficulty: a spell ordered once a second goes out on its second order", function()
-	local _, D = load()
-	local never = function()
-		return 0.99
-	end
-	for _, name in ipairs({ "hard", "medium", "easy" }) do
-		local profile = D.PROFILES[name]
-		local state = {}
-		local ok, why = D.CastStep(state, 100, profile, never)
-		T.eq(ok, false, name .. ": first order held")
-		T.eq(why, "reaction", name .. ": reaction")
-		T.eq(D.CastStep(state, 101, profile, never), true, name .. ": second order 1s later goes out")
-		-- Two orders a second later: a missed re-order still keeps the held decision open.
-		state = {}
-		D.CastStep(state, 200, profile, never)
-		T.eq(D.CastStep(state, 202.1, profile, never), true, name .. ": next order 2.1s later goes out")
-		-- Once sent, a gap over DECISION_GAP starts a new decision (held again).
-		T.eq(D.CastStep(state, 203.1, profile, never), false, name .. ": a new decision after a sent one is held")
-	end
-end)
-
-T.test("difficulty: a spell ordered every frame still waits the reaction delay", function()
-	local _, D = load()
-	local never = function()
-		return 0.99
-	end
 	local frame = 1 / 30
-	for _, name in ipairs({ "hard", "medium", "easy" }) do
+	for _, name in ipairs({ "hard", "medium", "easy", "newplayer" }) do
 		local profile = D.PROFILES[name]
+		local roll, count = counter({ 0.5 })
 		local state = {}
-		local firstAt = nil
-		for i = 0, 60 do
-			local now = 50 + i * frame
-			if D.CastStep(state, now, profile, never) and firstAt == nil then
-				firstAt = now - 50
+		local sent = 0
+		for i = 0, 89 do
+			if D.CastStep(state, 50 + i * frame, profile, roll) then
+				sent = sent + 1
 			end
 		end
-		T.ok(firstAt ~= nil, name .. ": goes out")
-		T.ok(firstAt >= profile.reactionDelay - 1e-9, name .. ": not before the delay " .. tostring(firstAt))
-		T.ok(firstAt < profile.reactionDelay + frame + 1e-9, name .. ": on the first frame after it")
+		T.eq(count.n, 1, name .. ": one roll for 3s of orders")
+		T.eq(sent, 90, name .. ": every order goes out from the first frame (no delay)")
+		-- A pause over DECISION_GAP ends the decision: the next order is a new decision, a new roll.
+		local _, rolled = D.CastStep(state, 50 + 89 * frame + D.DECISION_GAP + 0.05, profile, roll)
+		T.eq(rolled, true, name .. ": new decision after a pause")
+		T.eq(count.n, 2, name .. ": second roll")
 	end
+	local unfairRoll, unfairCount = counter({ 0.99 })
+	T.eq(D.CastStep({}, 0, D.PROFILES.unfair, unfairRoll), true, "unfair: at once")
+	T.eq(unfairCount.n, 0, "unfair: no roll")
 end)
 
-T.test("difficulty: a held decision left for 3s starts fresh", function()
-	local _, D = load()
-	local never = function()
-		return 0.99
-	end
-	for _, name in ipairs({ "hard", "easy" }) do
-		local profile = D.PROFILES[name]
-		local state = {}
-		T.eq(D.CastStep(state, 10, profile, never), false, name .. ": held")
-		local ok, why = D.CastStep(state, 13, profile, never)
-		T.eq(ok, false, name .. ": 3s later: a new decision, held again")
-		T.eq(why, "reaction", name .. ": reaction")
-		T.eq(state.startAt, 13, name .. ": restarted")
-		T.eq(D.CastStep(state, 13 + profile.reactionDelay + 0.05, profile, never), true, name .. ": then goes out")
-	end
-end)
-
-T.test("difficulty: a skip at one order a second holds the skip time, then decides again", function()
+T.test("difficulty: a failed cast decision is held SKIP_HOLD, then rolled again", function()
 	local _, D = load()
 	local easy = D.PROFILES.easy
-	local rolls = { 0.1, 0.9 }
-	local i = 0
-	local roll = function()
-		i = i + 1
-		return rolls[i]
-	end
+	local frame = 1 / 30
+	-- Every frame: 0.9 >= 0.65 fails; held until SKIP_HOLD after the roll; the re-roll (0.1) passes.
+	local roll, count = counter({ 0.9, 0.1 })
 	local state = {}
-	T.eq(select(2, D.CastStep(state, 0, easy, roll)), "skip", "0: skipped")
-	T.eq(select(2, D.CastStep(state, 1, easy, roll)), "skip", "1: still skipped (0.8 + 1.0 not over)")
-	T.eq(i, 1, "no re-roll at 1")
-	T.eq(select(2, D.CastStep(state, 2, easy, roll)), "reaction", "2: decided again, passed, waits")
-	T.eq(D.CastStep(state, 3, easy, roll), true, "3: goes out")
-	T.eq(i, 2, "two rolls")
+	local firstAt = nil
+	for i = 0, 45 do
+		local now = i * frame
+		if D.CastStep(state, now, easy, roll) and firstAt == nil then
+			firstAt = now
+		end
+	end
+	T.eq(count.n, 2, "two rolls")
+	T.ok(firstAt ~= nil and firstAt >= D.SKIP_HOLD - 1e-9, "not before SKIP_HOLD " .. tostring(firstAt))
+	T.ok(firstAt < D.SKIP_HOLD + frame + 1e-9, "on the first frame after it")
+	-- One order a second (Largo's song toggle): the failed decision is held, the order 1s later rolls again.
+	roll, count = counter({ 0.9, 0.1 })
+	state = {}
+	T.eq(D.CastStep(state, 100, easy, roll), false, "100: failed")
+	T.eq(D.CastStep(state, 100.5, easy, roll), false, "100.5: still held, no re-roll")
+	T.eq(count.n, 1, "one roll so far")
+	T.eq(D.CastStep(state, 101, easy, roll), true, "101: rolled again, goes out")
+	T.eq(count.n, 2, "two rolls")
+	-- A slow caller (every 0.7s) does not re-roll a failed decision on each order.
+	roll, count = counter({ 0.9 })
+	state = {}
+	D.CastStep(state, 200, easy, roll)
+	D.CastStep(state, 200.7, easy, roll)
+	T.eq(count.n, 1, "0.7s later: same failed decision")
+	D.CastStep(state, 201.4, easy, roll)
+	T.eq(count.n, 2, "1.4s: past SKIP_HOLD, a new roll")
 end)
 
-T.test("difficulty: dodge share latched per window, last-hit wait once per creep", function()
+T.test("difficulty: one reactive roll covers every reactive spell of the episode", function()
 	local _, D = load()
-	local medium = D.PROFILES.medium
-	local latch = {}
-	T.eq(
-		D.DodgeStep(latch, 0, medium, function()
-			return 0.7
-		end),
-		false,
-		"0.7 >= 0.5: no dodge"
-	)
-	T.eq(
-		D.DodgeStep(latch, 1, medium, function()
-			return 0.1
-		end),
-		false,
-		"latched for the window"
-	)
-	T.eq(
-		D.DodgeStep(latch, 2.1, medium, function()
-			return 0.1
-		end),
-		true,
-		"new window, new roll"
-	)
-	T.eq(D.DodgeStep({}, 0, D.PROFILES.easy, nil), false, "easy never")
-	T.eq(D.DodgeStep({}, 0, D.PROFILES.hard, nil), true, "hard always")
+	local hard = D.PROFILES.hard
+	local roll, count = counter({ 0.5 })
+	local rs = {}
+	local okOrb, episode, rolled = D.ReactiveStep(rs, 10, hard, roll, "puck_illusory_orb")
+	T.eq(okOrb, true, "0.5 < 0.85: allowed")
+	T.eq(rolled, true, "rolled")
+	T.eq(episode.id, 1, "episode 1")
+	local okRift, episodeRift, rolledRift = D.ReactiveStep(rs, 10, hard, roll, "puck_waning_rift")
+	local okPhase = D.ReactiveStep(rs, 10.5, hard, roll, "puck_phase_shift")
+	T.ok(okRift and okPhase, "the other spells share it")
+	T.ok(episodeRift == episode and not rolledRift, "same episode, no roll")
+	T.eq(count.n, 1, "one roll, not three")
+end)
+
+T.test("difficulty: a failed reactive roll stays failed until the episode ends, then rolls again", function()
+	local _, D = load()
+	local hard = D.PROFILES.hard
+	local roll, count = counter({ 0.9, 0.2 })
+	local rs = {}
+	local danger = { alive = true, danger = true, hit = false }
+	local safe = { alive = true, danger = false, hit = false }
+	T.eq(D.ReactiveStep(rs, 0, hard, roll, "puck_illusory_orb"), false, "0.9 >= 0.85: failed")
+	for t = 0.5, 1.5, 0.5 do
+		T.eq(D.EpisodeTick(rs, t, danger), nil, "in danger at " .. t)
+		T.eq(D.ReactiveStep(rs, t, hard, roll, "puck_waning_rift"), false, "still failed at " .. t)
+		D.ReactiveStep(rs, t, hard, roll, "puck_phase_shift")
+	end
+	T.eq(count.n, 1, "no re-roll in the episode (re-rolling each second would make 0.85 about 0.98)")
+	T.eq(rs.episode.fails, 3, "fails: three spells refused, each counted once")
+	-- Out of retreat after 1.5; hero damage in the last 2s keeps it open.
+	T.eq(D.EpisodeTick(rs, 3.4, safe), nil, "1.9s out of danger: open")
+	T.eq(D.EpisodeTick(rs, 3.6, { alive = true, danger = false, hit = true }), nil, "hit within 2s: open")
+	local why, ended = D.EpisodeTick(rs, 3.7, safe)
+	T.eq(why, "safe", "2s out of danger: ends")
+	T.eq(ended.fails, 3, "ended episode keeps its fails")
+	T.eq(rs.episode, nil, "no episode")
+	local ok, episode, rolled = D.ReactiveStep(rs, 6, hard, roll, "puck_phase_shift")
+	T.eq(ok, true, "the next danger rolls again (0.2: allowed)")
+	T.ok(rolled and episode.id == 2, "episode 2")
+	T.eq(count.n, 2, "second roll")
+end)
+
+T.test(
+	"difficulty: a reactive episode ends after EPISODE_CAP, at death, and lasts EPISODE_SAFE out of danger",
+	function()
+		local _, D = load()
+		local medium = D.PROFILES.medium
+		local roll = counter({ 0.9 })
+		local danger = { alive = true, danger = true, hit = true }
+		local rs = {}
+		D.ReactiveStep(rs, 100, medium, roll, "x")
+		T.eq(D.EpisodeTick(rs, 104.9, danger), nil, "4.9s in danger: open")
+		T.eq(D.EpisodeTick(rs, 105, danger), "cap", "5s: cap")
+		D.ReactiveStep(rs, 200, medium, roll, "x")
+		T.eq(D.EpisodeTick(rs, 200.5, { alive = false, danger = false, hit = true }), "dead", "dead")
+		-- A dodge or a save starts out of danger: it still lasts EPISODE_SAFE, not one frame.
+		D.ReactiveStep(rs, 300, medium, roll, "x")
+		local safe = { alive = true, danger = false, hit = false }
+		T.eq(D.EpisodeTick(rs, 300 + 1 / 30, safe), nil, "next frame: open")
+		T.eq(D.EpisodeTick(rs, 301.9, safe), nil, "1.9s: open")
+		T.eq(D.EpisodeTick(rs, 302, safe), "safe", "2s: safe")
+		-- Profiles at 0 and 1 draw nothing.
+		local never, neverCount = counter({ 0 })
+		T.eq(D.ReactiveStep({}, 0, { reactiveChance = 0 }, never, "x"), false, "chance 0: refused")
+		T.eq(D.ReactiveStep({}, 0, { reactiveChance = 1 }, never, "x"), true, "chance 1: allowed")
+		T.eq(neverCount.n, 0, "no roll at 0 or 1")
+	end
+)
+
+T.test("difficulty: last-hit wait once per creep", function()
+	local _, D = load()
 	local state = {}
 	local half = function()
 		return 0.5
@@ -327,7 +335,22 @@ T.test("difficulty hooks: Unfair passes every order through unchanged, no roll, 
 	local d, t, c, r = smoke("item")
 	T.ok(d == 0.7 and t == "t" and c == "none" and r == "r" and smokeArgs == 1, "smoke rule passes through")
 	T.eq(H.FightsHeroes(bot), true, "fights heroes")
+	-- Retreat mode, a dodge check, a save on an ally, the per-frame tick: no roll, no state, no line.
+	function bot:GetActiveMode()
+		return BOT_MODE_RETREAT
+	end
+	H.Tick(bot)
+	T.eq(H.DodgeAllowed(bot, "IsStunProjectileIncoming"), true, "dodge allowed")
+	local ally = Stub.teams[TEAM_RADIANT][2]
+	T.eq(bot:Action_UseAbilityOnEntity(ability, ally), "orig-Action_UseAbilityOnEntity", "save return")
+	T.eq(#castCalls, 2, "save reached")
 	T.eq(count.n, 0, "still no random number")
+	T.eq(bot._ohaDiffReact, nil, "no episode state")
+	T.eq(bot._ohaDiffRiskyAt, nil, "no retreat stamp")
+	T.eq(bot._ohaDiffDodgeAt, nil, "no dodge stamp")
+	T.eq(bot._ohaDiffRoll, nil, "no frame roll")
+	T.eq(printed("roll kind="), 0, "no roll line")
+	T.eq(printed("episode-end"), 0, "no episode line")
 end)
 
 T.test("difficulty hooks: Unfair - all 15 wrapped order methods are transparent", function()
@@ -368,13 +391,11 @@ T.test("difficulty hooks: Unfair - all 15 wrapped order methods are transparent"
 	T.eq(printed("held kind="), 0, "no held line")
 end)
 
-T.test("difficulty hooks: a dodge item chosen this frame is not held (its window is shorter than the hold)", function()
+T.test("difficulty hooks: a dodge item chosen this frame goes out at once", function()
 	local bot = load(2)
 	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbility")
 	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
-	math.random = function()
-		return 0.9
-	end
+	local count = scriptedRandom({ 0.9 })
 	local bkb = Stub.newAbility("item_black_king_bar", bot, false)
 	bot._dodgeChosen = { t = 600, target = bot }
 	bot:Action_UseAbility(bkb)
@@ -382,18 +403,17 @@ T.test("difficulty hooks: a dodge item chosen this frame is not held (its window
 	bot._dodgeChosen = { t = 599, target = bot }
 	Stub.time = 610
 	bot:Action_UseAbility(bkb)
-	T.eq(#castCalls, 2, "not chosen this frame: still at once (a no-target item is never held)")
-	T.eq(printed("held kind=reaction"), 0, "no held line")
+	T.eq(#castCalls, 2, "not chosen this frame: still at once (a no-target item is never rolled)")
+	T.eq(count.n, 0, "no roll")
+	T.eq(printed("roll kind="), 0, "no roll line")
 end)
 
-T.test("difficulty hooks: items go out at once unless aimed at an enemy hero", function()
+T.test("difficulty hooks: items go out at once unless aimed at an enemy hero, then they are rolled", function()
 	local bot = load(1)
 	local entityCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnEntity")
 	local locationCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnLocation")
 	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
-	math.random = function()
-		return 0.9
-	end
+	local count = scriptedRandom({ 0.9, 0.1 })
 	-- One-shot orders (game 077: an eat after a swap): sent on the first call, even on Easy.
 	local toadstool = Stub.newAbility("item_foragers_health", bot, false)
 	bot:Action_UseAbilityOnEntity(toadstool, bot)
@@ -401,12 +421,22 @@ T.test("difficulty hooks: items go out at once unless aimed at an enemy hero", f
 	local tp = Stub.newAbility("item_tpscroll", bot, false)
 	bot:Action_UseAbilityOnLocation(tp, Vector(5000, 5000, 0))
 	T.eq(#locationCalls, 1, "a TP far from enemy heroes goes out at once")
-	-- An item on an enemy hero keeps the reaction hold.
+	T.eq(count.n, 0, "items not on an enemy hero: no roll")
+	-- An item on an enemy hero takes Easy's cast roll (0.65): 0.9 fails, held SKIP_HOLD, 0.1 passes.
 	local hex = Stub.newAbility("item_sheepstick", bot, false)
 	local enemy = Stub.teams[TEAM_DIRE][1]
 	bot:Action_UseAbilityOnEntity(hex, enemy)
-	T.eq(#entityCalls, 1, "Hex on an enemy hero is held")
-	T.eq(printed("held kind=reaction level=easy ability=item_sheepstick"), 1, "held line")
+	T.eq(#entityCalls, 1, "Hex on an enemy hero: the roll failed")
+	T.eq(printed("roll kind=cast result=fail p=0.65 ability=item_sheepstick episode=- level=easy n=1"), 1, "roll line")
+	T.eq(printed("held kind=skip level=easy ability=item_sheepstick"), 1, "skip line")
+	Stub.time = 600.5
+	bot:Action_UseAbilityOnEntity(hex, enemy)
+	T.eq(#entityCalls, 1, "0.5s: still held, no new roll")
+	T.eq(count.n, 1, "one roll")
+	Stub.time = 601
+	bot:Action_UseAbilityOnEntity(hex, enemy)
+	T.eq(#entityCalls, 2, "1s: rolled again, sent")
+	T.eq(printed("held kind=reaction"), 0, "no reaction hold any more")
 end)
 
 T.test("difficulty hooks: Unfair projectile checks return exactly what they returned", function()
@@ -431,45 +461,181 @@ T.test("difficulty hooks: Unfair projectile checks return exactly what they retu
 	)
 end)
 
-T.test("difficulty hooks: Easy holds a cast for the reaction delay and logs it", function()
-	local bot = load(1)
-	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnEntity")
+-- Game 087 8:32 (Hard): Puck switched between Orb, Rift and Phase Shift every think in retreat; the per-ability
+-- reaction hold sent none of them and she died. Now one roll per danger episode covers all three.
+T.test("difficulty hooks: Hard retreat - Orb, Rift and Phase Shift share one reactive roll per episode", function()
+	local bot = load(3)
+	local noTarget = recorder(CDOTA_Bot_Script, "Action_UseAbility")
+	local onLocation = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnLocation")
 	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
-	local ability = bot:GetAbilityInSlot(0)
-	local enemy = Stub.teams[TEAM_DIRE][1]
-	-- Stub's first random numbers are above 0.35 (no skip): 16807 / (2^31 - 1) is tiny, so force one above.
-	math.random = function()
-		return 0.9
+	local H = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
+	local mode = BOT_MODE_RETREAT
+	function bot:GetActiveMode()
+		return mode
 	end
-	T.eq(bot:Action_UseAbilityOnEntity(ability, enemy), nil, "held")
-	T.eq(#castCalls, 0, "not sent")
-	T.eq(printed("held kind=reaction level=easy ability=lion_ability_1"), 1, "held line")
-	Stub.time = 600.4
-	bot:Action_UseAbilityOnEntity(ability, enemy)
-	T.eq(#castCalls, 0, "0.4s: still held")
-	Stub.time = 600.85
-	bot:Action_UseAbilityOnEntity(ability, enemy)
-	T.eq(#castCalls, 1, "0.8s: sent")
-	T.eq(printed("held kind=reaction"), 1, "throttled")
-	local release = Stub.newAbility("ancient_apparition_ice_blast_release", bot, false)
-	bot:Action_UseAbility(release)
-	T.eq(printed("ice_blast_release"), 0, "a release is never held")
+	local count = scriptedRandom({ 0.9, 0.5 })
+	local orb = Stub.newAbility("puck_illusory_orb", bot, false)
+	local rift = Stub.newAbility("puck_waning_rift", bot, false)
+	local phase = Stub.newAbility("puck_phase_shift", bot, false)
+	local away = Vector(-5000, -5000, 0)
+	local frame = 1 / 30
+	-- Episode 1: 0.9 >= 0.85 fails; every order of every reactive spell is refused for the episode, no re-roll.
+	for i = 0, 29 do
+		Stub.time = 600 + i * frame
+		H.Tick(bot)
+		bot:Action_UseAbilityOnLocation(orb, away)
+		bot:Action_UseAbilityOnLocation(rift, away)
+		bot:Action_UseAbility(phase)
+	end
+	T.eq(count.n, 1, "one roll for three spells over 1s")
+	T.eq(#noTarget + #onLocation, 0, "a failed episode sends none of them")
+	T.eq(
+		printed("roll kind=reactive result=fail p=0.85 ability=puck_illusory_orb episode=1 level=hard"),
+		1,
+		"roll line"
+	)
+	T.eq(printed("roll kind="), 1, "one roll line")
+	T.eq(printed("held kind=reaction"), 0, "no reaction hold")
+	-- Out of retreat at 601: the episode ends 2s later (why=safe), not before.
+	mode = BOT_MODE_NONE
+	local endedAt = nil
+	for i = 0, 90 do
+		Stub.time = 601 + i * frame
+		H.Tick(bot)
+		if endedAt == nil and printed("episode-end") > 0 then
+			endedAt = Stub.time
+		end
+	end
+	T.ok(endedAt ~= nil and endedAt >= 602.9 and endedAt <= 603.1, "ends 2s after the danger " .. tostring(endedAt))
+	T.eq(printed("episode-end why=safe fails=3 episode=1 result=fail"), 1, "episode-end line")
+	-- Episode 2: the next danger rolls again (0.5 passes); every reactive spell goes out on its first order.
+	mode = BOT_MODE_RETREAT
+	Stub.time = 610
+	H.Tick(bot)
+	bot:Action_UseAbility(phase)
+	T.eq(#noTarget, 1, "Phase Shift goes out on the frame it is decided")
+	bot:Action_UseAbilityOnLocation(orb, away)
+	T.eq(#onLocation, 1, "the Orb in the same episode too")
+	T.eq(count.n, 2, "second roll")
+	T.eq(printed("roll kind=reactive result=ok p=0.85 ability=puck_phase_shift episode=2"), 1, "second roll line")
 end)
 
-T.test("difficulty hooks: Hard sends a spell ordered once a second on its second order", function()
+-- Puck orders her escape shift from the outpost mode's cast hold, up to 0.4s after retreat mode (game 087
+-- [SHy-PUCK] phase cast ... from-mode=4 mode=26).
+T.test(
+	"difficulty hooks: reactive = retreat or evasive (or just left), a dodge this frame, an ally, a channeller",
+	function()
+		local bot = load(2)
+		local H = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
+		local mode = BOT_MODE_EVASIVE_MANEUVERS
+		function bot:GetActiveMode()
+			return mode
+		end
+		local enemy = Stub.teams[TEAM_DIRE][1]
+		local ally = Stub.teams[TEAM_RADIANT][2]
+		T.eq(H.IsReactive(bot, "none", nil, 600), true, "evasive maneuvers")
+		H.Tick(bot)
+		mode = 26
+		T.eq(H.IsReactive(bot, "none", nil, 600.4), true, "0.4s after retreat / evasive: still reactive")
+		T.eq(H.IsReactive(bot, "none", nil, 601.1), false, "1.1s after: not")
+		T.eq(H.IsReactive(bot, "entity", enemy, 601.1), false, "a nuke on an enemy hero: not")
+		T.eq(H.IsReactive(bot, "entity", ally, 601.1), true, "a spell on an allied hero: a save")
+		T.eq(H.IsReactive(bot, "entity", bot, 601.1), true, "on the bot itself: a save")
+		function enemy:IsChanneling()
+			return true
+		end
+		T.eq(H.IsReactive(bot, "entity", enemy, 601.1), true, "a channelling enemy hero: an interrupt")
+		Stub.time = 602
+		scriptedRandom({ 0.2 })
+		T.eq(H.DodgeAllowed(bot, "IsStunProjectileIncoming"), true, "a dodge check: 0.2 < 0.5")
+		T.eq(H.IsReactive(bot, "none", nil, 602), true, "a cast on the frame of a dodge check")
+		T.eq(H.IsReactive(bot, "none", nil, 602 + 1 / 30), false, "not on the next frame")
+	end
+)
+
+T.test("difficulty hooks: a dodge check and the dodge spell after it share the episode roll", function()
+	local bot = load(3)
+	local noTarget = recorder(CDOTA_Bot_Script, "Action_UseAbility")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	local H = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
+	local count = scriptedRandom({ 0.9, 0.1 })
+	local phase = Stub.newAbility("puck_phase_shift", bot, false)
+	local frame = 1 / 30
+	-- Stifling Dagger seen for 1s (a check every frame): one roll, refused, and the shift on that frame too.
+	for i = 0, 29 do
+		Stub.time = 600 + i * frame
+		H.Tick(bot)
+		T.eq(H.DodgeAllowed(bot, "IsUnitTargetProjectileIncoming"), false, "refused at frame " .. i)
+		bot:Action_UseAbility(phase)
+	end
+	T.eq(count.n, 1, "one roll")
+	T.eq(#noTarget, 0, "no shift")
+	T.eq(printed("roll kind=reactive result=fail p=0.85 ability=dodge:IsUnitTargetProjectileIncoming"), 1, "roll")
+	T.eq(printed("held kind=dodge-off"), 1, "dodge-off line (throttled)")
+	-- The threats keep the episode open: it ends 2s after the last one.
+	local endedAt = nil
+	for i = 0, 90 do
+		Stub.time = 601 + i * frame
+		H.Tick(bot)
+		if endedAt == nil and printed("episode-end") > 0 then
+			endedAt = Stub.time
+		end
+	end
+	T.ok(
+		endedAt ~= nil and endedAt >= 602.9 and endedAt <= 603.1,
+		"ends 2s after the last threat " .. tostring(endedAt)
+	)
+	T.eq(printed("episode-end why=safe fails=2 episode=1 result=fail"), 1, "the check and the shift refused")
+	Stub.time = 605
+	T.eq(H.DodgeAllowed(bot, "IsUnitTargetProjectileIncoming"), true, "a new threat: a new roll (0.1)")
+	bot:Action_UseAbility(phase)
+	T.eq(#noTarget, 1, "the shift goes out on the same frame")
+	T.eq(count.n, 2, "two rolls")
+end)
+
+T.test("difficulty hooks: a per-frame cast keeps one roll, and goes out on its first frame", function()
+	local bot = load(2)
+	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbilityOnEntity")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	local count = scriptedRandom({ 0.5 })
+	local ability = bot:GetAbilityInSlot(0)
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	for i = 0, 29 do
+		Stub.time = 600 + i / 30
+		bot:Action_UseAbilityOnEntity(ability, enemy)
+	end
+	T.eq(#castCalls, 30, "sent on every frame, from the first")
+	T.eq(count.n, 1, "one roll for the decision")
+	T.eq(printed("roll kind=cast result=ok p=0.85 ability=lion_ability_1 episode=- level=medium n=1"), 1, "roll line")
+	local release = Stub.newAbility("ancient_apparition_ice_blast_release", bot, false)
+	bot:Action_UseAbility(release)
+	T.eq(printed("ice_blast_release"), 0, "a release is never rolled")
+	T.eq(count.n, 1, "still one roll")
+end)
+
+-- Game 080 (Hard): Largo ordered Amphibian Rhapsody once a second and the reaction hold never let it out.
+T.test("difficulty hooks: Largo's once-a-second song toggle goes out (no hold left to break it)", function()
 	local bot = load(3)
 	local castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbility")
 	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
-	math.random = function()
-		return 0.9
-	end
+	scriptedRandom({ 0.9 })
 	local song = Stub.newAbility("largo_amphibian_rhapsody", bot, false)
 	bot:Action_UseAbility(song)
-	T.eq(#castCalls, 0, "first order held")
-	T.eq(printed("held kind=reaction level=hard ability=largo_amphibian_rhapsody"), 1, "held line")
+	T.eq(#castCalls, 1, "Hard: 0.9 < 0.95, the first order goes out")
 	Stub.time = 601
 	bot:Action_UseAbility(song)
-	T.eq(#castCalls, 1, "1s later: sent")
+	T.eq(#castCalls, 2, "1s later: a new decision, sent")
+
+	bot = load(1)
+	castCalls = recorder(CDOTA_Bot_Script, "Action_UseAbility")
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	scriptedRandom({ 0.9, 0.1 })
+	song = Stub.newAbility("largo_amphibian_rhapsody", bot, false)
+	bot:Action_UseAbility(song)
+	T.eq(#castCalls, 0, "Easy: 0.9 >= 0.65, the first decision fails")
+	Stub.time = 601
+	bot:Action_UseAbility(song)
+	T.eq(#castCalls, 1, "the order 1s later rolls again and goes out")
 end)
 
 T.test("difficulty hooks: Easy last hit goes out late, Passive never hits or targets a hero", function()
@@ -507,17 +673,14 @@ T.test("difficulty hooks: Easy last hit goes out late, Passive never hits or tar
 	T.eq(printed("held kind=gate level=passive what=hero-attack"), 1, "gate line")
 	local ally = Stub.teams[TEAM_RADIANT][2]
 	math.random = function()
-		return 0.9
+		return 0.1
 	end
 	bot:Action_UseAbilityOnEntity(bot:GetAbilityInSlot(1), enemy)
 	T.eq(printed("what=hero-cast"), 1, "no spell on a hero")
 	Stub.time = 602
 	bot:Action_UseAbilityOnEntity(bot:GetAbilityInSlot(1), ally)
-	Stub.time = 602.5
-	bot:Action_UseAbilityOnEntity(bot:GetAbilityInSlot(1), ally)
-	Stub.time = 602.9
-	bot:Action_UseAbilityOnEntity(bot:GetAbilityInSlot(1), ally)
-	T.eq(#castCalls, 1, "a spell on an ally goes out (after the delay)")
+	T.eq(#castCalls, 1, "a spell on an ally goes out at once (a save: Passive's reactive roll, 0.1 < 0.25)")
+	T.eq(printed("roll kind=reactive result=ok p=0.25"), 1, "reactive roll line")
 	T.eq(H.FightsHeroes(bot), false, "no attack mode")
 	local desire, why = H.GateRoam(bot, 0.6, "help-ally", ally, 3, 1)
 	T.eq(desire, 0, "no help fight")

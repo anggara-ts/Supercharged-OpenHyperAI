@@ -1,15 +1,19 @@
 -- Shared bot system: wires the difficulty levels (#232, bots/lib/systems/difficulty.lua) into the bot's orders and rules.
 -- Each bot reads its own bot:GetDifficulty() once ([SHy-DIFF] ... src=api|default); Unfair (and any value the API does
 -- not give) is today's play: every hook below returns before any roll or state write when the profile is neutral.
---   cast orders     every Action / ActionPush / ActionQueue _UseAbility* (installed from global_overrides.lua):
---                   reaction delay and skip chance per ability; Passive: no targeted spells on enemy heroes.
+--   cast orders     every Action / ActionPush / ActionQueue _UseAbility* (installed from global_overrides.lua): no
+--                   delay; a reactive cast (H.IsReactive) goes out when the bot's danger-episode roll passed, any
+--                   other cast when its per-decision roll passed; Passive: no targeted spells on enemy heroes.
 --   attack orders   Action / ActionPush / ActionQueue _AttackUnit: Passive never right-clicks an enemy hero; a timed
 --                   last hit (last_hit_timing.lua's armed creep) goes out late by the level's lastHitError.
 --   dodges          the Fu projectile checks the hero files use (installed from func_utils.lua) and the dodge items
---                   (ability_item_usage_generic.lua Usage.TimedTrackingProjectile / FindLinearProjectileIncoming).
+--                   (ability_item_usage_generic.lua Usage.TimedTrackingProjectile / FindLinearProjectileIncoming):
+--                   the episode's reactive roll.
 --   gates           team roam's hero hunts and help fights, Smoke of Deceit, chasing a hero under an enemy tower,
 --                   Valve's attack mode for Passive bots.
--- Logs: [SHy-DIFF] held kind=reaction|skip|dodge-off|gate|lasthit, at most once per 10s per bot and kind.
+-- Logs: [SHy-DIFF] roll kind=reactive|cast (one per roll; cast lines at most one per CAST_ROLL_LOG_EVERY s per bot
+-- and result, n= counts the rolls since the last one), episode-end (one per episode), held kind=skip|dodge-off|gate|
+-- lasthit (at most once per 10s per bot and kind).
 -- Loaded by global_overrides.lua before func_utils.lua exists: Fu is required only at call time.
 local D = require(GetScriptDirectory() .. "/lib/systems/difficulty")
 
@@ -124,8 +128,8 @@ local function aimsAtEnemyHero(bot, kind, target)
 	return ok and near == true
 end
 
--- One random number per bot per frame for new cast decisions: the spells of one combo (Blink then the spell) are
--- skipped together or not at all.
+-- One random number per bot per frame for new "other" cast decisions: the spells of one combo (Blink then the spell)
+-- fail together or not at all.
 local function frameRoll(bot, now)
 	return function()
 		local last = bot._ohaDiffRoll
@@ -137,7 +141,184 @@ local function frameRoll(bot, now)
 	end
 end
 
--- kind: "none" | "location" | "entity" | "tree". False: hold this order (the unit keeps its current action).
+-- Cast roll lines: at most one per this many seconds per bot and result (a bot decides many casts in a fight);
+-- n= counts the rolls of that result since its last line, so the ok / fail share stays readable.
+local CAST_ROLL_LOG_EVERY = 5
+local function logRoll(bot, kind, allowed, p, what, episodeId)
+	local now = DotaTime()
+	local result = allowed and "ok" or "fail"
+	local n = 1
+	if kind == "cast" then
+		local counts = bot._ohaDiffRollLog
+		if counts == nil then
+			counts = {}
+			bot._ohaDiffRollLog = counts
+		end
+		local entry = counts[result]
+		if entry == nil then
+			entry = { n = 0, at = -999 }
+			counts[result] = entry
+		end
+		entry.n = entry.n + 1
+		if now < entry.at + CAST_ROLL_LOG_EVERY then
+			return
+		end
+		n = entry.n
+		entry.n = 0
+		entry.at = now
+	end
+	local info = bot._ohaDiff
+	pcall(
+		print,
+		string.format(
+			"[SHy-DIFF] t=%.0f %s roll kind=%s result=%s p=%.2f ability=%s episode=%s level=%s n=%d",
+			now,
+			shortName(bot),
+			kind,
+			result,
+			p,
+			tostring(what),
+			episodeId ~= nil and tostring(episodeId) or "-",
+			info ~= nil and info.name or "?",
+			n
+		)
+	)
+end
+
+local function inRiskyMode(bot)
+	local ok, mode = pcall(function()
+		return bot:GetActiveMode()
+	end)
+	return ok and (mode == BOT_MODE_RETREAT or mode == BOT_MODE_EVASIVE_MANEUVERS)
+end
+
+-- Ends the bot's danger episode when it is over ([SHy-DIFF] episode-end). Called every frame by H.Tick and before
+-- every reactive decision, so an episode also ends when the tick did not run.
+local function updateEpisode(bot, rs, now)
+	if rs.episode == nil then
+		return
+	end
+	local okAlive, alive = pcall(function()
+		return bot:IsAlive()
+	end)
+	local okHit, hit = pcall(function()
+		return bot:WasRecentlyDamagedByAnyHero(D.EPISODE_SAFE)
+	end)
+	local facts = {
+		alive = not okAlive or alive ~= false,
+		danger = inRiskyMode(bot),
+		hit = okHit and hit == true,
+	}
+	local why, episode = D.EpisodeTick(rs, now, facts)
+	if why == nil then
+		return
+	end
+	local info = bot._ohaDiff
+	pcall(
+		print,
+		string.format(
+			"[SHy-DIFF] t=%.0f %s episode-end why=%s fails=%d episode=%d result=%s dur=%.1f level=%s",
+			now,
+			shortName(bot),
+			why,
+			episode.fails,
+			episode.id,
+			episode.allowed and "ok" or "fail",
+			now - episode.startAt,
+			info ~= nil and info.name or "?"
+		)
+	)
+end
+
+-- A reactive cast or dodge of `bot` (what: the ability or dodge check). Returns allowed.
+function H.ReactiveAllowed(bot, profile, what)
+	local rs = bot._ohaDiffReact
+	if rs == nil then
+		rs = {}
+		bot._ohaDiffReact = rs
+	end
+	local now = DotaTime()
+	updateEpisode(bot, rs, now)
+	local allowed, episode, rolled = D.ReactiveStep(rs, now, profile, math.random, what)
+	if rolled then
+		logRoll(bot, "reactive", allowed, profile.reactiveChance, what, episode.id)
+	end
+	return allowed
+end
+
+-- Every frame (ItemUsageThink and BuybackUsageThink, which also runs while the bot is dead): remembers when the bot
+-- was last in retreat or evasive mode (a cast up to D.REACTIVE_RECENT later is still reactive) and ends the danger
+-- episode on time. Unfair returns first: no state.
+function H.Tick(bot)
+	if bot == nil then
+		return
+	end
+	local profile = H.Get(bot)
+	if profile.neutral then
+		return
+	end
+	local now = DotaTime()
+	if inRiskyMode(bot) then
+		bot._ohaDiffRiskyAt = now
+	end
+	local rs = bot._ohaDiffReact
+	if rs ~= nil and rs.episode ~= nil then
+		updateEpisode(bot, rs, now)
+	end
+end
+
+local function isChannellingEnemyHero(bot, unit)
+	local ok, channelling = pcall(function()
+		return unit:IsChanneling()
+	end)
+	return ok and channelling == true and isEnemyHero(bot, unit)
+end
+
+-- A reactive cast: an escape, dodge, save or interrupt. Rules (the PR's change log has the same list):
+--   the bot is in retreat or evasive maneuvers mode, or was within D.REACTIVE_RECENT s (Puck's cast hold);
+--   a dodge check (H.DodgeAllowed) found a threat this frame, or the item think chose a dodge item this frame;
+--   the target is an allied hero (a save; the bot itself included: Cold Embrace, Shallow Grave on self);
+--   the target is an enemy hero that is channelling, or the point is next to one (an interrupt).
+function H.IsReactive(bot, kind, target, now)
+	if inRiskyMode(bot) or now - (bot._ohaDiffRiskyAt or -99) <= D.REACTIVE_RECENT then
+		return true
+	end
+	if bot._ohaDiffDodgeAt == now then
+		return true
+	end
+	local chosen = bot._dodgeChosen
+	if chosen ~= nil and chosen.t == now then
+		return true
+	end
+	if kind == "entity" then
+		if target == nil then
+			return false
+		end
+		local okAlly, ally = pcall(function()
+			return not target:IsNull() and target:IsHero() and target:GetTeam() == bot:GetTeam()
+		end)
+		if okAlly and ally == true then
+			return true
+		end
+		return isChannellingEnemyHero(bot, target)
+	end
+	if kind ~= "location" or target == nil then
+		return false
+	end
+	local ok, near = pcall(function()
+		for _, enemy in ipairs(bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE) or {}) do
+			if
+				GetUnitToLocationDistance(enemy, target) <= HERO_LOCATION_RADIUS and isChannellingEnemyHero(bot, enemy)
+			then
+				return true
+			end
+		end
+		return false
+	end)
+	return ok and near == true
+end
+
+-- kind: "none" | "location" | "entity" | "tree". False: drop this order (the unit keeps its current action).
 function H.CastAllowed(unit, kind, ability, target)
 	local bot = runningBot()
 	if bot == nil then
@@ -157,22 +338,19 @@ function H.CastAllowed(unit, kind, ability, target)
 		H.Held(bot, "gate", "what=hero-cast ability=%s", name)
 		return false
 	end
-	if profile.reactionDelay <= 0 and profile.castSkipChance <= 0 then
+	if profile.reactiveChance >= 1 and profile.castChance >= 1 then
 		return true
 	end
-	-- Items go out at once unless aimed at an enemy hero (maintainer, 2026-11-24). The hold below needs the same
-	-- order again after the reaction delay (within D.PENDING_GAP), and many item orders are given only once (an eat right after a backpack swap,
-	-- a TP, a ward), so a held one never went out (game 077 20:56: Puck's Vital Toadstool). Items on an enemy hero
-	-- (Hex, Orchid, Dagon, Abyssal) keep the hold and the skip, so a lower level still reacts slower in fights.
+	-- Items go out at once unless aimed at an enemy hero (maintainer, 2026-11-24): many item orders are given only
+	-- once (an eat right after a backpack swap, a TP, a ward; game 077 20:56: Puck's Vital Toadstool). Saves with an
+	-- item on an ally (Glimmer, Lotus) and the dodge items on the bot go out at once with them. Items on an enemy hero
+	-- (Hex, Orchid, Dagon, Abyssal) are rolled like spells below.
 	if string.sub(name, 1, 5) == "item_" and not aimsAtEnemyHero(bot, kind, target) then
 		return true
 	end
-	-- A dodge item the item think chose this frame (Usage.LogDodge sets bot._dodgeChosen before the order): the
-	-- dodge share already decided whether to react, and its timing window ([react, react + 0.35s],
-	-- dodge_rules.lua Window) is shorter than a reaction hold, so a held dodge order would always land too late.
-	local chosen = bot._dodgeChosen
-	if chosen ~= nil and chosen.t == DotaTime() then
-		return true
+	local now = DotaTime()
+	if H.IsReactive(bot, kind, target, now) then
+		return H.ReactiveAllowed(bot, profile, name)
 	end
 	local states = unit._ohaDiffCast
 	if states == nil then
@@ -184,10 +362,12 @@ function H.CastAllowed(unit, kind, ability, target)
 		state = {}
 		states[name] = state
 	end
-	local now = DotaTime()
-	local allowed, why = D.CastStep(state, now, profile, frameRoll(bot, now))
+	local allowed, rolled = D.CastStep(state, now, profile, frameRoll(bot, now))
+	if rolled then
+		logRoll(bot, "cast", allowed, profile.castChance, name, nil)
+	end
 	if not allowed then
-		H.Held(bot, why, "ability=%s unit=%s since=%.2f", name, shortName(unit), now - state.startAt)
+		H.Held(bot, "skip", "ability=%s unit=%s since=%.2f", name, shortName(unit), now - state.startAt)
 	end
 	return allowed
 end
@@ -253,28 +433,26 @@ function H.LastHitRetry(bot)
 	bot:Action_AttackUnit(creep, pending.isOnce)
 end
 
--- A dodge (item or hero spell) for `unit` that a projectile check found. False: the bot does not react to it.
+-- A dodge (item or hero spell) for `unit` that a projectile check found: the bot's reactive episode roll. False: the bot
+-- does not react to it.
 function H.DodgeAllowed(unit, what)
 	local bot = runningBot()
 	if bot == nil then
 		return true
 	end
 	local profile = H.Get(bot)
-	if profile.dodgeChance >= 1 then
+	if profile.reactiveChance >= 1 then
 		return true
 	end
-	local latches = bot._ohaDiffDodge
-	if latches == nil then
-		latches = {}
-		bot._ohaDiffDodge = latches
+	local now = DotaTime()
+	-- A cast this frame (Phase Shift after the check) is a dodge: reactive, the same episode roll, no second roll.
+	bot._ohaDiffDodgeAt = now
+	local allowed = H.ReactiveAllowed(bot, profile, "dodge:" .. tostring(what))
+	-- A threat seen keeps the bot in danger: the episode does not end "safe" while projectiles keep coming.
+	local episode = bot._ohaDiffReact.episode
+	if episode ~= nil then
+		episode.dangerAt = now
 	end
-	local key = unit or bot
-	local latch = latches[key]
-	if latch == nil then
-		latch = {}
-		latches[key] = latch
-	end
-	local allowed = D.DodgeStep(latch, DotaTime(), profile, math.random)
 	if not allowed then
 		H.Held(bot, "dodge-off", "what=%s unit=%s", tostring(what), shortName(unit))
 	end
@@ -445,11 +623,16 @@ function H.InstallFu(Fu)
 		if original ~= nil then
 			Fu[name] = function(unit, ...)
 				local bot = runningBot()
-				if bot == nil or H.Get(bot).dodgeChance >= 1 then
+				if bot == nil or H.Get(bot).reactiveChance >= 1 then
 					return original(unit, ...)
 				end
 				local result = original(unit, ...)
-				if result and not H.DodgeAllowed(unit, name) then
+				if not result then
+					return result
+				end
+				-- In a pcall: a broken dodge rule must not stop the hero's think (a threat then counts as allowed).
+				local ok, allowed = pcall(H.DodgeAllowed, unit, name)
+				if ok and allowed == false then
 					if type(result) == "boolean" then
 						return false
 					end
