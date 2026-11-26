@@ -21,32 +21,36 @@ function X.ConsiderStolenSpell(ability)
 		SpawnSpiderlingsDesire, SpirderlingsTarget = X.ConsiderSpawnSpiderlings()
 		if SpawnSpiderlingsDesire > 0 then
 			bot:Action_UseAbilityOnEntity(spawnSpiderlingsAbility, SpirderlingsTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "broodmother_spin_web" then
 		spinWebAbility = ability
 		SpinWebDesire, SpinWebLocation = X.ConsiderSpinWeb()
 		if SpinWebDesire > 0 then
 			bot:Action_UseAbilityOnLocation(spinWebAbility, SpinWebLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "broodmother_silken_bola" then
 		silkenBolaAbility = ability
 		SilkenBolaDesire, SilkenBolaTarget = X.ConsiderSilkenBola()
 		if SilkenBolaDesire > 0 then
 			bot:Action_UseAbilityOnEntity(silkenBolaAbility, SilkenBolaTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "broodmother_insatiable_hunger" then
 		insatiableHungerAbility = ability
 		InsatiableHungerDesire = X.ConsiderInsatiableHunger()
 		if InsatiableHungerDesire > 0 then
 			bot:Action_UseAbility(insatiableHungerAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderInsatiableHunger()

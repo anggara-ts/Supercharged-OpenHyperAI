@@ -22,32 +22,36 @@ function X.ConsiderStolenSpell(ability)
 		HandOfGodDesire = X.ConsiderHandOfGod()
 		if HandOfGodDesire > 0 then
 			bot:Action_UseAbility(handOfGodAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "chen_penitence" then
 		penitenceAbility = ability
 		PenitenceDesire, PenitenceTarget = X.ConsiderPenitence()
 		if PenitenceDesire > 0 then
 			bot:Action_UseAbilityOnEntity(penitenceAbility, PenitenceTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "chen_holy_persuasion" then
 		holyPersuasionAbility = ability
 		HolyPersuasionDesire, HolyPersuasionTarget = X.ConsiderHolyPersuasion()
 		if HolyPersuasionDesire > 0 then
 			bot:Action_UseAbilityOnEntity(holyPersuasionAbility, HolyPersuasionTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "chen_divine_favor" then
 		divineFavorAbility = ability
 		DivineFavorDesire, DivineFavorTarget = X.ConsiderDivineFavor()
 		if DivineFavorDesire > 0 then
 			bot:Action_UseAbilityOnEntity(divineFavorAbility, DivineFavorTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderPenitence()

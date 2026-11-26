@@ -30,16 +30,18 @@ function X.ConsiderStolenSpell(ability)
 		OverclockingDesire = X.ConsiderOverclocking()
 		if OverclockingDesire > 0 then
 			bot:Action_UseAbility(overclockingAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "rattletrap_hookshot" then
 		hookshotAbility = ability
 		HookshotDesire, HookshotTarget = X.ConsiderHookshot()
 		if HookshotDesire > 0 then
 			bot:Action_UseAbilityOnLocation(hookshotAbility, HookshotTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "rattletrap_power_cogs" then
 		powerCogsAbility = ability
@@ -47,32 +49,36 @@ function X.ConsiderStolenSpell(ability)
 		if PowerCogsDesire > 0 then
 			bot:Action_UseAbility(powerCogsAbility)
 			lastPowerCogsTime = DotaTime()
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "rattletrap_battery_assault" then
 		batteryAssaultAbility = ability
 		BatteryAssaultDesire = X.ConsiderBatteryAssault()
 		if BatteryAssaultDesire > 0 then
 			bot:Action_UseAbility(batteryAssaultAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "rattletrap_rocket_flare" then
 		rocketFlareAbility = ability
 		RocketFlareDesire, RocketFlareLocation = X.ConsiderRocketFlare()
 		if RocketFlareDesire > 0 then
 			bot:Action_UseAbilityOnLocation(rocketFlareAbility, RocketFlareLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "rattletrap_jetpack" then
 		jetpackAbility = ability
 		JetpackDesire = X.ConsiderJetpack()
 		if JetpackDesire > 0 then
 			bot:Action_UseAbility(jetpackAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderBatteryAssault()

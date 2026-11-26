@@ -21,8 +21,9 @@ function X.ConsiderStolenSpell(ability)
 		if CounterSpellDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbility(counterspellAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "antimage_blink" then
 		blinkAbility = ability
@@ -30,8 +31,9 @@ function X.ConsiderStolenSpell(ability)
 		if BlinkDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnLocation(blinkAbility, BlinkLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "antimage_mana_void" then
 		manaVoidAbility = ability
@@ -39,8 +41,9 @@ function X.ConsiderStolenSpell(ability)
 		if ManaVoidDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnEntity(manaVoidAbility, ManaVoidTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderBlink()

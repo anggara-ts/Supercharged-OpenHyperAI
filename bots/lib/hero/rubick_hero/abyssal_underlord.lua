@@ -20,24 +20,27 @@ function X.ConsiderStolenSpell(ability)
 		PitOfMaliceDesire, PitOfMaliceLocation = X.ConsiderPitOfMalice()
 		if PitOfMaliceDesire > 0 then
 			bot:Action_UseAbilityOnLocation(pitOfMaliceAbility, PitOfMaliceLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "abyssal_underlord_firestorm" then
 		firestormAbility = ability
 		FirestormDesire, FirestormLocation = X.ConsiderFirestorm()
 		if FirestormDesire > 0 then
 			bot:Action_UseAbilityOnLocation(firestormAbility, FirestormLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "abyssal_underlord_dark_portal" then
 		fiendsGateAbility = ability
 		FiendsGateDesire, FiendsGateLocation = X.ConsiderFiendsGate()
 		if FiendsGateDesire > 0 then
 			bot:Action_UseAbilityOnLocation(fiendsGateAbility, FiendsGateLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderFirestorm()

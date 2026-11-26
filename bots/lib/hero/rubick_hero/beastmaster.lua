@@ -31,7 +31,7 @@ function X.ConsiderStolenSpell(ability)
 			bot:ActionQueue_UseAbilityOnLocation(blinkItem, BlinkLocation)
 			bot:ActionQueue_Delay(0.1)
 			bot:ActionQueue_UseAbilityOnEntity(primalRoarAbility, BlinkRoarTarget)
-			return
+			return "cast"
 		end
 	end
 	if abilityName == "beastmaster_primal_roar" then
@@ -39,32 +39,36 @@ function X.ConsiderStolenSpell(ability)
 		PrimalRoarDesire, PrimalRoarTarget = X.ConsiderPrimalRoar()
 		if PrimalRoarDesire > 0 then
 			bot:Action_UseAbilityOnEntity(primalRoarAbility, PrimalRoarTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "beastmaster_summon_razorback" then
 		callOfTheWildBoarAbility = ability
 		CallOfTheWildBoarDesire = X.ConsiderCallOfTheWildBoar()
 		if CallOfTheWildBoarDesire > 0 then
 			bot:Action_UseAbility(callOfTheWildBoarAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "beastmaster_summon_raptor" then
 		callOfTheWildHawkAbility = ability
 		CallOfTheWildHawkDesire = X.ConsiderCallOfTheWildHawk()
 		if CallOfTheWildHawkDesire > 0 then
 			bot:Action_UseAbility(callOfTheWildHawkAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "beastmaster_wild_axes" then
 		wildAxesAbility = ability
 		WildAxesDesire, WildAxesLocation = X.ConsiderWildAxes()
 		if WildAxesDesire > 0 then
 			bot:Action_UseAbilityOnLocation(wildAxesAbility, WildAxesLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderWildAxes()

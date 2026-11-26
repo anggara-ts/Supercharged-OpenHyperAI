@@ -101,7 +101,14 @@ local spellReplaceWeights = {
 	venomancer_snakebite = 0.3,
 	monkey_king_transfiguration = 0.9,
 }
+-- Names missing here used to weigh 1 (always worth replacing). The full table already covers the heroes
+-- that have no rubick_hero file; keep a name that is listed here, and fall through for the rest.
+local SpellList = require(GetScriptDirectory() .. "/lib/data/spell_list")
 function SpellProbList.GetSpellReplaceWeight(abilityName)
-	return spellReplaceWeights[abilityName] or 1
+	local weight = spellReplaceWeights[abilityName]
+	if weight ~= nil then
+		return weight
+	end
+	return SpellList.GetSpellReplaceWeight(abilityName)
 end
 return SpellProbList

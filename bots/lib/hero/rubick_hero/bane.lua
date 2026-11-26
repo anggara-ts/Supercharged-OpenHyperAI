@@ -28,8 +28,9 @@ function X.ConsiderStolenSpell(ability)
 		EnfeebleDesire, EnfeebleTarget = X.ConsiderEnfeeble()
 		if EnfeebleDesire > 0 then
 			bot:ActionQueue_UseAbilityOnEntity(enfeebleAbility, EnfeebleTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bane_brain_sap" then
 		brainSapAbility = ability
@@ -44,8 +45,9 @@ function X.ConsiderStolenSpell(ability)
 			else
 				bot:ActionQueue_UseAbilityOnEntity(brainSapAbility, BrainSapTarget)
 			end
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bane_fiends_grip" then
 		fiendsGripAbility = ability
@@ -53,16 +55,18 @@ function X.ConsiderStolenSpell(ability)
 		if FiendsGripDesire > 0 then
 			Fu.SetQueueToInvisible(bot)
 			bot:ActionQueue_UseAbilityOnEntity(fiendsGripAbility, FiendsGripTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bane_nightmare" then
 		nightmareAbility = ability
 		NightmareDesire, NightmareTarget = X.ConsiderNightmare()
 		if NightmareDesire > 0 then
 			bot:ActionQueue_UseAbilityOnEntity(nightmareAbility, NightmareTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderEnfeeble()

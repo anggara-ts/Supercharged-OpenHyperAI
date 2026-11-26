@@ -359,6 +359,15 @@ SpellList["spells"] = {
 		["lion_mana_drain"] = { weight = 0.5 },
 		["lion_finger_of_death"] = { weight = 0.5 },
 	},
+	-- Valve datafeed hero_id=80. Same scale as the rest of this table: 0 keep, 1 replace.
+	-- Passive and innate spells are 1 so a held copy is thrown away; a disable stays.
+	["npc_dota_hero_lone_druid"] = {
+		["lone_druid_spirit_bear"] = { weight = 0.6 },
+		["lone_druid_spirit_link"] = { weight = 1 },
+		["lone_druid_savage_roar"] = { weight = 0.3 },
+		["lone_druid_entangle"] = { weight = 0.4 },
+		["lone_druid_true_form"] = { weight = 0.5 },
+	},
 	["npc_dota_hero_luna"] = {
 		["luna_lucent_beam"] = { weight = 0.5 },
 		["luna_lunar_orbit"] = { weight = 1 },
@@ -424,6 +433,17 @@ SpellList["spells"] = {
 		["monkey_king_mischief"] = { weight = 1 },
 		["monkey_king_untransform"] = { weight = 1 },
 		["monkey_king_wukongs_command"] = { weight = 0.2 },
+	},
+	-- Valve datafeed hero_id=10. Attribute-shift toggles (behavior 516) are easy to replace.
+	["npc_dota_hero_morphling"] = {
+		["morphling_waveform"] = { weight = 0.4 },
+		["morphling_adaptive_strike_agi"] = { weight = 0.3 },
+		["morphling_adaptive_strike_str"] = { weight = 0.3 },
+		["morphling_morph_agi"] = { weight = 0.9 },
+		["morphling_morph_str"] = { weight = 0.9 },
+		["morphling_replicate"] = { weight = 0.4 },
+		["morphling_morph_replicate"] = { weight = 0.7 },
+		["morphling_ebb_and_flow"] = { weight = 1 },
 	},
 	["npc_dota_hero_muerta"] = {
 		["muerta_dead_shot"] = { weight = 0.8 },
@@ -598,6 +618,15 @@ SpellList["spells"] = {
 		["ringmaster_strongman_tonic"] = { weight = 0.2 },
 		["ringmaster_whoopee_cushion"] = { weight = 0.2 },
 		["ringmaster_summon_unicycle"] = { weight = 0.5 },
+	},
+	-- Valve datafeed hero_id=86. Telekinesis Land is the sub-ability (hero_rubick.lua), not a spell to hold.
+	["npc_dota_hero_rubick"] = {
+		["rubick_telekinesis"] = { weight = 0.2 },
+		["rubick_telekinesis_land"] = { weight = 1 },
+		["rubick_fade_bolt"] = { weight = 0.4 },
+		["rubick_arcane_supremacy"] = { weight = 1 },
+		["rubick_spell_steal"] = { weight = 0.4 },
+		["rubick_curiosity"] = { weight = 1 },
 	},
 	["npc_dota_hero_sand_king"] = {
 		["sandking_burrowstrike"] = { weight = 0 },

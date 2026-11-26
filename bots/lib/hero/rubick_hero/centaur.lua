@@ -22,40 +22,45 @@ function X.ConsiderStolenSpell(ability)
 		HitchARideDesire, HitchARideTarget = X.ConsiderHitchARide()
 		if HitchARideDesire > 0 then
 			bot:Action_UseAbilityOnEntity(hitchARideAbility, HitchARideTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "centaur_work_horse" then
 		workHorseAbility = ability
 		WorkHorseDesire = X.ConsiderWorkHorse()
 		if WorkHorseDesire > 0 then
 			bot:Action_UseAbility(workHorseAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "centaur_stampede" then
 		stampedeAbility = ability
 		StampedeDesire = X.ConsiderStampede()
 		if StampedeDesire > 0 then
 			bot:Action_UseAbility(stampedeAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "centaur_hoof_stomp" then
 		hoofStompAbility = ability
 		HoofStompDesire = X.ConsiderHoofStomp()
 		if HoofStompDesire > 0 then
 			bot:Action_UseAbility(hoofStompAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "centaur_double_edge" then
 		doubleEdgeAbility = ability
 		DoubleEdgeDesire, DoubleEdgeTarget = X.ConsiderDoubleEdge()
 		if DoubleEdgeDesire > 0 then
 			bot:Action_UseAbilityOnEntity(doubleEdgeAbility, DoubleEdgeTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderHoofStomp()

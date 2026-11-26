@@ -27,24 +27,27 @@ function X.ConsiderStolenSpell(ability)
 		local ShadowWalkDesire = X.ConsiderShadowWalk()
 		if ShadowWalkDesire > 0 then
 			bot:Action_UseAbility(shadowWalkAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bounty_hunter_wind_walk_ally" then
 		friendlyShadowAbility = ability
 		local FriendlyShadowDesire, FriendlyShadowTarget = X.ConsiderFriendlyShadow()
 		if FriendlyShadowDesire > 0 then
 			bot:Action_UseAbilityOnEntity(friendlyShadowAbility, FriendlyShadowTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bounty_hunter_track" then
 		trackAbility = ability
 		local TrackDesire, TrackTarget = X.ConsiderTrack()
 		if TrackDesire > 0 then
 			bot:Action_UseAbilityOnEntity(trackAbility, TrackTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bounty_hunter_shuriken_toss" then
 		shurikenTossAbility = ability
@@ -52,8 +55,9 @@ function X.ConsiderStolenSpell(ability)
 		if ShurikenTossDesire > 0 then
 			-- fix: the target was the ability handle itself
 			bot:ActionQueue_UseAbilityOnEntity(shurikenTossAbility, ShurikenTossTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderShurikenToss()

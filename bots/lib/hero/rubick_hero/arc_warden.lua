@@ -20,24 +20,27 @@ function X.ConsiderStolenSpell(ability)
 		FluxDesire, FluxTarget = X.ConsiderFlux()
 		if FluxDesire > 0 then
 			bot:Action_UseAbilityOnEntity(fluxAbility, FluxTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "arc_warden_magnetic_field" then
 		magneticFieldAbility = ability
 		MagneticFieldDesire, MagneticFieldLocation = X.ConsiderMagneticField()
 		if MagneticFieldDesire > 0 then
 			bot:Action_UseAbilityOnLocation(magneticFieldAbility, MagneticFieldLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "arc_warden_spark_wraith" then
 		sparkWraithAbility = ability
 		SparkWraithDesire, SparkWraithLocation = X.ConsiderSparkWraith()
 		if SparkWraithDesire > 0 then
 			bot:Action_UseAbilityOnLocation(sparkWraithAbility, SparkWraithLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderFlux()

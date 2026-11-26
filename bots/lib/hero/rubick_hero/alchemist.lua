@@ -26,16 +26,18 @@ function X.ConsiderStolenSpell(ability)
 		ChemicalRageDesire = X.ConsiderChemicalRage()
 		if ChemicalRageDesire > 0 then
 			bot:Action_UseAbility(chemicalRageAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "alchemist_unstable_concoction_throw" then
 		unstableConcoctionThrowAbility = ability
 		UnstableConcoctionThrowDesire, UnstableConcoctionThrowTarget = X.ConsiderUnstableConcoctionThrow()
 		if UnstableConcoctionThrowDesire > 0 then
 			bot:Action_UseAbilityOnEntity(unstableConcoctionThrowAbility, UnstableConcoctionThrowTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "alchemist_unstable_concoction" then
 		unstableConcoctionAbility = ability
@@ -43,8 +45,9 @@ function X.ConsiderStolenSpell(ability)
 		if UnstableConcoctionDesire > 0 then
 			bot:Action_UseAbility(unstableConcoctionAbility)
 			concoctionStartTime = DotaTime()
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "alchemist_acid_spray" then
 		acidSprayAbility = ability
@@ -52,16 +55,18 @@ function X.ConsiderStolenSpell(ability)
 		if AcidSprayDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:Action_UseAbilityOnLocation(acidSprayAbility, AcidSprayLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "alchemist_berserk_potion" then
 		berserkPotionAbility = ability
 		BerserkPotionDesire, BerserkPotionTarget = X.ConsiderBerserkPotion()
 		if BerserkPotionDesire > 0 then
 			bot:Action_UseAbilityOnEntity(berserkPotionAbility, BerserkPotionTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderAcidSpray()

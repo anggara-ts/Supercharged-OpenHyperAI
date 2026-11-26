@@ -23,40 +23,45 @@ function X.ConsiderStolenSpell(ability)
 		SkeletonWalkDesire = X.ConsiderSkeletonWalk()
 		if SkeletonWalkDesire > 0 then
 			bot:Action_UseAbility(skeletonWalkAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "clinkz_burning_barrage" then
 		burningBarrageAbility = ability
 		BurningBarrageDesire, BurningBarrageLocation = X.ConsiderBurningBarrage()
 		if BurningBarrageDesire > 0 then
 			bot:Action_UseAbilityOnLocation(burningBarrageAbility, BurningBarrageLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "clinkz_strafe" then
 		strafeAbility = ability
 		StrafeDesire = X.ConsiderStrafe()
 		if StrafeDesire > 0 then
 			bot:Action_UseAbility(strafeAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "clinkz_death_pact" then
 		deathPactAbility = ability
 		DeathPactDesire, DeathPactTarget = X.ConsiderDeathPact()
 		if DeathPactDesire > 0 then
 			bot:Action_UseAbilityOnEntity(deathPactAbility, DeathPactTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "clinkz_burning_army" then
 		burningArmyAbility = ability
 		BurningArmyDesire, BurningArmyLocation = X.ConsiderBurningArmy()
 		if BurningArmyDesire > 0 then
 			bot:Action_UseAbilityOnLocation(burningArmyAbility, BurningArmyLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderStrafe()

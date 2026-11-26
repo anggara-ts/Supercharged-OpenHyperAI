@@ -23,24 +23,27 @@ function X.ConsiderStolenSpell(stolenAbility)
 		PhantasmDesire = X.ConsiderPhantasm()
 		if PhantasmDesire > 0 then
 			bot:ActionQueue_UseAbility(phantasmAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "chaos_knight_reality_rift" then
 		realityRiftAbility = stolenAbility
 		RealityRiftDesire, RealityRiftTarget = X.ConsiderRealityRift()
 		if RealityRiftDesire > 0 then
 			bot:Action_UseAbilityOnEntity(realityRiftAbility, RealityRiftTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "chaos_knight_chaos_bolt" then
 		chaosBoltAbility = stolenAbility
 		ChaosBoltDesire, ChaosBoltTarget = X.ConsiderChaosBolt()
 		if ChaosBoltDesire > 0 then
 			bot:Action_UseAbilityOnEntity(chaosBoltAbility, ChaosBoltTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderChaosBolt()

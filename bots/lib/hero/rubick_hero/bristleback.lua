@@ -25,32 +25,36 @@ function X.ConsiderStolenSpell(ability)
 		HairBallDesire, HairBallLocation = X.ConsiderHairBall()
 		if HairBallDesire > 0 then
 			bot:Action_UseAbilityOnLocation(hairballAbility, HairBallLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bristleback_bristleback" then
 		bristlebackAbility = ability
 		BristlebackDesire, BristlebackLocation = X.ConsiderBristleback()
 		if BristlebackDesire > 0 then
 			bot:Action_UseAbilityOnLocation(bristlebackAbility, BristlebackLocation)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bristleback_viscous_nasal_goo" then
 		viscousNasalGooAbility = ability
 		ViscousNasalGooDesire, ViscousNasalGooTarget = X.ConsiderViscousNasalGoo()
 		if ViscousNasalGooDesire > 0 then
 			bot:Action_UseAbilityOnEntity(viscousNasalGooAbility, ViscousNasalGooTarget)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "bristleback_quill_spray" then
 		quillSprayAbility = ability
 		QuillSprayDesire = X.ConsiderQuillSpray()
 		if QuillSprayDesire > 0 then
 			bot:Action_UseAbility(quillSprayAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderViscousNasalGoo()
