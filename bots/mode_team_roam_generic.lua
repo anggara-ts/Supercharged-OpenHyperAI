@@ -398,7 +398,14 @@ function GetDesireHelper()
 		if Fu.IsValid(lastHitCreep) and Fu.CanBeAttacked(lastHitCreep) then
 			local why = TeamRoam.LastHitWithdrawWhy(lastHitCreep)
 			local path = nil
-			if why == nil then
+			-- Enemy lane creeps hitting the bot (RoamRules.CreepAggroWhy, #165 game 078: Winter Wyvern held on snipes
+			-- with 2 creeps on her): no snipe, neither through the overlay nor as a mode; the active mode and the kite
+			-- step act. [SHy-ROAM] snipe-skip why=creep-aggro at=offer.
+			local aggro = LastHitOverlay.CreepAggro(bot)
+			if why == nil and aggro.on then
+				LastHitOverlay.LogAggroSkip(bot, "offer", "snipe", aggro)
+				why = "creep-aggro"
+			elseif why == nil then
 				local activeMode = bot:GetActiveMode()
 				local modeName = activeMode == BOT_MODE_TEAM_ROAM and "team_roam" or RoamStats.ModeName(activeMode)
 				path = RoamRules.SnipePath(
@@ -432,6 +439,8 @@ function GetDesireHelper()
 				return BOT_DESIRE_OVERRIDE * 1.5
 			elseif path == "none" then
 				roamWhy = "snipe-none"
+			elseif why == "creep-aggro" then
+				roamWhy = "snipe-aggro"
 			elseif DotaTime() >= (bot._roamLastHitSkipLogAt or -999) then
 				bot._roamLastHitSkipLogAt = DotaTime() + 5
 				pcall(
