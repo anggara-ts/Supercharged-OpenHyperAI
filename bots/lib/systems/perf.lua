@@ -259,7 +259,7 @@ end
 -- such as item_bfury calls item_quelling_blade's rule through the same table).
 local detailRunning = false
 
--- A watcher of the timed calls (#268): bots/lib/systems/perf_ab.lua sets one while a PR's A/B measurement runs. nil
+-- A watcher of the timed calls (#268): bots/dev/perf_ab.lua sets one while a PR's A/B measurement runs. nil
 -- otherwise, and then a timed call pays the two tests below and nothing else.
 local watchBefore, watchAfter = nil, nil
 

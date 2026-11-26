@@ -13,7 +13,7 @@
 -- does not differ by that alone.
 -- Besides the trace it counts the "engine" calls by function (the stub's unit and ability methods and API globals).
 -- The counts say how many calls a change saves; they say nothing about time, which only a game can tell
--- (bots/lib/systems/perf_ab.lua, docs/MEASURING_PERFORMANCE.md).
+-- (bots/dev/perf_ab.lua, docs/MEASURING_PERFORMANCE.md).
 --
 -- From the repo root, with LuaJIT (CI has it; it runs tests/test_decision_trace.lua on every push):
 --   luajit tests/decision_trace.lua run <out> [--scenario attack|retreat|both] [--frames N] [--heroes <text>]
@@ -303,7 +303,7 @@ function Trace.run(Stub, opts)
 			return list
 		end
 		if opts.arm ~= nil then
-			local PerfAb = require(GetScriptDirectory() .. "/lib/systems/perf_ab")
+			local PerfAb = require(GetScriptDirectory() .. "/dev/perf_ab")
 			if not PerfAb.Pin(opts.arm) then
 				error(
 					"no arm named " .. tostring(opts.arm) .. " (arms: " .. table.concat(PerfAb.Arms(), ", ") .. ")",

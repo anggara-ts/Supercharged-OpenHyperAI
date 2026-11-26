@@ -7,7 +7,10 @@
 -- scripts cannot see which of the two the game does), and two games, one before and one after, differ by 7% to 12%
 -- in script time with the same build (#153).
 --
--- Dormant: nothing on main requires this file. The PR that measures something does, and defines an experiment:
+-- Development only, and off by default. This file is in bots/dev/: tools/export-bots.js copies that folder for a
+-- test game and leaves it out of a Workshop copy, so players never get it. Nothing on main requires it either, so
+-- an ordinary test game does not load it. The PR that measures something requires it and defines an experiment:
+--   local PerfAb = require(GetScriptDirectory() .. "/dev/perf_ab")
 --   local switch = PerfAb.Define({
 --       name = "lotus",                                    -- letters, digits, "_" and "-"
 --       variants = {
@@ -57,7 +60,9 @@
 -- why="). Either way every switch is off from then on and the timer is left alone again.
 --
 -- What stays on main: this file, its hook in perf.lua, its tests. What does not: an experiment. Its Define, its
--- switch tests and the code path that lost come out of the PR before it merges (AGENTS.md, Code conventions).
+-- switch tests and the code path that lost come out of the PR before it merges (AGENTS.md, Code conventions). A
+-- build that still requires this file cannot be exported for the Workshop: the copy has no bots/dev/, and the
+-- export's require check stops.
 local Perf = require(GetScriptDirectory() .. "/lib/systems/perf")
 local PerfAb = {}
 

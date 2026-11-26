@@ -13,10 +13,21 @@ For a change that is meant to save script time (#52): a cache, fewer engine call
 - **Two games, one before and one after, cannot show it.** Two games of one build differ by 7% to 12% in script time
   (#153). The effects looked for are 1% to 4%.
 
-So the change runs against the old code on neighbouring frames of the same game. `bots/lib/systems/perf_ab.lua` does
-that: every frame runs one variant ("arm") for the whole team, a block of frames runs every arm once in a shuffled
-order, and `[SHy-AB]` prints each arm's script time per frame with its difference from the old code. The file is on
-`main` but nothing requires it: it costs nothing until a PR defines an experiment.
+So the change runs against the old code on neighbouring frames of the same game. `bots/dev/perf_ab.lua` does that:
+every frame runs one variant ("arm") for the whole team, a block of frames runs every arm once in a shuffled order,
+and `[SHy-AB]` prints each arm's script time per frame with its difference from the old code.
+
+## When it runs
+
+- **Off by default.** Nothing on `main` requires the harness, so an ordinary test game does not load it and prints
+  no `[SHy-AB]` line. Every game already has `[SHy-PERF]` and `[SHy-PERFSUM]` for the script time as a whole.
+- **Never in the Workshop.** The file is in `bots/dev/`. `tools/export-bots.js` copies that folder for a test game
+  and leaves it out of a Workshop copy. A build whose scripts still require it cannot be exported for the Workshop.
+- **On in the games that test a measurement PR, and only there.** There is no flag: the PR's `PerfAb.Define` is the
+  switch. The PR goes into the tracker like any other (`node tools/verify.js add <pr>`), `tools/test-build.js`
+  merges it into `test/next`, and `/prepare-game` says that the build holds an experiment.
+- **The other PRs in that game are tested as usual.** Every variant decides the same things as the old code, so the
+  game plays as if nothing was switched.
 
 | #251, script time per frame against the old code | stub, interpreted | stub, compiled | games 083 and 084 |
 |---|---|---|---|
@@ -28,7 +39,7 @@ order, and `[SHy-AB]` prints each arm's script time per frame with its differenc
 
 1. **Put the change behind a switch.** The old code stays as it is, with one test in front of it.
    ```lua
-   local PerfAb = require(GetScriptDirectory() .. "/lib/systems/perf_ab")
+   local PerfAb = require(GetScriptDirectory() .. "/dev/perf_ab")
    local switch = PerfAb.Define({
        name = "lotus",
        variants = {
@@ -94,7 +105,7 @@ kb/frame=95.7 gc=17116 jit=na tick=0.0153
 ```
 
 (game 084, one line in the log; the version of #252 also printed `on=`.) The fields are explained at the top of
-`bots/lib/systems/perf_ab.lua`. In short: `ms/frame=` is the team's script time per frame in this arm, `d=` its mean
+`bots/dev/perf_ab.lua`. In short: `ms/frame=` is the team's script time per frame in this arm, `d=` its mean
 difference from the `off` frame of the same block, `se=` the standard error of `d`, `z=` their ratio, `pct=` `d` as a
 share of `off`, and `faster=` / `slower=` / `sign=` the same comparison by count.
 

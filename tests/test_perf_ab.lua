@@ -1,10 +1,10 @@
--- bots/lib/systems/perf_ab.lua ([SHy-AB], #268): the harness that times a change against the old code on neighbouring
+-- bots/dev/perf_ab.lua ([SHy-AB], #268): the harness that times a change against the old code on neighbouring
 -- frames of one game. Nothing on main defines an experiment, so these cases define made-up ones. A frame is one
 -- GameTime() value.
 local T = ...
 local Stub = T.stub
 local FRAME = 1 / 30
-local MODULE = "/lib/systems/perf_ab"
+local MODULE = "/dev/perf_ab"
 local ARMS = { "off", "off2", "probe.a", "probe.b", "probe.both" }
 -- Switches a and b of each arm.
 local SWITCHES = {
@@ -109,7 +109,7 @@ T.test("[SHy-AB] dormant: no bot script asks for the harness", function()
 	for _, path in ipairs(T.files("^bots/.*%.lua$")) do
 		if path ~= "bots" .. MODULE .. ".lua" and not MEASURING[path] then
 			-- The end of a require path: the closing quote keeps comments that name the file out.
-			local found = string.find(T.read(path), 'lib/systems/perf_ab"', 1, true)
+			local found = string.find(T.read(path), 'dev/perf_ab"', 1, true)
 			T.eq(found, nil, path .. " requires perf_ab.lua")
 		end
 	end

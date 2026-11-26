@@ -2,7 +2,7 @@
 -- One hero and a few frames here, so that the tool keeps working; a measurement runs it for every hero.
 local T = ...
 local Trace = assert(loadfile("tests/decision_trace.lua"))()
-local MODULE = "/lib/systems/perf_ab"
+local MODULE = "/dev/perf_ab"
 
 local function count(lines, prefix)
 	local n = 0

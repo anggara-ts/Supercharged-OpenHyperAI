@@ -32,3 +32,7 @@ Rules: `AGENTS.md` (workflow steps 4-6). Checklist:
 5. **Tell the user:** branch and build that will run (the `[SHy-BUILD]` version the export printed), the lineup
    table (pos / hero / what it tests), and the log lines to expect. Remind them to launch with `-condebug` in a
    Local Host lobby with Local Dev Script.
+   - **A/B measurement:** `git grep -n "PerfAb.Define" HEAD -- bots ":!bots/dev"`. No hit (the usual case): the
+     harness is off, say nothing. A hit: a measurement PR is in the build; name its experiment and say that
+     `[SHy-AB]` lines print every 5 minutes and that the review posts the last line of every arm on the issue
+     (`docs/MEASURING_PERFORMANCE.md`). Nothing has to be switched on.
