@@ -141,8 +141,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	if Minion.IsValidUnit(minionUnit) then
 		local unitName = minionUnit:GetUnitName()
@@ -495,12 +494,10 @@ function X.ConsiderR()
 		return 0
 	end
 	local abilityLevel = exorcismAbility:GetLevel()
-	local castRange = exorcismAbility:GetCastRange()
 	local castPoint = exorcismAbility:GetCastPoint()
 	local manaCost = exorcismAbility:GetManaCost()
 	local damage = exorcismAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)

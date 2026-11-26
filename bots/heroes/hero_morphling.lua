@@ -73,8 +73,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -668,7 +667,6 @@ function X.ConsiderAtttributeShift()
 	local isStrMorphOn = morphStrAbility:GetToggleState()
 	local alliesNearBot = Fu.GetAlliesNearLoc(bot:GetLocation(), 1200)
 	local enemiesNearBot = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
-	local nearbyTowers = bot:GetNearbyTowers(1100, true)
 	local weAreStronger = Fu.WeAreStronger(bot, 1600)
 	local agility = bot:GetAttributeValue(ATTRIBUTE_AGILITY)
 	local strength = bot:GetAttributeValue(ATTRIBUTE_STRENGTH)
