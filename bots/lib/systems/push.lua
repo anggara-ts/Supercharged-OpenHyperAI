@@ -166,6 +166,9 @@ local function ReadAdvantage(gameState, bot)
 	})
 	local was = advantage.desire
 	if (desire ~= nil) ~= (was ~= nil) then
+		-- A new window (or its end) frees the window's lane lock (WindowLane).
+		advantage.startAt = desire ~= nil and now or nil
+		advantage.lane, advantage.laneTarget = nil, nil
 		local endWhy = why
 		if desire == nil then
 			if baseHit then
@@ -205,6 +208,58 @@ local function ReadAdvantage(gameState, bot)
 	advantage.minLeft = minLeft
 	advantage.names = names
 	return advantage
+end
+-- The team's advantage window is running (for bots/lib/systems/roshan_window.lua's peek): read within the last 2s.
+function Push.AdvantageActive(team)
+	local advantage = advantageByTeam[team or GetTeam()]
+	return advantage ~= nil and advantage.desire ~= nil and DotaTime() - (advantage.at or -999) <= 2
+end
+-- The lane of a human's push order (#222) a bot of this team carries out: noted by Push.GetPushDesire, read by
+-- WindowLane within 2s.
+local function NoteOrderLane(lane)
+	local team = GetTeam()
+	advantageByTeam[team] = advantageByTeam[team] or { at = -999, desire = nil, why = "none" }
+	advantageByTeam[team].orderLane = lane
+	advantageByTeam[team].orderAt = DotaTime()
+end
+-- The advantage window's lane (#12, game 087 27:32-28:26: the Aegis window went lane 3, then 1 at 1669, then mid from
+-- 1684, about 30 of its 54s spent walking; the human had pinged mid at 1658-1660). teamPushLane is worked out again
+-- every 0.1s (Push.WhichLaneToPush, from where the bots stand), so it hopped as they walked. Now the first pick in a
+-- window is kept until the window ends, a human's push order takes its lane at once, and the lane is picked again
+-- only when the building it was locked on falls. Line (per team, on a change): window-lane lane= why=pick|ping|
+-- target-down was= window=.
+local function WindowLane(bot, lane, adv)
+	local now = DotaTime()
+	local orderLane = adv.orderLane ~= nil and now - (adv.orderAt or -999) <= 2 and adv.orderLane or nil
+	local was = adv.lane
+	local why = nil
+	if orderLane ~= nil and orderLane ~= was then
+		adv.lane, why = orderLane, "ping"
+	elseif was == nil then
+		adv.lane, why = Push.WhichLaneToPush(bot, lane), "pick"
+	elseif adv.laneTarget ~= nil and (adv.laneTarget:IsNull() or not adv.laneTarget:IsAlive()) then
+		adv.lane, why = Push.WhichLaneToPush(bot, lane), "target-down"
+	end
+	if why ~= nil then
+		adv.laneTarget = getLaneTargetBuilding(adv.lane)
+		if adv.lane ~= was and not Fu.IsMeepoClone(bot) then
+			pcall(
+				print,
+				string.format(
+					"[SHy-PUSH] t=%.0f %s window-lane lane=%s why=%s was=%s window=%s target=%s from=%s",
+					now,
+					GetTeam() == TEAM_DIRE and "dire" or "radiant",
+					tostring(adv.lane),
+					why,
+					tostring(was or "-"),
+					tostring(adv.why),
+					adv.laneTarget ~= nil and (string.gsub(adv.laneTarget:GetUnitName(), "npc_dota_", "")) or "-",
+					ShortHeroName(bot)
+				)
+			)
+		end
+	end
+	return adv.lane
 end
 -- How many living allies are closer to `location` than this bot (0 = the closest).
 local function AllyRankTo(bot, location)
@@ -402,6 +457,11 @@ local function TeamGatherLane(bot, team, enemyFountain)
 	local kept = gatherLaneByTeam[team]
 	local keptLane = kept ~= nil and now - kept.at <= 3 and now >= kept.at and kept.lane or nil
 	local advLane = lockedPushLane ~= nil and now < (lockedPushLaneUntil or -999) and lockedPushLane or nil
+	-- In an advantage window its locked lane (WindowLane) breaks a tie, as the bot-only lock does.
+	local windowAdv = advantageByTeam[team]
+	if advLane == nil and windowAdv ~= nil and windowAdv.desire ~= nil and now - (windowAdv.at or -999) <= 2 then
+		advLane = windowAdv.lane
+	end
 	local lane, why = PushRules.HgGatherLane({ counts = counts, kept = keptLane, advLane = advLane, hgLanes = hgLanes })
 	local was = pick ~= nil and pick.lane or nil
 	pick = { at = now, lane = lane, why = why, counts = counts, logAt = pick ~= nil and pick.logAt or -999 }
@@ -1075,13 +1135,16 @@ function Push.GetPushDesireHelper(bot, lane)
 	local aliveAllyCount = gameState.aliveAllyCount
 	local aliveEnemyCount = gameState.aliveEnemyCount
 	if teamPushLane == nil then
-		teamPushLane = Push.WhichLaneToPush(bot, lane)
+		teamPushLane = advDesire ~= nil and WindowLane(bot, lane, adv) or Push.WhichLaneToPush(bot, lane)
 	end
 	local isTeamPushLane = teamPushLane == lane
 	local hasHumanEnemy = Fu.Utils.IsHumanPlayerInTeam(GetOpposingTeam())
 	if hasHumanEnemy then
+		-- The lane's building has to exist, not be seen or attackable (#12, game 087: Fu.IsValidBuilding rejects a
+		-- tower in fog, under the Glyph or still protected, and dropped Radiant's 0.90 pushes at 708-870 while the
+		-- towers stood; the Glyph has its own wait, GlyphWaitThink).
 		local laneTarget = getLaneTargetBuilding(lane)
-		if laneTarget == nil or not Fu.IsValidBuilding(laneTarget) then
+		if laneTarget == nil or laneTarget:IsNull() or not laneTarget:IsAlive() then
 			return NoPush(bot, "no-lane-target")
 		end
 	else
@@ -2091,9 +2154,14 @@ local function GlyphWaitTick(bot)
 	if wait == nil then
 		return
 	end
-	if not IsStandingTower(wait.tower) then
+	-- "fell" only for a tower that is gone (#12, game 087 24:16: `glyph-end why=fell` for the Radiant mid T3, which fell
+	-- at 32:47; IsStandingTower also needs it seen). A standing tower out of sight is lost-sight.
+	local tower = wait.tower
+	if tower == nil or tower:IsNull() or not tower:IsAlive() then
 		GlyphWaitEnd(bot, "fell")
-	elseif not wait.tower:HasModifier(GLYPH_MODIFIER) then
+	elseif not tower:CanBeSeen() then
+		GlyphWaitEnd(bot, "lost-sight")
+	elseif not tower:HasModifier(GLYPH_MODIFIER) then
 		GlyphWaitEnd(bot, "ended")
 	elseif DotaTime() - (wait.seenAt or -999) > 2 then
 		GlyphWaitEnd(bot, "left")
@@ -2408,6 +2476,41 @@ local function LogPushGate(bot, lane, desire)
 			)
 		end
 	end
+	-- In an advantage window, once per bot and window (#12, game 087: Radiant's four windows printed no push line at
+	-- all, since the line above needs a push that was on first): why this bot does not push the window's lane. Not
+	-- for a bot already in that lane's push mode; from 2s into the window. why=low: no gate, the lane's desire stayed
+	-- under 0.5 (cap= names the caps of that call).
+	local adv = advantageByTeam[GetTeam()]
+	if
+		adv ~= nil
+		and adv.desire ~= nil
+		and adv.startAt ~= nil
+		and desire < 0.5
+		and (adv.lane == nil or adv.lane == lane)
+		and bot._advGateWindow ~= adv.startAt
+		and DotaTime() - adv.startAt >= 2
+		and bot:GetActiveMode() ~= LANE_PUSH_MODE[lane]
+		and not Fu.IsMeepoClone(bot)
+	then
+		bot._advGateWindow = adv.startAt
+		pcall(
+			print,
+			string.format(
+				"[SHy-PUSH] t=%.0f %s push-gate-window lane=%s locked=%s why=%s desire=%.2f window=%s age=%.0f mode=%s hp=%.2f cap=%s",
+				DotaTime(),
+				ShortHeroName(bot),
+				tostring(lane),
+				tostring(adv.lane ~= nil),
+				bot._pushGate or "low",
+				desire,
+				tostring(adv.why),
+				DotaTime() - adv.startAt,
+				tostring(bot:GetActiveMode()),
+				Fu.GetHP(bot),
+				pushCapSrc == "" and "-" or pushCapSrc
+			)
+		)
+	end
 end
 -- Lane-done episodes (#12, maintainer 2026-11-22: "stay on the target" first, with stats to choose between it and
 -- handing the push to the building's lane). An episode starts when PushThink keeps a bot on another lane's building
@@ -2526,6 +2629,7 @@ function Push.GetPushDesire(bot, lane)
 	-- its wave, of any ping type): before the level and lane checks below, which would refuse it.
 	local orderDesire = HumanOrders.PushDesire(bot, lane)
 	if orderDesire ~= nil then
+		NoteOrderLane(lane)
 		bot.pushDesire = orderDesire
 		return orderDesire
 	end

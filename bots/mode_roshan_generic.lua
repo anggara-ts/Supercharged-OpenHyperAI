@@ -1092,6 +1092,16 @@ function Think()
 	end
 	bot._roshThinkAt = now
 	bot._roshAckSet = bot._roshAckSet or {}
+	-- After this bot's drop (nobody-acked, weak-group, commit-fit) GetDesire returns 0 (why=nobody-acked), but the
+	-- engine keeps the mode until another mode's desire is higher (#12, game 087: Ringmaster and Wyvern printed
+	-- `drop why=weak-group` 47 times in 1147-1151 and stood in the mode; 1046-1048 Radiant printed commit-fit drops and
+	-- then committed 4/4 in the same second, and that take left Roshan at 92%). Walk out, decide nothing more. Not
+	-- for a human's Roshan order, which GetDesire returns before that check (bot._roshWhy is then the order's).
+	if bot._roshWhy == "nobody-acked" and now < (bot._roshNoAckUntil or -999) then
+		bot._roshCommitUntil = nil
+		bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
+		return
+	end
 	local grouped, pending, required, declined, coming =
 		RoshanGather(roshanLocation, now - bot._roshGatherAt, bot._roshAckSet)
 	local elapsed = now - bot._roshGatherAt
@@ -1118,6 +1128,7 @@ function Think()
 			#coming,
 			#declined > 0 and table.concat(declined, ",") or "-"
 		)
+		bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
 		return
 	end
 	local othersWalking = pending > 1800
@@ -1146,8 +1157,12 @@ function Think()
 	local capped = elapsed >= 40 and grouped >= math.min(minimumCap, math.max(required, 1))
 	-- The group at the pit has to tank Roshan to half HP (GroupFitAt, #12 game 069 20:17-21:14). While others still
 	-- walk in it waits for them; with nobody left to come (or the window or the 40s cap forcing it) the call drops.
+	-- The fit's numbers go on the commit line (#12, game 087: 3 of 4 committed takes left Roshan at 61-92%; the tank
+	-- model is calibrated from one take, RoshanRules.HALF_CREDIT, so the next games say how far off it is).
+	local commitFit = finishing and "finishing" or "-"
 	if safe and not committed and not finishing and (full or arrived or windowTight or capped) then
 		local fitOk, fitWhy, atPit = GroupFitAt(roshanLocation)
+		commitFit = fitWhy
 		if not fitOk then
 			if othersWalking and not (windowTight or capped) then
 				full, arrived = false, false
@@ -1169,13 +1184,14 @@ function Think()
 		committed = true
 		if fresh then
 			RoshLog(
-				"commit grouped=%d/%d min=%d pending=%d elapsed=%.0f by=%s",
+				"commit grouped=%d/%d min=%d pending=%d elapsed=%.0f by=%s fit=%s",
 				grouped,
 				required,
 				minimum,
 				math.floor(pending),
 				elapsed,
-				full and "full" or (arrived and "arrived" or (windowTight and "window" or "cap"))
+				full and "full" or (arrived and "arrived" or (windowTight and "window" or "cap")),
+				tostring(commitFit)
 			)
 		end
 	end

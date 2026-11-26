@@ -84,6 +84,11 @@ T.test("tempo: Roshan respawn phases and the peek interval", function()
 	T.eq(due({ tripActive = true })[2], "trip-active", "a trip is running")
 	T.eq(due({ lastTripEnd = 50 })[2], "interval", "50s after the last trip")
 	T.eq(due({ lastTripEnd = 40 })[1], true, "60s after the last trip: again")
+	-- Game 087 35:27: the peek sent the pos 1 away from the base siege.
+	T.eq(due({ siege = "strength" })[1], false, "no peek while a strength push runs")
+	T.eq(due({ siege = "advantage" })[2], "siege-advantage", "nor in an advantage window")
+	T.eq(due({ siege = "their-hg" })[2], "siege-their-hg", "nor with the team on their high ground")
+	T.eq(due({ siege = "strength", phase = "dead" })[2], "phase-dead", "the phase is read first")
 end)
 
 T.test("tempo: the peeker is the nearest healthy support, else the nearest healthy bot", function()

@@ -77,11 +77,17 @@ end
 
 -- A peek trip: someone walks to see the pit (or wards it) while Roshan may be up and nobody has seen him, at most one
 -- trip every PEEK_INTERVAL seconds. p = { phase, seen (Roshan seen alive since the kill), pitVisible (our team sees
--- the pit now: a ward or a hero there), tripActive, lastTripEnd, now }. Returns due, why.
+-- the pit now: a ward or a hero there), tripActive, lastTripEnd, now, siege (nil, or why the team is busy at the enemy
+-- base: "strength", "advantage" or "their-hg") }. Returns due, why.
+-- No peek during a siege (#12, game 087 35:27: Ringmaster, pos 1, was sent 7251 away from the Dire base push and the
+-- trip timed out after 44s).
 TempoRules.PEEK_INTERVAL = 60
 function TempoRules.PeekDue(p)
 	if p.phase ~= "window" then
 		return false, "phase-" .. tostring(p.phase)
+	end
+	if p.siege ~= nil then
+		return false, "siege-" .. tostring(p.siege)
 	end
 	if p.seen then
 		return false, "seen"
