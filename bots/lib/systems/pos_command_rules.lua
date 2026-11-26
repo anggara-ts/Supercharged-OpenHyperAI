@@ -18,12 +18,12 @@ PosRules.AnswerMaxAge = 20
 -- pos = 5 } (swap positions 3 and 5). Whole numbers outside 1..5 still parse ("!pos 7", "!0pos 1"): PlanSwap refuses
 -- them as "missing" so the player hears "no pos 7". Anything else that starts with "!pos" / "!Npos" ->
 -- { kind = "bad" }; other text -> nil.
+-- Digits only (an optional minus), up to two: "1e9", "0x10" or "2.0" are "bad", not "no pos 1e+09".
 local function wholeNumber(text)
-	local number = tonumber(text)
-	if number ~= nil and number == math.floor(number) then
-		return number
+	if text:match("^%-?%d%d?$") == nil then
+		return nil
 	end
-	return nil
+	return tonumber(text)
 end
 function PosRules.Parse(text)
 	if type(text) ~= "string" then
