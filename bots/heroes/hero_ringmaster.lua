@@ -99,8 +99,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -1356,7 +1355,6 @@ function X.ConsiderEscapeAct()
 	local leashRadius = escapeActAbility:GetSpecialValueFloat("leash_radius")
 	local invisDuration = escapeActAbility:GetSpecialValueFloat("invis_duration")
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -1436,7 +1434,6 @@ function X.ConsiderImpalementArts()
 	local bleedDuration = impalementArtsAbility:GetSpecialValueInt("bleed_duration")
 	local daggerSpeed = impalementArtsAbility:GetSpecialValueInt("dagger_speed")
 	local abilityLevel = impalementArtsAbility:GetLevel()
-	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -1552,7 +1549,6 @@ function X.ConsiderSpotlight()
 	local radius = spotlightAbility:GetSpecialValueInt("radius")
 	local duration = spotlightAbility:GetSpecialValueInt("duration")
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	if Fu.IsInTeamFight(bot, 1200) then
 		-- datafeed: the light makes ENEMIES miss and reveals them; this searched for a spot with 2+ allies.
 		local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0, 0)
@@ -1668,7 +1664,6 @@ function X.ConsiderStrongmanTonic()
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, strongmanTonicAbility:GetCastRange())
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -1684,7 +1679,6 @@ function X.ConsiderStrongmanTonic()
 			then
 				return BOT_ACTION_DESIRE_HIGH, allyHero
 			end
-			local alliesNearAlly = allyHero:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 			local enemiesNearAlly = allyHero:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 			if
 				Fu.IsValidHero(enemiesNearAlly[1])
