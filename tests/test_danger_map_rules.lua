@@ -261,3 +261,53 @@ T.test("danger map: no alternative - the safest wave by our towers", function()
 	T.near(x, -1200, 0.01, "1800 from the tower toward the front")
 	T.near(y, 0, 0.01, "on the line")
 end)
+
+-- Game 087 (sven t=1169, brewmaster t=1248 / 1554, puck t=1849): farm-keep why=no-alt never held; 2-4s later the
+-- farm took a camp or another spot. The keep (DangerRules.KeepStep) now holds the wait until one of its end rules.
+T.test("danger map: no-alternative keep - holds, then ends on its own rules", function()
+	local R = rules()
+	local calm = { seen = 0, enemiesNear = 0, frontOk = true, farmActive = true, creeps = 0 }
+	local function with(over)
+		local s = {}
+		for k, v in pairs(calm) do
+			s[k] = v
+		end
+		for k, v in pairs(over or {}) do
+			s[k] = v
+		end
+		return s
+	end
+	T.eq(R.KeepUntil(100, 10), 130, "a 10s walk plus 20s of waiting")
+	T.eq(R.KeepUntil(100, 40), 145, "at most 45s")
+	local keep = { startedAt = 100, untilT = R.KeepUntil(100, 5) }
+	T.eq(R.KeepStep(keep, 101, calm), nil, "kept while nothing changes")
+	-- Game 087 brewmaster t=1248 > 1250: a camp became pickable 2s later and cancelled the wait.
+	T.eq(R.KeepStep(keep, 102, with({ campAllowed = true })), nil, "a camp in the first 8s does not end it")
+	T.eq(R.KeepStep(keep, 109, with({ campAllowed = true })), "alt", "a camp after 8s, with no creeps yet, does")
+	-- The kept wave arrives: farmed, then done 3s after its last creep.
+	keep = { startedAt = 100, untilT = R.KeepUntil(100, 5) }
+	T.eq(R.KeepStep(keep, 110, with({ creeps = 3 })), nil, "farming the kept wave")
+	T.eq(R.KeepStep(keep, 112, with({ campAllowed = true })), nil, "a camp does not pull it off a wave it farmed")
+	T.eq(R.KeepStep(keep, 113.5, calm), "farmed", "3s after the last creep")
+	-- Farming the wave past the wait cap: kept; the hard cap still ends it.
+	keep = { startedAt = 100, untilT = 125 }
+	T.eq(R.KeepStep(keep, 130, with({ creeps = 1 })), nil, "past untilT while farming")
+	T.eq(R.KeepStep(keep, 161, with({ creeps = 1 })), "cap", "60s hard cap")
+	-- No wave came.
+	keep = { startedAt = 100, untilT = 125 }
+	T.eq(R.KeepStep(keep, 124, calm), nil, "still waiting")
+	T.eq(R.KeepStep(keep, 125, calm), "cap", "nothing came by untilT")
+	-- Danger, HP, the front leaving our towers.
+	keep = { startedAt = 100, untilT = 125 }
+	T.eq(R.KeepStep(keep, 101, with({ seen = 3 })), "danger", "3 seen at the front (game 087 sven: 4 at mid T2)")
+	T.eq(R.KeepStep(keep, 101, with({ enemiesNear = 1 })), "danger", "an enemy seen near the wait point")
+	T.eq(R.KeepStep(keep, 101, with({ lowHp = true })), "hp", "low HP")
+	T.eq(R.KeepStep(keep, 101, with({ frontOk = false })), "moved", "our wave pushed out")
+	-- Another mode (defend, retreat) holds the bot for 4s.
+	keep = { startedAt = 100, untilT = 125 }
+	T.eq(R.KeepStep(keep, 101, with({ farmActive = false })), nil, "off for a moment")
+	T.eq(R.KeepStep(keep, 103, calm), nil, "back in farm")
+	T.eq(keep.offSince, nil, "off time reset")
+	T.eq(R.KeepStep(keep, 104, with({ farmActive = false })), nil, "off again")
+	T.eq(R.KeepStep(keep, 108, with({ farmActive = false })), "mode", "off 4s")
+end)

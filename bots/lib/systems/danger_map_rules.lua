@@ -206,6 +206,68 @@ function Rules.SafestTowerWave(cands)
 	return best ~= nil and best.cand or nil
 end
 
+-- The no-alternative keep (game 087: 6 farm-keep why=no-alt lines, none held; each was followed within 2-4s by a
+-- camp pick or another spot, because the wait was chosen again on every think and any camp the farm could pick
+-- cancelled it). A keep holds one lane's wait point until one of these ends it.
+Rules.KEEP_WAIT = 20 -- seconds to wait at the point after the walk there (a lane wave spawns every 30s)
+Rules.KEEP_TOTAL = 45 -- walk and wait together at most
+Rules.KEEP_HARD = 60 -- the keep ends after this long even while it farms waves (other farm gets its turn)
+Rules.KEEP_MIN = 8 -- a camp the farm could take does not end the keep in its first 8s (camps flicker in and out)
+Rules.KEEP_FARMED = 3 -- the kept wave counts as farmed this long after its last creep near the wait point
+Rules.KEEP_OFF = 4 -- farm not the active mode this long: another mode took the bot (defend, retreat, ...)
+Rules.KEEP_REACH = 600 -- the kept wave: enemy lane creeps within this of the wait point
+Rules.KEEP_RETRY = 10 -- after a keep ended without farming, no new keep for this long
+
+-- When the keep expires: the walk (seconds) plus KEEP_WAIT, at most KEEP_TOTAL from now.
+function Rules.KeepUntil(now, walkSeconds)
+	return now + math.min(math.max(walkSeconds or 0, 0) + Rules.KEEP_WAIT, Rules.KEEP_TOTAL)
+end
+
+-- One think of the keep. keep: { startedAt =, untilT = } (this writes creepsAt and offSince into it). s:
+--   lowHp        the bot's HP is too low to farm
+--   seen         Rules.Danger at the lane front counting only enemies seen in the last SEEN_RECENT seconds
+--   enemiesNear  enemies seen in the last 5s within 1600 of the wait point
+--   frontOk      the lane front is still on our half, within FALLBACK_TOWER_REACH of one of our towers
+--   farmActive   farm is the bot's active mode
+--   creeps       enemy lane creeps within KEEP_REACH of the wait point (the kept wave is here)
+--   campAllowed  the farm could take a camp now
+-- Returns why the keep ends (hp, danger, moved, mode, cap, farmed, alt) or nil to keep it.
+function Rules.KeepStep(keep, now, s)
+	if s.lowHp then
+		return "hp"
+	end
+	if (s.seen or 0) >= Rules.DANGER_ANY or (s.enemiesNear or 0) > 0 then
+		return "danger"
+	end
+	if not s.frontOk then
+		return "moved"
+	end
+	if s.farmActive then
+		keep.offSince = nil
+	elseif keep.offSince == nil then
+		keep.offSince = now
+	elseif now - keep.offSince >= Rules.KEEP_OFF then
+		return "mode"
+	end
+	if now - keep.startedAt >= Rules.KEEP_HARD then
+		return "cap"
+	end
+	if (s.creeps or 0) > 0 then
+		keep.creepsAt = now
+		return nil
+	end
+	if keep.creepsAt ~= nil and now - keep.creepsAt >= Rules.KEEP_FARMED then
+		return "farmed"
+	end
+	if keep.creepsAt == nil and now >= keep.untilT then
+		return "cap"
+	end
+	if s.campAllowed and keep.creepsAt == nil and now - keep.startedAt >= Rules.KEEP_MIN then
+		return "alt"
+	end
+	return nil
+end
+
 -- Where to wait for that wave: the front itself when it is within `radius` of the tower, else the point `radius`
 -- from the tower on the line to the front (the wave walks to the tower). Returns x, y.
 function Rules.CoverPoint(frontX, frontY, towerX, towerY, radius)
