@@ -176,13 +176,14 @@ end
 --   "release", "sure"      a sure start that now looks short: kept (never cancelled), counted.
 --   backup     a support's backup hit behind its core: when the core's hit (or anything else) kills it first, the
 --              swing is stopped ("cancel", "core") instead of released for nothing;
---   coreNext   (backup) the core can still take it first (BackupCoreNext): stopped too ("cancel", "core-next").
+--   coreNext   (backup) the core can still take it first (BackupNextWhy): stopped too ("cancel", coreNextWhy, or
+--              "core-next" when coreNextWhy is nil).
 --   yield      (WindupYield) an allied hero's swing on this creep the bot leaves it to: "wait" until the last look,
 --              then "cancel", yield ("ally-swing" / "core-swing"), whether or not our hit would kill.
 function LastHitRules.WindupDecision(s)
 	if s.backup and (s.incomingKills or s.coreNext) then
 		if LastHitRules.LastLook(s.remaining, s.frameGap) then
-			return "cancel", s.incomingKills and "core" or "core-next"
+			return "cancel", s.incomingKills and "core" or s.coreNextWhy or "core-next"
 		end
 		return "wait", nil
 	end
@@ -233,6 +234,9 @@ end
 --                     far        farther than BACKUP_CORE_NEAR;
 --   coreTooLate     the core's hit, started now, lands after the creep dies (CoreTooLate);
 --   coreCanKill     the core's hit kills it when it lands (not killed by others first);
+--   coreOnWay       the core's hit already on its way (its projectile in flight, or its swing winding up on the creep)
+--                   kills it when it lands (CoreOnWayKills), even when that is after ours would land;
+--   coreHolding     the core (a bot) stopped its swing on this creep and holds to swing again (its timing's "hold");
 --   myDelay, coreEta  seconds until our hit / the core's hit would land if started now (walk and turn included);
 --   ourKills        our hit kills it (after the core's pending hit, when the core is attacking);
 -- }
@@ -240,9 +244,10 @@ end
 -- at 10:00) and Primal Beast (33 -> 27) lost farm to their supports: the support waited only for a core swinging at
 -- the creep or whose hit killed it at once, so a core walking in, holding after a cancel or held by the overlay
 -- counted as not there.
--- Returns decision, why: "core", "first" (leave it to the core); "wait", "behind" (the core takes it, or ours would
--- not land after the core's) or "hp" (our hit does not kill yet); "go", why (attack now): "behind" (the core's hit
--- does not kill it, ours lands BACKUP_MARGIN after it), "late" (the core's hit is too late), or the core's state
+-- Returns decision, why: "core", "first" (leave it to the core); "wait", "on-way" (the core's hit on its way kills
+-- it), "core-hold" (the core stopped its swing and holds this creep: it swings again), "behind" (the core takes it,
+-- or ours would not land after the core's) or "hp" (our hit does not kill yet); "go", why (attack now): "behind" (the
+-- core's hit does not kill it, ours lands BACKUP_MARGIN after it), "late" (the core's hit is too late), or the core's state
 -- (busy / far: it cannot take it; elsewhere: its hit does not kill this one).
 LastHitRules.BACKUP_MARGIN = 0.15
 -- A core this close to the creep can take it (a walk-in of about one second at 300 movement speed; not a game value).
@@ -253,9 +258,23 @@ LastHitRules.CORE_IN_PLAY = { attacking = true, free = true }
 LastHitRules.CORE_MAY_TAKE = { attacking = true, free = true, elsewhere = true }
 
 -- The core's hit is too late: other hits already on their way kill the creep before it lands (othersKill), or the
--- creep's estimated death (DeathEta: our creeps and towers) comes clearly (BACKUP_MARGIN) before it.
-function LastHitRules.CoreTooLate(othersKill, deathEta, coreEta)
+-- creep's estimated death (DeathEta: our creeps and towers) comes clearly (BACKUP_MARGIN) before it. Never while the
+-- core's own hit on its way kills it (onWayKills, CoreOnWayKills): game 087 t=318, Ringmaster's projectile was in
+-- the air (his launch=0.60, then missed creep-hp=86); DeathEta subtracts every attack projectile landing within 1s,
+-- his too, so it read death=0.04, and his next hit's prediction counted his own projectile as "others". Dark Willow's
+-- backup went "late" (coreEta 0.54, myEta 0.42) and took his creep.
+function LastHitRules.CoreTooLate(othersKill, deathEta, coreEta, onWayKills)
+	if onWayKills then
+		return false
+	end
 	return othersKill or deathEta < coreEta - LastHitRules.BACKUP_MARGIN
+end
+
+-- The core's hit already on its way (its attack projectile in flight, or its swing winding up on the creep) kills the
+-- creep: coreHit (after armour) beats the creep's predicted HP when it lands (predictedHp, X.Predict at that moment
+-- with the core left out) and the other hits do not kill it first (othersKill). nil coreHit: no hit on its way.
+function LastHitRules.CoreOnWayKills(coreHit, predictedHp, othersKill)
+	return coreHit ~= nil and not othersKill and coreHit > predictedHp
 end
 
 -- True when the support must leave the creep to the core now: the core can take it in time, and either its hit kills
@@ -274,6 +293,12 @@ end
 function LastHitRules.BackupDecision(b)
 	if b.coreKillsFirst then
 		return "core", "first"
+	end
+	if b.coreOnWay then
+		return "wait", "on-way"
+	end
+	if b.coreHolding and not b.coreTooLate then
+		return "wait", "core-hold"
 	end
 	if LastHitRules.BackupBehindCore(b) then
 		return "wait", "behind"
@@ -296,6 +321,24 @@ end
 -- look ("core-next").
 function LastHitRules.BackupCoreNext(b)
 	return b.coreCanKill == true and LastHitRules.CORE_IN_PLAY[b.coreState] == true and LastHitRules.BackupBehindCore(b)
+end
+
+-- Why a backup swing winding up (or released) is stopped for its core at the last look, or nil: "core-on-way" (the
+-- core's hit on its way kills the creep, game 087 t=318), "core-hold" (the core stopped its own swing on this creep
+-- and holds to swing again: games 081 t=493, 083 t=524, 085 t=172, the support's released backup took the creep the
+-- core was holding; the core's next swing, or the "late" rule when the creep dies before it, decides), "core-next"
+-- (BackupCoreNext).
+function LastHitRules.BackupNextWhy(b)
+	if b.coreOnWay then
+		return "core-on-way"
+	end
+	if b.coreHolding and not b.coreTooLate then
+		return "core-hold"
+	end
+	if LastHitRules.BackupCoreNext(b) then
+		return "core-next"
+	end
+	return nil
 end
 
 -- Walk-ins that cannot arrive (#71, game 064: late= rose from 71 to 137; 120 of them were walk-ins that never launched
@@ -424,8 +467,16 @@ end
 
 -- A swing whose release was decided ("decided": WindupDecision said release at an earlier look) is looked at again at
 -- the last look, and stopped only for these reasons: an ally takes the creep (the yields), or a backup's core does
--- ("core", "core-next": games 083-085, the core cancelled, the support's backup decided "kills" at its first look and
--- the core's next swing took the creep). Never for "survives": a release once decided stays a release.
-LastHitRules.RECHECK_CANCEL = { ["ally-swing"] = true, ["core-swing"] = true, core = true, ["core-next"] = true }
+-- ("core", "core-next", "core-on-way", "core-hold": games 083-085, the core cancelled, the support's backup decided
+-- "kills" at its first look and the core's next swing took the creep). Never for "survives": a release once decided
+-- stays a release.
+LastHitRules.RECHECK_CANCEL = {
+	["ally-swing"] = true,
+	["core-swing"] = true,
+	core = true,
+	["core-next"] = true,
+	["core-on-way"] = true,
+	["core-hold"] = true,
+}
 
 return LastHitRules

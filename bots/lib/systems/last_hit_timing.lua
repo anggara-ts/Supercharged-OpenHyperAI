@@ -283,6 +283,40 @@ local function coreHold(core, creep)
 	return nil
 end
 
+-- The core's hit already on its way to creep (#71, game 087 t=318): its attack projectile in flight, or its swing
+-- winding up on it (LastHitRules.SwingRemaining, plus the flight). Seconds until the first of them lands, or nil. A
+-- projectile's eta is distance / speed, the window Fu.GetCreepAttackProjectileWillRealDamage does not count it in yet
+-- (it needs speed * window * 0.95 > distance * 1.02), so X.Predict at that eta leaves the core's own hit out.
+local function coreHitOnWay(core, creep)
+	local eta = nil
+	local speed = math.max(1, core:GetAttackProjectileSpeed())
+	for _, projectile in pairs(creep:GetIncomingTrackingProjectiles() or {}) do
+		if projectile.is_attack and projectile.caster == core and projectile.location ~= nil then
+			local flight = GetUnitToLocationDistance(creep, projectile.location) / speed
+			if eta == nil or flight < eta then
+				eta = flight
+			end
+		end
+	end
+	if core:GetAttackTarget() == creep and core:GetAnimActivity() == ATTACK_ACTIVITY then
+		local lastAttack = core:GetLastAttackTime()
+		local remaining = Rules.SwingRemaining(
+			core:GetAttackPoint(),
+			core:GetAttackSpeed(),
+			core:GetAnimCycle(),
+			type(lastAttack) == "number" and GameTime() - lastAttack or nil,
+			core:GetSecondsPerAttack()
+		)
+		if remaining ~= nil then
+			local swingEta = remaining + X.TravelTime(core, creep)
+			if eta == nil or swingEta < eta then
+				eta = swingEta
+			end
+		end
+	end
+	return eta
+end
+
 -- A support's backup hit behind its core (#71, games 064 / 065). Returns the facts for LastHitRules.BackupDecision /
 -- BackupCoreNext, with coreEta / myDelay / deathEta for the log. myDelay: our hit's landing (default: an attack
 -- started now; the wind-up passes the rest of the swing). The core's pending hit counts as landing first when it
@@ -320,14 +354,32 @@ function X.BackupFacts(bot, core, creep, damage, myDelay)
 	end
 	local corePredicted, coreHit, coreOthersKill =
 		X.Predict(creep, core:GetAttackDamage(), coreEta, X.TowerShotBefore(bot, creep, coreEta), core)
+	-- The core's hit already on its way (game 087 t=318): when it kills, the support waits for it, whatever the
+	-- death estimate says (that estimate counted the core's own projectile).
+	local onWayEta = coreHitOnWay(core, creep)
+	local coreOnWay = false
+	if onWayEta ~= nil then
+		local wayPredicted, wayHit, wayOthersKill =
+			X.Predict(creep, core:GetAttackDamage(), onWayEta, X.TowerShotBefore(bot, creep, onWayEta), core)
+		coreOnWay = Rules.CoreOnWayKills(wayHit, wayPredicted, wayOthersKill)
+	end
+	-- The core (a bot) stopped its swing on this creep and holds to swing again (games 081 / 083 / 085).
+	local coreTiming = core._lhTiming
+	local coreHolding = core._lhOwn == nil
+		and coreTiming ~= nil
+		and coreTiming.phase == "hold"
+		and coreTiming.creep == creep
 	-- The death estimate (two unit scans) only where it decides something: a core that can take the creep.
-	local deathEta = Rules.CORE_MAY_TAKE[coreState] and X.DeathEta(bot, creep) or math.huge
+	local deathEta = not coreOnWay and Rules.CORE_MAY_TAKE[coreState] and X.DeathEta(bot, creep) or math.huge
 	return {
 		coreKillsFirst = incomingKills,
 		coreState = coreState,
 		coreHold = hold or "-",
-		coreTooLate = Rules.CoreTooLate(coreOthersKill, deathEta, coreEta),
-		coreCanKill = not coreOthersKill and coreHit > corePredicted,
+		coreOnWay = coreOnWay,
+		coreOnWayEta = onWayEta,
+		coreHolding = coreHolding,
+		coreTooLate = Rules.CoreTooLate(coreOthersKill, deathEta, coreEta, coreOnWay),
+		coreCanKill = coreOnWay or not coreOthersKill and coreHit > corePredicted,
 		myDelay = myDelay,
 		coreEta = coreEta,
 		deathEta = deathEta,
@@ -483,13 +535,19 @@ local function throttledLog(bot, key, fmt, ...)
 	pcall(print, string.format(fmt, ...))
 end
 
+-- The core's hit on its way (seconds until it lands), or "-".
+local function onWayText(facts)
+	return facts.coreOnWayEta ~= nil and string.format("%.2f", facts.coreOnWayEta) or "-"
+end
+
 -- [SHy-LH] backup go: why the support attacks behind its core now (BackupDecision's why, the core's state, lead =
--- myEta - coreEta: 0.15 or more when it waited behind the core). Throttled per bot.
+-- myEta - coreEta: 0.15 or more when it waited behind the core; onway= the core's hit on its way that does not kill,
+-- or -). Throttled per bot.
 local function logBackupGo(bot, facts, why, from)
 	throttledLog(
 		bot,
 		"backupgo",
-		"[SHy-LH] t=%.0f %s backup go why=%s state=%s hold=%s from=%s coreEta=%.2f myEta=%.2f lead=%.2f death=%.2f",
+		"[SHy-LH] t=%.0f %s backup go why=%s state=%s hold=%s from=%s coreEta=%.2f myEta=%.2f lead=%.2f death=%.2f onway=%s",
 		DotaTime(),
 		heroName(bot),
 		why,
@@ -499,7 +557,30 @@ local function logBackupGo(bot, facts, why, from)
 		facts.coreEta,
 		facts.myDelay,
 		facts.myDelay - facts.coreEta,
-		math.min(99, facts.deathEta)
+		math.min(99, facts.deathEta),
+		onWayText(facts)
+	)
+end
+
+-- [SHy-LH] backup wait: the support waits for its core's hit on its way (why=on-way, onway= when it lands) or for a
+-- core holding the creep after stopping its swing (why=core-hold). Other waits are not logged. Throttled per bot.
+local function logBackupWait(bot, creep, facts, why, from)
+	if why ~= "on-way" and why ~= "core-hold" then
+		return
+	end
+	throttledLog(
+		bot,
+		"backupwait",
+		"[SHy-LH] t=%.0f %s backup wait why=%s from=%s state=%s creep-hp=%d onway=%s coreEta=%.2f myEta=%.2f",
+		DotaTime(),
+		heroName(bot),
+		why,
+		from,
+		facts.coreState,
+		creep:GetHealth(),
+		onWayText(facts),
+		facts.coreEta,
+		facts.myDelay
 	)
 end
 
@@ -673,12 +754,13 @@ local function watchWindup(bot, st, now, recheck)
 	-- An ally winding up on it that the bot leaves it to (#71, LastHitRules.WindupYield): stopped at the last look.
 	local yieldWhy, yieldTo = windupYield(bot, swings, swingKill, delay)
 	local core = backupCoreOf(st)
-	local facts = nil
+	local facts, nextWhy = nil, nil
 	if core ~= nil then
 		-- A backup swing: the core's hit still to come and landing before ours counts too, and a core that can still
 		-- take it first (its hold, walking in, free next to it) stops ours (LastHitRules.BackupCoreNext).
 		facts = X.BackupFacts(bot, core, st.creep, st.damage, delay)
 		predictedHp, ourHit, incomingKills = facts.predictedHp, facts.ourHit, facts.coreKillsFirst
+		nextWhy = Rules.BackupNextWhy(facts)
 	end
 	if st.early == nil then
 		-- Sure when the swing started: never cancelled.
@@ -692,7 +774,8 @@ local function watchWindup(bot, st, now, recheck)
 		frameGap = X.FrameGap(bot),
 		early = st.early,
 		backup = core ~= nil,
-		coreNext = facts ~= nil and Rules.BackupCoreNext(facts),
+		coreNext = nextWhy ~= nil,
+		coreNextWhy = nextWhy,
 		yield = yieldWhy,
 	})
 	if recheck and not (decision == "cancel" and Rules.RECHECK_CANCEL[why]) then
@@ -703,11 +786,11 @@ local function watchWindup(bot, st, now, recheck)
 	end
 	if facts ~= nil and (decision == "cancel" or decision == "release") then
 		-- state= the core's state, hold= its own hold (same creep, other unit, -), late= its hit too late (1), coreKill= its
-		-- hit kills when it lands (1).
+		-- hit kills when it lands (1), onway= its hit on its way (seconds, or -).
 		throttledLog(
 			bot,
 			"backup",
-			"[SHy-LH] t=%.0f %s backup creep-hp=%d coreEta=%.2f myEta=%.2f lead=%.2f result=%s why=%s state=%s hold=%s late=%d coreKill=%d",
+			"[SHy-LH] t=%.0f %s backup creep-hp=%d coreEta=%.2f myEta=%.2f lead=%.2f result=%s why=%s state=%s hold=%s late=%d coreKill=%d onway=%s",
 			DotaTime(),
 			heroName(bot),
 			st.creep:GetHealth(),
@@ -719,7 +802,8 @@ local function watchWindup(bot, st, now, recheck)
 			facts.coreState,
 			facts.coreHold,
 			facts.coreTooLate and 1 or 0,
-			facts.coreCanKill and 1 or 0
+			facts.coreCanKill and 1 or 0,
+			onWayText(facts)
 		)
 	end
 	if decision == "cancel" then
@@ -783,6 +867,8 @@ local function watchHold(bot, st, now)
 		restart = decision == "go" and "sure" or "hold"
 		if decision == "go" then
 			logBackupGo(bot, facts, why, "hold")
+		else
+			logBackupWait(bot, st.creep, facts, why, "hold")
 		end
 	else
 		restart = Rules.RestartDecision(classifyNow(bot, st), st.cancels)
@@ -812,6 +898,7 @@ local function watchWalk(bot, st)
 			st.phase = "attack"
 			return true
 		end
+		logBackupWait(bot, st.creep, facts, why, "walk")
 		return false
 	end
 	local kind = classifyNow(bot, st)

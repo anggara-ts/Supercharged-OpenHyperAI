@@ -204,6 +204,73 @@ T.test("backup swing: stopped when the core's hit kills first, at the last look"
 	T.eq(R.WindupDecision(s), "release", "not a backup: nothing to stop")
 end)
 
+T.test("backup: no late go while the core's hit on its way kills (game 087 t=318)", function()
+	local R = rules()
+	-- Dark Willow behind Ringmaster: his projectile in the air, death=0.04 (it counted his projectile), coreEta 0.54
+	-- (his next hit), myEta 0.42. Before: late, and she took his creep.
+	T.ok(R.CoreTooLate(true, 0.04, 0.54, false), "without the hit on its way: too late (the old reading)")
+	T.ok(not R.CoreTooLate(true, 0.04, 0.54, true), "the core's own hit on its way kills: never too late")
+	T.ok(R.CoreOnWayKills(64, 48.8, false), "64 on a creep at 48.8 when it lands")
+	T.ok(not R.CoreOnWayKills(30, 48.8, false), "a hit that leaves it alive")
+	T.ok(not R.CoreOnWayKills(64, 48.8, true), "others kill it before the core's hit lands")
+	T.ok(not R.CoreOnWayKills(nil, 48.8, false), "no hit on its way")
+	local b = {
+		coreKillsFirst = false,
+		coreState = "attacking",
+		coreOnWay = true,
+		coreTooLate = R.CoreTooLate(true, 0.04, 0.54, true),
+		coreCanKill = true,
+		myDelay = 0.42,
+		coreEta = 0.54,
+		ourKills = true,
+	}
+	local decision, why = R.BackupDecision(b)
+	T.eq(decision, "wait", "the support leaves it to the core's hit in the air")
+	T.eq(why, "on-way")
+	for _, state in ipairs({ "busy", "far", "free" }) do
+		b.coreState = state
+		T.eq(R.BackupDecision(b), "wait", "whatever the core does now: " .. state)
+		T.eq(R.BackupNextWhy(b), "core-on-way", "a backup swing stops for it: " .. state)
+	end
+	b.coreKillsFirst = true
+	T.eq(R.BackupDecision(b), "core", "it lands before ours: the core-first answer")
+	b.coreKillsFirst, b.coreOnWay, b.coreTooLate = false, false, true
+	decision, why = R.BackupDecision(b)
+	T.eq(decision, "go", "no hit on its way and the creep dies before the core's next: late")
+	T.eq(why, "late")
+end)
+
+T.test("backup: a core holding the creep after stopping its swing keeps it (games 081 / 083 / 085)", function()
+	local R = rules()
+	local b = {
+		coreKillsFirst = false,
+		coreState = "attacking",
+		coreHolding = true,
+		coreTooLate = false,
+		coreCanKill = false,
+		myDelay = 0.6,
+		coreEta = 0.4,
+		ourKills = true,
+	}
+	local decision, why = R.BackupDecision(b)
+	T.eq(decision, "wait", "before: go behind (its hit alone does not kill); now it waits for the core's next swing")
+	T.eq(why, "core-hold")
+	T.eq(R.BackupNextWhy(b), "core-hold", "a released backup swing stops at its last look")
+	T.ok(R.RECHECK_CANCEL["core-hold"] and R.RECHECK_CANCEL["core-on-way"], "a decided release may stop for both")
+	b.coreTooLate = true
+	decision, why = R.BackupDecision(b)
+	T.eq(decision, "go", "the creep dies before the core's next hit: the backup takes it")
+	T.eq(why, "late")
+	T.eq(R.BackupNextWhy(b), nil, "and its swing is not stopped")
+	b.coreHolding, b.coreTooLate = false, false
+	T.eq(select(2, R.BackupDecision(b)), "behind", "no hold: the old behind rule")
+	local s = { predictedHp = 30, ourHit = 45, incomingKills = false, frameGap = 0.033, early = false, backup = true }
+	s.coreNext, s.coreNextWhy, s.remaining = true, "core-hold", 0.05
+	decision, why = R.WindupDecision(s)
+	T.eq(decision, "cancel")
+	T.eq(why, "core-hold", "the cancel names it")
+end)
+
 T.test("walk-in too late: the hit lands after the creep's estimated death", function()
 	local R = rules()
 	-- Game 064 t=61 Abaddon: creep 53 HP, expect=2.47, took=0.93. Two melee creeps at ~19 a hit per second: 1.39s.

@@ -311,6 +311,97 @@ T.test("backup: a wind-up ahead of the core's hit is stopped (core-next)", funct
 	T.eq(state.orders[1], "clear", "the core holds this creep and its hit kills it: our swing stops")
 end)
 
+local function printedCount(pattern)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, pattern, 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("backup: no late go while the core's projectile in the air kills (game 087 t=318)", function()
+	local _, Timing, bot, creep, state = setup(48)
+	Stub.time = 1090
+	local props = { attacking = false }
+	local core = addCore(creep, props)
+	local coreDamage = 64
+	core.GetAttackDamage = function()
+		return coreDamage
+	end
+	core.GetAttackProjectileSpeed = function()
+		return 600
+	end
+	-- His attack released: the projectile is 400 from the creep (0.67s), he is in his backswing, not swinging.
+	local inFlight = { { is_attack = true, caster = core, location = creep:GetLocation() + Vector(400, 0, 0) } }
+	creep.GetIncomingTrackingProjectiles = function()
+		return inFlight
+	end
+	bot.GetNearbyLaneCreeps = function()
+		return {}
+	end
+	bot.GetNearbyTowers = function()
+		return {}
+	end
+	local facts = Timing.BackupFacts(bot, core, creep, 60)
+	T.near(facts.coreOnWayEta, 400 / 600, 1e-9, "the projectile's flight")
+	T.ok(facts.coreOnWay, "64 on 48 HP when it lands")
+	T.ok(not facts.coreTooLate, "the death estimate (it counts his projectile) does not make him late")
+	T.ok(not facts.coreKillsFirst, "it lands after our hit would")
+	T.ok(facts.ourKills, "our 60 would kill it first: the old 'late' steal")
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 60, allowEarly = false, walk = true, backupCore = core })
+		Timing.Tick(bot)
+	end
+	T.eq(#state.orders, 0, "no backup swing while the core's hit is in the air")
+	T.eq(printedCount("backup wait why=on-way from=walk"), 1, "one [SHy-LH] backup wait why=on-way line")
+	-- A projectile that leaves the creep alive does not hold the backup.
+	coreDamage = 30
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 60, allowEarly = false, walk = true, backupCore = core })
+	Timing.Tick(bot)
+	print = mutedPrint
+	T.eq(state.orders[1], "attack", "its hit does not kill: the backup goes")
+	T.eq(printedCount("death=99.00 onway=0.67"), 1, "the go line names the hit on its way")
+end)
+
+T.test("backup: a released backup stops when the core stops its swing and holds the creep", function()
+	local _, Timing, bot, creep, state = setup(80)
+	Stub.time = 1095
+	local props = { attacking = true }
+	local core = addCore(creep, props)
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	-- The core's pending 50 lands first (0.3s against 0.5s) and ours kills what is left: released at the first look.
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+	state.activity = 1503
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+	Timing.Tick(bot)
+	T.eq(bot._lhTiming.phase, "decided", "backup release decided")
+	-- The core stops its swing ("survives") and holds the creep to swing again.
+	props.attacking = false
+	core._lhTiming = { creep = creep, phase = "hold" }
+	local count = 31
+	for frame = 1, 30 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+		Timing.Tick(bot)
+		if #state.orders > 0 then
+			count = frame
+			break
+		end
+	end
+	print = mutedPrint
+	T.ok(count < 15, "stopped before our attack point (frame " .. count .. ")")
+	T.eq(state.orders[1], "clear", "the released backup stopped")
+	T.eq(printedCount("result=cancel why=core-hold"), 1, "[SHy-LH] backup ... result=cancel why=core-hold")
+end)
+
 T.test("a laning Think that gave another order drops the timing at the next frame's Tick", function()
 	local _, Timing, bot, creep, state = setup(60)
 	Stub.time = 1100
