@@ -786,10 +786,11 @@ local function watchWindup(bot, st, now, recheck)
 	end
 	if facts ~= nil and (decision == "cancel" or decision == "release") then
 		-- state= the core's state, hold= its own hold (same creep, other unit, -), late= its hit too late (1), coreKill= its
-		-- hit kills when it lands (1), onway= its hit on its way (seconds, or -).
+		-- hit kills when it lands (1), onway= its hit on its way (seconds, or -). Releases and cancels are throttled apart:
+		-- a cancel at the last look often comes 0.3s after the release line.
 		throttledLog(
 			bot,
-			"backup",
+			decision == "cancel" and "backupcancel" or "backup",
 			"[SHy-LH] t=%.0f %s backup creep-hp=%d coreEta=%.2f myEta=%.2f lead=%.2f result=%s why=%s state=%s hold=%s late=%d coreKill=%d onway=%s",
 			DotaTime(),
 			heroName(bot),

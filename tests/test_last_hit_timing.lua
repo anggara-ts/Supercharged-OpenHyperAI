@@ -386,8 +386,6 @@ T.test("backup: a released backup stops when the core stops its swing and holds 
 	-- The core stops its swing ("survives") and holds the creep to swing again.
 	props.attacking = false
 	core._lhTiming = { creep = creep, phase = "hold" }
-	-- The release line above took the per-bot backup-line throttle (3s): clear it to read the cancel line.
-	bot._lhtLogAt = nil
 	local count = 31
 	for frame = 1, 30 do
 		Stub.time = Stub.time + 1 / 30
