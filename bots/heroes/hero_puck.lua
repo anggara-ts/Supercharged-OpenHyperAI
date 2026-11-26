@@ -1294,8 +1294,9 @@ function X.LogStepError(name, err)
 	towerErrors[#towerErrors + 1] = key
 	pcall(print, string.format("[SHy-ERROR] t=%.1f puck %s", DotaTime(), key))
 end
--- [SHy-PUCK] tower-escape via=walk|rift|orb-jaunt|orb-hop why=hit|behind-tower dist= out= hp= loss= tower=, when
--- the way changes or once per 3s.
+-- [SHy-PUCK] tower-escape via=walk|rift|orb-jaunt|orb-hop|wait-cast|skip-cast why=hit|behind-tower|<spell> dist= out=
+-- hp= loss= tower=, when the way changes or once per 3s. wait-cast: her own tower Rift / Orb is still in its cast
+-- point (why= the spell); skip-cast: that order never went out, so this think walks without it.
 function X.LogTowerEscape(via, why, tower, dist, out, loss)
 	local key = via .. why
 	if key == bot._towerEscapeLogKey and DotaTime() < (bot._towerEscapeLogAt or -999) then
@@ -1344,8 +1345,19 @@ function X.TowerCastPending()
 	then
 		return ability:GetName()
 	end
+	-- Never cast (a held or dropped order, e.g. the difficulty roll): the tower escape skips that spell for
+	-- TOWER_CAST_SKIP, so the next think walks instead of ordering it again.
+	if ability ~= nil and not ability:IsNull() and ability:GetCooldownTimeRemaining() <= 0 then
+		bot._towerCastSkip = { name = ability:GetName(), untilAt = DotaTime() + X.TOWER_CAST_SKIP }
+	end
 	bot._towerCastOrder = nil
 	return nil
+end
+X.TOWER_CAST_SKIP = 1.0
+-- True while the tower escape skips this spell (its last tower order never went out).
+function X.TowerCastSkipped(ability)
+	local skip = bot._towerCastSkip
+	return skip ~= nil and DotaTime() < skip.untilAt and ability:GetName() == skip.name
 end
 -- Out of an enemy tower's range at once when it hits her and nothing tanks it (EscapeRules.TowerEscape, game 072
 -- 19:56-20:05). No TP while it hits her (bot._noTpUntil; the TP channel is 3s, 7.42 items). A walk is held by the
@@ -1365,9 +1377,13 @@ function X.TowerEscape(canCast)
 	local loss = X.HpLoss()
 	local out = range + EscapeRules.TOWER_MARGIN - dist
 	-- Her Rift or Orb still in its cast point: no new order, or the walk cancels it (game 087, t=740-741).
+	local ownOrder = bot._towerCastOrder ~= nil
 	local pending = X.TowerCastPending()
 	if pending ~= nil then
-		X.LogTowerEscape("wait-cast", pending, tower, dist, out, loss)
+		-- Logged for the tower step's own order only (a fight Orb under a tower at full HP is no escape).
+		if ownOrder then
+			X.LogTowerEscape("wait-cast", pending, tower, dist, out, loss)
+		end
 		return true
 	end
 	-- The Orb of a tower escape in flight: the Jaunt once it is out of range comes before another walk order.
@@ -1384,7 +1400,8 @@ function X.TowerEscape(canCast)
 		and etherealJauntAbility:IsFullyCastable()
 		and not bot:IsRooted()
 		and X.OrbInFlight() == nil
-	local riftReady = canCast and waningRiftAbility:IsFullyCastable()
+		and not X.TowerCastSkipped(illusoryOrbAbility)
+	local riftReady = canCast and waningRiftAbility:IsFullyCastable() and not X.TowerCastSkipped(waningRiftAbility)
 	local riftDistance = waningRiftAbility:GetSpecialValueInt("max_distance")
 	if riftDistance == nil or riftDistance <= 0 then
 		riftDistance = 350
@@ -1422,7 +1439,12 @@ function X.TowerEscape(canCast)
 		X.LogTowerCheck(true, "hero-hit", tower, dist, range, loss)
 		return false
 	end
-	X.LogTowerEscape(via, "hit", tower, dist, out, loss)
+	local skip = bot._towerCastSkip
+	if skip ~= nil and now < skip.untilAt then
+		X.LogTowerEscape("skip-cast", skip.name, tower, dist, out, loss)
+	else
+		X.LogTowerEscape(via, "hit", tower, dist, out, loss)
+	end
 	local point = X.EscapePoint(math.max(out, 0) + 150, threats)
 	bot._phaseHoldAskUntil = now + 0.3
 	bot:Action_MoveToLocation(point)

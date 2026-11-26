@@ -133,6 +133,25 @@ T.test("puck: an enemy tower on her is found (#191: Fu.IsValid is false for buil
 	end
 	local _, noteOther = X.TowerOnHer()
 	T.eq(noteOther, "other", "a tower in range on nobody")
+	-- Game 087, t=29: the Dire mid T2, invulnerable while its T1 stands, shot her; found=no why=none.
+	local protected = tower(400, bot)
+	protected.IsInvulnerable = function()
+		return true
+	end
+	T.eq(Fu.IsValidBuilding(protected), false, "Fu.IsValidBuilding rejects an invulnerable tower (the 087 check)")
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { protected } or {}
+	end
+	local foundProtected = X.TowerOnHer()
+	T.ok(foundProtected == protected, "an invulnerable tower targeting her is found")
+	local dead = tower(400, bot)
+	dead.IsAlive = function()
+		return false
+	end
+	bot.GetNearbyTowers = function(_, _, enemy)
+		return enemy and { dead } or {}
+	end
+	T.eq((X.TowerOnHer()), nil, "a dead tower is not")
 end)
 
 T.test("escape rules: Phase Shift at low HP while hit (game 067, 42:07; game 068)", function()
@@ -356,6 +375,7 @@ T.test("puck: the escape helpers run on the stub", function()
 		"TowerOnHer",
 		"TowerStanding",
 		"TowerCastPending",
+		"TowerCastSkipped",
 		"TowerEscape",
 		"TowerHop",
 		"TowerOrbJaunt",

@@ -175,7 +175,8 @@ end
 -- false), so the tower escape fell back to a walk order, which cancelled the Rift; three Rift orders, none went out.
 -- No new order while the spell is in its ability phase, or while her own order is younger than the cast point +
 -- CAST_ORDER_SLACK and the spell is not on cooldown yet (the order is taken a think later). A spell that never
--- starts (a held or dropped order) stops holding after that window, and the walk goes out.
+-- starts (a held or dropped order) stops holding after that window; hero_puck.lua then skips that spell for 1s
+-- (X.TowerCastSkipped, tower-escape via=skip-cast), so the walk goes out instead of the same order again.
 EscapeRules.CAST_ORDER_SLACK = 0.2
 function EscapeRules.CastPending(inPhase, orderAge, castPoint, onCooldown)
 	if inPhase == true then
