@@ -54,8 +54,8 @@ function DeepTower.InReach(...)
 	return nil
 end
 
--- [SHy-HARASS] t= <hero> skip why=deep-tower tower= dist= src=harass|reset|lasthit|overlay target=, at most every 5s
--- per bot.
+-- [SHy-HARASS] t= <hero> skip why=deep-tower tower= invuln= dist= src=harass|reset|lasthit|overlay target=, at most
+-- every 5s per bot (invuln=: whether the tower is invulnerable, which a T2 should be while its T1 stands).
 function DeepTower.LogSkip(bot, src, tower, dist, target)
 	if DotaTime() < (bot._deepTowerLogAt or -999) then
 		return
@@ -64,10 +64,11 @@ function DeepTower.LogSkip(bot, src, tower, dist, target)
 	pcall(
 		print,
 		string.format(
-			"[SHy-HARASS] t=%.0f %s skip why=deep-tower tower=%s dist=%d src=%s target=%s",
+			"[SHy-HARASS] t=%.0f %s skip why=deep-tower tower=%s invuln=%s dist=%d src=%s target=%s",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			(string.gsub(tower:GetUnitName(), "npc_dota_", "")),
+			tostring(tower:IsInvulnerable()),
 			math.floor(dist or -1),
 			src,
 			target ~= nil and not target:IsNull() and (string.gsub(target:GetUnitName(), "npc_dota_", "")) or "-"

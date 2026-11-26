@@ -241,7 +241,14 @@ T.test(
 		DeepTower.LogSkip(bot, "harass", tower, dist, nil)
 		local lines = 0
 		for _, line in ipairs(T.stub.printed) do
-			if string.find(line, "skip why=deep-tower tower=badguys_tower2_mid dist=300 src=harass", 1, true) then
+			if
+				string.find(
+					line,
+					"skip why=deep-tower tower=badguys_tower2_mid invuln=true dist=300 src=harass",
+					1,
+					true
+				)
+			then
 				lines = lines + 1
 			end
 		end

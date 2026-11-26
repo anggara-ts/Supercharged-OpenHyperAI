@@ -1207,7 +1207,7 @@ function Retreat.ShouldRun()
 		-- #12, game 087 0:26-0:31: a T2 is invulnerable while its T1 stands, so Fu.IsValidBuilding skipped it and the
 		-- tier-2 rule below never ran before the T1 fell (no `anti-dive why=tower-tier2` line in games 086 / 087).
 		-- The deep tower is read by its id instead (bots/lib/systems/deep_tower.lua), with the same reach.
-		if not isDivingTower then
+		if not isDivingTower and Fu.IsValidHero(botTarget) then
 			diveTower = DeepTower.InReach(bot:GetLocation())
 			isDivingTower = diveTower ~= nil
 		end
