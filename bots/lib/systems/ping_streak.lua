@@ -87,6 +87,23 @@ function PingStreak.Step(state, pingTime, x, y, fx, fy, now, bx, by)
 	return false
 end
 
+-- The humans among the team's members. `members[slot]` = { bot = member:IsBot(), id = member:GetPlayerID() } (or
+-- nil) for the GetTeamMember slots 1-5. Returns { { slot =, id = }, ... } in slot order and a short key
+-- ("id@slot,..." or "-") for the fountain-watch log. The slots come from GetTeamMember itself, never from the
+-- GetTeamPlayers order: on a Dire team with a human the two differ (game 087: GetTeamPlayers read 6,1,7,8,9 with the
+-- human, player 1, second; GetTeamMember(1) was the human and GetTeamMember(2) Zeus, so the pings read were Zeus').
+function PingStreak.HumanSlots(members)
+	local list, parts = {}, {}
+	for slot = 1, 5 do
+		local member = members[slot]
+		if member ~= nil and not member.bot and member.id ~= nil then
+			list[#list + 1] = { slot = slot, id = member.id }
+			parts[#parts + 1] = member.id .. "@" .. slot
+		end
+	end
+	return list, #parts > 0 and table.concat(parts, ",") or "-"
+end
+
 -- May the team answer at `now`? Records the answer when it may.
 function PingStreak.Allow(shared, now)
 	local last = shared.lastAt

@@ -1181,12 +1181,36 @@ function Usage.WatchFountainPings()
 	local team = GetTeam()
 	local shared = PingStreak.Team(team)
 	if shared.slots == nil or now >= shared.slotsAt or now < shared.slotsAt - 5 then
-		-- The humans' team slots (GetTeamMember takes a slot 1-5), re-read every 5s.
-		shared.slots, shared.slotsAt = {}, now + 5
-		for slot, playerId in ipairs(GetTeamPlayers(team)) do
-			if not IsPlayerBot(playerId) then
-				shared.slots[#shared.slots + 1] = { slot = slot, id = playerId }
+		-- The humans' team slots, re-read every 5s, from GetTeamMember itself (PingStreak.HumanSlots): the
+		-- GetTeamPlayers order is not the GetTeamMember slot order on a Dire team with a human (games 086 and 087: the
+		-- human was GetTeamMember(1) but second in GetTeamPlayers, so slot 2, Zeus, was read and no ping counted).
+		local members = {}
+		for slot = 1, #GetTeamPlayers(team) do
+			local member = GetTeamMember(slot)
+			if member ~= nil and not member:IsNull() then
+				members[slot] = { bot = member:IsBot(), id = member:GetPlayerID() }
 			end
+		end
+		local slotsKey
+		shared.slots, slotsKey = PingStreak.HumanSlots(members)
+		shared.slotsAt = now + 5
+		-- [SHy-CHAT] fountain-watch (#222): which humans the team reads pings from, once per change per team.
+		if slotsKey ~= shared.slotsKey then
+			shared.slotsKey = slotsKey
+			local playerIds = {}
+			for _, playerId in ipairs(GetTeamPlayers(team)) do
+				playerIds[#playerIds + 1] = tostring(playerId)
+			end
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s fountain-watch team=%s humans=%s players=%s",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					team == TEAM_RADIANT and "radiant" or "dire",
+					slotsKey,
+					table.concat(playerIds, ",")
+				)
+			)
 		end
 	end
 	local fountain = Fu.GetTeamFountain()
