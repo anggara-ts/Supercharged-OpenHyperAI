@@ -207,6 +207,103 @@ T.test("neutral items: Mana Draught is not given to an ally with an enemy hero n
 	T.eq(Usage.ConsiderItemDesire["item_mana_draught"](draught), BOT_ACTION_DESIRE_NONE, "kept")
 end)
 
+T.test("neutral items: Mana Draught self rule (pure numbers)", function()
+	local Rules = assert(loadstring(T.read("bots/lib/systems/neutral_rules.lua"), "neutral_rules"))()
+	-- Game 087: Largo at 0.65 of ~800 mana misses 280, more than one 114 restore.
+	T.ok(Rules.ManaDraughtSelfWorth(280, 114, true), "misses a whole restore, calm")
+	T.ok(not Rules.ManaDraughtSelfWorth(100, 114, true), "would waste part of it")
+	T.ok(not Rules.ManaDraughtSelfWorth(500, 114, false), "an enemy hero could hit it: the effect would end")
+	T.ok(not Rules.ManaDraughtSelfWorth(500, 0, true), "no restore read")
+end)
+
+local function farFromEveryone(bot)
+	for _, team in pairs(Stub.teams) do
+		for _, hero in pairs(team) do
+			if hero ~= bot then
+				hero._loc = Vector(7000, 7000, 0)
+			end
+		end
+	end
+end
+
+T.test("neutral items: Mana Draught is drunk at 0.65 MP when nothing can hit the holder (#116, game 087)", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_largo", slot = 5, time = 1700 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	bot._maxMana, bot._mana = 800, 520
+	local draught = Stub.newAbility("item_mana_draught", bot)
+	local rule = Usage.ConsiderItemDesire["item_mana_draught"]
+	local desire, target, castType, why = rule(draught)
+	T.ok(desire > 0, "drunk")
+	T.eq(target, bot, "on self")
+	T.eq(castType, "none", "no-target order")
+	T.eq(why, "self", "reason")
+	T.ok(printedUse("item_mana_draught", "self"), "the use is logged")
+	bot._mana = 760
+	T.eq(rule(draught), BOT_ACTION_DESIRE_NONE, "kept when it would waste most of the restore")
+end)
+
+T.test("neutral items: Mana Draught is kept with an enemy hero close (an enemy hit ends the effect)", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_largo", slot = 5, time = 1700 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	bot._maxMana, bot._mana = 800, 200
+	local enemy = Stub.teams[bot:GetTeam() == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT][1]
+	enemy._loc = bot:GetLocation() + Vector(500, 0, 0)
+	local draught = Stub.newAbility("item_mana_draught", bot)
+	T.eq(Usage.ConsiderItemDesire["item_mana_draught"](draught), BOT_ACTION_DESIRE_NONE, "kept")
+end)
+
+-- #116 (game 087): Sven's mushrooms reached Puck, Largo and Brewmaster, none of whom held the kit. Each one's 14 eat
+-- orders consumed nothing before it was dropped.
+T.test("forager mushrooms: a bot without a Forager's Kit never orders an eat, and drops the mushroom once", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_puck", slot = 2, time = 1630 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	_G.GetDroppedItemList = function()
+		return {}
+	end
+	local nut = Stub.newAbility("item_foragers_stats", bot)
+	nut.IsFullyCastable = function()
+		return true
+	end
+	nut.IsTrained = function()
+		return true
+	end
+	bot._items[5] = nut
+	local eats, drops = 0, 0
+	bot.Action_UseAbility = function()
+		eats = eats + 1
+	end
+	bot.Action_UseAbilityOnEntity = function()
+		eats = eats + 1
+	end
+	bot.Action_DropItem = function(_, item)
+		if item == nut then
+			drops = drops + 1
+		end
+	end
+	for step = 0, 9 do
+		Stub.time = 1630 + step
+		Usage.EatForage()
+		Usage.DropForeignItems()
+	end
+	T.eq(eats, 0, "no eat order")
+	T.eq(drops, 1, "dropped once")
+	local noKit, dropLine = nil, nil
+	for _, line in ipairs(Stub.printed) do
+		if
+			string.find(line, "[SHy-FORAGE]", 1, true) and string.find(line, "no-kit item=item_foragers_stats", 1, true)
+		then
+			noKit = line
+		elseif string.find(line, "drop-foreign item=item_foragers_stats", 1, true) then
+			dropLine = line
+		end
+	end
+	T.ok(noKit ~= nil and string.find(noKit, "slot=5", 1, true), "no-kit line: " .. tostring(noKit))
+	T.ok(dropLine ~= nil and string.find(dropLine, "how=no-kit", 1, true), "drop line: " .. tostring(dropLine))
+end)
+
 T.test("neutral items: Witchbane (Heavy Blade) is cast on a location, not a unit (through ItemUsageThink)", function()
 	local Usage = loadUsage({ hero = "npc_dota_hero_dazzle", slot = 5, time = 3100 })
 	local bot = Stub.bot

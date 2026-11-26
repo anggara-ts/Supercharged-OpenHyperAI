@@ -9477,19 +9477,57 @@ end
 Usage.ConsiderItemDesire["item_pirate_hat"] = function(item)
 	return Usage.ConsiderItemDesire["item_trusty_shovel"](item)
 end
+-- Mana Draught (#116; data and thresholds in bots/lib/systems/neutral_rules.lua): an ally far lower on mana gets it
+-- first, else the holder drinks it whenever it misses one whole restore and nothing can hit it. Game 087: the old
+-- self rule wanted MP below 0.5, and Brewmaster (10.9 min) and Largo (9.8 min) never used theirs.
 Usage.ConsiderItemDesire["item_mana_draught"] = function(item)
-	local nEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
-	if
-		#nEnemyHeroes == 0
-		or Fu.IsValidHero(nEnemyHeroes[1])
-			and not Fu.IsInRange(bot, nEnemyHeroes[1], 800)
-			and not bot:WasRecentlyDamagedByAnyHero(5.0)
-	then
-		if Fu.GetMP(bot) < 0.5 then
-			return BOT_ACTION_DESIRE_HIGH, bot, "none", nil
-		end
+	local giveDesire, giveTarget, giveCast, giveWhy = Usage.ConsiderGiveManaDraught(item)
+	if type(giveDesire) == "number" and giveDesire > 0 then
+		return giveDesire, giveTarget, giveCast, giveWhy
 	end
-	return Usage.ConsiderGiveManaDraught(item)
+	return Usage.ConsiderSelfManaDraught(item)
+end
+-- The mana one draught restores for this holder (90 + 3% of its maximum mana when the item reads no values).
+function Usage.ManaDraughtRestore(item, NeutralRules)
+	local restore = NeutralRules.ManaDraughtRestore(
+		item:GetSpecialValueInt("mana_restore"),
+		item:GetSpecialValueInt("mana_restore_pct"),
+		bot:GetMaxMana()
+	)
+	if restore <= 0 then
+		restore = NeutralRules.ManaDraughtRestore(90, 3, bot:GetMaxMana())
+	end
+	return restore
+end
+-- The holder drinks it: it misses at least one restore, no enemy hero within 800, not hit by a hero for 5s, not in
+-- Roshan mode (an enemy hero's or Roshan's hit ends the effect: 7.42 tooltip).
+-- [SHy-NEUTRAL] t= <hero> use item=item_mana_draught why=self myMp= missing= restore= (at most every 10s).
+function Usage.ConsiderSelfManaDraught(item)
+	local NeutralRules = require(GetScriptDirectory() .. "/lib/systems/neutral_rules")
+	local restore = Usage.ManaDraughtRestore(item, NeutralRules)
+	local missing = bot:GetMaxMana() - bot:GetMana()
+	local calm = #(bot:GetNearbyHeroes(800, true, BOT_MODE_NONE) or {}) == 0
+		and not bot:WasRecentlyDamagedByAnyHero(5.0)
+		and bot:GetActiveMode() ~= BOT_MODE_ROSHAN
+	if not NeutralRules.ManaDraughtSelfWorth(missing, restore, calm) then
+		return BOT_ACTION_DESIRE_NONE
+	end
+	local now = DotaTime()
+	NeutralUseLog.ruleAt["item_mana_draught"] = now
+	if now >= (bot._manaDraughtSelfLogAt or -999) then
+		bot._manaDraughtSelfLogAt = now + 10
+		print(
+			string.format(
+				"[SHy-NEUTRAL] t=%.0f %s use item=item_mana_draught why=self myMp=%.2f missing=%.0f restore=%.0f",
+				now,
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				Fu.GetMP(bot),
+				missing,
+				restore
+			)
+		)
+	end
+	return BOT_ACTION_DESIRE_HIGH, bot, "none", "self"
 end
 -- Mana Draught given to an allied hero (#116; numbers and thresholds in bots/lib/systems/neutral_rules.lua). The
 -- effect is lost when an enemy hero attacks the ally, so only an ally with no enemy hero near and not hit lately.
@@ -9523,14 +9561,7 @@ function Usage.ConsiderGiveManaDraught(item)
 	if castRange == nil or castRange <= 0 then
 		castRange = 650
 	end
-	local restore = NeutralRules.ManaDraughtRestore(
-		item:GetSpecialValueInt("mana_restore"),
-		item:GetSpecialValueInt("mana_restore_pct"),
-		bot:GetMaxMana()
-	)
-	if restore <= 0 then
-		restore = NeutralRules.ManaDraughtRestore(90, 3, bot:GetMaxMana())
-	end
+	local restore = Usage.ManaDraughtRestore(item, NeutralRules)
 	local myMp = Fu.GetMP(bot)
 	local bestAlly, bestMp = nil, 1
 	for _, ally in pairs(Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE) or {}) do
@@ -11022,6 +11053,9 @@ function Usage.DropForeignItems()
 			local foreign, owner, how = ForeignItems.Check(bot, item)
 			if foreign then
 				local mode = bot:GetActiveMode()
+				if how == "no-kit" then
+					Usage.LogNoKitForage(item, slot, mode)
+				end
 				-- Not in rune or item mode: the order would replace the river hold or Valve's pick-up.
 				if mode == BOT_MODE_RUNE or mode == BOT_MODE_ITEM then
 					return false
@@ -11060,6 +11094,47 @@ function Usage.DropForeignItems()
 		end
 	end
 	return false
+end
+-- #116 (game 087): how did a mushroom reach a bot without a Forager's Kit? Not by the courier: [SHy-COURIER]
+-- arrived prints any item new in the bag away from the fountain, and no script delivers mushrooms. The 7.42 items.txt
+-- gives the mushrooms AutoPickup 1, so a hero walking over one (or Valve's item mode) may take it; unverified.
+-- [SHy-FORAGE] t= <hero> no-kit item= slot= mode= ground=<owner on the ground|none|not-seen> kit=<allied kit holder|->
+-- kitDist=: once per mushroom name per bot, when DropForeignItems first finds it.
+function Usage.LogNoKitForage(item, slot, mode)
+	local name = item:GetName()
+	bot._noKitLogged = bot._noKitLogged or {}
+	if bot._noKitLogged[name] then
+		return
+	end
+	bot._noKitLogged[name] = true
+	local holder, holderDist = "-", "-"
+	for i = 1, 5 do
+		local member = GetTeamMember(i)
+		if
+			member ~= nil
+			and not member:IsNull()
+			and member ~= bot
+			and ForeignItems.NeutralName(member) == "item_foragers_kit"
+		then
+			holder = (string.gsub(member:GetUnitName(), "npc_dota_hero_", ""))
+			holderDist = string.format("%.0f", GetUnitToUnitDistance(bot, member))
+			break
+		end
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-FORAGE] t=%.0f %s no-kit item=%s slot=%d mode=%s ground=%s kit=%s kitDist=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			name,
+			slot,
+			StuckModeName(mode),
+			ForeignItems.GroundSeen(item) or "not-seen",
+			holder,
+			holderDist
+		)
+	)
 end
 -- Dust ahead of the item think's busy gate (queued orders and the like), as for the mushrooms:
 -- the Dust rule decides, this only makes sure it can act. Dust is no-target (datafeed).

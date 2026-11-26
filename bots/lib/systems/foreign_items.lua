@@ -3,12 +3,14 @@
 -- The bot API has no owner or purchaser read for an item in an inventory (docs/BOT_API_RUNTIME.md: none of the
 -- 50 ability/item methods). The only owner it shows is on the ground: GetDroppedItemList() entries carry the
 -- item, its owner unit and the location (item_purchase_generic.lua re-picks its own drops with drop.owner == bot).
--- Two ways an item is known to be foreign here:
+-- Three ways an item is known to be foreign here:
 --   drop-list      the item handle was seen on the ground with another player's hero as its owner (the handle is
 --                  remembered, then found in the bot's inventory; whether the engine hands out the same handle
 --                  both times is unverified, the [SHy-ITEM] drop-foreign line says how= when it works)
 --   not-consumed   a Forager mushroom whose eat orders consumed nothing (another player's mushrooms can't be
 --                  eaten: game 062, Medusa and Nyx Assassin held Nature's Prophet's mushrooms for 15+ minutes)
+--   no-kit         a Forager mushroom in the bag of a bot that holds no Forager's Kit and never held one (#116,
+--                  game 087); see NoKitForage
 -- A foreign item is never used, eaten or swapped into the main slots, and is dropped once (DropForeignItems in
 -- ability_item_usage_generic.lua).
 local ForeignItems = {}
@@ -93,6 +95,12 @@ local function OwnerName(drop)
 	end)
 	return ok and type(name) == "string" and (string.gsub(name, "^npc_dota_hero_", "")) or "unknown"
 end
+-- Whether an item handle was seen on the ground, and whose it was there: owner name, or "none" for no owner. For the
+-- [SHy-FORAGE] no-kit line (#116: how another hero's mushrooms reach a bot is unverified).
+local groundSeen = setmetatable({}, { __mode = "k" })
+function ForeignItems.GroundSeen(item)
+	return item ~= nil and groundSeen[item] or nil
+end
 -- Entries: { item, name, owner (unit or nil), ownerPid, ownerName, location }.
 function ForeignItems.DropList()
 	local now = DotaTime()
@@ -113,6 +121,9 @@ function ForeignItems.DropList()
 				location = drop.location,
 			}
 			list[#list + 1] = entry
+			if ForeignItems.FORAGE[entry.name] then
+				groundSeen[item] = entry.ownerPid ~= nil and entry.ownerName or "none"
+			end
 			if entry.ownerPid ~= nil then
 				ownerByItem[item] = { pid = entry.ownerPid, name = entry.ownerName }
 			end
@@ -136,6 +147,9 @@ function ForeignItems.Check(bot, item)
 	if rec ~= nil and ForeignItems.IsForeignOwner(name, rec.pid, bot:GetPlayerID()) then
 		return true, rec.name, "drop-list"
 	end
+	if ForeignItems.FORAGE[name] and ForeignItems.NoKitForage(name, ForeignItems.HadKit(bot)) then
+		return true, "unknown", "no-kit"
+	end
 	return false
 end
 
@@ -145,9 +159,30 @@ end
 function ForeignItems.IsOwnKitForage(itemName, neutralName)
 	return ForeignItems.FORAGE[itemName] == true and neutralName == "item_foragers_kit"
 end
+-- Pure: a mushroom in the bag of a bot that does not hold a Forager's Kit, and never held one this game (#116, game
+-- 087: Sven's mushrooms reached Puck, Largo and Brewmaster, none of whom had the kit; each one's eat orders consumed
+-- nothing, 7 orders twice, before it was dropped). It is not eaten or swapped, and DropForeignItems drops it once.
+-- hadKit: the bot holds the kit, or held it earlier this game (its own mushrooms stay its own after the kit is
+-- replaced; unverified).
+-- Unverified the other way too: game 062, Kez printed one eat line for a mushroom without ever holding a kit and no
+-- not-consumed line after it, so a mushroom without an owner may be edible by anyone. One sample against three.
+function ForeignItems.NoKitForage(itemName, hadKit)
+	return ForeignItems.FORAGE[itemName] == true and not hadKit
+end
 function ForeignItems.NeutralName(bot)
 	local item = bot:GetItemInSlot(16)
 	return item ~= nil and not item:IsNull() and item:GetName() or nil
+end
+-- Whether the bot holds or held a Forager's Kit this game (read off slot 16, remembered on the bot).
+function ForeignItems.HadKit(bot)
+	if bot._hadForagersKit then
+		return true
+	end
+	if ForeignItems.NeutralName(bot) == "item_foragers_kit" then
+		bot._hadForagersKit = true
+		return true
+	end
+	return false
 end
 
 -- Mark an item name as foreign for this bot for the rest of the game (used for Forager mushrooms, which stack, so
