@@ -55,7 +55,7 @@ const LINEUP = path.join(ROOT, "bots/customize", "general.lua");
 const OVERRIDES = path.join(ROOT, "bots/lib", "systems", "global_overrides.lua");
 const HEROES_TSV = path.join(__dirname, "role-weights", "heroes.tsv");
 const ROWS = path.join(LOCAL_DIR, "role-weights", "rows.json");
-const GH = process.env.GH || "gh_personal";
+const GH = require("./github_cli")();
 
 function load() {
 	try {
