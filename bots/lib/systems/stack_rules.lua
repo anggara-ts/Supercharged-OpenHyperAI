@@ -36,15 +36,24 @@ StackRules.WAIT_BY = 47
 StackRules.PATH_FACTOR = 1.5
 -- Farthest camp considered (walking distance is longer than this straight line).
 StackRules.MAX_DIST = 3500
--- The bot stops this far from the camp centre to wait (out of the spawn box: its size is not in the bot API,
--- so this is a guess), and the exit point is where it was EXIT_DIST from the camp on its way in.
+-- The bot stops this far from the camp centre to wait (out of the spawn box: a guess; the spawners do have min
+-- and max fields, game 087 spawner-keys, not used yet), and the exit point is where it was EXIT_DIST from the camp
+-- on its way in.
 StackRules.WAIT_DIST = 650
 StackRules.EXIT_DIST = 1300
+-- When the camp is out of sight (trees, high ground, night), the bot steps in toward the camp centre until it is in
+-- sight, never closer than STEP_MIN. Game 087: every check from the exit point and one wait at 650 had visible=0,
+-- so no stack could be confirmed and a camp out of sight was called empty.
+StackRules.STEP_MIN = 250
 -- No stack with a visible enemy hero this close to the camp or the bot.
 StackRules.ENEMY_RADIUS = 1500
 StackRules.MIN_HP = 0.6
--- The camp is counted again at this second after the spawn.
+-- After the spawn the bot waits at the exit point until CHECK_SECOND, then steps back in until the camp is in
+-- sight. The count is the highest over CHECK_LOOK seconds in sight (the pulled set walks back late); the check
+-- gives up at CHECK_UNTIL (all in seconds after the spawn).
 StackRules.CHECK_SECOND = 5
+StackRules.CHECK_LOOK = 2
+StackRules.CHECK_UNTIL = 12
 
 -- Second of the minute (0 <= s < 60) and the minute.
 function StackRules.Clock(dotaTime)
@@ -228,14 +237,58 @@ function StackRules.PointFromCamp(campX, campY, fromX, fromY, dist)
 	return campX + dx / len * dist, campY + dy / len * dist
 end
 
--- The result of a stack: creeps counted at the pull and after the spawn (within the camp area). The count is
--- only read when the camp is visible at the check ("unknown" otherwise).
+-- Wait phase with no camp creep in sight: what to do. visible: IsLocationVisible(camp centre); dist: bot to camp
+-- centre; sec: second of the minute; minutePassed: the stack's minute is over. A camp out of sight is not empty:
+-- the bot steps in until it sees it.
+-- Returns "hold" (stay), "step" (walk toward the camp), "empty" (in sight and empty) or "unseen" (never in sight:
+-- give up, stacked=unknown).
+function StackRules.NoCreepAction(visible, dist, sec, minutePassed)
+	local giveUp = minutePassed or sec >= StackRules.EARLIEST_ORDER - 2
+	if visible then
+		return giveUp and "empty" or "hold"
+	end
+	if minutePassed or sec >= StackRules.LATEST_HIT then
+		return "unseen"
+	end
+	if (dist or 0) > StackRules.STEP_MIN then
+		return "step"
+	end
+	return giveUp and "unseen" or "hold"
+end
+
+-- Check phase after the spawn. elapsed: seconds since the spawn; visible: the camp centre is in sight now;
+-- sightSince: elapsed when it first came in sight (nil: not yet); best: the highest count so far (nil: none);
+-- before: the count at the pull; dist: bot to camp centre.
+-- Returns "exit" (stay at the exit point), "step" (walk toward the camp), "hold" (stop there and keep counting)
+-- or "done" (read the result).
+function StackRules.CheckAction(elapsed, visible, sightSince, best, before, dist)
+	if elapsed < StackRules.CHECK_SECOND then
+		return "exit"
+	end
+	if best ~= nil and best > (before or 0) then
+		return "done"
+	end
+	if elapsed >= StackRules.CHECK_UNTIL then
+		return "done"
+	end
+	if sightSince ~= nil then
+		return elapsed - sightSince >= StackRules.CHECK_LOOK and "done" or "hold"
+	end
+	if visible or (dist or 0) <= StackRules.STEP_MIN then
+		return "hold"
+	end
+	return "step"
+end
+
+-- The result of a stack: creeps counted at the pull and after the spawn (within the camp area). More creeps than
+-- before is a stack even when the camp centre was never in sight (every counted creep was seen). Otherwise the
+-- count is only read when the camp was in sight at the check ("unknown" if not).
 function StackRules.Result(before, after, visible)
+	if after ~= nil and after > (before or 0) then
+		return "yes"
+	end
 	if not visible or after == nil then
 		return "unknown"
-	end
-	if after > (before or 0) then
-		return "yes"
 	end
 	return "no"
 end

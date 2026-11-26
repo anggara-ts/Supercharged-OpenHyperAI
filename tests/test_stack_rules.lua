@@ -179,6 +179,46 @@ T.test("result: more creeps after the spawn = stacked; unseen camp = unknown", f
 	T.eq(R.Result(3, 6, true), "yes")
 	T.eq(R.Result(3, 3, true), "no")
 	T.eq(R.Result(3, 2, true), "no")
-	T.eq(R.Result(3, 6, false), "unknown")
+	-- More creeps than before were seen, even with the camp centre out of sight: stacked.
+	T.eq(R.Result(3, 6, false), "yes")
+	-- Out of sight and not more than before: unknown, not "no".
+	T.eq(R.Result(3, 0, false), "unknown")
+	T.eq(R.Result(3, 3, false), "unknown")
+	T.eq(R.Result(3, nil, true), "unknown")
 	T.eq(R.Result(nil, 2, true), "yes")
+end)
+
+-- Game 087, 9:49: a camp with no creep in sight from the wait spot was called empty (visible=0).
+T.test("wait, no creep: out of sight is stepped in on, not empty; in sight and empty only near the order", function()
+	local R = rules()
+	-- In sight, no creep: hold until :48, then empty.
+	T.eq(R.NoCreepAction(true, 650, 45, false), "hold")
+	T.eq(R.NoCreepAction(true, 650, 48, false), "empty")
+	T.eq(R.NoCreepAction(true, 650, 2, true), "empty")
+	-- Out of sight: step in, at any second before the latest hit.
+	T.eq(R.NoCreepAction(false, 650, 42, false), "step")
+	T.eq(R.NoCreepAction(false, 650, 52, false), "step")
+	-- Stepped in to STEP_MIN and still out of sight: hold, then unknown (never "empty").
+	T.eq(R.NoCreepAction(false, R.STEP_MIN, 45, false), "hold")
+	T.eq(R.NoCreepAction(false, R.STEP_MIN, 49, false), "unseen")
+	T.eq(R.NoCreepAction(false, 650, R.LATEST_HIT, false), "unseen")
+	T.eq(R.NoCreepAction(false, 650, 3, true), "unseen")
+end)
+
+-- Game 087, 14:05 and 15:05: counted from the exit point (1300), the camp was out of sight: stacked=unknown.
+T.test("check: exit point until :05, step in until the camp is in sight, count for a while, give up at :12", function()
+	local R = rules()
+	-- Before CHECK_SECOND: at the exit point.
+	T.eq(R.CheckAction(2, false, nil, nil, 3, 1300), "exit")
+	-- Out of sight after it: step in.
+	T.eq(R.CheckAction(R.CHECK_SECOND, false, nil, 3, 3, 1300), "step")
+	-- In sight: hold and keep counting for CHECK_LOOK, then done.
+	T.eq(R.CheckAction(6, true, 6, 3, 3, 800), "hold")
+	T.eq(R.CheckAction(6 + R.CHECK_LOOK, true, 6, 3, 3, 800), "done")
+	-- More creeps than before: done at once (in sight or not).
+	T.eq(R.CheckAction(6, false, nil, 5, 3, 1100), "done")
+	-- At STEP_MIN and still out of sight: hold until CHECK_UNTIL, then done (the result is unknown).
+	T.eq(R.CheckAction(9, false, nil, 0, 3, R.STEP_MIN), "hold")
+	T.eq(R.CheckAction(R.CHECK_UNTIL, false, nil, 0, 3, R.STEP_MIN), "done")
+	T.eq(R.Result(3, 0, false), "unknown")
 end)

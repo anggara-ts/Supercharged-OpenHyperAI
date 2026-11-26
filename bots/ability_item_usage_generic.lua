@@ -10432,7 +10432,7 @@ function Usage.LogStuck()
 			print,
 			string.format(
 				"[SHy-STUCK] t=%.0f %s mode=%s/%.2f action=%s moved=%d path=%d at=%.0f,%.0f hp=%.2f enemies=%d"
-					.. " queued=%d using=%s casting=%s channel=%s active=%s",
+					.. " queued=%d using=%s casting=%s channel=%s active=%s%s",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				StuckModeName(bot:GetActiveMode()),
@@ -10448,7 +10448,9 @@ function Usage.LogStuck()
 				tostring(bot:IsUsingAbility()),
 				tostring(bot:IsCastingAbility()),
 				tostring(bot:IsChanneling()),
-				activeName
+				activeName,
+				-- A camp stack (#229) runs inside the ward mode and stands still while it waits: say so.
+				bot._stack ~= nil and (" stack=" .. tostring(bot._stack.phase)) or ""
 			)
 		)
 	end

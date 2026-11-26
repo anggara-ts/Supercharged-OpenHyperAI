@@ -3,10 +3,12 @@
 -- (bots/mode_ward_generic.lua: pos 4/5 only, and a mode the stuck watch lets stand still): Stack.Desire is asked
 -- first, and while a stack runs the ward Think hands over to Stack.Think.
 --
--- Steps: pick a camp between :15 and :40 (walk ...), stop WAIT_DIST from the camp (wait ...), give the attack
--- order so the hit lands at the camp's pull second (pull ...), walk back out to where the bot was EXIT_DIST from
--- the camp on its way in (leave ...), then come back and count the camp after the spawn (check ...).
--- [SHy-STACK] start / pull / result lines show each stack; skip says why a support in its pick window did not go.
+-- Steps: pick a camp between :15 and :44 (walk ...), stop WAIT_DIST from the camp (wait ...; a camp out of sight
+-- there is stepped in on until it is in sight), give the attack order so the hit lands at the camp's pull second
+-- (pull ...), walk back out to where the bot was EXIT_DIST from the camp on its way in (leave ...), then after the
+-- spawn step back in until the camp is in sight and count it (check ...).
+-- [SHy-STACK] start / wait / step-in / in-sight / pull / result lines show each stack; skip says why a support in
+-- its pick window did not go.
 local Stack = {}
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/stack_rules")
@@ -186,14 +188,16 @@ local function LogSkip(bot, minute, why, extra)
 	Log("[SHy-STACK] t=%.0f %s skip why=%s%s", DotaTime(), HeroName(bot), why, extra or "")
 end
 
-local function Finish(bot, stacked, why, before, after, visible)
+-- visible: whether the camp centre was in sight when it was counted (nil: not counted, printed "-"). sightDist:
+-- how far from the camp centre the bot was when it came in sight (tunes WAIT_DIST and EXIT_DIST).
+local function Finish(bot, stacked, why, before, after, visible, sightDist)
 	local s = bot._stack
 	if s == nil then
 		return
 	end
 	bot._stack = nil
 	Log(
-		"[SHy-STACK] t=%.0f %s result camp=%s type=%s stacked=%s creeps=%d before=%d visible=%d why=%s",
+		"[SHy-STACK] t=%.0f %s result camp=%s type=%s stacked=%s creeps=%d before=%d visible=%s why=%s sight=%s",
 		DotaTime(),
 		HeroName(bot),
 		s.key,
@@ -201,8 +205,26 @@ local function Finish(bot, stacked, why, before, after, visible)
 		stacked,
 		after or -1,
 		before or s.before or -1,
-		visible and 1 or 0,
-		why
+		visible == nil and "-" or (visible and "1" or "0"),
+		why,
+		sightDist ~= nil and tostring(math.floor(sightDist)) or "-"
+	)
+end
+
+-- One line per phase change, so a stack that stands still (waiting at the camp, out at the exit point) is
+-- explained next to a [SHy-STUCK] line (which also prints stack=<phase>).
+local function LogPhase(bot, s, what, dist, extra)
+	local loc = bot:GetLocation()
+	Log(
+		"[SHy-STACK] t=%.0f %s %s camp=%s dist=%d at=%.0f,%.0f%s",
+		DotaTime(),
+		HeroName(bot),
+		what,
+		s.key,
+		math.floor(dist or -1),
+		loc.x,
+		loc.y,
+		extra or ""
 	)
 end
 
@@ -394,6 +416,7 @@ function Stack.Think(bot)
 			s.phase = "wait"
 			s.waitLoc = bot:GetLocation()
 			s.exitLoc = s.exitLoc or s.startLoc
+			LogPhase(bot, s, "wait", dist, " visible=" .. (IsLocationVisible(s.loc) and "1" or "0"))
 		else
 			bot:Action_MoveToLocation(s.loc)
 			return
@@ -409,15 +432,35 @@ function Stack.Think(bot)
 			or cache.creep ~= nil and (cache.creep:IsNull() or not cache.creep:IsAlive())
 		then
 			local n, nearest, nearestDist = CampCreeps(s.loc, Spawners(), bot)
-			cache = { at = now, count = n, creep = nearest, dist = nearestDist }
+			cache = { at = now, count = n, creep = nearest, dist = nearestDist, visible = IsLocationVisible(s.loc) }
 			s.waitCount = cache
 			s.maxCount = math.max(s.maxCount or 0, n)
 		end
 		local count, creep, creepDist = s.maxCount or cache.count, cache.creep, cache.dist
+		-- Stepped in because the camp was out of sight: it (or a creep) is in sight now, so wait here.
+		if s.stepping and (creep ~= nil or cache.visible) then
+			s.stepping = nil
+			s.waitLoc = bot:GetLocation()
+			LogPhase(bot, s, "in-sight", dist, " phase=wait creeps=" .. cache.count)
+		end
 		if creep == nil then
-			if sec >= Rules.EARLIEST_ORDER - 2 or minute > s.minute then
-				Finish(bot, "no", "empty", 0, 0, IsLocationVisible(s.loc))
+			-- No creep seen: an empty camp only when the camp is in sight; out of sight, step in (#229, game 087).
+			local action = Rules.NoCreepAction(cache.visible, dist, sec, minute > s.minute)
+			if action == "empty" then
+				Finish(bot, "no", "empty", 0, 0, true, dist)
+			elseif action == "unseen" then
+				Finish(bot, "unknown", "unseen", count, nil, false)
+			elseif action == "step" then
+				if not s.stepping then
+					s.stepping = true
+					LogPhase(bot, s, "step-in", dist, " phase=wait why=unseen")
+				end
+				bot:Action_MoveToLocation(s.loc)
 			else
+				if s.stepping then
+					-- Stepped in as far as STEP_MIN and still out of sight: stay here, not back out at WAIT_DIST.
+					s.waitLoc = bot:GetLocation()
+				end
 				bot:Action_MoveToLocation(s.waitLoc)
 			end
 			return
@@ -490,15 +533,43 @@ function Stack.Think(bot)
 		s.phase = "check"
 	end
 	if s.phase == "check" then
-		-- Counted from the exit point: walking back in meets the pulled creeps still chasing. At night (800
-		-- vision) the camp may be out of sight from there: stacked=unknown.
-		if now < s.spawnAt + Rules.CHECK_SECOND then
-			bot:Action_MoveToLocation(s.exitLoc)
-			return
+		-- Until CHECK_SECOND at the exit point (the pulled creeps are still chasing), then step back in until the
+		-- camp centre is in sight and stop there. Game 087: counted from the exit point, every check had visible=0
+		-- (trees and high ground, by day too) and gave stacked=unknown.
+		local elapsed = now - s.spawnAt
+		if elapsed >= Rules.CHECK_SECOND then
+			local cache = s.checkCount
+			if cache == nil or now - cache.at >= 0.4 then
+				cache = { at = now, count = CampCreeps(s.loc, Spawners(), nil), visible = IsLocationVisible(s.loc) }
+				s.checkCount = cache
+				s.best = math.max(s.best or 0, cache.count)
+				if cache.visible and s.sightSince == nil then
+					s.sightSince = elapsed
+					s.sightDist = dist
+					if s.checkStepping then
+						LogPhase(bot, s, "in-sight", dist, " phase=check creeps=" .. cache.count)
+					end
+				end
+			end
 		end
-		local visible = IsLocationVisible(s.loc)
-		local after = CampCreeps(s.loc, Spawners(), nil)
-		Finish(bot, Rules.Result(s.before, after, visible), "checked", s.before, after, visible)
+		local visibleNow = s.checkCount ~= nil and s.checkCount.visible
+		local action = Rules.CheckAction(elapsed, visibleNow, s.sightSince, s.best, s.before, dist)
+		if action == "exit" then
+			bot:Action_MoveToLocation(s.exitLoc)
+		elseif action == "step" then
+			if not s.checkStepping then
+				s.checkStepping = true
+				LogPhase(bot, s, "step-in", dist, " phase=check why=unseen")
+			end
+			bot:Action_MoveToLocation(s.loc)
+		elseif action == "hold" then
+			s.holdLoc = s.holdLoc or bot:GetLocation()
+			bot:Action_MoveToLocation(s.holdLoc)
+		else
+			local seen = s.sightSince ~= nil
+			local stacked = Rules.Result(s.before, s.best, seen)
+			Finish(bot, stacked, stacked == "unknown" and "unseen" or "checked", s.before, s.best, seen, s.sightDist)
+		end
 	end
 end
 
