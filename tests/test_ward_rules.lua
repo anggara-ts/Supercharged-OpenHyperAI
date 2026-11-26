@@ -87,3 +87,26 @@ T.test("ward: preferred point under an enemy tower pulls back only to a point cl
 	-- Our tower near: the points behind are inside the gap, so none.
 	T.eq(Ward.PickLaneSpot(lanePoints(10, 3), 3, OWN, 250), nil, "no pull-back into the tower's area")
 end)
+
+-- #15, game 087: the sentry list offered our own eye cliff while every T1 of ours stood, and the ward think planted
+-- an observer there (Zuus 7:01, Largo 12:37).
+T.test("ward: sentry list holds our own eye cliff back until a T1 of ours falls", function()
+	local Ward = ward()
+	local want, why = Ward.SentryWant("uber", true, false, false, true)
+	T.eq(want, false, "own cliff, all T1s up: not wanted")
+	T.eq(why, "home-too-early", "skip reason")
+	want, why = Ward.SentryWant("uber", true, false, false, false)
+	T.eq(want, true, "own cliff after a T1 fell")
+	T.eq(why, nil, "no skip reason")
+	T.eq((Ward.SentryWant("uber", false, false, false, false)), true, "enemy cliff")
+	T.eq((Ward.SentryWant("contest", true, false, false, false)), true, "contest spot")
+	T.eq((Ward.SentryWant("hunt", true, false, false, false)), false, "hunt spot before defending or pushing")
+end)
+
+T.test("ward: sentry list while defending or pushing keeps one side, home check aside", function()
+	local Ward = ward()
+	T.eq((Ward.SentryWant("uber", true, true, false, true)), true, "defending: our cliff")
+	T.eq((Ward.SentryWant("uber", false, true, false, false)), false, "defending: not theirs")
+	T.eq((Ward.SentryWant("hunt", false, false, true, false)), true, "pushing: their side")
+	T.eq((Ward.SentryWant("uber", true, false, true, false)), false, "pushing: not ours")
+end)

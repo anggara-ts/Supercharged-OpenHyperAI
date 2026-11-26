@@ -28,6 +28,8 @@ local sentryCastRange = 500
 local observerWard = nil
 local sentryWard = nil
 local wardSpot = nil
+-- Which pick set wardSpot (objective, observer or sentry), for the goal line.
+local wardSpotKind = nil
 local wardModeOffUntil = -math.huge
 -- Switched off on purpose: the ping when a ward is planted (user request) and per-try plant logging. The ward chat
 -- lines need `!debug` instead (ChatRules).
@@ -204,7 +206,11 @@ local function PickChat(key, fallback)
 	end
 	return fallback
 end
-local function RememberWard(kind, spot)
+-- Each ward placed, once (#15, game 087 item 7): a plain Observer or Sentry Ward printed no line with its spot's
+-- label (Zuus's t=25 observer on mid-dire-2 showed only in the end-of-game dump), so a label that took one looked
+-- unused. A plain ward is placed on the order, a dispenser ward once its charge went down. `cliff-early`: the spot is
+-- our own eye cliff while all our T1s stand (Ward.OwnCliffTooEarly); no pick should lead there.
+local function RememberWard(kind, spot, at)
 	spot = spot or wardSpot
 	if spot == nil or spot.location == nil then
 		return
@@ -216,9 +222,38 @@ local function RememberWard(kind, spot)
 	if last and last.kind == kind and last.x == x and last.y == y and now - last.t < 20 then
 		return
 	end
-	planted[#planted + 1] = { t = now, kind = kind, role = spot.role or "spot", x = x, y = y }
+	planted[#planted + 1] = { t = now, kind = kind, role = spot.role or "spot", x = x, y = y, label = spot.label }
 	if #planted > 40 then
 		table.remove(planted, 1)
+	end
+	local loc = at or spot.location
+	local name = (string.gsub(bot:GetUnitName(), "npc_dota_hero_", ""))
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s placed kind=%s role=%s at=%.0f,%.0f spot=%s",
+			now,
+			name,
+			kind,
+			tostring(spot.role or "spot"),
+			loc.x,
+			loc.y,
+			tostring(spot.label or "-")
+		)
+	)
+	if Ward.OwnCliffTooEarly(spot) then
+		pcall(
+			print,
+			string.format(
+				"[SHy-WARD] t=%.0f %s cliff-early kind=%s spot=%s at=%.0f,%.0f",
+				now,
+				name,
+				kind,
+				tostring(spot.label or "-"),
+				loc.x,
+				loc.y
+			)
+		)
 	end
 end
 -- Each bot's ward list, once, near the end of the game. Bot scripts stop when the game enters POST_GAME (game 050:
@@ -252,13 +287,14 @@ local function DumpWards()
 		local entry = planted[idx]
 		print(
 			string.format(
-				"[SHy-WARD] %s %s t=%.0f role=%s %d,%d",
+				"[SHy-WARD] %s %s t=%.0f role=%s %d,%d%s",
 				name,
 				entry.kind,
 				entry.t,
 				entry.role,
 				entry.x,
-				entry.y
+				entry.y,
+				entry.label ~= nil and (" " .. entry.label) or ""
 			)
 		)
 	end
@@ -307,7 +343,7 @@ local function LaneObsLog(spot, at)
 end
 local function AnnounceWard(kind, spot, at)
 	spot = spot or wardSpot
-	RememberWard(kind, spot)
+	RememberWard(kind, spot, at)
 	if kind == "observer" then
 		LaneObsLog(spot, at)
 	end
@@ -566,6 +602,7 @@ function GetDesireHelper()
 		local obj, kind = Ward.GetObjectiveWardSpot(bot)
 		if obj and (not WardMode.IsEnemyCloserToWardLocation(obj.location) or Fu.IsRealInvisible(bot)) then
 			wardSpot = obj
+			wardSpotKind = "objective"
 			if DotaTime() >= (bot._objWardLogAt or -999) + 20 then
 				bot._objWardLogAt = DotaTime()
 				pcall(
@@ -587,6 +624,7 @@ function GetDesireHelper()
 	if observerWard ~= nil and (observerInInventory and Fu.CanCastAbility(observerWard) or not observerInInventory) then
 		local observerSpots = Ward.GetAvailabeObserverWardSpots(bot)
 		wardSpot = Ward.GetClosestObserverWardSpot(bot, observerSpots)
+		wardSpotKind = "observer"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -601,6 +639,7 @@ function GetDesireHelper()
 	if sentryWard ~= nil and (sentryInInventory and Fu.CanCastAbility(sentryWard) or not sentryInInventory) then
 		local sentrySpots = Ward.GetPossibleSentryWardSpots(bot)
 		wardSpot = Ward.GetClosestSentryWardSpot(bot, sentrySpots)
+		wardSpotKind = "sentry"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -843,7 +882,8 @@ local function MarkEarlyWard(spot)
 end
 -- Plant the observer from where he stands, as far toward the spot as the cast range allows.
 function WardMode.PlantShort()
-	if wardSpot == nil or observerWard == nil or not Fu.CanCastAbility(observerWard) then
+	-- A sentry pick takes no observer (see WardThink).
+	if wardSpot == nil or wardSpotKind == "sentry" or observerWard == nil or not Fu.CanCastAbility(observerWard) then
 		return false
 	end
 	if observerWard:GetName() == "item_ward_dispenser" and not DispenserHasObservers(observerWard) then
@@ -922,8 +962,13 @@ function WardMode.WardThink()
 	pcall(ValidateSpot, wardSpot)
 	if wardSpot then
 		local plantLoc = PlantLoc(wardSpot)
+		-- No observer on a spot the sentry pick chose (#15, game 087): the sentry list doesn't check for our observers
+		-- or the observer rules, and a bot holding both kinds planted an observer there first. Zuus put two observers
+		-- on the Dire bottom cliff 1.6s apart at 7:01 (the spot stayed on the sentry list), and Largo one on our
+		-- Radiant bottom cliff at 12:37, 16s after the observer list had held it back (uber-skip home-too-early).
 		if
-			observerWard
+			wardSpotKind ~= "sentry"
+			and observerWard
 			and Fu.CanCastAbility(observerWard)
 			and (observerWard:GetName() ~= "item_ward_dispenser" or DispenserHasObservers(observerWard))
 		then
