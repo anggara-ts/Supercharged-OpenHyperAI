@@ -32,7 +32,7 @@ function X.ConsiderStolenSpell(stolenAbility)
 		RealityRiftDesire, RealityRiftTarget = X.ConsiderRealityRift()
 		if RealityRiftDesire > 0 then
 			bot:Action_UseAbilityOnEntity(realityRiftAbility, RealityRiftTarget)
-			return "cast"
+			return "cast", RealityRiftTarget
 		end
 		return true
 	end
@@ -41,7 +41,7 @@ function X.ConsiderStolenSpell(stolenAbility)
 		ChaosBoltDesire, ChaosBoltTarget = X.ConsiderChaosBolt()
 		if ChaosBoltDesire > 0 then
 			bot:Action_UseAbilityOnEntity(chaosBoltAbility, ChaosBoltTarget)
-			return "cast"
+			return "cast", ChaosBoltTarget
 		end
 		return true
 	end

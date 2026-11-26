@@ -20,7 +20,7 @@ function X.ConsiderStolenSpell(ability)
 		FluxDesire, FluxTarget = X.ConsiderFlux()
 		if FluxDesire > 0 then
 			bot:Action_UseAbilityOnEntity(fluxAbility, FluxTarget)
-			return "cast"
+			return "cast", FluxTarget
 		end
 		return true
 	end
@@ -29,7 +29,7 @@ function X.ConsiderStolenSpell(ability)
 		MagneticFieldDesire, MagneticFieldLocation = X.ConsiderMagneticField()
 		if MagneticFieldDesire > 0 then
 			bot:Action_UseAbilityOnLocation(magneticFieldAbility, MagneticFieldLocation)
-			return "cast"
+			return "cast", MagneticFieldLocation
 		end
 		return true
 	end
@@ -38,7 +38,7 @@ function X.ConsiderStolenSpell(ability)
 		SparkWraithDesire, SparkWraithLocation = X.ConsiderSparkWraith()
 		if SparkWraithDesire > 0 then
 			bot:Action_UseAbilityOnLocation(sparkWraithAbility, SparkWraithLocation)
-			return "cast"
+			return "cast", SparkWraithLocation
 		end
 		return true
 	end
@@ -196,8 +196,11 @@ function X.ConsiderSparkWraith()
 	end
 	local radius = sparkWraithAbility:GetSpecialValueInt("radius")
 	local castRange = Fu.GetProperCastRange(false, bot, sparkWraithAbility:GetCastRange())
-	local damage = sparkWraithAbility:GetSpecialValueInt("spark_damage")
-	local activationDelay = sparkWraithAbility:GetSpecialValueInt("activation_delay") + 0.1
+	-- Valve datafeed hero_id=113: the keys are spark_damage_base and base_activation_delay (1.5s); "spark_damage" and
+	-- "activation_delay" read 0, so the kill check never fired (hero_arc_warden.lua has the same fix).
+	local damage = sparkWraithAbility:GetSpecialValueInt("spark_damage_base")
+	local activationDelay = sparkWraithAbility:GetSpecialValueFloat("base_activation_delay")
+		+ sparkWraithAbility:GetCastPoint()
 	if Fu.IsValidHero(botTarget) and Fu.CanCastOnNonMagicImmune(botTarget) then
 		if Fu.CanKillTarget(botTarget, damage, DAMAGE_TYPE_MAGICAL) and Fu.IsInRange(botTarget, bot, castRange) then
 			return BOT_ACTION_DESIRE_MODERATE, botTarget:GetExtrapolatedLocation(activationDelay)

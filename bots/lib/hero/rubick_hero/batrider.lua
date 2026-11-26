@@ -41,7 +41,7 @@ function X.ConsiderStolenSpell(ability)
 			bot:ActionQueue_UseAbilityOnLocation(blinkItem, BlinkLassoTarget:GetLocation())
 			bot:ActionQueue_Delay(0.1)
 			bot:ActionQueue_UseAbilityOnEntity(flamingLassoAbility, BlinkLassoTarget)
-			return "cast"
+			return "cast", BlinkLassoTarget
 		end
 	end
 	if abilityName == "batrider_firefly" then
@@ -58,7 +58,7 @@ function X.ConsiderStolenSpell(ability)
 		FlamingLassoDesire, FlamingLassoTarget = X.ConsiderFlamingLasso()
 		if FlamingLassoDesire > 0 then
 			bot:Action_UseAbilityOnEntity(flamingLassoAbility, FlamingLassoTarget)
-			return "cast"
+			return "cast", FlamingLassoTarget
 		end
 		return true
 	end
@@ -67,7 +67,7 @@ function X.ConsiderStolenSpell(ability)
 		FlamebreakDesire, FlamebreakLocation = X.ConsiderFlamebreak()
 		if FlamebreakDesire > 0 then
 			bot:Action_UseAbilityOnLocation(flamebreakAbility, FlamebreakLocation)
-			return "cast"
+			return "cast", FlamebreakLocation
 		end
 		return true
 	end
@@ -76,7 +76,7 @@ function X.ConsiderStolenSpell(ability)
 		StickyNapalmDesire, StickyNapalmLocation = X.ConsiderStickyNapalm()
 		if StickyNapalmDesire > 0 then
 			bot:Action_UseAbilityOnLocation(stickyNapalmAbility, StickyNapalmLocation)
-			return "cast"
+			return "cast", StickyNapalmLocation
 		end
 		return true
 	end

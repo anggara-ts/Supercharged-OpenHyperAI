@@ -20,7 +20,7 @@ function X.ConsiderStolenSpell(ability)
 		PitOfMaliceDesire, PitOfMaliceLocation = X.ConsiderPitOfMalice()
 		if PitOfMaliceDesire > 0 then
 			bot:Action_UseAbilityOnLocation(pitOfMaliceAbility, PitOfMaliceLocation)
-			return "cast"
+			return "cast", PitOfMaliceLocation
 		end
 		return true
 	end
@@ -29,7 +29,7 @@ function X.ConsiderStolenSpell(ability)
 		FirestormDesire, FirestormLocation = X.ConsiderFirestorm()
 		if FirestormDesire > 0 then
 			bot:Action_UseAbilityOnLocation(firestormAbility, FirestormLocation)
-			return "cast"
+			return "cast", FirestormLocation
 		end
 		return true
 	end
@@ -38,7 +38,7 @@ function X.ConsiderStolenSpell(ability)
 		FiendsGateDesire, FiendsGateLocation = X.ConsiderFiendsGate()
 		if FiendsGateDesire > 0 then
 			bot:Action_UseAbilityOnLocation(fiendsGateAbility, FiendsGateLocation)
-			return "cast"
+			return "cast", FiendsGateLocation
 		end
 		return true
 	end

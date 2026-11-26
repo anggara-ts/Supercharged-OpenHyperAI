@@ -31,7 +31,7 @@ function X.ConsiderStolenSpell(ability)
 		PenitenceDesire, PenitenceTarget = X.ConsiderPenitence()
 		if PenitenceDesire > 0 then
 			bot:Action_UseAbilityOnEntity(penitenceAbility, PenitenceTarget)
-			return "cast"
+			return "cast", PenitenceTarget
 		end
 		return true
 	end
@@ -40,7 +40,7 @@ function X.ConsiderStolenSpell(ability)
 		HolyPersuasionDesire, HolyPersuasionTarget = X.ConsiderHolyPersuasion()
 		if HolyPersuasionDesire > 0 then
 			bot:Action_UseAbilityOnEntity(holyPersuasionAbility, HolyPersuasionTarget)
-			return "cast"
+			return "cast", HolyPersuasionTarget
 		end
 		return true
 	end
@@ -49,7 +49,7 @@ function X.ConsiderStolenSpell(ability)
 		DivineFavorDesire, DivineFavorTarget = X.ConsiderDivineFavor()
 		if DivineFavorDesire > 0 then
 			bot:Action_UseAbilityOnEntity(divineFavorAbility, DivineFavorTarget)
-			return "cast"
+			return "cast", DivineFavorTarget
 		end
 		return true
 	end

@@ -31,7 +31,7 @@ function X.ConsiderStolenSpell(ability)
 		if BlinkDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnLocation(blinkAbility, BlinkLocation)
-			return "cast"
+			return "cast", BlinkLocation
 		end
 		return true
 	end
@@ -41,7 +41,7 @@ function X.ConsiderStolenSpell(ability)
 		if ManaVoidDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnEntity(manaVoidAbility, ManaVoidTarget)
-			return "cast"
+			return "cast", ManaVoidTarget
 		end
 		return true
 	end

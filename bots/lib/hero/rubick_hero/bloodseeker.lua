@@ -20,7 +20,7 @@ function X.ConsiderStolenSpell(ability)
 		RuptureDesire, RuptureTarget = X.ConsiderRupture()
 		if RuptureDesire > 0 then
 			bot:Action_UseAbilityOnEntity(ruptureAbility, RuptureTarget)
-			return "cast"
+			return "cast", RuptureTarget
 		end
 		return true
 	end
@@ -29,7 +29,7 @@ function X.ConsiderStolenSpell(ability)
 		BloodrageDesire, BloodrageTarget = X.ConsiderBloodrage()
 		if BloodrageDesire > 0 then
 			bot:Action_UseAbilityOnEntity(bloodrageAbility, BloodrageTarget)
-			return "cast"
+			return "cast", BloodrageTarget
 		end
 		return true
 	end
@@ -38,7 +38,7 @@ function X.ConsiderStolenSpell(ability)
 		BloodRiteDesire, BloodRiteLocation = X.ConsiderBloodRite()
 		if BloodRiteDesire > 0 then
 			bot:Action_UseAbilityOnLocation(bloodRiteAbility, BloodRiteLocation)
-			return "cast"
+			return "cast", BloodRiteLocation
 		end
 		return true
 	end

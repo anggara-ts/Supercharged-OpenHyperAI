@@ -67,7 +67,7 @@ SpellList["spells"] = {
 		["bounty_hunter_shuriken_toss"] = { weight = 0.7 },
 		["bounty_hunter_jinada"] = { weight = 1 },
 		["bounty_hunter_wind_walk"] = { weight = 0.5 },
-		["bounty_hunter_wind_walk_ally"] = { weight = 6 },
+		["bounty_hunter_wind_walk_ally"] = { weight = 0.6 },
 		["bounty_hunter_track"] = { weight = 1 },
 	},
 	["npc_dota_hero_brewmaster"] = {
@@ -359,15 +359,6 @@ SpellList["spells"] = {
 		["lion_mana_drain"] = { weight = 0.5 },
 		["lion_finger_of_death"] = { weight = 0.5 },
 	},
-	-- Valve datafeed hero_id=80. Same scale as the rest of this table: 0 keep, 1 replace.
-	-- Passive and innate spells are 1 so a held copy is thrown away; a disable stays.
-	["npc_dota_hero_lone_druid"] = {
-		["lone_druid_spirit_bear"] = { weight = 0.6 },
-		["lone_druid_spirit_link"] = { weight = 1 },
-		["lone_druid_savage_roar"] = { weight = 0.3 },
-		["lone_druid_entangle"] = { weight = 0.4 },
-		["lone_druid_true_form"] = { weight = 0.5 },
-	},
 	["npc_dota_hero_luna"] = {
 		["luna_lucent_beam"] = { weight = 0.5 },
 		["luna_lunar_orbit"] = { weight = 1 },
@@ -383,7 +374,7 @@ SpellList["spells"] = {
 		["lycan_shapeshift"] = { weight = 1 },
 	},
 	["npc_dota_hero_magnataur"] = {
-		["magnataur_shockwave"] = { weight = 8 },
+		["magnataur_shockwave"] = { weight = 0.8 },
 		["magnataur_empower"] = { weight = 0.8 },
 		["magnataur_skewer"] = { weight = 0.3 },
 		["magnataur_horn_toss"] = { weight = 0.5 },
@@ -433,17 +424,6 @@ SpellList["spells"] = {
 		["monkey_king_mischief"] = { weight = 1 },
 		["monkey_king_untransform"] = { weight = 1 },
 		["monkey_king_wukongs_command"] = { weight = 0.2 },
-	},
-	-- Valve datafeed hero_id=10. Attribute-shift toggles (behavior 516) are easy to replace.
-	["npc_dota_hero_morphling"] = {
-		["morphling_waveform"] = { weight = 0.4 },
-		["morphling_adaptive_strike_agi"] = { weight = 0.3 },
-		["morphling_adaptive_strike_str"] = { weight = 0.3 },
-		["morphling_morph_agi"] = { weight = 0.9 },
-		["morphling_morph_str"] = { weight = 0.9 },
-		["morphling_replicate"] = { weight = 0.4 },
-		["morphling_morph_replicate"] = { weight = 0.7 },
-		["morphling_ebb_and_flow"] = { weight = 1 },
 	},
 	["npc_dota_hero_muerta"] = {
 		["muerta_dead_shot"] = { weight = 0.8 },
@@ -618,15 +598,6 @@ SpellList["spells"] = {
 		["ringmaster_strongman_tonic"] = { weight = 0.2 },
 		["ringmaster_whoopee_cushion"] = { weight = 0.2 },
 		["ringmaster_summon_unicycle"] = { weight = 0.5 },
-	},
-	-- Valve datafeed hero_id=86. Telekinesis Land is the sub-ability (hero_rubick.lua), not a spell to hold.
-	["npc_dota_hero_rubick"] = {
-		["rubick_telekinesis"] = { weight = 0.2 },
-		["rubick_telekinesis_land"] = { weight = 1 },
-		["rubick_fade_bolt"] = { weight = 0.4 },
-		["rubick_arcane_supremacy"] = { weight = 1 },
-		["rubick_spell_steal"] = { weight = 0.4 },
-		["rubick_curiosity"] = { weight = 1 },
 	},
 	["npc_dota_hero_sand_king"] = {
 		["sandking_burrowstrike"] = { weight = 0 },
@@ -909,20 +880,26 @@ SpellList["spells"] = {
 		["zuus_thundergods_wrath"] = { weight = 0.4 },
 	},
 }
-function SpellList.GetSpellReplaceWeight(abilityName)
-	for heroName, _ in pairs(SpellList["spells"]) do
-		if SpellList["spells"][heroName] and SpellList["spells"][heroName][abilityName] then
-			return SpellList["spells"][heroName][abilityName].weight
+-- Spell name -> { weight, hero }, built on the first lookup. Rubick's steal rule asks for a weight on every think
+-- (bots/heroes/hero_rubick.lua), and a scan of every hero's list per call was the cost (#271).
+local byName = nil
+local function Entry(abilityName)
+	if byName == nil then
+		byName = {}
+		for heroName, spells in pairs(SpellList["spells"]) do
+			for spellName, data in pairs(spells) do
+				byName[spellName] = { weight = data.weight, hero = heroName }
+			end
 		end
 	end
-	return 1
+	return byName[abilityName]
+end
+function SpellList.GetSpellReplaceWeight(abilityName)
+	local entry = Entry(abilityName)
+	return entry ~= nil and entry.weight or 1
 end
 function SpellList.GetSpellHeroName(abilityName)
-	for heroName, _ in pairs(SpellList["spells"]) do
-		if SpellList["spells"][heroName] and SpellList["spells"][heroName][abilityName] then
-			return heroName
-		end
-	end
-	return nil
+	local entry = Entry(abilityName)
+	return entry ~= nil and entry.hero or nil
 end
 return SpellList

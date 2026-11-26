@@ -39,7 +39,7 @@ function X.ConsiderStolenSpell(ability)
 		HookshotDesire, HookshotTarget = X.ConsiderHookshot()
 		if HookshotDesire > 0 then
 			bot:Action_UseAbilityOnLocation(hookshotAbility, HookshotTarget)
-			return "cast"
+			return "cast", HookshotTarget
 		end
 		return true
 	end
@@ -67,7 +67,7 @@ function X.ConsiderStolenSpell(ability)
 		RocketFlareDesire, RocketFlareLocation = X.ConsiderRocketFlare()
 		if RocketFlareDesire > 0 then
 			bot:Action_UseAbilityOnLocation(rocketFlareAbility, RocketFlareLocation)
-			return "cast"
+			return "cast", RocketFlareLocation
 		end
 		return true
 	end

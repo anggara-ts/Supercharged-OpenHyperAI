@@ -41,7 +41,7 @@ function X.ConsiderStolenSpell(ability)
 		CrystalNovaDesire, CrystalNovaLocation = X.ConsiderCrystalNova()
 		if CrystalNovaDesire > 0 then
 			bot:Action_UseAbilityOnLocation(crystalNovaAbility, CrystalNovaLocation)
-			return "cast"
+			return "cast", CrystalNovaLocation
 		end
 		return true
 	end
@@ -50,7 +50,7 @@ function X.ConsiderStolenSpell(ability)
 		FrostbiteDesire, FrostbiteTarget = X.ConsiderFrostbite()
 		if FrostbiteDesire > 0 then
 			bot:Action_UseAbilityOnEntity(frostbiteAbility, FrostbiteTarget)
-			return "cast"
+			return "cast", FrostbiteTarget
 		end
 		return true
 	end

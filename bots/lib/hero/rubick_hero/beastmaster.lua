@@ -31,7 +31,7 @@ function X.ConsiderStolenSpell(ability)
 			bot:ActionQueue_UseAbilityOnLocation(blinkItem, BlinkLocation)
 			bot:ActionQueue_Delay(0.1)
 			bot:ActionQueue_UseAbilityOnEntity(primalRoarAbility, BlinkRoarTarget)
-			return "cast"
+			return "cast", BlinkRoarTarget
 		end
 	end
 	if abilityName == "beastmaster_primal_roar" then
@@ -39,7 +39,7 @@ function X.ConsiderStolenSpell(ability)
 		PrimalRoarDesire, PrimalRoarTarget = X.ConsiderPrimalRoar()
 		if PrimalRoarDesire > 0 then
 			bot:Action_UseAbilityOnEntity(primalRoarAbility, PrimalRoarTarget)
-			return "cast"
+			return "cast", PrimalRoarTarget
 		end
 		return true
 	end
@@ -66,7 +66,7 @@ function X.ConsiderStolenSpell(ability)
 		WildAxesDesire, WildAxesLocation = X.ConsiderWildAxes()
 		if WildAxesDesire > 0 then
 			bot:Action_UseAbilityOnLocation(wildAxesAbility, WildAxesLocation)
-			return "cast"
+			return "cast", WildAxesLocation
 		end
 		return true
 	end

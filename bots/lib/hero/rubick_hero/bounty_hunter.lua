@@ -36,7 +36,7 @@ function X.ConsiderStolenSpell(ability)
 		local FriendlyShadowDesire, FriendlyShadowTarget = X.ConsiderFriendlyShadow()
 		if FriendlyShadowDesire > 0 then
 			bot:Action_UseAbilityOnEntity(friendlyShadowAbility, FriendlyShadowTarget)
-			return "cast"
+			return "cast", FriendlyShadowTarget
 		end
 		return true
 	end
@@ -45,7 +45,7 @@ function X.ConsiderStolenSpell(ability)
 		local TrackDesire, TrackTarget = X.ConsiderTrack()
 		if TrackDesire > 0 then
 			bot:Action_UseAbilityOnEntity(trackAbility, TrackTarget)
-			return "cast"
+			return "cast", TrackTarget
 		end
 		return true
 	end
@@ -55,7 +55,7 @@ function X.ConsiderStolenSpell(ability)
 		if ShurikenTossDesire > 0 then
 			-- fix: the target was the ability handle itself
 			bot:ActionQueue_UseAbilityOnEntity(shurikenTossAbility, ShurikenTossTarget)
-			return "cast"
+			return "cast", ShurikenTossTarget
 		end
 		return true
 	end

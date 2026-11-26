@@ -28,7 +28,7 @@ function X.ConsiderStolenSpell(ability)
 		EnfeebleDesire, EnfeebleTarget = X.ConsiderEnfeeble()
 		if EnfeebleDesire > 0 then
 			bot:ActionQueue_UseAbilityOnEntity(enfeebleAbility, EnfeebleTarget)
-			return "cast"
+			return "cast", EnfeebleTarget
 		end
 		return true
 	end
@@ -41,7 +41,9 @@ function X.ConsiderStolenSpell(ability)
 				brainSapTargetType = brainSapAbility:GetTargetType()
 			end
 			if brainSapTargetType ~= nil and brainSapTargetType ~= brainSapAbility:GetTargetType() then
-				bot:ActionQueue_UseAbilityOnEntity(brainSapAbility, brainSapAbility:GetLocation())
+				-- The other target type (the Shard makes it a point spell): a location order on the target's spot, as in
+				-- hero_bane.lua. It was an entity order with the ability's own location.
+				bot:ActionQueue_UseAbilityOnLocation(brainSapAbility, BrainSapTarget:GetLocation())
 			else
 				bot:ActionQueue_UseAbilityOnEntity(brainSapAbility, BrainSapTarget)
 			end
@@ -55,7 +57,7 @@ function X.ConsiderStolenSpell(ability)
 		if FiendsGripDesire > 0 then
 			Fu.SetQueueToInvisible(bot)
 			bot:ActionQueue_UseAbilityOnEntity(fiendsGripAbility, FiendsGripTarget)
-			return "cast"
+			return "cast", FiendsGripTarget
 		end
 		return true
 	end
@@ -64,7 +66,7 @@ function X.ConsiderStolenSpell(ability)
 		NightmareDesire, NightmareTarget = X.ConsiderNightmare()
 		if NightmareDesire > 0 then
 			bot:ActionQueue_UseAbilityOnEntity(nightmareAbility, NightmareTarget)
-			return "cast"
+			return "cast", NightmareTarget
 		end
 		return true
 	end

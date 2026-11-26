@@ -22,7 +22,7 @@ function X.ConsiderStolenSpell(ability)
 		HitchARideDesire, HitchARideTarget = X.ConsiderHitchARide()
 		if HitchARideDesire > 0 then
 			bot:Action_UseAbilityOnEntity(hitchARideAbility, HitchARideTarget)
-			return "cast"
+			return "cast", HitchARideTarget
 		end
 		return true
 	end
@@ -58,7 +58,7 @@ function X.ConsiderStolenSpell(ability)
 		DoubleEdgeDesire, DoubleEdgeTarget = X.ConsiderDoubleEdge()
 		if DoubleEdgeDesire > 0 then
 			bot:Action_UseAbilityOnEntity(doubleEdgeAbility, DoubleEdgeTarget)
-			return "cast"
+			return "cast", DoubleEdgeTarget
 		end
 		return true
 	end

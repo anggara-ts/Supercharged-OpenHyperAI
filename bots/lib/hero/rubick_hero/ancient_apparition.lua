@@ -34,7 +34,7 @@ function X.ConsiderStolenSpell(ability)
 		if IceBlastDesire > 0 then
 			bot:Action_UseAbilityOnLocation(iceBlastAbility, IceBlastLocation)
 			iceBlastCastLocation = IceBlastLocation
-			return "cast"
+			return "cast", IceBlastLocation
 		end
 		return true
 	end
@@ -43,7 +43,7 @@ function X.ConsiderStolenSpell(ability)
 		IceVortexDesire, IceVortextLocation = X.ConsiderIceVortex()
 		if IceVortexDesire > 0 then
 			bot:Action_UseAbilityOnLocation(iceVortexAbility, IceVortextLocation)
-			return "cast"
+			return "cast", IceVortextLocation
 		end
 		return true
 	end
@@ -52,7 +52,7 @@ function X.ConsiderStolenSpell(ability)
 		ColdFeetDesire, ColdFeetTarget = X.ConsiderColdFeet()
 		if ColdFeetDesire > 0 then
 			bot:Action_UseAbilityOnEntity(coldFeetAbility, ColdFeetTarget)
-			return "cast"
+			return "cast", ColdFeetTarget
 		end
 		return true
 	end
@@ -61,7 +61,7 @@ function X.ConsiderStolenSpell(ability)
 		ChillingTouchDesire, ChillingTouchTarget = X.ConsiderChillingTouch()
 		if ChillingTouchDesire > 0 then
 			bot:Action_UseAbilityOnEntity(chillingTouchAbility, ChillingTouchTarget)
-			return "cast"
+			return "cast", ChillingTouchTarget
 		end
 		return true
 	end

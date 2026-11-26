@@ -32,7 +32,7 @@ function X.ConsiderStolenSpell(ability)
 		BurningBarrageDesire, BurningBarrageLocation = X.ConsiderBurningBarrage()
 		if BurningBarrageDesire > 0 then
 			bot:Action_UseAbilityOnLocation(burningBarrageAbility, BurningBarrageLocation)
-			return "cast"
+			return "cast", BurningBarrageLocation
 		end
 		return true
 	end
@@ -50,7 +50,7 @@ function X.ConsiderStolenSpell(ability)
 		DeathPactDesire, DeathPactTarget = X.ConsiderDeathPact()
 		if DeathPactDesire > 0 then
 			bot:Action_UseAbilityOnEntity(deathPactAbility, DeathPactTarget)
-			return "cast"
+			return "cast", DeathPactTarget
 		end
 		return true
 	end
@@ -59,7 +59,7 @@ function X.ConsiderStolenSpell(ability)
 		BurningArmyDesire, BurningArmyLocation = X.ConsiderBurningArmy()
 		if BurningArmyDesire > 0 then
 			bot:Action_UseAbilityOnLocation(burningArmyAbility, BurningArmyLocation)
-			return "cast"
+			return "cast", BurningArmyLocation
 		end
 		return true
 	end
@@ -246,8 +246,14 @@ function X.ConsiderBurningBarrage()
 	if not burningBarrageAbility:IsTrained() or not burningBarrageAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
-	local castRange = Fu.GetProperCastRange(false, bot, burningBarrageAbility:GetCastRange())
-	local radius = burningBarrageAbility:GetSpecialValueInt("radius")
+	-- Valve datafeed hero_id=56: Burning Barrage has no cast range and no "radius"; its arrows fly "range" (850),
+	-- "projectile_width" (200) wide. Both read 0, so it never cast (hero_clinkz.lua has the same fix).
+	local castRange = Fu.GetProperCastRange(
+		false,
+		bot,
+		math.max(burningBarrageAbility:GetCastRange(), burningBarrageAbility:GetSpecialValueInt("range"))
+	)
+	local radius = burningBarrageAbility:GetSpecialValueInt("projectile_width")
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidTarget(botTarget)

@@ -35,7 +35,7 @@ function X.ConsiderStolenSpell(ability)
 		UnstableConcoctionThrowDesire, UnstableConcoctionThrowTarget = X.ConsiderUnstableConcoctionThrow()
 		if UnstableConcoctionThrowDesire > 0 then
 			bot:Action_UseAbilityOnEntity(unstableConcoctionThrowAbility, UnstableConcoctionThrowTarget)
-			return "cast"
+			return "cast", UnstableConcoctionThrowTarget
 		end
 		return true
 	end
@@ -55,7 +55,7 @@ function X.ConsiderStolenSpell(ability)
 		if AcidSprayDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:Action_UseAbilityOnLocation(acidSprayAbility, AcidSprayLocation)
-			return "cast"
+			return "cast", AcidSprayLocation
 		end
 		return true
 	end
@@ -64,7 +64,7 @@ function X.ConsiderStolenSpell(ability)
 		BerserkPotionDesire, BerserkPotionTarget = X.ConsiderBerserkPotion()
 		if BerserkPotionDesire > 0 then
 			bot:Action_UseAbilityOnEntity(berserkPotionAbility, BerserkPotionTarget)
-			return "cast"
+			return "cast", BerserkPotionTarget
 		end
 		return true
 	end

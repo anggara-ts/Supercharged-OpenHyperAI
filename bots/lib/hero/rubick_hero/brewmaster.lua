@@ -17,7 +17,7 @@ function X.ConsiderStolenSpell(ability)
 		local CinderBrewDesire, CinderBrewLocation = X.ConsiderCinderBrew()
 		if CinderBrewDesire > 0 then
 			bot:Action_UseAbilityOnLocation(cinderBrewAbility, CinderBrewLocation)
-			return "cast"
+			return "cast", CinderBrewLocation
 		end
 		return true
 	end
