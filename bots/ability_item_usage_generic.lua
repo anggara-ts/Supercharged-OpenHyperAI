@@ -19,7 +19,6 @@ if not bot.frameProcessTime then
 	bot.frameProcessTime = 0.1
 end
 local team = GetTeam()
-local alwaysTrue = 10 == 10
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local LastHitOverlay = require(GetScriptDirectory() .. "/lib/systems/last_hit_overlay")
 -- Logs switched off once their feature works (the TP diag lines, game 029).
@@ -126,7 +125,7 @@ if BotBuild == nil then
 	log("[ERROR] BotBuild is nil for %s - hero file failed to load. No items/abilities.", botName)
 	return
 end
-local useDefaultItem = BotBuild["bDeafaultItem"]
+local useDefaultItem = BotBuild["bDefaultItem"]
 local abilityLevelUpList = BotBuild["sSkillList"]
 local radiantFountain = Vector(-6619, -6336, 384)
 local direFountain = Vector(6928, 6372, 392)
@@ -148,7 +147,7 @@ local function ReloadBotBuild(reason)
 	local loaded, build = pcall(dofile, GetScriptDirectory() .. "/heroes/" .. heroFile)
 	if loaded and build ~= nil then
 		BotBuild = build
-		useDefaultItem = BotBuild["bDeafaultItem"]
+		useDefaultItem = BotBuild["bDefaultItem"]
 		if build["sSkillList"] ~= nil and #build["sSkillList"] > 0 then
 			local fullSkillList = build["sSkillList"]
 			-- Drop what is already learned, by each ability's own level (#45). "Hero level minus unspent
@@ -194,7 +193,7 @@ local function CheckArdmHeroSwap()
 		end
 		if loaded and build ~= nil and build["sSkillList"] ~= nil and #build["sSkillList"] > 0 then
 			BotBuild = build
-			useDefaultItem = BotBuild["bDeafaultItem"]
+			useDefaultItem = BotBuild["bDefaultItem"]
 			abilityLevelUpList = BotBuild["sSkillList"]
 			log(
 				"[ARDM] Loaded bots/heroes for %s with %s skill entries, first: %s",
@@ -1785,7 +1784,6 @@ function Usage.IsEnemyHeroAroundSecretShop()
 end
 local stashItemSeenTime = {}
 local castRangeBonus = 0
-local unusedCounter = 0
 local enemyHasMonkeyKing = false
 local lastTreadsSwitchTime = -90
 local nearbyEnemies = {}
@@ -2297,7 +2295,6 @@ Usage.ConsiderItemDesire["item_arcane_boots"] = function(item)
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetAllyList(bot, radius)
 	if #allyHeroes >= 2 and bot:GetHealth() <= 120 and bot:WasRecentlyDamagedByAnyHero(3.0) then
 		castReason = "死前为队友用"
@@ -2912,7 +2909,6 @@ Usage.ConsiderItemDesire["item_blink"] = function(item)
 			and not botTarget:HasModifier("modifier_enigma_black_hole_pull")
 		then
 			local alliesNearTarget = Fu.GetAlliesNearLoc(botTarget:GetLocation(), 1200)
-			local nInRangeEnemy = Fu.GetEnemiesNearLoc(botTarget:GetLocation(), 1200)
 			local weAreStronger = Fu.WeAreStronger(bot, 1200)
 			local enemyCountNearTarget = 0
 			for _, playerId in pairs(GetTeamPlayers(GetOpposingTeam())) do
@@ -2972,7 +2968,6 @@ Usage.ConsiderItemDesire["item_cheese"] = function(item)
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
 	local missingHealth = bot:GetMaxHealth() - bot:GetHealth()
 	local hpRatio = bot:GetHealth() / bot:GetMaxHealth()
 	local missingMana = bot:GetMaxMana() - bot:GetMana()
@@ -3126,7 +3121,6 @@ Usage.ConsiderItemDesire["item_bottle"] = function(item)
 	if Fu.HasDamageOverTimeDebuff(bot) then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 400 + castRangeBonus
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -3211,7 +3205,6 @@ Usage.ConsiderItemDesire["item_crimson_guard"] = function(item)
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetAllyList(bot, castRange)
 	for _, ally in pairs(allyHeroes) do
 		if
@@ -3285,7 +3278,6 @@ Usage.ConsiderItemDesire["item_cyclone"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if bot:HasModifier("modifier_nyx_assassin_vendetta") then
 		return BOT_ACTION_DESIRE_NONE
 	end
@@ -3441,7 +3433,6 @@ Usage.ConsiderItemDesire["item_diffusal_blade"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if botMode == BOT_MODE_RETREAT then
 		for _, enemy in pairs(nearbyEnemies) do
 			if
@@ -3521,7 +3512,6 @@ Usage.ConsiderItemDesire["item_ethereal_blade"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)
@@ -3540,11 +3530,9 @@ Usage.ConsiderItemDesire["item_faerie_fire"] = function(item)
 	if bot:DistanceFromFountain() < 1800 then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 300 + castRangeBonus
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if
 		botMode == BOT_MODE_RETREAT
 		and bot:GetActiveModeDesire() >= BOT_MODE_DESIRE_HIGH
@@ -3788,7 +3776,6 @@ Usage.ConsiderItemDesire["item_force_staff"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if bot:HasModifier("modifier_nyx_assassin_vendetta") then
 		return BOT_ACTION_DESIRE_NONE
 	end
@@ -3893,11 +3880,9 @@ Usage.ConsiderItemDesire["item_force_staff"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_ghost"] = function(item)
-	local castRange = 800
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	-- A right-click carry is on me. Ghost now, before the 500 HP line below.
 	for _, enemy in pairs(nearbyEnemies) do
 		if
@@ -3929,7 +3914,6 @@ Usage.ConsiderItemDesire["item_ghost"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_crellas_crozier"] = function(item)
-	local castRange = 800
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -4644,7 +4628,6 @@ Usage.ConsiderItemDesire["item_hurricane_pike"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, pushRange, true, BOT_MODE_NONE)
 	if botMode == BOT_MODE_RETREAT and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_HIGH then
 		for _, enemy in pairs(nearbyEnemies) do
 			if Fu.IsInRange(bot, enemy, pushRange) and Fu.CanCastOnNonMagicImmune(enemy) then
@@ -4736,7 +4719,6 @@ Usage.ConsiderItemDesire["item_invis_sword"] = function(item)
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
 	if Fu.IsRetreating(bot) and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_MODERATE and #nearbyEnemies > 0 then
 		hEffectTarget = bot
 		castReason = "撤退了"
@@ -4874,8 +4856,6 @@ Usage.ConsiderItemDesire["item_manta"] = function(item)
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
-	local attackingAllies = Fu.GetNearbyHeroes(bot, 1000, false, BOT_MODE_ATTACK)
 	local enemyHeroesInRange = Fu.GetNearbyHeroes(bot, 1000, true, BOT_MODE_NONE)
 	local enemyTowers = bot:GetNearbyTowers(800, true)
 	local enemyBarracks = bot:GetNearbyBarracks(600, true)
@@ -4949,7 +4929,6 @@ Usage.ConsiderItemDesire["item_mjollnir"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange + 100, false, BOT_MODE_NONE)
 	if Fu.IsInTeamFight(bot, 900) then
 		local bestAlly = nil
@@ -5070,7 +5049,6 @@ Usage.ConsiderItemDesire["item_mask_of_madness"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_medallion_of_courage"] = function(item)
-	local castRange = 900 + castRangeBonus
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -5135,7 +5113,6 @@ Usage.ConsiderItemDesire["item_moon_shard"] = function(item)
 	if bot:GetNetWorth() < 18000 or Utils.CountBackpackEmptySpace(bot) >= 3 then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 2000
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -5180,7 +5157,6 @@ Usage.ConsiderItemDesire["item_nullifier"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)
@@ -5261,11 +5237,9 @@ Usage.ConsiderItemDesire["item_phase_boots"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_pipe"] = function(item)
-	local castRange = 1000
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 	for _, ally in pairs(allyHeroes) do
 		if
@@ -5347,7 +5321,6 @@ Usage.ConsiderItemDesire["item_quelling_blade"] = function(item)
 	local castType = "tree"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if bot:HasModifier("modifier_furion_sprout_damage") then
 		local sproutTrees = bot:GetNearbyTrees(280)
 		if
@@ -5499,11 +5472,9 @@ Usage.ConsiderItemDesire["item_refresher_shard"] = function(item)
 	return Usage.ConsiderItemDesire["item_refresher"](item)
 end
 Usage.ConsiderItemDesire["item_ultimate_scepter_roshan"] = function(item)
-	local castRange = 300
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if item:IsFullyCastable() then
 		hEffectTarget = bot
 		castReason = "吃A杖"
@@ -5512,11 +5483,9 @@ Usage.ConsiderItemDesire["item_ultimate_scepter_roshan"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_aghanims_shard_roshan"] = function(item)
-	local castRange = 300
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if item:IsFullyCastable() then
 		hEffectTarget = bot
 		castReason = "吃魔晶"
@@ -5756,11 +5725,9 @@ Usage.ConsiderItemDesire["item_shivas_guard"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_silver_edge"] = function(item)
-	local castRange = 1600
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if
 		Fu.IsGoingOnSomeone(bot)
 		and not bot:HasModifier("modifier_slardar_amplify_damage")
@@ -5819,7 +5786,6 @@ Usage.ConsiderItemDesire["item_sphere"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE)
 	-- (#134) Incoming projectiles by time to impact (was: any unit-target spell projectile within 800). Skillshots:
 	-- Linken's blocks targeted spells only (Valve item text), so linear projectiles are not answered here.
@@ -6074,7 +6040,6 @@ Usage.ConsiderItemDesire["item_essence_distiller"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)
@@ -6134,7 +6099,6 @@ Usage.ConsiderItemDesire["item_tango"] = function(item)
 	if bot._lastTangoUseTime and DotaTime() - bot._lastTangoUseTime < 16 then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 300 + castRangeBonus
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -6182,7 +6146,6 @@ Usage.ConsiderItemDesire["item_tango_single"] = function(item)
 	if bot._lastTangoUseTime and DotaTime() - bot._lastTangoUseTime < 16 then
 		return 0
 	end
-	local castRange = 300 + castRangeBonus
 	local castType = "tree"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -7498,7 +7461,6 @@ Usage.ConsiderItemDesire["item_urn_of_shadows"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)
@@ -7570,7 +7532,6 @@ Usage.ConsiderItemDesire["item_veil_of_discord"] = function(item)
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
-local unusedSentryCounter = 0
 Usage.ConsiderItemDesire["item_ward_sentry"] = function(item)
 	do
 		local desire, spot, kind, why = Usage.ConsiderSentryReveal(item, false)
@@ -7583,7 +7544,6 @@ Usage.ConsiderItemDesire["item_ward_sentry"] = function(item)
 	local hEffectTarget = nil
 	local castReason = nil
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)
-	local allyTowers = bot:GetNearbyTowers(1200, false)
 	if Fu.IsGoingOnSomeone(bot) and #enemyHeroes >= 1 then
 		local chosenEnemy = nil
 		for _, enemy in pairs(enemyHeroes) do
@@ -7626,11 +7586,9 @@ Usage.ConsiderItemDesire["item_essence_ring"] = function(item)
 	if bot:DistanceFromFountain() < 1000 then
 		return 0
 	end
-	local castRange = 600
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, 1400, true, BOT_MODE_NONE)
 	if bot:GetMaxHealth() - bot:GetHealth() > 600 and Fu.IsAllowedToSpam(bot, 200) then
 		hEffectTarget = bot
 		castReason = "治疗自己"
@@ -7808,7 +7766,6 @@ Usage.ConsiderItemDesire["item_flicker"] = function(item)
 	if bot:DistanceFromFountain() < 600 or bot:IsRooted() then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 600
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -7843,7 +7800,6 @@ Usage.ConsiderItemDesire["item_woodland_striders"] = function(item)
 	if bot:DistanceFromFountain() < 600 then
 		return 0
 	end
-	local castRange = 800
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
@@ -7899,11 +7855,9 @@ Usage.ConsiderItemDesire["item_fallen_sky"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_ex_machina"] = function(item)
-	local castRange = 800
 	local castType = "none"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if Fu.IsValidHero(botTarget) then
 			local inventorySlots = { 0, 1, 2, 3, 4, 5 }
@@ -8016,7 +7970,6 @@ Usage.ConsiderItemDesire["item_paintball"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if
 		Fu.IsValidHero(botTarget)
 		and Fu.CanCastOnNonMagicImmune(botTarget)
@@ -8124,11 +8077,9 @@ Usage.ConsiderItemDesire["item_boots_of_bearing"] = function(item)
 	return Usage.ConsiderItemDesire["item_ancient_janggo"](item)
 end
 Usage.ConsiderItemDesire["item_new"] = function(item)
-	local castRange = 300 + castRangeBonus
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if Fu.IsValidHero(botTarget) then
 			hEffectTarget = botTarget
@@ -8159,7 +8110,6 @@ Usage.ConsiderItemDesire["item_pavise"] = function(item)
 	local castType = "unit"
 	local hEffectTarget = nil
 	local castReason = nil
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange, false, BOT_MODE_NONE)
 	local hpRatio = bot:OriginalGetHealth() / bot:OriginalGetMaxHealth()
 	for _, ally in pairs(allyHeroes) do
@@ -9035,7 +8985,6 @@ Usage.ConsiderItemDesire["item_unstable_wand"] = function(item)
 end
 Usage.ConsiderItemDesire["item_seeds_of_serenity"] = function(item)
 	local radius = 400
-	local nInRangeEnemy = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
 	local enemyTowers = bot:GetNearbyTowers(700, true)
 	if Fu.IsFarming(bot) then
 		if Fu.IsAttacking(bot) then
@@ -9269,7 +9218,6 @@ local doubloonNextSwap = "health"
 Usage.ConsiderItemDesire["item_doubloon"] = function(item)
 	local nInRangeEnemy = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1000)
 	if Fu.IsGoingOnSomeone(bot) then
-		local allyHeroes = Fu.GetNearbyHeroes(bot, 1000, false, BOT_MODE_NONE)
 		if
 			Fu.IsValidTarget(botTarget)
 			and Fu.IsInRange(bot, botTarget, 1000)
@@ -9299,7 +9247,6 @@ Usage.ConsiderItemDesire["item_doubloon"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_ninja_gear"] = function(item)
-	local castRange = 1600
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidTarget(botTarget)
@@ -9378,7 +9325,6 @@ Usage.ConsiderItemDesire["item_havoc_hammer"] = function(item)
 		end
 	end
 	if Fu.IsGoingOnSomeone(bot) then
-		local allyHeroes = Fu.GetNearbyHeroes(bot, 1000, false, BOT_MODE_NONE)
 		if
 			Fu.IsValidTarget(botTarget)
 			and Fu.CanCastOnNonMagicImmune(botTarget)
@@ -9407,7 +9353,6 @@ end
 Usage.ConsiderItemDesire["item_martyrs_plate"] = function(item)
 	local radius = 900
 	if Fu.IsInTeamFight(bot) then
-		local allyHeroes = Fu.GetAlliesNearLoc(bot:GetLocation(), radius)
 		local nInRangeEnemy = Fu.GetEnemiesNearLoc(bot:GetLocation(), radius)
 		if nInRangeEnemy ~= nil and #nInRangeEnemy >= 2 then
 			if
@@ -9557,8 +9502,6 @@ Usage.ConsiderItemDesire["item_seer_stone"] = function(item)
 	return BOT_ACTION_DESIRE_NONE
 end
 Usage.ConsiderItemDesire["item_demonicon"] = function(item)
-	local castRange = 750
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsPushing(bot) then
 		local enemyTowers = bot:GetNearbyTowers(900, true)
 		local allyLaneCreeps = bot:GetNearbyLaneCreeps(900, false)
@@ -10216,7 +10159,6 @@ end
 Usage.ConsiderItemDesire["item_book_of_shadows"] = function(item)
 	local castRange = 700 + castRangeBonus
 	local allyHeroes = Fu.GetAlliesNearLoc(bot:GetLocation(), castRange)
-	local nInRangeEnemy = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
 	for _, ally in pairs(allyHeroes) do
 		if Fu.IsValidHero(ally) and Fu.CanCastOnNonMagicImmune(ally) and ally:WasRecentlyDamagedByAnyHero(3) then
 			local enemiesNearAlly = Fu.GetNearbyHeroes(ally, 1200, true, BOT_MODE_NONE)
@@ -12018,7 +11960,7 @@ function AbilityLevelUpThink()
 		LevelUpAbilities()
 	end
 end
-function Usage.SetAbilityItemList(enableDefaultAbility, enableDefaultItem, levelUpList)
+function Usage.SetAbilityItemList(enableDefaultItem, levelUpList)
 	useDefaultItem = enableDefaultItem
 	abilityLevelUpList = levelUpList
 end
