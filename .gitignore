@@ -18,3 +18,5 @@ bots/customize/fretbots.lua
 bots/customize/build_info.lua
 # Local secrets for the tools (API tokens). Template: .env.example
 .env
+# Per-issue checkouts (AGENTS.md). One git worktree per issue: .worktree/oha-issue-<N>
+.worktree/

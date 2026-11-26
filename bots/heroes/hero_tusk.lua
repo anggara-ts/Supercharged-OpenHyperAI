@@ -129,7 +129,6 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Tusk is invulnerable inside his snowball; spell logic must still run to launch it.
 X["bThinkWhileInvulnerable"] = true
 X["bDeafaultItem"] = false
