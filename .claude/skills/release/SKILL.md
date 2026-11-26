@@ -58,7 +58,7 @@ in one line each. Stop here unless publishing was asked for.
 - No open PR the maintainer named as part of this release is still open.
 
 ## 6. Release PR
-- Branch `chore/release-vX.Y` from `origin/main` (own worktree; never commit on main). Bump the version files
+- Branch `chore/release-vX.Y` from `origin/main` in `.worktree/release-vX.Y` (never commit on main). Bump the version files
   (step 1: `number` and `release` in `bots/customize/version.lua`, `bots/lib/systems/version.lua`), signed commit
   `chore(release): vX.Y`, push, PR with the notes as description, CI green, squash-merge (`gh pr merge --squash --delete-branch`).
 
