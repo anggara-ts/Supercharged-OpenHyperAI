@@ -1692,12 +1692,25 @@ function GetDesireHelper()
 		if #laneCreeps > 0 then
 			local enemiesNearCreeps = Fu.GetEnemiesNearLoc(Fu.GetCenterOfUnits(laneCreeps), 1600)
 			if #enemiesNearCreeps == 0 then
-				bot.farmLocation = Fu.GetCenterOfUnits(laneCreeps)
-				-- The kept wave arrived (the keep's tick marks it), or another wave was allowed: the keep is done.
+				-- The no-alternative keep (#227): its wave walked past the wait point under our tower (farmed: the
+				-- keep did its job, this path goes on farming it), or another enemy wave was allowed (alt). Our own
+				-- creeps walking through the cover do not end a keep that has not seen its wave yet.
+				local ownCreeps = laneCreeps[1] ~= nil and laneCreeps[1]:GetTeam() == GetTeam()
 				if noAltKeep ~= nil and TickNoAltKeep(availableCamps) ~= nil and NoAltKeepCreep() == nil then
-					EndNoAltKeep("alt")
+					if noAltKeep.creepsAt ~= nil then
+						EndNoAltKeep("farmed")
+					elseif not ownCreeps then
+						EndNoAltKeep("alt")
+					end
 				end
-				return BOT_MODE_DESIRE_VERYHIGH
+				if noAltKeep == nil or not ownCreeps then
+					bot.farmLocation = Fu.GetCenterOfUnits(laneCreeps)
+					return BOT_MODE_DESIRE_VERYHIGH
+				end
+				laneCreeps = {}
+			elseif noAltKeep ~= nil then
+				-- An enemy hero near the wave next to the bot: the farm leaves it, and the keep with it.
+				EndNoAltKeep("danger")
 			end
 		end
 		if #laneCreeps == 0 then
