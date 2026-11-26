@@ -126,11 +126,11 @@ end
 -- was pushing, and attack mode walked him back under it once the hold was gone.
 --   pushLaneTower    the hold tower is in the lane the bot pushes; alliesAtTower: other allied heroes at it
 --   why              the stop's reason
---   mustRun          the bot has to run now (TowerHoldRun: inside the zone, or the hold is latched). A push pauses the
---                    hold only while the bot is out of the zone: a push that walks it back in ends the pause, and the
---                    hold runs (a re-entry: TowerHoldRun latches it). Game 087, t=1030, Zeus at Radiant's mid T1: the
---                    push walked him from 1099 into the zone during the pause, then dropped, and the hold resumed with
---                    him at 882 (zone 900) in team roam. nil: the old rule (a push always pauses).
+--   mustRun          the hold is latched (TowerHoldRun: a re-entry): a push no longer pauses it. An unlatched hold
+--                    keeps the pause in any zone (a push steps out of tower aggro itself; game 064, Alchemist). A push
+--                    that walked the bot back in and then dropped leaves it inside the zone at the resume: that is the
+--                    re-entry (game 087, t=1030, Zeus at Radiant's mid T1, resumed at 882 of 900 in team roam), and
+--                    the latch keeps the next push from pausing the run. nil: the old rule (a push always pauses).
 -- Returns "expire" (drop the hold), "siege" (drop it: team siege), "pause", "resume" (first check after a pause)
 -- or "keep".
 DiveRules.SIEGE_ALLIES = 2

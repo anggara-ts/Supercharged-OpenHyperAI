@@ -356,9 +356,9 @@ end)
 -- with the edge margin (zone 900). Returns the state and whether the bot runs.
 local function holdStep(R, hold, now, dist, pushing)
 	local run, inside, entered = R.TowerHoldRun(dist, 700, hold.inside, nil, hold.latched)
-	local state = R.TowerHoldState(now, hold.untilTime, true, pushing, hold.paused, false, 0, hold.why, run)
+	local state = R.TowerHoldState(now, hold.untilTime, true, pushing, hold.paused, false, 0, hold.why, hold.latched)
 	if state == "pause" then
-		hold.inside, hold.paused = inside, true
+		hold.paused = true
 		return state, false
 	end
 	hold.paused, hold.inside = nil, inside
@@ -401,7 +401,7 @@ T.test("tower hold: a re-entry latches the run, no flip at the edge (game 087, Z
 	T.eq(R.TowerHoldEnd({ expired = true, outOfZone = true, age = 9.1 }), "expire", "9s over, out: ends")
 end)
 
-T.test("tower hold: a push pauses it only out of the zone (game 087, Zeus at Radiant's mid T1, t=1027-1037)", function()
+T.test("tower hold: a resume inside the zone after a push latches (game 087, Zeus at Radiant's mid T1)", function()
 	local R = rules()
 	local hold = { inside = true, untilTime = 1027 + R.HOLD_SECONDS, why = "not-killable" }
 	-- t=1027 stop at 478: run out.
@@ -412,11 +412,14 @@ T.test("tower hold: a push pauses it only out of the zone (game 087, Zeus at Rad
 	-- t=1030 push at 1099: pause.
 	state = holdStep(R, hold, 1030.0, 1099, true)
 	T.eq(state, "pause", "t=1030 push at 1099: pause")
-	-- The push walks him into the zone: the pause ends at the edge (it used to go on until the push dropped and team
-	-- roam had him at 882; the hold then resumed inside the zone).
-	state, run = holdStep(R, hold, 1030.3, 895, true)
-	T.eq(state, "resume", "push inside the zone: resume")
-	T.eq(run, true, "and run")
+	-- The push walks him into the zone: still paused (a push steps out of tower aggro itself; game 064, Alchemist).
+	state = holdStep(R, hold, 1030.3, 860, true)
+	T.eq(state, "pause", "push inside the zone: still paused")
+	T.eq(hold.latched, nil, "no latch during the pause")
+	-- The push drops (push-gate cannot-push), team roam has him at 882: the resume is a re-entry and latches.
+	state, run = holdStep(R, hold, 1030.6, 882, false)
+	T.eq(state, "resume", "team roam: resume")
+	T.eq(run, true, "882 of 900: run")
 	T.eq(hold.latched, true, "latched")
 	-- t=1031 push 0.90 again, team roam (help-core) at 1033: the latched hold keeps running, no new pause.
 	state, run = holdStep(R, hold, 1031, 1080, true)
@@ -430,6 +433,6 @@ T.test("tower hold: a push pauses it only out of the zone (game 087, Zeus at Rad
 	T.eq(R.TowerHoldState(1031, hold.untilTime, true, true, nil, true, 4, "no-target", true), "siege", "siege")
 	-- The retreat file runs the hold first and passes it to the state, and latches on a re-entry.
 	local src = T.read("bots/mode_retreat_generic.lua")
-	T.ok(string.find(src, "hold.why,%s+run%s+%)") ~= nil, "TowerHoldState gets the run")
+	T.ok(string.find(src, "hold.why,%s+hold.latched == true%s+%)") ~= nil, "TowerHoldState gets the latch")
 	T.ok(string.find(src, "hold.latched = true", 1, true) ~= nil, "re-entry latches")
 end)

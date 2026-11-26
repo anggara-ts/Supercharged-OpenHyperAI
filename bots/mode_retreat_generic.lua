@@ -1198,7 +1198,7 @@ local function TowerHoldCheck()
 		pcall(
 			print,
 			string.format(
-				"[SHy-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d vis=%d alive=%d latched=%d",
+				"[SHy-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d vis=%d alive=%d latched=%d runs=%d",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				why,
@@ -1215,7 +1215,8 @@ local function TowerHoldCheck()
 				towerNull and 1 or 0,
 				towerSeen and 1 or 0,
 				towerAlive and 1 or 0,
-				hold.latched and 1 or 0
+				hold.latched and 1 or 0,
+				hold.runs or 0
 			)
 		)
 	end
@@ -1260,8 +1261,8 @@ local function TowerHoldCheck()
 	end
 	-- A push pauses the hold, it doesn't end it (DiveRules.TowerHoldState; game 064, 12:24-12:31, Alchemist).
 	-- The end is TowerHoldEnd's (above): a hold past its time with the bot still in the zone goes on here.
-	-- Only while the bot is out of the zone (mustRun): a push that walks it back in ends the pause, and the re-entry
-	-- latches the hold (DiveRules.TowerHoldRun; game 087, Zeus at Radiant's bottom and mid T1).
+	-- A re-entry latches the hold (DiveRules.TowerHoldRun; game 087, Zeus at Radiant's bottom and mid T1), and a push
+	-- doesn't pause a latched hold.
 	local run, inside, entered = DiveRules.TowerHoldRun(dist, hold.range, hold.inside, hold.margin, hold.latched)
 	local zone = hold.range + (hold.margin or DiveRules.HOLD_MARGIN)
 	local state = DiveRules.TowerHoldState(
@@ -1273,7 +1274,7 @@ local function TowerHoldCheck()
 		pushLaneTower,
 		alliesAtTower,
 		hold.why,
-		run
+		hold.latched == true
 	)
 	if state == "siege" then
 		pcall(
@@ -1335,8 +1336,8 @@ local function TowerHoldCheck()
 		)
 	end
 	if state == "pause" then
-		-- Out of the zone here (a push pauses only then): the run is over.
-		hold.inside, hold.running = inside, nil
+		-- "inside" (and a run in progress) stay as they were: a push that walks the bot in after a run and drops makes
+		-- the resume a re-entry.
 		if not hold.paused then
 			hold.paused = true
 			-- The time left now (at least 2s, once per hold) is what the hold gets back when the push ends
@@ -1351,8 +1352,8 @@ local function TowerHoldCheck()
 	if entered then
 		hold.latched = true
 	end
-	-- inZone=1 / depth: a push that walked the bot back into the zone ends the pause right at the edge (game 087,
-	-- t=1030: Zeus resumed 18 inside it, at 882 of 900, after team roam took over from a dropped push).
+	-- inZone / depth (zone minus dist): game 087, t=1030, Zeus resumed 18 inside the zone (882 of 900) after team
+	-- roam took over from a dropped push.
 	if state == "resume" then
 		logChange("resume")
 	end
@@ -1364,6 +1365,7 @@ local function TowerHoldCheck()
 	-- for the stop's own run, reentry when a mode walked the bot back into the zone (that latches the hold).
 	if not hold.running then
 		hold.running = true
+		hold.runs = (hold.runs or 0) + 1
 		pcall(
 			print,
 			string.format(
