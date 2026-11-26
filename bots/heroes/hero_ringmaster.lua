@@ -4,6 +4,7 @@ local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
+local RoamStats = require(GetScriptDirectory() .. "/lib/systems/roam_stats")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
 local sRole = Fu.Item.GetRoleItemsBuyList(bot)
@@ -98,8 +99,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -125,8 +125,7 @@ local whoopeeCushionAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_whoopee_cushion"), "ringmaster_whoopee_cushion", "ringmaster")
 local unicycleAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_summon_unicycle"), "ringmaster_summon_unicycle", "ringmaster")
-local tameTheBeastsDesire, tameTheBeastsLocation
-local tameTheBeastsCrackDesire
+local tameTheBeastsDesire, tameTheBeastsLocation, tameTheBeastsWhy, tameTheBeastsTarget
 local escapeActDesire, escapeActTarget
 local impalementArtsDesire, impalementArtsLocation
 local spotlightDesire, spotlightLocation
@@ -134,14 +133,14 @@ local wheelOfWonderDesire, wheelOfWonderLocation
 local funhouseMirrorDesire
 local strongmanTonicDesire, strongmanTonicTarget
 local whoopeeCushionDesire
+local whoopeeCushionWhy = "fight"
 local unicycleDesire
 -- Weighted Pie and Crystal Ball souvenirs (#49): never cast before.
 local weightedPieAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_weighted_pie"), "ringmaster_weighted_pie", "ringmaster")
 local crystalBallAbility =
 	SafeAbility(bot:GetAbilityByName("ringmaster_crystal_ball"), "ringmaster_crystal_ball", "ringmaster")
-local whipCastTime
-local botTarget, botLevel
+local botTarget
 local isEngaging
 local isRetreating
 local isAttacking
@@ -180,7 +179,20 @@ function X.LogSouvenirState()
 end
 function X.SkillsComplement()
 	pcall(X.LogSouvenirState)
-	if Fu.CanNotUseAbility(bot) or bot:IsCastingAbility() or bot:IsChanneling() then
+	-- The Wheel and whip trackers run before the channel check: the whip is a channel, and its crack is decided here.
+	pcall(X.WheelTick)
+	local okW, whipBusy = pcall(X.WhipTick)
+	if okW and whipBusy then
+		-- The last-will check runs on every early return, so its skip line says why no Wheel went out.
+		pcall(X.LastWillWheel, "whip")
+		return
+	end
+	if Fu.CanNotUseAbility(bot) then
+		pcall(X.LastWillWheel, "disabled")
+		return
+	end
+	if bot:IsCastingAbility() or bot:IsChanneling() then
+		pcall(X.LastWillWheel, "casting")
 		return
 	end
 	local abilityContext = AbilityContext.Build(bot)
@@ -189,39 +201,55 @@ function X.SkillsComplement()
 	isAttacking = Fu.IsAttacking(bot)
 	hpRatio = abilityContext.hp
 	botTarget = abilityContext.target
-	botLevel = bot:GetLevel()
+	local okL, lastWill = pcall(X.LastWillWheel)
+	if okL and lastWill then
+		return
+	end
+	-- A whip or Wheel decided earlier and waiting for the outpost hold (X.HoldFirst).
+	local okH, held = pcall(X.HeldOrderTick)
+	if okH and held then
+		return
+	end
 	whoopeeCushionDesire = X.ConsiderWhoopeeCushion()
 	if whoopeeCushionDesire > 0 then
-		X.LogSouvenir("whoopee_cushion", "cast")
+		X.LogSouvenir("whoopee_cushion", "cast-" .. whoopeeCushionWhy)
 		bot:Action_UseAbility(whoopeeCushionAbility)
+		return
+	end
+	local okC, comboActed = pcall(X.WheelTameCombo)
+	if okC and comboActed then
 		return
 	end
 	wheelOfWonderDesire, wheelOfWonderLocation = X.ConsiderWheelOfWonder()
 	if wheelOfWonderDesire > 0 then
+		-- Game 085: 4 team-fight Wheels were ordered and never went out (dropped=1), 3 of them 11-21s before a death.
+		if X.HoldFirst({ kind = "wheel", location = wheelOfWonderLocation }) then
+			return
+		end
+		X.WheelOrdered("teamfight")
+		bot._castHoldUntil = DotaTime() + 1.0
 		Fu.SetQueuePtToINT(bot, false)
 		bot:ActionQueue_UseAbilityOnLocation(wheelOfWonderAbility, wheelOfWonderLocation)
 		return
 	end
-	tameTheBeastsCrackDesire = X.ConsiderTameTheBeastsCrack()
-	if tameTheBeastsCrackDesire > 0 then
-		bot:Action_UseAbility(tameTheBeastsCrackAbility)
-		bot.whip_to_cancel = false
-		bot.whip_to_kill = false
-		bot.whip_to_kill_target = nil
-		bot.whip_to_engage = false
-		bot.whip_to_retreat = false
-		bot.whip_to_push = false
-		bot.whip_to_defend = false
-		bot.whip_to_farm = false
-		bot.whip_to_miniboss = false
-		bot.whip_to_aoe_kill = false
-		return
-	end
-	tameTheBeastsDesire, tameTheBeastsLocation = X.ConsiderTameTheBeasts()
+	tameTheBeastsDesire, tameTheBeastsLocation, tameTheBeastsWhy, tameTheBeastsTarget = X.ConsiderTameTheBeasts()
 	if tameTheBeastsDesire > 0 then
+		-- A teleport-cancel whip cracks at once: nothing to hold, and the teleport does not wait.
+		if
+			tameTheBeastsWhy ~= "cancel"
+			and X.HoldFirst({
+				kind = "whip",
+				why = tameTheBeastsWhy,
+				location = tameTheBeastsLocation,
+				target = tameTheBeastsTarget,
+				targetAt = Fu.IsValidHero(tameTheBeastsTarget) and tameTheBeastsTarget:GetLocation() or nil,
+			})
+		then
+			return
+		end
+		X.WhipOrdered(tameTheBeastsWhy, tameTheBeastsLocation, tameTheBeastsTarget)
 		Fu.SetQueuePtToINT(bot, true)
 		bot:ActionQueue_UseAbilityOnLocation(tameTheBeastsAbility, tameTheBeastsLocation)
-		whipCastTime = DotaTime()
 		return
 	end
 	escapeActDesire, escapeActTarget = X.ConsiderEscapeAct()
@@ -345,6 +373,106 @@ function X.ConsiderCrystalBall()
 	end
 	return nil
 end
+-- Wheel then Tame (#49, maintainer's idea). Datafeed: Tame the Beasts makes whipped enemies "flee in fear from
+-- Ringmaster" (up to 1.2s with a full 1s channel, cast range 700); the Wheel of Wonder rolls to a point (cast range
+-- 1400, min range 700, speed 1200) and mesmerizes heroes who face it for 0.5s. The fear is shorter than the roll, so
+-- the Wheel goes first, beyond the group on the line from Ringmaster, then the whip drives them into it.
+function X.WheelTameCombo()
+	local now = DotaTime()
+	local combo = bot._wheelTame
+	if combo ~= nil then
+		-- Step 2 waits until the Wheel really went out (its cooldown started, X.WheelTick): game 084 ordered the whip
+		-- in the same second as the Wheel, and a new order before the Wheel's cast point replaces the Wheel order.
+		if bot._wheelPending ~= nil and now - combo.at <= 1.0 then
+			return true
+		end
+		local wheelCastAt = bot._wheelCastAt
+		if wheelCastAt == nil or wheelCastAt < combo.at or now - wheelCastAt > 1.5 then
+			bot._wheelTame = nil
+			pcall(
+				print,
+				string.format(
+					"[SHy-RINGMASTER] t=%.0f ringmaster wheel-tame step=dropped wheel=%s",
+					now,
+					(wheelCastAt ~= nil and wheelCastAt >= combo.at) and "late" or "not-cast"
+				)
+			)
+			return false
+		end
+		-- Step 2: the Wheel is out; whip the group within 1.5s. The whip keeps its full channel (X.WhipCrackDecision).
+		if Fu.CanCastAbility(tameTheBeastsAbility) then
+			local enemies = Fu.GetEnemiesNearLoc(combo.center, 650)
+			if #enemies >= 1 and GetUnitToLocationDistance(bot, combo.center) <= 750 then
+				bot._wheelTame = nil
+				local whipPoint = Fu.GetCenterOfUnits(enemies)
+				pcall(
+					print,
+					string.format(
+						"[SHy-RINGMASTER] t=%.0f ringmaster wheel-tame step=tame enemies=%d after-wheel=%.2f",
+						now,
+						#enemies,
+						now - wheelCastAt
+					)
+				)
+				X.WhipOrdered("combo", whipPoint, nil)
+				bot:Action_UseAbilityOnLocation(tameTheBeastsAbility, whipPoint)
+				return true
+			end
+		end
+		return false
+	end
+	-- Step 1: a group of 2+ enemy heroes close together, both spells ready, mana for both, and not about to die
+	-- (game 084 t=1132: the combo started at 18% HP inside five enemies and Ringmaster died in the same second).
+	if not isEngaging or not Fu.CanCastAbility(wheelOfWonderAbility) or not Fu.CanCastAbility(tameTheBeastsAbility) then
+		return false
+	end
+	if hpRatio < 0.35 then
+		return false
+	end
+	if bot:GetMana() < wheelOfWonderAbility:GetManaCost() + tameTheBeastsAbility:GetManaCost() then
+		return false
+	end
+	local enemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1000)
+	if #enemies < 2 then
+		return false
+	end
+	local center = Fu.GetCenterOfUnits(enemies)
+	if #Fu.GetEnemiesNearLoc(center, 600) < 2 then
+		return false
+	end
+	local dist = GetUnitToLocationDistance(bot, center)
+	if dist > 700 then
+		return false
+	end
+	-- Game 085: all 3 combo whips were cut at 0.07-0.13s in attack mode. Hold first; the hold lasts to the whip.
+	if X.HoldFirst({ kind = "combo", center = center }) then
+		return true
+	end
+	X.ComboWheelGo(center, "")
+	return true
+end
+-- Combo step 1: the Wheel beyond the group on the line from him (700-1400).
+function X.ComboWheelGo(center, extra)
+	local now = DotaTime()
+	local dist = GetUnitToLocationDistance(bot, center)
+	local wheelDist = math.max(700, math.min(1400, dist + 400))
+	local wheelPoint = Fu.VectorTowards(bot:GetLocation(), center, wheelDist)
+	bot._wheelTame = { at = now, center = center }
+	X.WheelOrdered("combo", extra)
+	-- Hold the mode Thinks and items through the Wheel's turn and cast point (released by X.WheelTick).
+	bot._castHoldUntil = now + 0.6
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster wheel-tame step=wheel enemies=%d wheel-dist=%d group-dist=%d",
+			now,
+			#Fu.GetEnemiesNearLoc(center, 600),
+			wheelDist,
+			dist
+		)
+	)
+	bot:Action_UseAbilityOnLocation(wheelOfWonderAbility, wheelPoint)
+end
 function X.ConsiderTameTheBeasts()
 	if not Fu.CanCastAbility(tameTheBeastsAbility) then
 		return BOT_ACTION_DESIRE_NONE, 0
@@ -365,8 +493,7 @@ function X.ConsiderTameTheBeasts()
 			and Fu.CanCastOnNonMagicImmune(enemyHero)
 		then
 			if enemyHero:HasModifier("modifier_teleporting") then
-				bot.whip_to_cancel = true
-				return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation()
+				return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation(), "cancel", enemyHero
 			end
 			if
 				Fu.CanKillTarget(enemyHero, maxDamage, DAMAGE_TYPE_MAGICAL)
@@ -375,9 +502,7 @@ function X.ConsiderTameTheBeasts()
 				and not enemyHero:HasModifier("modifier_necrolyte_reapers_scythe")
 				and not enemyHero:HasModifier("modifier_oracle_false_promise_timer")
 			then
-				bot.whip_to_kill = true
-				bot.whip_to_kill_target = enemyHero
-				return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation()
+				return BOT_ACTION_DESIRE_HIGH, enemyHero:GetLocation(), "kill", enemyHero
 			end
 		end
 	end
@@ -397,8 +522,7 @@ function X.ConsiderTameTheBeasts()
 			if aoeLocation.count > 1 then
 				targetLocation = aoeLocation.targetloc
 			end
-			bot.whip_to_engage = true
-			return BOT_ACTION_DESIRE_HIGH, targetLocation
+			return BOT_ACTION_DESIRE_HIGH, targetLocation, "engage", botTarget
 		end
 	end
 	if isRetreating and not Fu.IsRealInvisible(bot) then
@@ -417,8 +541,7 @@ function X.ConsiderTameTheBeasts()
 				if aoeLocation.count > 1 then
 					targetLocation = aoeLocation.targetloc
 				end
-				bot.whip_to_retreat = true
-				return BOT_ACTION_DESIRE_HIGH, targetLocation
+				return BOT_ACTION_DESIRE_HIGH, targetLocation, "retreat", enemyHero
 			end
 		end
 	end
@@ -435,15 +558,13 @@ function X.ConsiderTameTheBeasts()
 			if aoeLocation.count >= 4 then
 				targetLocation = aoeLocation.targetloc
 			end
-			bot.whip_to_push = true
-			return BOT_ACTION_DESIRE_HIGH, targetLocation
+			return BOT_ACTION_DESIRE_HIGH, targetLocation, "push", nil
 		end
 	end
 	if Fu.IsDefending(bot) then
 		local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, endWidth, 0, 0)
 		if aoeLocation.count >= 2 then
-			bot.whip_to_defend = true
-			return BOT_ACTION_DESIRE_HIGH, aoeLocation.targetloc
+			return BOT_ACTION_DESIRE_HIGH, aoeLocation.targetloc, "defend", nil
 		end
 		if
 			#laneCreeps >= 4
@@ -456,8 +577,7 @@ function X.ConsiderTameTheBeasts()
 			if aoeLocation.count >= 4 then
 				targetLocation = aoeLocation.targetloc
 			end
-			bot.whip_to_defend = true
-			return BOT_ACTION_DESIRE_HIGH, targetLocation
+			return BOT_ACTION_DESIRE_HIGH, targetLocation, "defend", nil
 		end
 	end
 	if Fu.IsFarming(bot) and Fu.GetManaAfter(manaCost) > 0.33 then
@@ -473,8 +593,7 @@ function X.ConsiderTameTheBeasts()
 			if aoeLocation.count >= 4 then
 				targetLocation = aoeLocation.targetloc
 			end
-			bot.whip_to_farm = true
-			return BOT_ACTION_DESIRE_HIGH, targetLocation
+			return BOT_ACTION_DESIRE_HIGH, targetLocation, "farm", nil
 		end
 	end
 	if Fu.IsDoingRoshan(bot) then
@@ -484,8 +603,7 @@ function X.ConsiderTameTheBeasts()
 			and Fu.IsInRange(bot, botTarget, castRange)
 			and isAttacking
 		then
-			bot.whip_to_miniboss = true
-			return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation()
+			return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation(), "roshan", nil
 		end
 	end
 	if Fu.IsDoingTormentor(bot) then
@@ -495,8 +613,7 @@ function X.ConsiderTameTheBeasts()
 			and Fu.IsInRange(bot, botTarget, castRange)
 			and isAttacking
 		then
-			bot.whip_to_miniboss = true
-			return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation()
+			return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation(), "tormentor", nil
 		end
 	end
 	if Fu.IsCore(bot) or not Fu.IsThereNonSelfCoreNearby(1600) then
@@ -524,73 +641,711 @@ function X.ConsiderTameTheBeasts()
 						and Fu.IsValidHero(nearbyEnemies[1])
 						and Fu.IsInRange(killableCreeps[1], nearbyEnemies[1], startWidth)
 				then
-					bot.whip_to_aoe_kill = true
-					return BOT_ACTION_DESIRE_HIGH, killableCreeps[1]:GetLocation()
+					return BOT_ACTION_DESIRE_HIGH, killableCreeps[1]:GetLocation(), "creeps", nil
 				end
 			end
 			if aoeLocation.count >= 4 and #killableCreeps >= 3 then
-				bot.whip_to_aoe_kill = true
-				return BOT_ACTION_DESIRE_HIGH, aoeLocation.targetloc
+				return BOT_ACTION_DESIRE_HIGH, aoeLocation.targetloc, "creeps", nil
 			end
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE, 0
 end
-function X.ConsiderTameTheBeastsCrack()
-	if not Fu.CanCastAbility(tameTheBeastsCrackAbility) then
-		return BOT_ACTION_DESIRE_NONE, 0
+-- Tame the Beasts as a channel (#49, game 084: "tame also instant, the fear is minimum duration").
+-- Game files (scripts/npc ringmaster abilities from pak01_dir.vpk, read 2026-11-21; the datafeed hero 131 read 2026-11-25
+-- has the same values): POINT | AOE | CHANNELLED,
+-- AbilityChannelTime 1.0, cast point 0, start_width 450 -> end_width 200 ("RADIUS START / END"), damage_min
+-- 50/75/100/125 with "Real max damage is 4x damage min" (max_multiplier 4; damage_max only feeds the tooltip),
+-- fear_duration_min 0.1/0.2/0.3/0.4 -> fear_duration_max 0.6/0.8/1.0/1.2, crack_duration 0.2. Tooltip: "Channel time
+-- exponentially increases damage and extends the fear duration, but reduces the radius". The crack
+-- (ringmaster_tame_the_beasts_crack) is IMMEDIATE | IGNORE_CHANNEL and only shown while the whip is out.
+-- The curve itself is not in the game data. Estimate (unverified): damage = damage_min * max_multiplier ^ f and the
+-- fear moves by the same share, (max_multiplier ^ f - 1) / (max_multiplier - 1), with f the channelled share 0..1;
+-- the radius shrinks linearly from start_width to end_width.
+function X.WhipShare(f, multiplier)
+	f = math.max(0, math.min(1, f))
+	if multiplier == nil or multiplier <= 1 then
+		return f
 	end
+	return (multiplier ^ f - 1) / (multiplier - 1)
+end
+function X.WhipDamage(f, damageMin, multiplier)
+	f = math.max(0, math.min(1, f))
+	return damageMin * (multiplier or 4) ^ f
+end
+function X.WhipFear(f, fearMin, fearMax, multiplier)
+	return fearMin + (fearMax - fearMin) * X.WhipShare(f, multiplier)
+end
+function X.WhipRadius(f, startWidth, endWidth)
+	f = math.max(0, math.min(1, f))
+	return startWidth - (startWidth - endWidth) * f
+end
+-- When to crack before the full channel; nil = keep channelling (the engine cracks at the end by itself).
+-- s: why (cast reason), killNow (a hero in the area dies to the damage now), lowHp, enemyOnTop (an enemy hero within
+-- end_width of Ringmaster), nearestNow / nearestLater (distance of the enemy hero nearest the whip point now and after
+-- the lead time; nil = no enemy hero inside), radiusLater (the area after the lead time), margin.
+-- The combo whip is never cracked early: the fear has to be long enough to drive them into the Wheel.
+local WHIP_RADIUS_REASONS = { engage = true, kill = true, retreat = true }
+function X.WhipCrackDecision(s)
+	if s.why == "combo" then
+		return nil
+	end
+	if s.why == "cancel" then
+		return "cancel"
+	end
+	if s.killNow then
+		return "kill"
+	end
+	if s.lowHp then
+		return "lowhp"
+	end
+	if s.why == "retreat" and s.enemyOnTop then
+		return "ontop"
+	end
+	if WHIP_RADIUS_REASONS[s.why] then
+		if s.nearestNow == nil then
+			return "empty"
+		end
+		if s.nearestLater ~= nil and s.nearestLater > s.radiusLater - (s.margin or 0) then
+			return "radius"
+		end
+	end
+	return nil
+end
+-- The crack button is shown while the whip is out (a missing ability is the NIL_ABILITY stub: no name).
+local function WhipCrackShown()
+	return tameTheBeastsCrackAbility ~= nil
+		and not tameTheBeastsCrackAbility:IsNull()
+		and tameTheBeastsCrackAbility:GetName() == "ringmaster_tame_the_beasts_crack"
+		and not tameTheBeastsCrackAbility:IsHidden()
+end
+-- The modifier only counts when it was not already on at the order (its holder and lifetime are not in the game data).
+local function WhipChannelOn(whip)
+	return WhipCrackShown() or (not whip.modifierBefore and bot:HasModifier("modifier_ringmaster_tame_the_beasts"))
+end
+local function WhipDisabled()
+	return not bot:IsAlive() or bot:IsStunned() or bot:IsSilenced() or bot:IsHexed() or bot:IsNightmared()
+end
+local function WhipNoSave(unit)
+	return not unit:HasModifier("modifier_abaddon_borrowed_time")
+		and not unit:HasModifier("modifier_dazzle_shallow_grave")
+		and not unit:HasModifier("modifier_necrolyte_reapers_scythe")
+		and not unit:HasModifier("modifier_oracle_false_promise_timer")
+end
+-- Every Tame order goes through here: one fresh state per cast (the old whip_to_* flags leaked from one whip to the
+-- next, and a creep whip's flag blocked every later crack), and a cast hold (bot._castHoldUntil, the Puck pattern:
+-- OhaCastGuard skips the mode Thinks and the item think skips items) so no move, attack or item order ends the
+-- channel. Game 084 [SHy-STUCK]: during the whip the API said channel=false casting=false using=true, so the usual
+-- IsChanneling guards did not hold anything.
+-- Game 085: the hold covered our own modes only (38 whips in farm, defend and Roshan ran the full channel); 36 whips
+-- in Valve's attack and retreat modes were cut 0.03-0.20s in (no Think of ours there for OhaCastGuard to pause). The
+-- outpost mode's hold (mode_outpost_generic.lua, desire 1.5, its Think gives no order) now covers every mode: it is
+-- asked for before the cast (X.HoldFirst) and lasts as long as bot._castHoldUntil.
+-- Modes whose Think is ours and skipped by OhaCastGuard while the cast hold is on: a cast goes out at once there.
+local ourThinkModes = nil
+local function OurThinkMode(mode)
+	if ourThinkModes == nil then
+		ourThinkModes = {}
+		for _, name in ipairs({
+			"LANING",
+			"FARM",
+			"PUSH_TOWER_TOP",
+			"PUSH_TOWER_MID",
+			"PUSH_TOWER_BOT",
+			"DEFEND_TOWER_TOP",
+			"DEFEND_TOWER_MID",
+			"DEFEND_TOWER_BOT",
+			"ASSEMBLE",
+			"RUNE",
+			"SECRET_SHOP",
+			"WARD",
+			"ROSHAN",
+			"TEAM_ROAM",
+		}) do
+			local id = _G["BOT_MODE_" .. name]
+			if id ~= nil then
+				ourThinkModes[id] = true
+			end
+		end
+		ourThinkModes[BOT_MODE_OUTPOST or 26] = true
+	end
+	return ourThinkModes[mode] == true
+end
+-- Hold first, cast a moment later (the Puck pattern, hero_puck.lua, game 055/064). Mode desires are read about 3
+-- times a second, so the outpost hold can take up to ~0.3s to win.
+-- The decision is made once, under the mode that asked, and kept (bot._rmHeldOrder): once the hold is on the active
+-- mode is outpost, and the engage / retreat rules read the mode (Fu.IsGoingOnSomeone, Fu.IsRetreating), so a decision
+-- made again then would never cast.
+-- A held order's step: ourMode = the active mode's Think is ours (the outpost hold is on, or another of our modes);
+-- age = seconds since the ask. "wait", "cast" (the hold is on, or HOLD_WAIT is over: cast anyway), "drop" (too old).
+local HOLD_WAIT = 0.4
+function X.HoldStep(ourMode, age, maxWait)
+	if age > maxWait + 0.3 then
+		return "drop"
+	end
+	if ourMode or age >= maxWait then
+		return "cast"
+	end
+	return "wait"
+end
+-- true = no cast this frame: one of Valve's modes runs, so the order is kept and the outpost hold asked for. In one of
+-- our own modes the cast goes out at once (false), and the hold takes over at the next desire read.
+function X.HoldFirst(order)
+	if OurThinkMode(bot:GetActiveMode()) then
+		bot._ringmasterWaited = 0
+		return false
+	end
+	local now = DotaTime()
+	order.at = now
+	bot._rmHeldOrder = order
+	bot._ringmasterHoldWantAt = now
+	return true
+end
+-- How long a whip order may take to start: 0.8s to turn when in range, plus the walk into cast range, at most 3s.
+-- Game 085: all 11 nostart whips were ordered 843-1453 away (cast range 700) and timed out at 0.8s mid-walk.
+function X.WhipStartLimit(dist, castRange, moveSpeed)
+	local walk = math.max(0, (dist or 0) - (castRange or 0))
+	return math.min(3.0, 0.8 + walk / math.max(200, moveSpeed or 0))
+end
+local function ModeNow()
+	return RoamStats.ModeName(bot:GetActiveMode())
+end
+-- The retreat mode wants him out (mode_retreat_generic.lua's bot._retreatDesireNow, fresh within 1s; as Alchemist).
+local function RetreatWanted()
+	return (bot._retreatDesireNow or 0) >= 0.5 and DotaTime() - (bot._retreatDesireAt or -99) < 1.0
+end
+-- [SHy-RINGMASTER] hold-drop: a held order that was not sent (the target left, the spell is not castable, too old).
+local function HoldDropLog(order, why, age)
+	if DotaTime() < (bot._holdDropLogAt or -999) then
+		return
+	end
+	bot._holdDropLogAt = DotaTime() + 2
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster hold-drop kind=%s why=%s reason=%s age=%.2f mode=%s",
+			DotaTime(),
+			order.kind,
+			order.why or "-",
+			why,
+			age,
+			ModeNow()
+		)
+	)
+end
+-- Sends a held order after a last check (castable, target alive and near). false = dropped.
+function X.SendHeldOrder(order, age)
+	if order.kind == "whip" then
+		if not Fu.CanCastAbility(tameTheBeastsAbility) then
+			return false, "uncastable"
+		end
+		local location = order.location
+		local target = order.target
+		if target ~= nil then
+			if not Fu.IsValidHero(target) or not target:IsAlive() then
+				return false, "target-gone"
+			end
+			-- The point moves with the target (the engage point is the target or a group around it).
+			if order.targetAt ~= nil then
+				location = location + (target:GetLocation() - order.targetAt)
+			end
+		end
+		if GetUnitToLocationDistance(bot, location) > tameTheBeastsAbility:GetCastRange() + 300 then
+			return false, "far"
+		end
+		bot._ringmasterWaited = age
+		X.WhipOrdered(order.why, location, target)
+		Fu.SetQueuePtToINT(bot, true)
+		bot:ActionQueue_UseAbilityOnLocation(tameTheBeastsAbility, location)
+		return true
+	end
+	if order.kind == "wheel" then
+		if not Fu.CanCastAbility(wheelOfWonderAbility) then
+			return false, "uncastable"
+		end
+		X.WheelOrdered("teamfight", string.format(" waited=%.2f", age))
+		bot._castHoldUntil = DotaTime() + 1.0
+		Fu.SetQueuePtToINT(bot, false)
+		bot:ActionQueue_UseAbilityOnLocation(wheelOfWonderAbility, order.location)
+		return true
+	end
+	if order.kind == "combo" then
+		if not Fu.CanCastAbility(wheelOfWonderAbility) or not Fu.CanCastAbility(tameTheBeastsAbility) then
+			return false, "uncastable"
+		end
+		if #Fu.GetEnemiesNearLoc(order.center, 600) < 2 or GetUnitToLocationDistance(bot, order.center) > 750 then
+			return false, "group-gone"
+		end
+		X.ComboWheelGo(order.center, string.format(" waited=%.2f", age))
+		return true
+	end
+	return false, "unknown"
+end
+-- Runs before the cast rules: a held order waits for the outpost hold, then goes out. true = nothing else this frame.
+function X.HeldOrderTick()
+	local order = bot._rmHeldOrder
+	if order == nil then
+		return false
+	end
+	local age = DotaTime() - order.at
+	local step = X.HoldStep(OurThinkMode(bot:GetActiveMode()), age, HOLD_WAIT)
+	if step == "wait" then
+		return true
+	end
+	bot._rmHeldOrder = nil
+	local sent, why = false, "old"
+	if step == "cast" then
+		sent, why = X.SendHeldOrder(order, age)
+	end
+	if not sent then
+		-- Let the outpost hold go at its next read. An order from before a death (age 20s+) goes without a line.
+		bot._ringmasterHoldWantAt = nil
+		if age < 5 then
+			HoldDropLog(order, why or "?", age)
+		end
+	end
+	return sent
+end
+function X.WhipOrdered(why, location, target)
+	local now = DotaTime()
+	local whip = bot._whip
+	if whip ~= nil then
+		return
+	end
+	local dist = location ~= nil and GetUnitToLocationDistance(bot, location) or 0
+	local waited = bot._ringmasterWaited or 0
+	bot._ringmasterWaited = nil
+	bot._whip = {
+		why = why or "?",
+		location = location,
+		target = target,
+		orderAt = now,
+		tickAt = now,
+		modifierBefore = bot:HasModifier("modifier_ringmaster_tame_the_beasts"),
+		startLimit = X.WhipStartLimit(dist, tameTheBeastsAbility:GetCastRange(), bot:GetCurrentMovementSpeed()),
+		retreat0 = RetreatWanted(),
+	}
+	bot._castHoldUntil = now + bot._whip.startLimit
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster tame-cast why=%s dist=%d target=%s mode=%s waited=%.2f limit=%.2f",
+			now,
+			why or "?",
+			location ~= nil and dist or -1,
+			(target ~= nil and Fu.IsValidHero(target)) and target:GetUnitName() or "none",
+			ModeNow(),
+			waited,
+			bot._whip.startLimit
+		)
+	)
+end
+function X.WhipEnd(whip, endWhy, elapsed, channelTime, extra)
+	local f = channelTime > 0 and elapsed / channelTime or 1
+	local level = math.max(1, tameTheBeastsAbility:GetLevel())
+	local fearMin = tameTheBeastsAbility:GetSpecialValueFloat("fear_duration_min")
+	local fearMax = tameTheBeastsAbility:GetSpecialValueFloat("fear_duration_max")
+	local damageMin = tameTheBeastsAbility:GetSpecialValueInt("damage_min")
+	local multiplier = tameTheBeastsAbility:GetSpecialValueFloat("max_multiplier")
+	if multiplier <= 1 then
+		multiplier = 4
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster tame-crack why=%s end=%s channelled=%.2f share=%.2f fear=%.2f damage=%d level=%d mode=%s mode0=%s action=%s chan0=%s active0=%s crackable0=%s%s",
+			DotaTime(),
+			whip.why,
+			endWhy,
+			elapsed,
+			f,
+			X.WhipFear(f, fearMin, fearMax, multiplier),
+			X.WhipDamage(f, damageMin, multiplier),
+			level,
+			-- The mode at the end and at the channel start (game 085: the cut whips ran in attack or retreat), and
+			-- the action the bot was on at the end (an interrupt shows what replaced the channel).
+			ModeNow(),
+			whip.mode0 or "-",
+			tostring(bot:GetCurrentActionType()),
+			tostring(whip.chan0),
+			tostring(whip.active0),
+			tostring(whip.crackable0),
+			extra or ""
+		)
+	)
+	bot._whip = nil
+	bot._castHoldUntil = nil
+end
+-- The whip's own tick: start, crack and end. Runs at the top of SkillsComplement and from CastHoldTick while the hold
+-- is on. true = a whip is ordered or out: no other cast this frame.
+function X.WhipTick()
+	local whip = bot._whip
+	if whip == nil then
+		return false
+	end
+	local now = DotaTime()
+	-- The ticks stop while he is dead: a whip from before a death is dropped without a line (it would print after the
+	-- respawn). Stuns are shorter than this gap; a death lasts 20s or more.
+	if now - (whip.tickAt or now) > 5 then
+		bot._whip = nil
+		bot._castHoldUntil = nil
+		return false
+	end
+	whip.tickAt = now
 	local channelTime = tameTheBeastsAbility:GetChannelTime()
-	local castRange = Fu.GetProperCastRange(bot, false, tameTheBeastsAbility:GetCastRange())
-	local castPoint = tameTheBeastsAbility:GetCastPoint()
+	if channelTime == nil or channelTime <= 0 then
+		channelTime = 1.0
+	end
+	local channelOn = WhipChannelOn(whip)
+	if whip.startAt == nil then
+		-- The clock starts when the whip is out, not at the order (turning to the point comes first). The cooldown
+		-- starts with the channel too, in case neither the crack button nor the modifier shows through the API.
+		if channelOn or tameTheBeastsAbility:GetCooldownTimeRemaining() > 0 then
+			whip.startAt = now
+			whip.seen = channelOn
+			whip.mode0 = ModeNow()
+			-- What the API shows on the first channel frame (game 084 [SHy-STUCK]: channel=false during the whip).
+			whip.chan0 = bot:IsChanneling()
+			local active = bot:GetCurrentActiveAbility()
+			whip.active0 = active ~= nil and active:GetName() or "none"
+			whip.crackable0 = Fu.CanCastAbility(tameTheBeastsCrackAbility)
+			bot._castHoldUntil = now + channelTime + 0.15
+			return true
+		end
+		-- The hold now covers the walk into range too: give it up when the retreat mode starts wanting him out
+		-- (not for a whip ordered while it already did: a retreat whip is cast on the chasers).
+		local abort = not whip.retreat0 and RetreatWanted() and now - whip.orderAt > 0.1
+		if abort or now - whip.orderAt > (whip.startLimit or 0.8) then
+			pcall(
+				print,
+				string.format(
+					"[SHy-RINGMASTER] t=%.0f ringmaster tame-crack why=%s end=nostart channelled=0 waited=%.2f limit=%.2f abort=%s mode=%s",
+					now,
+					whip.why,
+					now - whip.orderAt,
+					whip.startLimit or 0.8,
+					abort and "retreat" or "none",
+					ModeNow()
+				)
+			)
+			bot._whip = nil
+			bot._castHoldUntil = nil
+			return false
+		end
+		return true
+	end
+	local elapsed = now - whip.startAt
+	if channelOn then
+		whip.seen = true
+	end
+	if not whip.seen then
+		if elapsed > channelTime + 0.1 then
+			-- Neither the crack button nor the modifier ever showed: no early crack was possible.
+			X.WhipEnd(whip, "unseen", channelTime, channelTime)
+			return false
+		end
+		return true
+	end
+	if elapsed > channelTime + 0.5 then
+		-- The signal stuck: never hold longer than the channel.
+		X.WhipEnd(whip, "stuck", channelTime, channelTime)
+		return false
+	end
+	if not channelOn then
+		-- The engine ended it: the full channel, a disable (stun, silence, hex, death) or an interrupt by an order.
+		X.WhipEnd(
+			whip,
+			elapsed >= channelTime - 0.1 and "full" or (WhipDisabled() and "disabled" or "interrupted"),
+			math.min(elapsed, channelTime),
+			channelTime
+		)
+		return false
+	end
+	if not Fu.CanCastAbility(tameTheBeastsCrackAbility) then
+		return true
+	end
+	local f = elapsed / channelTime
+	-- Lead: the crack takes crack_duration (0.2) to land, plus a frame.
+	local crackDuration = tameTheBeastsAbility:GetSpecialValueFloat("crack_duration")
+	if crackDuration <= 0 then
+		crackDuration = 0.2
+	end
+	local lead = crackDuration + 0.05
 	local startWidth = tameTheBeastsAbility:GetSpecialValueInt("start_width")
 	local endWidth = tameTheBeastsAbility:GetSpecialValueInt("end_width")
-	local minDamage = tameTheBeastsAbility:GetSpecialValueInt("damage_min")
-	local maxDamage = tameTheBeastsAbility:GetSpecialValueInt("damage_max")
-	local manaCost = tameTheBeastsAbility:GetManaCost()
-	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
-	local channelledTime = math.min(DotaTime() - whipCastTime, channelTime)
-	local currentDamage = RemapValClamped(channelledTime, 0, 1, minDamage, maxDamage)
-	if bot.whip_to_aoe_kill then
-		return BOT_ACTION_DESIRE_NONE
+	local radiusNow = X.WhipRadius(f, startWidth, endWidth)
+	local radiusLater = X.WhipRadius((elapsed + lead) / channelTime, startWidth, endWidth)
+	local multiplier = tameTheBeastsAbility:GetSpecialValueFloat("max_multiplier")
+	if multiplier <= 1 then
+		multiplier = 4
 	end
-	if bot.whip_to_cancel then
-		return BOT_ACTION_DESIRE_HIGH
-	end
-	if bot.whip_to_kill then
-		if Fu.IsValidHero(bot.whip_to_kill_target) and Fu.CanCastOnNonMagicImmune(bot.whip_to_kill_target) then
-			if
-				Fu.CanKillTarget(bot.whip_to_kill_target, currentDamage, DAMAGE_TYPE_MAGICAL)
-				and not bot.whip_to_kill_target:HasModifier("modifier_abaddon_borrowed_time")
-				and not bot.whip_to_kill_target:HasModifier("modifier_dazzle_shallow_grave")
-				and not bot.whip_to_kill_target:HasModifier("modifier_necrolyte_reapers_scythe")
-				and not bot.whip_to_kill_target:HasModifier("modifier_oracle_false_promise_timer")
-			then
-				return BOT_ACTION_DESIRE_HIGH
+	local damageNow = X.WhipDamage(f, tameTheBeastsAbility:GetSpecialValueInt("damage_min"), multiplier)
+	local nearestNow, nearestLater, nearestName = nil, nil, "none"
+	local killNow, enemyOnTop = false, false
+	for _, enemyHero in pairs(bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemyHero) and Fu.CanCastOnNonMagicImmune(enemyHero) then
+			if GetUnitToUnitDistance(bot, enemyHero) <= endWidth then
+				enemyOnTop = true
+			end
+			local dist = whip.location ~= nil and GetUnitToLocationDistance(enemyHero, whip.location) or 99999
+			if dist <= radiusNow then
+				if Fu.CanKillTarget(enemyHero, damageNow, DAMAGE_TYPE_MAGICAL) and WhipNoSave(enemyHero) then
+					killNow = true
+				end
+				if nearestNow == nil or dist < nearestNow then
+					nearestNow = dist
+					nearestLater =
+						Fu.GetLocationToLocationDistance(enemyHero:GetExtrapolatedLocation(lead), whip.location)
+					nearestName = enemyHero:GetUnitName()
+				end
 			end
 		end
 	end
-	if bot.whip_to_engage then
-		if Fu.IsValidHero(nearbyEnemies[1]) and botLevel < 15 or hpRatio < 0.15 then
-			if Fu.IsInRange(bot, nearbyEnemies[1], 350) then
-				return BOT_ACTION_DESIRE_HIGH
-			end
+	local crackWhy = X.WhipCrackDecision({
+		why = whip.why,
+		killNow = killNow,
+		lowHp = bot:GetHealth() / math.max(1, bot:GetMaxHealth()) < 0.15,
+		enemyOnTop = enemyOnTop,
+		nearestNow = nearestNow,
+		nearestLater = nearestLater,
+		radiusLater = radiusLater,
+		margin = 25,
+	})
+	if crackWhy == nil then
+		return true
+	end
+	bot:Action_UseAbility(tameTheBeastsCrackAbility)
+	X.WhipEnd(
+		whip,
+		crackWhy,
+		elapsed,
+		channelTime,
+		string.format(
+			" nearest=%s dist=%d later=%d radius=%d",
+			nearestName,
+			nearestNow or -1,
+			nearestLater or -1,
+			radiusLater
+		)
+	)
+	-- Keep the hold while the crack lands (crack_duration).
+	bot._castHoldUntil = now + crackDuration
+	return true
+end
+-- Wheel casts: one line per Wheel that really went out (its cooldown started), with the rule that ordered it.
+function X.WheelOrdered(why, extra)
+	if bot._wheelPending == nil then
+		-- The wait belongs to this Wheel, not to a later whip's line.
+		bot._ringmasterWaited = nil
+		bot._wheelPending = { why = why, at = DotaTime(), extra = extra or "" }
+	end
+end
+-- Wheel orders that put a cast hold on (released when the Wheel is out or dropped). Game 085: 4 team-fight Wheels were
+-- ordered and never went out (dropped=1), so they hold too.
+local WHEEL_HOLD_REASONS = { combo = true, ["last-will"] = true, teamfight = true }
+function X.WheelTick()
+	local pending = bot._wheelPending
+	if pending == nil then
+		return
+	end
+	local now = DotaTime()
+	-- The ticks stop while he is dead: an order from before a death is dropped without a line (game 085 t=2272: the
+	-- last-will order from his death at t=2219 printed dropped=1 after the respawn).
+	if now - (pending.tickAt or pending.at) > 5 then
+		bot._wheelPending = nil
+		if WHEEL_HOLD_REASONS[pending.why] then
+			bot._castHoldUntil = nil
+		end
+		return
+	end
+	pending.tickAt = now
+	if wheelOfWonderAbility:GetCooldownTimeRemaining() > 0 then
+		bot._wheelPending = nil
+		bot._wheelCastAt = now
+		pcall(
+			print,
+			string.format(
+				"[SHy-RINGMASTER] t=%.0f ringmaster wheel-cast why=%s after=%.2f mode=%s%s",
+				now,
+				pending.why,
+				now - pending.at,
+				ModeNow(),
+				pending.extra
+			)
+		)
+		if WHEEL_HOLD_REASONS[pending.why] then
+			-- The hold covered the Wheel's turn and cast point.
+			bot._castHoldUntil = nil
+		end
+		if pending.why == "combo" then
+			-- The combo whip comes next (within 1.5s): keep the outpost mode's hold asked for until it is ordered.
+			bot._ringmasterHoldWantAt = now
+		end
+	elseif now - pending.at > 1.0 then
+		bot._wheelPending = nil
+		pcall(
+			print,
+			string.format(
+				"[SHy-RINGMASTER] t=%.0f ringmaster wheel-cast why=%s dropped=1 mode=%s",
+				now,
+				pending.why,
+				ModeNow()
+			)
+		)
+		if WHEEL_HOLD_REASONS[pending.why] then
+			bot._castHoldUntil = nil
 		end
 	end
-	if bot.whip_to_retreat then
-		if not Fu.IsRealInvisible(bot) or Fu.IsValidHero(nearbyEnemies[1]) and botLevel < 15 or hpRatio < 0.15 then
-			if Fu.IsInRange(bot, nearbyEnemies[1], endWidth) then
-				return BOT_ACTION_DESIRE_HIGH
-			end
+end
+-- The cast hold pauses the item think, and with it SkillsComplement; the item think calls this instead.
+function X.CastHoldTick()
+	pcall(X.WheelTick)
+	pcall(X.WhipTick)
+	pcall(X.LastWillWheel, bot._whip ~= nil and "whip" or "hold")
+end
+-- Last will (maintainer, 2026-11-26: "ringmaster should still cast ult on last will before died (on low hp)").
+-- About to die = below 25% HP while a hero hit him in the last 2s, or the enemies near him deal his remaining HP
+-- within 2s (Fu.GetTotalEstimatedDamageToTarget estimates 5s, scaled by 2/5). Then the Wheel goes on the best
+-- enemy group at once, in any mode (retreat too), with no whip after it. The combo's 35% HP gate does not apply.
+function X.LastWillDue(hp, hitRecently, damage2s, health, enemiesInWheel)
+	if enemiesInWheel < 1 then
+		return false
+	end
+	return (hp < 0.25 and hitRecently) or damage2s >= health
+end
+-- Why no last-will Wheel goes out (nil = nothing stops it). Game 085: 2 last-will Wheels in 14 deaths; 7 deaths came
+-- 6-56s after a Wheel (cooldown 90/80/70, datafeed hero 131), and nothing said why the other 5 had none.
+-- s: learned, cooldown (seconds left), blocked (the script can't cast now: "whip" channelling, "disabled" stunned /
+-- silenced / hexed, "casting" another cast, "hold" another cast's hold), manaOk, castable (the API's own check),
+-- enemiesNear (enemy heroes in cast range + 300), enemiesInWheel (enemy heroes where the Wheel stops).
+function X.LastWillSkipWhy(s)
+	if not s.learned then
+		return "unlearned"
+	end
+	if (s.cooldown or 0) > 0 then
+		return "cd"
+	end
+	if s.blocked ~= nil then
+		return s.blocked
+	end
+	if not s.manaOk then
+		return "mana"
+	end
+	if not s.castable then
+		return "uncastable"
+	end
+	if (s.enemiesNear or 0) < 1 then
+		return "no-enemy"
+	end
+	if (s.enemiesInWheel or 0) < 1 then
+		return "empty"
+	end
+	return nil
+end
+-- [SHy-RINGMASTER] wheel-skip why=last-will-<reason>: below 25% HP, hit by a hero in the last 2s, and no Wheel goes
+-- out. Once per reason change or every 2s.
+function X.LastWillSkipLog(why, hp, cooldown, enemiesNear, enemiesInWheel, nearestDist)
+	local now = DotaTime()
+	if why == bot._lastWillSkipWhy and now < (bot._lastWillSkipAt or -999) then
+		return
+	end
+	bot._lastWillSkipWhy = why
+	bot._lastWillSkipAt = now + 2
+	pcall(
+		print,
+		string.format(
+			"[SHy-RINGMASTER] t=%.0f ringmaster wheel-skip why=last-will-%s hp=%.2f cd=%.0f enemies=%d in-wheel=%d nearest=%d mode=%s",
+			now,
+			why,
+			hp,
+			cooldown,
+			enemiesNear or -1,
+			enemiesInWheel or -1,
+			nearestDist or -1,
+			ModeNow()
+		)
+	)
+end
+-- blocked: why the script can't cast this frame (nil = it can); then this only checks and logs, it never casts.
+function X.LastWillWheel(blocked)
+	if bot._wheelPending ~= nil or not bot:IsAlive() then
+		return false
+	end
+	local hp = bot:GetHealth() / math.max(1, bot:GetMaxHealth())
+	local hitRecently = bot:WasRecentlyDamagedByAnyHero(2.0)
+	if hp >= 0.25 and not hitRecently then
+		return false
+	end
+	-- The skip line is for the dying case only; the burst case (damage within 2s) is an estimate.
+	local low = hp < 0.25 and hitRecently
+	local learned = wheelOfWonderAbility:IsTrained()
+	local s = {
+		learned = learned,
+		cooldown = learned and wheelOfWonderAbility:GetCooldownTimeRemaining() or 0,
+		blocked = blocked,
+		manaOk = bot:GetMana() >= wheelOfWonderAbility:GetManaCost(),
+		castable = Fu.CanCastAbility(wheelOfWonderAbility),
+		enemiesNear = 1,
+		enemiesInWheel = 1,
+	}
+	local skip = X.LastWillSkipWhy(s)
+	if skip ~= nil then
+		if low then
+			X.LastWillSkipLog(skip, hp, s.cooldown)
+		end
+		return false
+	end
+	local castRange = Fu.GetProperCastRange(false, bot, wheelOfWonderAbility:GetCastRange())
+	local nearbyEnemies = bot:GetNearbyHeroes(math.min(1600, castRange + 300), true, BOT_MODE_NONE) or {}
+	s.enemiesNear = #nearbyEnemies
+	local nearest = nil
+	for _, enemyHero in pairs(nearbyEnemies) do
+		if
+			Fu.IsValidHero(enemyHero)
+			and (nearest == nil or GetUnitToUnitDistance(bot, enemyHero) < GetUnitToUnitDistance(bot, nearest))
+		then
+			nearest = enemyHero
 		end
 	end
-	if bot.whip_to_push or bot.whip_to_defend or bot.whip_to_farm or bot.whip_to_miniboss then
-		if hpRatio < 0.15 then
-			return BOT_ACTION_DESIRE_HIGH
+	local nearestDist = nearest ~= nil and GetUnitToUnitDistance(bot, nearest) or nil
+	local damage2s, stopPoint = 0, nil
+	if nearest ~= nil then
+		damage2s = Fu.GetTotalEstimatedDamageToTarget(nearbyEnemies, bot) * 2 / 5
+		local mesmerizeRadius = wheelOfWonderAbility:GetSpecialValueInt("mesmerize_radius")
+		local minRange = wheelOfWonderAbility:GetSpecialValueInt("min_range")
+		local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, mesmerizeRadius, 0, 0)
+		local point = aoeLocation.count >= 1 and aoeLocation.targetloc or nearest:GetLocation()
+		-- datafeed: the Wheel rolls at least min_range (700); a closer point ends up that far out on the same line.
+		stopPoint = point
+		if GetUnitToLocationDistance(bot, point) < minRange then
+			stopPoint = Fu.VectorTowards(bot:GetLocation(), point, minRange)
 		end
+		s.enemiesInWheel = #Fu.GetEnemiesNearLoc(stopPoint, mesmerizeRadius)
+	else
+		s.enemiesNear = 0
+		s.enemiesInWheel = 0
 	end
-	return BOT_ACTION_DESIRE_NONE, 0
+	skip = X.LastWillSkipWhy(s)
+	if skip ~= nil then
+		if low then
+			X.LastWillSkipLog(skip, hp, s.cooldown, s.enemiesNear, s.enemiesInWheel, nearestDist)
+		end
+		return false
+	end
+	if not X.LastWillDue(hp, hitRecently, damage2s, bot:GetHealth(), s.enemiesInWheel) then
+		return false
+	end
+	X.WheelOrdered(
+		"last-will",
+		string.format(" hp=%.2f enemies=%d damage2s=%d nearest=%d", hp, s.enemiesInWheel, damage2s, nearestDist or -1)
+	)
+	bot._rmHeldOrder = nil
+	-- Hold the mode Thinks (retreat too) through the turn and cast point; X.WheelTick releases it. No wait for the
+	-- outpost hold first (he is about to die): the hold takes over at the next desire read.
+	bot._castHoldUntil = DotaTime() + 0.5
+	bot._ringmasterHoldWantAt = DotaTime()
+	bot:Action_UseAbilityOnLocation(wheelOfWonderAbility, stopPoint)
+	return true
 end
 function X.ConsiderEscapeAct()
 	if not Fu.CanCastAbility(escapeActAbility) then
@@ -600,7 +1355,6 @@ function X.ConsiderEscapeAct()
 	local leashRadius = escapeActAbility:GetSpecialValueFloat("leash_radius")
 	local invisDuration = escapeActAbility:GetSpecialValueFloat("invis_duration")
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -680,7 +1434,6 @@ function X.ConsiderImpalementArts()
 	local bleedDuration = impalementArtsAbility:GetSpecialValueInt("bleed_duration")
 	local daggerSpeed = impalementArtsAbility:GetSpecialValueInt("dagger_speed")
 	local abilityLevel = impalementArtsAbility:GetLevel()
-	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -796,7 +1549,6 @@ function X.ConsiderSpotlight()
 	local radius = spotlightAbility:GetSpecialValueInt("radius")
 	local duration = spotlightAbility:GetSpecialValueInt("duration")
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	if Fu.IsInTeamFight(bot, 1200) then
 		-- datafeed: the light makes ENEMIES miss and reveals them; this searched for a spot with 2+ allies.
 		local aoeLocation = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0, 0)
@@ -912,7 +1664,6 @@ function X.ConsiderStrongmanTonic()
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, strongmanTonicAbility:GetCastRange())
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
-	local nearbyEnemies = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	for _, allyHero in pairs(nearbyAllies) do
 		if
 			Fu.IsValidHero(allyHero)
@@ -928,7 +1679,6 @@ function X.ConsiderStrongmanTonic()
 			then
 				return BOT_ACTION_DESIRE_HIGH, allyHero
 			end
-			local alliesNearAlly = allyHero:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 			local enemiesNearAlly = allyHero:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 			if
 				Fu.IsValidHero(enemiesNearAlly[1])
@@ -975,6 +1725,7 @@ function X.ConsiderWhoopeeCushion()
 	if not Fu.CanCastAbility(whoopeeCushionAbility) then
 		return BOT_ACTION_DESIRE_NONE
 	end
+	whoopeeCushionWhy = "fight"
 	local leapDistance = whoopeeCushionAbility:GetSpecialValueInt("leap_distance")
 	local fartCloudRadius = whoopeeCushionAbility:GetSpecialValueInt("fart_cloud_radius")
 	local nearbyAllies = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
@@ -1004,6 +1755,26 @@ function X.ConsiderWhoopeeCushion()
 			then
 				return BOT_ACTION_DESIRE_HIGH
 			end
+		end
+	end
+	-- Free movement (#49, game 048: a held cushion blocked the next souvenirs for minutes). Game files: 0 mana, 3s
+	-- cooldown, a 400 leap where he faces. Walking straight and fast with no enemy hero or enemy tower near the
+	-- landing point, outside laning and attack: leap, which also frees the souvenir slot.
+	local mode = bot:GetActiveMode()
+	if
+		#nearbyEnemies == 0
+		and mode ~= BOT_MODE_LANING
+		and mode ~= BOT_MODE_ATTACK
+		and mode ~= BOT_MODE_EVASIVE_MANEUVERS
+		and not bot:IsChanneling()
+		and bot:GetMovementDirectionStability() >= 0.95
+		and bot:GetCurrentMovementSpeed() > 0
+		and #(bot:GetNearbyTowers(1300, true) or {}) == 0
+	then
+		local velocity = bot:GetVelocity()
+		if velocity ~= nil and velocity.x * velocity.x + velocity.y * velocity.y >= 250 * 250 then
+			whoopeeCushionWhy = "travel"
+			return BOT_ACTION_DESIRE_HIGH
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE

@@ -147,8 +147,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -216,7 +215,6 @@ function X.ConsiderQ()
 	local manaCost = shurikenTossAbility:GetManaCost()
 	local damage = shurikenTossAbility:GetSpecialValueInt("bonus_damage") + bonusShurikenDamage
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local castTarget = nil
 	local bounceRadius = shurikenTossAbility:GetSpecialValueInt("bounce_aoe")
 	local nearbyUnits = Fu.GetAroundBotUnitList(bot, castRange + 100, true)
