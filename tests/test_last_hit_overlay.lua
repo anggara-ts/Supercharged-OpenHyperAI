@@ -243,6 +243,47 @@ T.test("last-hit overlay: a snipe an allied core reaches first is left to it (ga
 	T.eq(printed("overlay-skip why=far rule=hunt-carry/lane"), 1, "far line")
 end)
 
+T.test("last-hit overlay: creep aggro ends the hold and starts no new one (game 078, Winter Wyvern)", function()
+	local bot, O, creep = setup()
+	require(GetScriptDirectory() .. "/lib/systems/global_overrides")
+	local attacker1 = T.stub.newUnit({ name = "npc_dota_creep_goodguys_melee", hp = 500, loc = bot:GetLocation() })
+	local attacker2 = T.stub.newUnit({ name = "npc_dota_creep_goodguys_melee", hp = 500, loc = bot:GetLocation() })
+	local onBot = {}
+	function attacker1:GetAttackTarget()
+		return onBot[1]
+	end
+	function attacker2:GetAttackTarget()
+		return onBot[2]
+	end
+	function bot:GetNearbyLaneCreeps()
+		return { attacker1, attacker2 }
+	end
+	function bot:WasRecentlyDamagedByCreep()
+		return onBot[1] ~= nil
+	end
+	O.Offer(bot, creep, 1.5, "snipe")
+	T.eq(O.Think(bot), true, "no creep on the bot: hold")
+	T.ok(OhaCastGuard(bot), "mode Think held")
+	-- Two creeps turn on the bot: the hold lets go before the mode Think, so the kite step and the mode act.
+	onBot = { bot, bot }
+	T.stub.time = T.stub.time + 0.1
+	T.ok(not OhaCastGuard(bot), "released: the mode Think runs")
+	T.eq(bot._lhOwn, nil, "no hold left for the kite step to wait on")
+	T.eq(printed("snipe-skip why=creep-aggro attackers=2"), 1, "skip line")
+	T.eq(printed("at=hold"), 1, "the hold ended")
+	-- No new hold while they hit, nor within 2s after.
+	local creep2 = T.stub.newUnit({ name = "npc_dota_creep_goodguys_ranged", hp = 20, loc = bot:GetLocation() })
+	O.Offer(bot, creep2, 1.5, "snipe")
+	T.eq(O.Think(bot), false, "no new hold")
+	onBot = {}
+	T.stub.time = T.stub.time + 1
+	O.Offer(bot, creep2, 1.5, "snipe")
+	T.eq(O.Think(bot), false, "latched 1s after")
+	T.stub.time = T.stub.time + 1.5
+	O.Offer(bot, creep2, 1.5, "snipe")
+	T.eq(O.Think(bot), true, "free again 2.5s after")
+end)
+
 T.test("team roam and retreat load and think; retreat publishes its desire", function()
 	local bot = T.stub.reset({ hero = "npc_dota_hero_zuus", time = 600 })
 	local ok, err = T.stub.load("mode_team_roam_generic")
