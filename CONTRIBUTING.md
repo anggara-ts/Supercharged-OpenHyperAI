@@ -142,7 +142,7 @@ Match logs go to `local/match-logs/` (git-ignored). They contain your Steam acco
 7. **Test it in a game.**
    - Changes the bots act on are tracked (`node tools/verify.js add <pr>`) until a game proves them.
    - `node tools/test-build.js` builds a local `test/next` branch with every PR under test, so one game checks several PRs.
-8. **Merge.** When every item passes, the PR is squash-merged.
+8. **Merge.** When every item passes, the PR is squash-merged into `main`. A merge commit or a rebase merge is not used.
    - The issue's task items are ticked.
    - The issue is closed only when all of its items are done.
 

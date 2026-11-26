@@ -282,8 +282,10 @@ Tools: `gh_personal` (GitHub CLI as the anggara-ts login), `tools/issue-prs.js`,
      either fixed in the PR it is about or added to a grouped issue card (step 1).
    - An item that failed: fix it in the same PR and keep it tracked; an item whose situation didn't happen stays
      pending for the next game.
-9. **Merge.** The agent decides which PRs are ready and squash-merges them itself, without asking (standing
-   approval from the maintainer, 2026-11-17); it reports what it merged and why. A PR is ready when
+9. **Merge.** The only way onto `main` is a squash merge (`gh_personal pr merge <pr> --squash --delete-branch`).
+   A merge commit or a rebase merge into `main` is refused (maintainer, 2026-11-26). Merging `origin/main` into
+   a feature branch is still allowed. The agent decides which PRs are ready and squash-merges them itself,
+   without asking (standing approval from the maintainer, 2026-11-17); it reports what it merged and why. A PR is ready when
    `node tools/verify.js show <pr>` says READY TO MERGE (every item pass or skip), CI is green, and every PR it is
    stacked on is merged or merges first in the same go (a PR that contains an unready PR waits).
    The PR shows its state by itself: "How to verify in game" is a checkbox list, and `verify.js set`, `check` and
@@ -400,6 +402,7 @@ came with (or a small `docs/` PR).
 - Do not change a mechanic from memory; check the game data.
 - Do not stack branches on unmerged branches; use `test-build.js` to test several PRs together.
 - Do not edit an issue's code in the main clone or on another issue's checkout. Use `.worktree/oha-issue-<N>`.
+- Do not merge or rebase a pull request into `main`. Squash-merge it (`gh_personal pr merge <pr> --squash`).
 - Do not merge a PR with game-visible changes before its tracker items pass in a game.
 - Do not close an issue while any of its task items is open; do not write `Closes #N` in a PR.
 - Do not push `test/next`, and do not change code while a test game is running.

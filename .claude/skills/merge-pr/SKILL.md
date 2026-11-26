@@ -17,7 +17,8 @@ Rules: `AGENTS.md` (workflow step 9). The agent decides and merges without askin
    errors or rare decisions). Commit, push, wait for CI.
 3. **Tick the checks** in the PR description ("Tested in a local game (game NNN)" and the verify items) with
    `gh_personal pr edit <pr> --body-file ...`; mark ready if it is a draft (`gh_personal pr ready <pr>`).
-4. **Merge:** `gh_personal pr merge <pr> --squash --delete-branch`. Stacked PRs: merge the base first.
+4. **Merge:** `gh_personal pr merge <pr> --squash --delete-branch`. Squash is the only method into `main`.
+   Stacked PRs: merge the base first.
 5. **Issues:** for every issue the PR refers to (`Refs #N`), tick the task items this PR fixed and verified,
    and comment on the issue: which items, the PR link and the game that proved them. **Close the issue only
    when every task item in it is ticked**; otherwise leave it open (the PR never uses `Closes #N`).
