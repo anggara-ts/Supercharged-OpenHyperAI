@@ -8,6 +8,7 @@ local LastHitRules = require(GetScriptDirectory() .. "/lib/systems/last_hit_rule
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
 local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -1187,6 +1188,15 @@ do
 							end
 						end
 					end
+					-- Early game: never from inside a tier-2+ enemy tower's range (#12, game 087). The tower list above
+					-- misses a T2 while its T1 stands (invulnerable), and the core exception is for a T1 only.
+					if why == nil then
+						local deepTower, deepDist = DeepTower.InReach(spot)
+						if deepTower ~= nil then
+							why, harasser = "deep-tower", deepTower
+							DeepTower.LogSkip(bot, "lasthit", deepTower, deepDist, lastHitCreep)
+						end
+					end
 					-- Just walked out of an enemy tower's range (TowerExit): no walk back in for a last hit.
 					if why == nil and InTowerExitZone(spot) then
 						why, harasser = "tower-exit", bot._towerExitZone.tower
@@ -1304,6 +1314,13 @@ do
 			then
 				return false
 			end
+			-- Early game: not from or into a tier-2+ enemy tower's range (#12, game 087 0:26: Puck harassed Marci
+			-- past Dire's mid T1 into the T2's range and died there; the T1 test above never saw the T2).
+			local deepTower, deepDist = DeepTower.InReach(bot:GetLocation(), hero:GetLocation())
+			if deepTower ~= nil then
+				DeepTower.LogSkip(bot, "harass", deepTower, deepDist, hero)
+				return false
+			end
 			return true
 		end
 		do
@@ -1319,8 +1336,15 @@ do
 					bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 350))
 					return
 				else
-					bot:Action_AttackUnit(reset.target, true)
-					return
+					-- The reset's hit, re-ordered every think for up to 2.5s: dropped once it would be under a deep
+					-- tower (#12, game 087).
+					local deepTower, deepDist = DeepTower.InReach(bot:GetLocation(), reset.target:GetLocation())
+					if deepTower == nil then
+						bot:Action_AttackUnit(reset.target, true)
+						return
+					end
+					DeepTower.LogSkip(bot, "reset", deepTower, deepDist, reset.target)
+					pcall(FinishHarassReset)
 				end
 			end
 		end

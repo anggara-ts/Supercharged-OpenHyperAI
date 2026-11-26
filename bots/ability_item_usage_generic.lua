@@ -6372,6 +6372,77 @@ function Usage.TpGatesClosed()
 		or bot._roshDipActive and bot:IsAlive() and GetUnitToLocationDistance(bot, Fu.GetCurrentRoshanLocation()) <= 3000
 		or Fu.IsDoingTormentor(bot) and GetUnitToLocationDistance(bot, Fu.GetTormentorLocation(GetTeam())) <= 2800
 end
+-- The laning TP and the farm TP from the fountain (castReason 出去发育) wait while they would leave a fight (#12, game
+-- 087 11:42-11:50: Zeus TP'd from mid to his bot lane with an enemy and an ally next to him, `foes=1 allies=1`, and
+-- Lion and Puck ganked the maintainer at mid). Counts the visible enemy heroes within TempoRules.TP_DANGER_RADIUS of
+-- the bot or of an allied hero (humans too) within that radius of it, and whether an enemy hero attacks one of our
+-- towers within it; TempoRules.LaneTpBlocked decides. Logs [SHy-TP] tp-skip why=ally-in-danger at most every 5s.
+-- Returns true when the TP waits.
+function Usage.LaneTpBlocked(src)
+	local TempoRules = require(GetScriptDirectory() .. "/lib/systems/tempo_rules")
+	local radius = TempoRules.TP_DANGER_RADIUS
+	local allies = {}
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES) or {}) do
+		if
+			ally ~= bot
+			and ally ~= nil
+			and not ally:IsNull()
+			and ally:IsAlive()
+			and not ally:IsIllusion()
+			and GetUnitToUnitDistance(bot, ally) <= radius
+		then
+			allies[#allies + 1] = ally
+		end
+	end
+	local enemyHeroes = {}
+	for _, enemy in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES) or {}) do
+		if enemy ~= nil and not enemy:IsNull() and enemy:IsAlive() and enemy:CanBeSeen() then
+			enemyHeroes[#enemyHeroes + 1] = enemy
+		end
+	end
+	local enemies, dangerAlly = 0, nil
+	for _, enemy in ipairs(enemyHeroes) do
+		local near = GetUnitToUnitDistance(bot, enemy) <= radius
+		for _, ally in ipairs(allies) do
+			if GetUnitToUnitDistance(ally, enemy) <= radius then
+				near = true
+				dangerAlly = dangerAlly or ally
+			end
+		end
+		if near then
+			enemies = enemies + 1
+		end
+	end
+	local towerHit = false
+	for _, tower in pairs(bot:GetNearbyTowers(radius, false) or {}) do
+		if tower ~= nil and not tower:IsNull() and tower:IsAlive() then
+			for _, enemy in ipairs(enemyHeroes) do
+				if enemy:GetAttackTarget() == tower then
+					towerHit = true
+				end
+			end
+		end
+	end
+	if not TempoRules.LaneTpBlocked(enemies, towerHit) then
+		return false
+	end
+	if DotaTime() >= (bot._laneTpSkipLogAt or -999) then
+		bot._laneTpSkipLogAt = DotaTime() + 5
+		pcall(
+			print,
+			string.format(
+				"[SHy-TP] t=%.0f %s tp-skip why=ally-in-danger ally=%s enemies=%d tower=%s src=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				dangerAlly ~= nil and (string.gsub(dangerAlly:GetUnitName(), "npc_dota_hero_", "")) or "-",
+				enemies,
+				towerHit and "yes" or "no",
+				src
+			)
+		)
+	end
+	return true
+end
 Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 	if Usage.TpTimed("tp:gates", Usage.TpGatesClosed) then
 		return BOT_ACTION_DESIRE_NONE
@@ -6504,6 +6575,10 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 		local shouldTp
 		hEffectTarget, shouldTp = Usage.TpTimed("tp:laning", Usage.GetLaningTPLocation, bot, tpDistance, botLocation)
 		castReason = "出去发育"
+		-- Not while it would leave a fight (#12, game 087): the TP waits, the rules below still run.
+		if shouldTp and Usage.TpTimed("tp:lane-danger", Usage.LaneTpBlocked, "laning") then
+			shouldTp = false
+		end
 		if shouldTp then
 			if botName == "npc_dota_hero_furion" then
 				local prophetTeleport = bot:GetAbilityByName("furion_teleportation")
@@ -6942,6 +7017,10 @@ Usage.ConsiderItemDesire["item_tpscroll"] = function(item)
 			end
 		end
 		if tpLocation ~= nil and Usage.JustTeleported() then
+			tpLocation = nil
+		end
+		-- Not while it would leave a fight at the fountain (#12, game 087; Usage.LaneTpBlocked).
+		if tpLocation ~= nil and Usage.TpTimed("tp:lane-danger", Usage.LaneTpBlocked, "farm") then
 			tpLocation = nil
 		end
 		if tpLocation ~= nil then

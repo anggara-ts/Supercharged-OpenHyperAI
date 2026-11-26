@@ -262,3 +262,38 @@ T.test("team roam and retreat load and think; retreat publishes its desire", fun
 		T.eq(bot._retreatFinalDesire and bot._retreatFinalDesire.t, 600, "with the time")
 	end
 end)
+
+T.test("last-hit overlay: no hit under a tier-2+ enemy tower in the early game (#12, game 087)", function()
+	local bot, O, creep, orders = setup()
+	local enemyTeam = GetOpposingTeam()
+	-- An invulnerable T2 (its T1 stands) next to the creep. Stub towers have range 150: the reach is 350.
+	local t2 = T.stub.newUnit({
+		name = "npc_dota_badguys_tower2_mid",
+		team = enemyTeam,
+		loc = creep:GetLocation() + Vector(200, 0, 0),
+		hero = false,
+	})
+	function t2:IsInvulnerable()
+		return true
+	end
+	T.stub.towers[enemyTeam][TOWER_MID_2] = t2
+	O.Offer(bot, creep, 1.5, "snipe")
+	T.eq(O.Think(bot), false, "10:00, creep under the T2: no hit")
+	T.eq(#orders, 0, "no attack order")
+	T.eq(printed("skip why=deep-tower tower=badguys_tower2_mid"), 1, "the skip line")
+	-- A T1 there instead: a last hit under their T1 is fine.
+	T.stub.towers[enemyTeam][TOWER_MID_2] = nil
+	T.stub.towers[enemyTeam][TOWER_MID_1] = T.stub.newUnit({
+		name = "npc_dota_badguys_tower1_mid",
+		team = enemyTeam,
+		loc = creep:GetLocation() + Vector(200, 0, 0),
+		hero = false,
+	})
+	T.eq(O.Think(bot), true, "under the T1: the snipe goes")
+	-- The T2 back, after 12:00: the early-game rule is over.
+	T.stub.towers[enemyTeam][TOWER_MID_2] = t2
+	bot._lhOwn = nil
+	T.stub.time = 12 * 60
+	O.Offer(bot, creep, 1.5, "snipe")
+	T.eq(O.Think(bot), true, "12:00: the snipe goes")
+end)

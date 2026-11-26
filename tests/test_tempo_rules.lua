@@ -186,3 +186,67 @@ T.test("roshan window: an armed call raises a timer desire to the call strength 
 	state.armed = false
 	T.eq(W.Desire(bot, 0.3), 0.3, "not armed: unchanged")
 end)
+
+T.test(
+	"tempo: early-game deep tower - tier 2+ blocks inside its reach, tier 1 and the mid game never (game 087)",
+	function()
+		local R = rules()
+		-- Game 087, 0:26-0:31: Puck harassed Marci past Dire's mid T1 into the mid T2's range and died there.
+		T.eq(R.DeepTowerBlocks(2, 800, 700, true), true, "T2 within range + 200")
+		T.eq(R.DeepTowerBlocks(3, 899, 700, true), true, "T3 at the edge")
+		T.eq(R.DeepTowerBlocks(2, 900, 700, true), false, "just outside range + 200")
+		T.eq(R.DeepTowerBlocks(1, 100, 700, true), false, "T1: its own rules (a last hit under it is fine)")
+		T.eq(R.DeepTowerBlocks(2, 100, 700, false), false, "after the early game: no block")
+		T.eq(R.DeepTowerBlocks(nil, 100, 700, true), false, "not a tower")
+		T.eq(R.DeepTowerBlocks(4, 850, nil, true), true, "unknown range: 700")
+	end
+)
+
+T.test("tempo: lane / farm TP waits while an enemy hero is near us or hits our tower (game 087 11:42)", function()
+	local R = rules()
+	-- Game 087, 11:42: Zeus TP'd away from mid with foes=1 allies=1.
+	T.eq(R.LaneTpBlocked(1, false), true, "one enemy near the bot or an ally")
+	T.eq(R.LaneTpBlocked(0, true), true, "enemy heroes on our tower")
+	T.eq(R.LaneTpBlocked(0, false), false, "nobody near: the TP goes")
+	T.eq(R.LaneTpBlocked(nil, nil), false, "nothing known: the TP goes")
+end)
+
+T.test(
+	"tempo: DeepTower.InReach sees an invulnerable T2 behind its T1, not a T1, and only in the early game",
+	function()
+		local bot = T.stub.reset({ hero = "npc_dota_hero_puck", time = 26 })
+		local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
+		local enemyTeam = GetOpposingTeam()
+		local here = bot:GetLocation()
+		T.eq(DeepTower.InReach(here), nil, "no towers: nothing")
+		-- Stub towers have attack range 150: the reach is 350.
+		T.stub.towers[enemyTeam][TOWER_MID_1] =
+			T.stub.newUnit({ name = "npc_dota_badguys_tower1_mid", team = enemyTeam, loc = here, hero = false })
+		T.eq(DeepTower.InReach(here), nil, "a T1 is not a deep tower")
+		local t2 = T.stub.newUnit({
+			name = "npc_dota_badguys_tower2_mid",
+			team = enemyTeam,
+			loc = here + Vector(300, 0, 0),
+			hero = false,
+		})
+		function t2:IsInvulnerable()
+			return true
+		end
+		T.stub.towers[enemyTeam][TOWER_MID_2] = t2
+		local tower, dist = DeepTower.InReach(here)
+		T.ok(tower == t2, "the invulnerable T2 is seen")
+		T.near(dist, 300, 0.01, "its distance")
+		T.eq(DeepTower.InReach(here + Vector(-200, 0, 0)), nil, "500 away: outside the reach")
+		T.ok(DeepTower.InReach(here + Vector(-200, 0, 0), here) == t2, "any of the spots counts")
+		DeepTower.LogSkip(bot, "harass", tower, dist, nil)
+		local lines = 0
+		for _, line in ipairs(T.stub.printed) do
+			if string.find(line, "skip why=deep-tower tower=badguys_tower2_mid dist=300 src=harass", 1, true) then
+				lines = lines + 1
+			end
+		end
+		T.eq(lines, 1, "the skip line")
+		T.stub.time = 12 * 60
+		T.eq(DeepTower.InReach(here), nil, "12:00: the early game is over")
+	end
+)
