@@ -1,0 +1,14 @@
+---
+description: Ask Claude Fable 5.2 for a second opinion before a design decision
+alwaysApply: true
+---
+
+# Second opinion
+
+When a decision needs a second opinion, ask Claude Fable 5.2 and resume that session for the next question on the same topic:
+
+`claude -p --model claude-fable-5-2 --resume <session-id>`
+
+The alias is `fable`. The Rubick stolen-spell review is session `a77b3828-2411-4fbb-91ee-8ca0755fff6e`.
+
+This rule is for Cursor only. Do not copy it into `AGENTS.md`; Claude Code reads that file.

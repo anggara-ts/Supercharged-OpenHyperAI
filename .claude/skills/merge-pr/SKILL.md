@@ -9,15 +9,15 @@ Rules: `AGENTS.md` (workflow step 9). The agent decides and merges without askin
 2026-11-17), then reports what it merged. Checklist:
 
 1. **Ready?** `node tools/verify.js show <pr>` says READY TO MERGE (every item pass or skip) and the PR's CI is
-   green (`gh pr checks <pr>`), and no PR it contains (stacked base) is still unready. Otherwise stop and say why.
+   green (`gh_personal pr checks <pr>`), and no PR it contains (stacked base) is still unready. Otherwise stop and say why.
    A ready but blocked PR keeps the **Ready to merge** label and the "blocked by #N" line that
    `node tools/verify.js sync <pr>` writes; run it after any status change.
 2. **Mute proven noise** (only lines whose effect a game proved, and only noisy ones; AGENTS.md, Logging): `node tools/verify.js mute-suggest <pr>` lists the passed `[SHy-*]` tags; add the
    noisy ones to `OHA_MUTED` in `bots/lib/systems/global_overrides.lua` in this PR (keep logs that report
    errors or rare decisions). Commit, push, wait for CI.
 3. **Tick the checks** in the PR description ("Tested in a local game (game NNN)" and the verify items) with
-   `gh pr edit <pr> --body-file ...`; mark ready if it is a draft (`gh pr ready <pr>`).
-4. **Merge:** `gh pr merge <pr> --squash --delete-branch`. Stacked PRs: merge the base first.
+   `gh_personal pr edit <pr> --body-file ...`; mark ready if it is a draft (`gh_personal pr ready <pr>`).
+4. **Merge:** `gh_personal pr merge <pr> --squash --delete-branch`. Stacked PRs: merge the base first.
 5. **Issues:** for every issue the PR refers to (`Refs #N`), tick the task items this PR fixed and verified,
    and comment on the issue: which items, the PR link and the game that proved them. **Close the issue only
    when every task item in it is ticked**; otherwise leave it open (the PR never uses `Closes #N`).

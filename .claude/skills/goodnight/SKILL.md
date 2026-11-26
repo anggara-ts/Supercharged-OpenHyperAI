@@ -27,7 +27,7 @@ Open cards and PRs drift: a merged PR fixes items nobody ticked, and finished PR
 - Put what you ticked, closed and merged at the top of the morning report.
 
 ## 2. Queue
-- `gh issue list --state open --json number,title,labels,body`. Skip `icebox` issues. Keep issues with at least one unticked
+- `gh_personal issue list --state open --json number,title,labels,body`. Skip `icebox` issues. Keep issues with at least one unticked
   task item (`- [ ]`). Skip `no-pr`, and skip items that need the maintainer: label `design`, or an item that
   asks for a decision. Put a question for each skipped item in the morning report.
 - Order: `P1 critical`, `P2 high`, `P3 medium`, `P4 low`, then oldest first. Untriaged issues: triage them
@@ -54,14 +54,14 @@ file) and rebuild after each wave, so a usage limit mid-night still leaves a pla
 3. **Code** by the AGENTS.md rules: readable names, no globals, slots not player IDs, nil guards, facts from
    game data with a source comment. Pure logic gets a test in `tests/`. Every new behaviour gets a throttled
    log with its own keyword, not one that `OHA_MUTED` mutes.
-4. **Check**: parse every changed Lua file, StyLua (`--check` again after formatting), `luajit tests/run.lua`
-   (or the local runner), then keep luacheck rules by hand (CI runs it).
+4. **Do not run CI locally** (AGENTS.md, Checks). No `luajit`, no test run, no `luacheck`, no syntax compile.
+   The commit hook formats the staged Lua. GitHub Actions is the check.
 5. **Commit** (signed, conventional message with `Refs #N`), push, then fill the PR description in the
    change-log format, with "How to verify in game" checkboxes that a game can fail: `<!-- expect: seen>=1 -->`.
    Use `heroes:` when an item needs a hero, and pair an `absent` rule with a `seen>=1` line. Then
-   `node tools/verify.js add <pr>` and `gh pr ready <pr>`.
-6. **CI** in the background. If it goes red, fix it before the next issue. After two failed attempts, convert the
-   PR back to draft with a comment and move on.
+   `node tools/verify.js add <pr>` and `gh_personal pr ready <pr>`.
+6. **CI**: wait for the GitHub Actions run and read the result. If it goes red, fix it before the next issue.
+   After two failed attempts, convert the PR back to draft with a comment and move on.
 7. **Issue comment**: which items this PR addresses, which got a diagnostic, which were skipped and why.
 8. **Merge** only PRs with no game-visible change (tooling, docs, tests), after green CI (skill `merge-pr`).
    Never merge a game-visible PR overnight: it waits for a game.

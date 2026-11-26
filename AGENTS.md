@@ -108,7 +108,8 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
 2. **Lint** - `luacheck` with `.luacheckrc`. No unused locals or values, no new globals,
    write `x < y` not `not (x >= y)`, never `not a == b` (it means `(not a) == b`).
 3. **Format** - `stylua --check .` (StyLua 2.6.0, `stylua.toml`: LuaJIT, tabs, 120 columns, double quotes).
-   Run `stylua <files>` before committing; some files need a second pass, so re-run `--check`.
+   The commit hook runs StyLua on the staged Lua. If it changes a file, the commit stops: look at the change,
+   stage it, and commit again.
 4. **Tests** - `luajit tests/run.lua`: a stub bot API loads every hero file, checks every `require` path,
    team-slot helpers (stub player IDs are deliberately not 1-5) and pure helpers. Add a test when you fix a bug
    a test could have caught. Tests live in `tests/test_*.lua` and get the runner as `local T = ...`
@@ -117,12 +118,10 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
    `tests/stub_api.lua`. A real bug that isn't fixed in the same PR stays as `T.xfail(name, reason, fn)` plus an
    issue; an XPASS means it got fixed, so remove the xfail.
 
-Locally, before pushing: StyLua (`stylua --check` on the changed files; the commit hook runs it too) and a syntax
-check. **The test suite runs in CI, not locally** (maintainer, 2026-11-22): without LuaJIT the local runner is slow,
-and several agents running it at once hog the laptop's CPU for the same result CI gives on every push. Run one test
-file locally only to debug a failure. After pushing, don't block on CI: start a background wait (e.g.
-`gh pr checks <pr> --watch` run in the background) and keep working; fix a red run with a new commit, and look at
-the result before merging.
+**Do not run CI on this machine** (maintainer, 2026-11-26). While developing, do not run `luajit`,
+`tests/run.lua`, `luacheck`, a syntax compile, or the GitHub workflow, and do not install LuaJIT or the other CI
+tools to reproduce it. The commit hook still formats the staged Lua. Push, wait for the GitHub Actions run, and
+read the result. Fix a red check with a new commit. Look at that result before merging.
 
 **pre-commit hooks.** Once per clone: `pip install pre-commit` then `pre-commit install --install-hooks`
 (`.pre-commit-config.yaml`; installs the commit hooks and the post-checkout/commit/merge/rewrite hooks that
@@ -173,7 +172,7 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   of [discussion #50](https://github.com/anggara-ts/Supercharged-OpenHyperAI/discussions/50). When a game, test or source
   confirms a new limitation, disproves one, or a workaround is found, **edit the main post** (not only a reply):
   move the item between "Confirmed" and "Not confirmed yet", with the evidence (log line, test, Valve source) and
-  the related issue. `gh api graphql` with `updateDiscussion` edits it. The post is public: write it for readers outside the project, with no internal test-game numbers ("game 043") or match-log names; describe the evidence itself (the log line, the test, the game file). Record API facts in
+  the related issue. `gh_personal api graphql` with `updateDiscussion` edits it. The post is public: write it for readers outside the project, with no internal test-game numbers ("game 043") or match-log names; describe the evidence itself (the log line, the test, the game file). Record API facts in
   `docs/BOT_API_RUNTIME.md` too.
 
 ## Logging
@@ -207,7 +206,7 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
 
 ## Issue -> PR -> game test -> merge (the regular workflow)
 
-Tools: `gh` (GitHub CLI, logged in), `tools/issue-prs.js`, `tools/verify.js`, `tools/test-build.js`,
+Tools: `gh_personal` (GitHub CLI as the anggara-ts login), `tools/issue-prs.js`, `tools/verify.js`, `tools/test-build.js`,
 `tools/after-game.js`, `tools/build-info.js`. Claude Code skills in `.claude/skills/` run each step
 (see Skills below).
 
@@ -295,7 +294,7 @@ Tools: `gh` (GitHub CLI, logged in), `tools/issue-prs.js`, `tools/verify.js`, `t
    - `node tools/verify.js mute-suggest <pr>` prints `OHA_MUTED` entries for the proven log lines
      (`bots/lib/systems/global_overrides.lua`); add the noisy ones in the PR (avoid whole-tag mutes; keep error and
      rare-decision logs).
-   - Tick the PR's checks (including "Tested in a local game (game NNN)"), `gh pr merge <pr> --squash
+   - Tick the PR's checks (including "Tested in a local game (game NNN)"), `gh_personal pr merge <pr> --squash
      --delete-branch`, `node tools/verify.js done <pr>`, free its lineup slots.
    - For each issue the PR refers to: tick the task items it fixed and verified, and comment the PR link and the
      game. **Close an issue only when every task item in it is ticked**; a PR never closes an issue by itself.
@@ -359,6 +358,8 @@ came with (or a small `docs/` PR).
   for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
   reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
   that quotes it), so later sessions and agents see it.
+- **GitHub account.** Every GitHub call in this repo uses `gh_personal` (the anggara-ts login), including the
+  tools (`GH` defaults to `gh_personal`). Do not call plain `gh` (maintainer, 2026-11-26).
 - **Commits** are authored as the maintainer's GitHub account `anggara-ts` with its GitHub no-reply e-mail
   (`10489830+anggara-ts@users.noreply.github.com`), set in the repo-local git config; check `git config user.name`
   in a fresh clone or worktree.
@@ -376,8 +377,8 @@ came with (or a small `docs/` PR).
 - **Parallel game reviewers** are read-only: they return `node tools/verify.js set <pr> <item> <verdict> "<note>"`
   lines and findings, and the lead applies them one by one (the tracker file and the PR descriptions are not safe
   for concurrent writes).
-- **Windows / Git Bash quirks** (the maintainer's laptop): `gh` is not on PATH in a new shell
-  (`export PATH="$PATH:/c/Program Files/GitHub CLI"`); a doubled backslash in a heredoc or `node -e` string
+- **Windows / Git Bash quirks** (the maintainer's laptop): `gh_personal` must be on PATH (the GitHub CLI
+  itself often is not: `export PATH="$PATH:/c/Program Files/GitHub CLI"`); a doubled backslash in a heredoc or `node -e` string
   arrives as one and apostrophes break `node -e '...'`, so write scripts to files; run `git commit -F - <<'EOF'` as
   its own command; never chain `<check> | tail && git commit` (the chain sees tail's exit code).
 - **Local test settings.** The maintainer's uncommitted `bots/customize/general.lua` keeps `Weak_Hero_Cap = 5` while
