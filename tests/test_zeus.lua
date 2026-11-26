@@ -216,3 +216,25 @@ T.test("zeus: nimbus-result why=ally-fight prints 3 s after an ally-fight cast",
 	)
 	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
 end)
+
+-- Game 087, 34:27: Zeus's own fight on Puck cast Nimbus as "ally-fight" with allies=0 (#47). Only another allied
+-- hero's fight counts.
+T.test("zeus: an ally-fight Nimbus needs another hero's fight, not Zeus's own", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	local function fight(unit)
+		unit._loc = enemy._loc + Vector(500, 0, 0)
+		function unit:GetActiveMode()
+			return BOT_MODE_ATTACK
+		end
+		function unit:GetAttackTarget()
+			return enemy
+		end
+	end
+	fight(Stub.bot)
+	T.eq(#X.AllyFightTargets(), 0, "Zeus alone on the enemy: no ally fight")
+	fight(Stub.teams[TEAM_RADIANT][1])
+	local targets = X.AllyFightTargets()
+	T.eq(#targets, 1, "an ally going on him counts once")
+	T.eq(targets[1], enemy, "his target")
+end)

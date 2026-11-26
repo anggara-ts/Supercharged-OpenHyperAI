@@ -848,64 +848,74 @@ function X.ConsiderD()
 		end
 	end
 	-- An ally's fight last, and held while Zeus or a hurt ally there may soon need it to flee (NimbusFightHold).
+	for _, target in ipairs(X.AllyFightTargets()) do
+		local targetLoc = target:GetLocation()
+		local lowestAllyHp = 1
+		for _, ally in pairs(Fu.GetAlliesNearLoc(targetLoc, 1200) or {}) do
+			if ally ~= bot and Fu.IsValidHero(ally) then
+				lowestAllyHp = math.min(lowestAllyHp, Fu.GetHP(ally))
+			end
+		end
+		local zeusDist = GetUnitToLocationDistance(bot, targetLoc)
+		local targetHp = Fu.GetHP(target)
+		local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
+		-- The allies are killing it (#47, game 068): no cast here either, or the finish skip falls through.
+		-- Counted for every cast, not only under 15%: the cast line printed allies=0 for all 9 ally-fight
+		-- casts of game 083 because the count was skipped above 15%.
+		local alliesHitting = 0
+		if hold == nil then
+			alliesHitting = X.NimbusAlliesHitting(target, NIMBUS_ALLY_FINISH_RANGE)
+			if X.NimbusAllyFinishing(targetHp, alliesHitting) then
+				X.LogNimbusAllyFinishing("ally-fight", target, targetHp, alliesHitting)
+				hold = "ally-finishing"
+			end
+		end
+		if hold == nil then
+			X.RecordNimbusFinish(target, alliesHitting, "ally-fight")
+			return BOT_ACTION_DESIRE_HIGH,
+				target:GetExtrapolatedLocation(1.0),
+				"ally-fight",
+				target,
+				string.format(" targetHp=%.2f allies=%d", targetHp, alliesHitting)
+		end
+		if hold ~= "ally-finishing" and DotaTime() >= (bot._zeusNimbusHoldLogAt or -999) then
+			bot._zeusNimbusHoldLogAt = DotaTime() + 10
+			pcall(
+				print,
+				string.format(
+					"[SHy-ZEUS] t=%.0f nimbus-hold why=%s target=%s targetHp=%.2f zeusDist=%d allyHp=%.2f",
+					DotaTime(),
+					hold,
+					target:GetUnitName(),
+					Fu.GetHP(target),
+					math.floor(zeusDist),
+					lowestAllyHp
+				)
+			)
+		end
+	end
+	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- The enemy heroes an allied hero is going on, within 1200 of him, in slot order. Zeus himself is skipped (#47,
+-- game 087 at 34:27): his own fight on Puck, 11 s after his own jump, cast the 45 s cloud as "ally-fight" with
+-- allies=0. His own fight is his Q, W and R.
+function X.AllyFightTargets()
+	local targets = {}
 	-- Slot loop (GetTeamMember takes a slot 1..5, not a player ID).
 	for i = 1, 5 do
 		local teamMember = GetTeamMember(i)
-		if Fu.IsValid(teamMember) and Fu.IsGoingOnSomeone(teamMember) then
+		if teamMember ~= bot and Fu.IsValid(teamMember) and Fu.IsGoingOnSomeone(teamMember) then
 			local target = Fu.GetProperTarget(teamMember)
 			if
 				Fu.IsValidHero(target)
 				and Fu.IsInRange(teamMember, target, 1200)
 				and Fu.CanCastOnNonMagicImmune(target)
 			then
-				local targetLoc = target:GetLocation()
-				local lowestAllyHp = 1
-				for _, ally in pairs(Fu.GetAlliesNearLoc(targetLoc, 1200) or {}) do
-					if ally ~= bot and Fu.IsValidHero(ally) then
-						lowestAllyHp = math.min(lowestAllyHp, Fu.GetHP(ally))
-					end
-				end
-				local zeusDist = GetUnitToLocationDistance(bot, targetLoc)
-				local targetHp = Fu.GetHP(target)
-				local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
-				-- The allies are killing it (#47, game 068): no cast here either, or the finish skip falls through.
-				-- Counted for every cast, not only under 15%: the cast line printed allies=0 for all 9 ally-fight
-				-- casts of game 083 because the count was skipped above 15%.
-				local alliesHitting = 0
-				if hold == nil then
-					alliesHitting = X.NimbusAlliesHitting(target, NIMBUS_ALLY_FINISH_RANGE)
-					if X.NimbusAllyFinishing(targetHp, alliesHitting) then
-						X.LogNimbusAllyFinishing("ally-fight", target, targetHp, alliesHitting)
-						hold = "ally-finishing"
-					end
-				end
-				if hold == nil then
-					X.RecordNimbusFinish(target, alliesHitting, "ally-fight")
-					return BOT_ACTION_DESIRE_HIGH,
-						target:GetExtrapolatedLocation(1.0),
-						"ally-fight",
-						target,
-						string.format(" targetHp=%.2f allies=%d", targetHp, alliesHitting)
-				end
-				if hold ~= "ally-finishing" and DotaTime() >= (bot._zeusNimbusHoldLogAt or -999) then
-					bot._zeusNimbusHoldLogAt = DotaTime() + 10
-					pcall(
-						print,
-						string.format(
-							"[SHy-ZEUS] t=%.0f nimbus-hold why=%s target=%s targetHp=%.2f zeusDist=%d allyHp=%.2f",
-							DotaTime(),
-							hold,
-							target:GetUnitName(),
-							Fu.GetHP(target),
-							math.floor(zeusDist),
-							lowestAllyHp
-						)
-					)
-				end
+				table.insert(targets, target)
 			end
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE, nil
+	return targets
 end
 -- Pure: why Nimbus is kept for later in an ally's fight, or nil to cast it now. Game 063: 15 of 18 casts were
 -- ally-fight, and every Zeus death after the Scepter came 7-14 s after one, with Nimbus on cooldown as he fled.
