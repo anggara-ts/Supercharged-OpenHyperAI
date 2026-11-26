@@ -358,8 +358,9 @@ came with (or a small `docs/` PR).
   for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
   reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
   that quotes it), so later sessions and agents see it.
-- **GitHub account.** Every GitHub call in this repo uses `gh_personal` (the anggara-ts login), including the
-  tools (`GH` defaults to `gh_personal`). Do not call plain `gh` (maintainer, 2026-11-26).
+- **GitHub account.** Every GitHub call in this repo uses `gh_personal` (the anggara-ts login). The tools
+  (`tools/github_cli.js`) pick `gh_personal` when it is on PATH, and `gh` only when that wrapper is missing.
+  `GH` names another binary only in that fallback (maintainer, 2026-11-26).
 - **Commits** are authored as the maintainer's GitHub account `anggara-ts` with its GitHub no-reply e-mail
   (`10489830+anggara-ts@users.noreply.github.com`), set in the repo-local git config; check `git config user.name`
   in a fresh clone or worktree.

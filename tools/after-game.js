@@ -30,7 +30,7 @@ const TEST_BUILD = path.join(LOCAL_DIR, "verify", "test-build.json");
 // customize/version.lua before and after the layout change of #221 (old builds name their version there).
 const VERSION_FILES = ["bots/customize/version.lua", "Customize/version.lua"]; // restructure:keep
 const DEFAULT_DOTA = "C:/Program Files (x86)/Steam/steamapps/common/dota 2 beta/game/dota";
-const GH = process.env.GH || "gh_personal";
+const GH = require("./github_cli")();
 // "attempt to" is case-sensitive: Lua errors are lower case, the engine's "Attempt to set 'item' in slot" is noise.
 const ERROR_LINE = /attempt to|stack traceback|\[SHy-ERROR\]|[Ss]cript (Runtime )?[Ee]rror/;
 const TAG = /\[(SHy-[A-Z0-9_]+)\]/;
