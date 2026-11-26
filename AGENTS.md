@@ -105,8 +105,9 @@ Prefix a file with `--` only for a short local test, never as a long-term "disab
 `docs/**` and on every PR:
 
 1. **Syntax** - every tracked `.lua` compiled with LuaJIT (the game's Lua, so `goto` is fine).
-2. **Lint** - `luacheck` with `.luacheckrc`. No unused locals or values, no new globals,
-   write `x < y` not `not (x >= y)`, never `not a == b` (it means `(not a) == b`).
+2. **Lint** - `luacheck` with `.luacheckrc`. Globals, unused locals, unused values, shadowing and empty
+   `if` branches are ignored. Unreachable code still fails the check. Write `x < y` not `not (x >= y)`,
+   never `not a == b` (it means `(not a) == b`).
 3. **Format** - `stylua --check .` (StyLua 2.6.0, `stylua.toml`: LuaJIT, tabs, 120 columns, double quotes).
    Run `stylua <files>` before committing; some files need a second pass, so re-run `--check`.
 4. **Tests** - `luajit tests/run.lua`: a stub bot API loads every hero file, checks every `require` path,
