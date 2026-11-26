@@ -1,4 +1,5 @@
 -- Shared helper: team info.
+local FrameCache = require(GetScriptDirectory() .. "/lib/systems/frame_cache")
 local function installTeamInfo(Fu)
 	local unitListCache = {}
 	local unitListCacheTime = -1
@@ -282,6 +283,13 @@ local function installTeamInfo(Fu)
 		end
 		bot._fc[key] = { DotaTime(), value }
 	end
+	-- The filter of Fu.GetNearbyHeroes. It used to test the CALLER's modifier
+	-- (`bot:HasModifier("modifier_arc_warden_tempest_double")`), so an Arc Warden Tempest Double calling it got an empty
+	-- list (blind in fights). Doubles in the list are kept on purpose: an enemy Double hits as hard as the real hero and
+	-- must count as a threat and a target. Fu.GetRealEnemyHeroes is the variant that leaves Doubles out.
+	local function IsListedHero(hero)
+		return Fu.IsValidHero(hero) and not Fu.IsMeepoClone(hero)
+	end
 	function Fu.GetNearbyHeroes(bot, radius, isEnemy, mode)
 		if not mode then
 			mode = BOT_MODE_NONE
@@ -290,13 +298,12 @@ local function installTeamInfo(Fu)
 		if not heroes then
 			return heroes
 		end
+		-- A hero is checked once per frame, however many lists of the frame it is in (bots/lib/systems/frame_cache.lua,
+		-- #52, #251). The result is a new table on every call: callers change it (Fu.GetAroundBotUnitList, #121).
+		local now = GameTime()
 		local result = {}
 		for _, hero in pairs(heroes) do
-			-- Used to test the CALLER's modifier (`bot:HasModifier("modifier_arc_warden_tempest_double")`), so an
-			-- Arc Warden Tempest Double calling this got an empty list (blind in fights). Doubles in the list are
-			-- kept on purpose: an enemy Double hits as hard as the real hero and must count as a threat and a
-			-- target. Fu.GetRealEnemyHeroes is the variant that leaves Doubles out.
-			if Fu.IsValidHero(hero) and not Fu.IsMeepoClone(hero) then
+			if FrameCache.Listed(hero, now, IsListedHero) then
 				table.insert(result, hero)
 			end
 		end

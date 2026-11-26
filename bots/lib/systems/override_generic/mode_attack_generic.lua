@@ -2,6 +2,7 @@
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 -- Kiting lives there now, shared with the per-think hook for heroes on Valve's attack mode.
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
+local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local AttackHelpers = {}
 local bot = GetBot()
 local attackTarget = { unit = nil, id = -1, location = nil, locationFuture = nil, hidden1 = false, hidden2 = false }
@@ -84,11 +85,9 @@ function AttackMode.GetDesire()
 	botName = bot:GetUnitName()
 	botLocation = bot:GetLocation()
 	local isCore = Fu.IsCore(bot)
-	local nearbyAllyHeroes = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local alliesNearby = Fu.GetAlliesNearLoc(botLocation, 1600)
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	local enemiesNearby = Fu.GetEnemiesNearLoc(botLocation, 1600)
-	local enemyLaneCreeps = bot:GetNearbyLaneCreeps(1600, true)
 	local enemyTowers = bot:GetNearbyTowers(1600, true)
 	local bestTarget = nil
 	local bestScore = 0
@@ -183,6 +182,8 @@ function AttackMode.GetDesire()
 		end
 	end
 	attackTarget.unit = bestTarget or AttackHelpers.GetWeakestNearbyHero(true, attackRange + 700)
+	-- The human's focus / gank target (#222, bots/lib/systems/human_orders.lua), when it is reachable within ~2s.
+	attackTarget.unit = HumanOrders.FocusTarget(bot, attackRange) or attackTarget.unit
 	if Fu.IsValidHero(attackTarget.unit) then
 		attackTarget.id = attackTarget.unit:GetPlayerID()
 		attackTarget.location = attackTarget.unit:GetLocation()
@@ -481,7 +482,8 @@ function AttackMode.GetDesire()
 				end
 				for i = 1, 5 do
 					local teammate = GetTeamMember(i)
-					if teammate and teammate == allyHero then
+					-- Only a human's ping (#222): a bot's own pings were followed too.
+					if teammate and teammate == allyHero and not teammate:IsBot() then
 						local ping = teammate:GetMostRecentPing()
 						if ping ~= nil and ping.normal_ping and GameTime() < ping.time + 5.5 then
 							local enemiesNearPing = Fu.GetEnemiesNearLoc(ping.location, 300)
@@ -539,7 +541,6 @@ function AttackMode.Think()
 		end
 	end
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
-	local enemyTowers = bot:GetNearbyTowers(1600, true)
 	if bot:HasModifier("modifier_pugna_life_drain") then
 		for _, enemyHero in ipairs(nearbyEnemyHeroes) do
 			if

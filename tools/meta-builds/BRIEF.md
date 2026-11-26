@@ -1,6 +1,6 @@
 # Item and skill builds vs the current Dotabuff meta
 
-Repo: C:\Users\ANGGARA\Documents\OpenHyperAI (Lua bot scripts for Dota 2). Each hero has one file,
+Repo: the root of this repository (Lua bot scripts for Dota 2). Each hero has one file,
 bots/heroes/hero_<name>.lua, with item builds per position (tables like `m["pos_1"] = { "item_...", ... }`,
 some positions are aliases such as `m["pos_4"] = m["pos_1"]`), a sell list `a["sSellList"]` read in pairs
 {owned, sold}, and skill builds (arrays of ability indices such as `{ 1, 3, 1, 2, 1, 6, ... }` = the order
@@ -8,7 +8,7 @@ abilities are levelled; read the file to see how indices map to abilities — us
 slots, 6 = ultimate).
 
 For each of your heroes there is a data file in
-C:\Users\ANGGARA\AppData\Local\Temp\claude\dd83bb95a98a6874\78631228-580b-4093-8e8e-7286c4feda37\scratchpad\meta\heroes\<hero>.txt
+<SCRATCH>/meta/heroes/<hero>.txt  (<SCRATCH> = the scratch folder the lead names)
 with Dotabuff's most played items for that hero (last patch data, all positions together; share of matches played, no win rate) and the most
 picked ability at each level.
 
@@ -35,7 +35,7 @@ picked ability at each level.
    for this hero's spells) whether it is worth replacing an item we have. Replace only when the case is
    clear (e.g. the meta core item for the hero is missing, or we build something nobody builds any more).
    Keep the list length and rough order (early items first). Keep the build valid: every item name must
-   exist in C:\Users\ANGGARA\AppData\Local\Temp\claude\dd83bb95a98a6874\78631228-580b-4093-8e8e-7286c4feda37\scratchpad\review\items.txt.
+   exist in <SCRATCH>/review/items.txt.  (<SCRATCH> = the scratch folder the lead names)
    Do not put two copies of an item that does not stack. Upgrades (e.g. item_ultimate_scepter_2,
    item_travel_boots_2, item_moon_shard) follow the existing file conventions.
 2. Skills: if our max order clearly differs from the meta (a different basic ability maxed first, or the

@@ -120,8 +120,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minion)
 	if Minion.IsValidUnit(minion) then
 		Minion.IllusionThink(minion)
@@ -480,8 +479,6 @@ function X.ConsiderW()
 	local manaCost = shallowGraveAbility:GetManaCost()
 	local nDamage = shallowGraveAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_PHYSICAL
-	local enemiesInCastRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil
 	for _, ally in pairs(nearbyAllies) do

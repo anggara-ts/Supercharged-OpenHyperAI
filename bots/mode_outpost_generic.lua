@@ -1,6 +1,7 @@
 -- Outpost capture mode.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
+local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -1062,6 +1063,24 @@ function TrampleToBase()
 	tramplePoints = {}
 	bot:Action_MoveToLocation(Fu.GetTeamFountain())
 end
+-- [SHy-ROAM] t= <hero> tombstone-slow hit where=think|no-run dist= hits-left= (once per 3s per bot).
+local function LogTombstoneSlowHit(where, dist, hitsLeft)
+	if DotaTime() < (bot._tombstoneSlowLogAt or -999) then
+		return
+	end
+	bot._tombstoneSlowLogAt = DotaTime() + 3
+	pcall(
+		print,
+		string.format(
+			"[SHy-ROAM] t=%.0f %s tombstone-slow hit where=%s dist=%d hits-left=%d",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			where,
+			dist,
+			hitsLeft
+		)
+	)
+end
 function ThinkGeneralRoaming()
 	local hpRatio = Fu.GetHP(bot)
 	if
@@ -1210,6 +1229,14 @@ function ThinkGeneralRoaming()
 		return true
 	end
 	if bot:HasModifier("modifier_undying_tombstone_zombie_deathstrike_slow") then
+		-- #185: a Tombstone within 400 that dies in 3 hits or fewer: kill it (it stops the zombies) instead of
+		-- running to the fountain slowed.
+		local tombstone, dist, hitsLeft = SpecialUnits.TombstoneToHitWhenSlowed(bot)
+		if tombstone ~= nil then
+			LogTombstoneSlowHit("think", dist, hitsLeft)
+			bot:Action_AttackUnit(tombstone, true)
+			return true
+		end
 		bot:Action_MoveToLocation(Fu.GetTeamFountain())
 		return true
 	end
@@ -1847,7 +1874,11 @@ function ConsiderGeneralRoamingInConditions()
 		end
 		if bot:HasModifier("modifier_undying_tombstone_zombie_deathstrike_slow") then
 			lastTombstoneSlowTime = DotaTime()
-			if Fu.IsValidTarget(botTarget) and not Fu.Utils.IsUnitWithName(botTarget, "tombstone") then
+			-- #185: no run while a nearly dead Tombstone is within 400 (team roam's Tombstone rule hits it).
+			local slowTombstone, slowDist, slowHits = SpecialUnits.TombstoneToHitWhenSlowed(bot)
+			if slowTombstone ~= nil then
+				LogTombstoneSlowHit("no-run", slowDist, slowHits)
+			elseif Fu.IsValidTarget(botTarget) and not Fu.Utils.IsUnitWithName(botTarget, "tombstone") then
 				local tombstone = Fu.FindEnemyUnit("tombstone")
 				if not tombstone then
 					tombstone = GetTargetEnemy("npc_dota_hero_undying")
@@ -2208,6 +2239,20 @@ heroSpecificDesire["npc_dota_hero_puck"] = function()
 	return BOT_MODE_DESIRE_NONE
 end
 heroSpecificDesire["npc_dota_hero_ringmaster"] = function()
+	-- The Puck pattern (#49, game 085): 36 whips were cut 0.03-0.20s into the channel in Valve's attack and retreat
+	-- modes (no Think of ours there, so the cast hold can't pause them); the 38 in farm, defend and Roshan ran full.
+	-- The checks below never held one (no outpost mode in any of his [SHy-FLIP] lines): the whip has no cast point,
+	-- and a whip cut within 0.2s ends before the next desire read. hero_ringmaster.lua asks for this hold before a
+	-- whip or a Wheel (bot._ringmasterHoldWantAt) and holds from the order until the whip cracks or the Wheel is out
+	-- (bot._castHoldUntil, at most ~3s). Desires are read about 3 times a second (game 085 [SHy-PERFSUM]: 961
+	-- outpost.GetDesire calls in 300s), so the Think's own hold lasts 0.5s past this read (idle, this Think walks
+	-- toward the fountain).
+	local now = DotaTime()
+	local wantAt = bot._ringmasterHoldWantAt
+	if (wantAt ~= nil and now - wantAt < 0.6) or now < (bot._castHoldUntil or -1) then
+		bot._outpostHoldUntil = now + 0.5
+		return BOT_DESIRE_OVERRIDE * 1.5
+	end
 	if highPriorityAbility == nil then
 		highPriorityAbility = bot:GetAbilityByName("ringmaster_tame_the_beasts")
 	end
@@ -2420,6 +2465,18 @@ heroSpecificDesire["npc_dota_hero_nevermore"] = function()
 				return BOT_MODE_DESIRE_VERYHIGH
 			end
 		end
+	end
+	return BOT_MODE_DESIRE_NONE
+end
+heroSpecificDesire["npc_dota_hero_alchemist"] = function()
+	-- Concoction keep-range (#34, hero_alchemist.lua X.ConcoctionKeepRange sets bot._alchChaseUntil while it walks
+	-- him back into throw range of a hero): game 063, 7:32, the laning mode's own move replaced that order (dist 606
+	-- -> 1023) and the brew blew up on him. This mode takes him and gives no order meanwhile, so the hero script's
+	-- move stands. 1.05: above the other modes' 1.0 overrides, below retreat's 1.1 (the hero script also stops
+	-- the chase when retreat wants him out).
+	if bot._alchChaseUntil ~= nil and DotaTime() < bot._alchChaseUntil then
+		bot._outpostHoldUntil = DotaTime() + 0.15
+		return BOT_DESIRE_OVERRIDE * 1.05
 	end
 	return BOT_MODE_DESIRE_NONE
 end

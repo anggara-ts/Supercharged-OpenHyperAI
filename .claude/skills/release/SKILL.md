@@ -18,6 +18,9 @@ on an earlier or general approval.
 - Version files (bumped only in the release PR):
   - `bots/customize/version.lua`, `number = "YYYY.MM.DD-NNN"`: the release date, and NNN = the previous NNN plus the
     number of commits on main since the last tag (`git rev-list --count <tag>..origin/main`), zero-padded to 3.
+  - `bots/customize/version.lua`, `release = "vX.Y"`: the new tag. A Workshop copy's start-of-game welcome shows it with
+    the date of `number`: "Supercharged OpenHyperAI vX.Y (D Mon YYYY)" (`bots/lib/systems/chat_rules.lua`;
+    a git build with `bots/customize/build_info.lua` shows "dev <commit date>-<sha>" instead).
   - `bots/lib/systems/version.lua`, `Version.number = "0.<game patch> - YYYY/MM/DD"`: the Dota patch the release is
     for (e.g. `0.7.42`) and the release date.
 
@@ -50,19 +53,19 @@ Show the maintainer: the new version and the two version-file values, the tidied
 in one line each. Stop here unless publishing was asked for.
 
 ## 5. Ready to publish?
-- `main` CI is green (`gh run list --branch main --limit 3`), and a game on a build of `main` alone ran clean
+- `main` CI is green (`gh_personal run list --branch main --limit 3`), and a game on a build of `main` alone ran clean
   (no freeze, no `[SHy-ERROR]`): if not, say so and stop.
 - No open PR the maintainer named as part of this release is still open.
 
 ## 6. Release PR
-- Branch `chore/release-vX.Y` from `origin/main` (own worktree; never commit on main). Bump the two version files
-  (step 1), signed commit `chore(release): vX.Y`, push, PR with the notes as description, CI green,
-  squash-merge (`gh pr merge --squash --delete-branch`).
+- Branch `chore/release-vX.Y` from `origin/main` in `.worktree/release-vX.Y` (never commit on main). Bump the version files
+  (step 1: `number` and `release` in `bots/customize/version.lua`, `bots/lib/systems/version.lua`), signed commit
+  `chore(release): vX.Y`, push, PR with the notes as description, CI green, squash-merge (`gh_personal pr merge --squash --delete-branch`).
 
 ## 7. Tag and release
 - `git fetch origin`; tag the merge commit: `git tag -s vX.Y -m "vX.Y" origin/main` (signed, like the commits),
   `git push origin vX.Y`.
-- `gh release create vX.Y --title "vX.Y" --notes-file <notes.md> --verify-tag`.
+- `gh_personal release create vX.Y --title "vX.Y" --notes-file <notes.md> --verify-tag`.
 
 ## 8. Workshop copy
 Ask the maintainer whether to put the release into `vscripts/bots` for the Workshop upload now; on yes, run the
