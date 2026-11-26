@@ -60,6 +60,7 @@ end
 --   channeling, busy     channeling / casting, using an ability or a queued order
 --   valveMode            the active mode's Think is Valve's (ModeHoldable): it cannot be held, team roam should not
 --                        have offered (the mode changed after its GetDesire)
+--   creepAggro           enemy lane creeps are hitting the bot (CreepAggroOn): no hit held while they do
 function Rules.OverlaySkipWhy(s)
 	if s.retreat then
 		return "retreat"
@@ -87,6 +88,10 @@ function Rules.OverlaySkipWhy(s)
 	end
 	if s.desire == nil or s.modeDesire == nil or s.desire <= s.modeDesire then
 		return "mode"
+	end
+	-- Last, so a creep-aggro skip is only counted where the hit would have gone.
+	if s.creepAggro then
+		return "creep-aggro"
 	end
 	return nil
 end
@@ -144,6 +149,7 @@ end
 --                    only once lastAttack + windup has passed, as it is not known whether GetLastAttackTime is the
 --                    start of the attack or its release (special_units.lua's kiting assumes the same)
 --   free             the active mode is retreat or evasive maneuvers: never held
+--   creepAggro       enemy lane creeps are hitting the bot (CreepAggroOn): the mode's Think and the kite step get it back
 -- HOLD_CAP ends a hold whose hit never comes (the unit walked off, an item or spell order replaced the attack).
 local HOLD_CAP = 1.0
 Rules.HOLD_CAP = HOLD_CAP
@@ -153,6 +159,9 @@ function Rules.OverlayHoldWhy(o)
 	end
 	if o.free then
 		return "free"
+	end
+	if o.creepAggro then
+		return "creep-aggro"
 	end
 	if o.lastAttack ~= nil and o.ownAttack ~= nil and o.lastAttack > o.ownAttack then
 		if o.now >= o.lastAttack + (o.windup or 0) then
@@ -181,23 +190,25 @@ function Rules.SpecialUnitCap(desire, allies, enemies, retreatDesire, exempt)
 end
 
 -- Which special units the outnumbered cap above leaves alone, or nil to cap. specialWhy: bot._specialUnitWhy;
--- tombstonePriority: bot._tombstonePriority (#185 / PR #188: Undying's Tombstone close, nearly dead or with our heroes
--- in it; nil without that PR); hp: the bot's HP ratio; retreatDesire: retreat's last desire (nil when unknown).
+-- tombstonePriority: bot._tombstonePriority (#185 / PR #188); hp: the bot's HP ratio; hitsLeft: the Tombstone's hits
+-- left (bot._tombstoneHitsLeft, nil when unknown).
 --   "serpent-escape"  the serpent ward escape (itself an escape)
---   "tombstone"       a priority Tombstone while the bot is above TOMBSTONE_EXEMPT_HP and retreat wants it under
---                     TOMBSTONE_EXEMPT_RETREAT. Game 067: 11 of 12 cap lines cut a Tombstone's 0.98 to 0.12-0.65,
---                     e.g. t=2185 Zeus (hp 0.98, retreat 0.39, 3 allies vs 4 enemies), and those Tombstones were
---                     never hit; where it was not cut (t=3342-3347) it went from 8 hits left to 1 in 5s.
-Rules.TOMBSTONE_EXEMPT_HP = 0.25
-Rules.TOMBSTONE_EXEMPT_RETREAT = 0.5
-function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, retreatDesire)
+--   "tombstone"       a priority Tombstone TOMBSTONE_EXEMPT_HITS hits or fewer from dying, while the bot is above
+--                     TOMBSTONE_EXEMPT_HP. Game 067: the cap cut a Tombstone's 0.98 to 0.12-0.65 and those were never
+--                     hit. Game 068: an exemption by retreat's desire (under 0.5) flickered off after ~1s; a 2s hold
+--                     followed, and game 069 37:39-37:49 showed it too wide: Axe stayed 4s on a full Tombstone (8 -> 5
+--                     hits) with 3 allies vs 4 enemies and three of them died. Now only a nearly dead one.
+Rules.TOMBSTONE_EXEMPT_HP = 0.4
+Rules.TOMBSTONE_EXEMPT_HITS = 3
+function Rules.SpecialUnitCapExempt(specialWhy, tombstonePriority, hp, hitsLeft)
 	if specialWhy == "serpent-escape" then
 		return "serpent-escape"
 	end
 	if
 		tombstonePriority == true
 		and (hp or 0) > Rules.TOMBSTONE_EXEMPT_HP
-		and (retreatDesire or 0) < Rules.TOMBSTONE_EXEMPT_RETREAT
+		and hitsLeft ~= nil
+		and hitsLeft <= Rules.TOMBSTONE_EXEMPT_HITS
 	then
 		return "tombstone"
 	end
@@ -269,6 +280,54 @@ function Rules.NewHitSkipWhy(rule, gap, allyGaps)
 		end
 	end
 	return nil
+end
+
+-- Creep aggro (#165, game 078 14:30-14:51): Winter Wyvern farmed beside Radiant lane creeps; the overlay held her on
+-- snipes (`overlay-try ... release=cap`, twice) while 2 creeps hit her, and the kite step was skipped
+-- (`kite-skip why=overlay-owns`); she fell to 38% HP. While enemy lane creeps hit the bot, the overlay holds no hit and
+-- team roam offers no snipe, so the active mode's Think and the kite step act. No "fight back" order: in lane, hitting
+-- the creeps pushes the wave, and the laning mode's aggro tricks draw and drop aggro on purpose without the overlay.
+-- Neutral creeps don't count: a bot farming a camp always has them on it, and its farm mode attacks them anyway.
+--   attackers   enemy lane creeps whose attack target is the bot
+--   loss        HP the bot lost in the last second while only creeps damaged it (no hero, no tower)
+--   hp          the bot's current HP (not max: the lower it is, the sooner a creep's hits count)
+-- "attackers": AGGRO_ATTACKERS or more on the bot; "damage": at least one, and loss would take more than
+-- AGGRO_HP_SHARE of hp within AGGRO_HORIZON seconds. nil: no aggro.
+Rules.AGGRO_ATTACKERS = 2
+Rules.AGGRO_HP_SHARE = 0.15
+Rules.AGGRO_HORIZON = 3
+function Rules.CreepAggroWhy(attackers, loss, hp)
+	if attackers >= Rules.AGGRO_ATTACKERS then
+		return "attackers"
+	end
+	if attackers >= 1 and hp > 0 and loss * Rules.AGGRO_HORIZON > Rules.AGGRO_HP_SHARE * hp then
+		return "damage"
+	end
+	return nil
+end
+
+-- The aggro stays on AGGRO_LATCH seconds after CreepAggroWhy last fired (lastAt), so a snipe doesn't pull the bot back
+-- between two creep swings, in the middle of a kite step.
+Rules.AGGRO_LATCH = 2
+function Rules.CreepAggroOn(now, lastAt)
+	return lastAt ~= nil and now - lastAt < Rules.AGGRO_LATCH
+end
+
+-- HP lost in the last LOSS_WINDOW seconds from samples { t, hp } (oldest first), the newest being now: the highest HP
+-- in the window minus the HP now (0 when it rose). Samples older than the window are ignored.
+Rules.LOSS_WINDOW = 1.0
+function Rules.RecentLoss(samples, now)
+	local last = samples[#samples]
+	if last == nil then
+		return 0
+	end
+	local top = last.hp
+	for _, sample in ipairs(samples) do
+		if now - sample.t <= Rules.LOSS_WINDOW and sample.hp > top then
+			top = sample.hp
+		end
+	end
+	return top - last.hp
 end
 
 return Rules

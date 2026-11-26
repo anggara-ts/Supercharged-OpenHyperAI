@@ -6,6 +6,7 @@ local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
+local PaBlurRules = require(GetScriptDirectory() .. "/lib/systems/pa_blur_rules")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
 local sRole = Fu.Item.GetRoleItemsBuyList(bot)
@@ -120,8 +121,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -142,7 +142,11 @@ local blurDesire
 local fanOfKnivesDesire, fanOfKnivesTarget
 local lastDaggerCreep
 local botLevel, mpRatio, hpRatio
+-- Was an accidental global (#13): set from the ability context each think.
+local aetherRange = 0
 function X.SkillsComplement()
+	-- Before the gate below: a stun on her is exactly when CanNotUseAbility is true.
+	X.WatchBlurDodge()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -448,8 +452,6 @@ function X.ConsiderW()
 	local damageType = DAMAGE_TYPE_PHYSICAL
 	local alliesNearby = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 	local enemiesNearby = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 50, true, BOT_MODE_NONE)
-	local enemiesInWideRange = Fu.GetNearbyHeroes(bot, castRange + 300, true, BOT_MODE_NONE)
 	local enemyTowers = bot:GetNearbyTowers(1400, true)
 	local aliveEnemyCount = Fu.GetNumOfAliveHeroes(true)
 	local target = Fu.GetProperTarget(bot)
@@ -597,46 +599,172 @@ function X.ConsiderW()
 	end
 	return 0
 end
+-- The first stun projectile on its way to her within `range`, by spell name (Fu.IsStunProjectileIncoming's test).
+local function IncomingStunSpell(range)
+	for _, projectile in pairs(bot:GetIncomingTrackingProjectiles() or {}) do
+		if
+			not projectile.is_attack
+			and projectile.ability ~= nil
+			and GetUnitToLocationDistance(bot, projectile.location) < range
+		then
+			local name = projectile.ability:GetName()
+			if Fu.IsStunProjectileSpell(name) then
+				return name
+			end
+		end
+	end
+	return nil
+end
+local function LogBlur(why, fmt, ...)
+	if DotaTime() < (bot._paBlurWhyAt or -999) then
+		return
+	end
+	bot._paBlurWhyAt = DotaTime() + 3
+	pcall(print, string.format("[SHy-PA] t=%.0f blur why=%s " .. fmt, DotaTime(), why, ...))
+end
+-- (#48) The dodge result: 1s after a blur-disjoint decision, was she stunned in between? The stun is latched on
+-- every think of the window, since a short stun can be over by the time the line prints.
+function X.WatchBlurDodge()
+	local watch = bot._paBlurWatch
+	if watch == nil then
+		return
+	end
+	-- thinks: how many thinks ran in the window, so the line shows whether the watcher ran during a stun at all.
+	watch.thinks = watch.thinks + 1
+	if bot:IsAlive() and (bot:IsStunned() or bot:HasModifier("modifier_stunned")) then
+		watch.stunned = true
+	end
+	local now = DotaTime()
+	local stunned = PaBlurRules.DodgeResult(watch, now)
+	if stunned == nil then
+		return
+	end
+	bot._paBlurWatch = nil
+	local cast = blurAbility:GetCooldownTimeRemaining() > 0 or bot:HasModifier("modifier_phantom_assassin_blur_active")
+	pcall(
+		print,
+		string.format(
+			"[SHy-PA] t=%.0f blur-dodge-result stunned=%s cast=%s spell=%s after=%.1f thinks=%d alive=%s hp=%.2f",
+			now,
+			stunned,
+			cast and "yes" or "no",
+			watch.spell,
+			now - watch.at,
+			watch.thinks,
+			tostring(bot:IsAlive()),
+			Fu.GetHP(bot)
+		)
+	)
+end
 function X.ConsiderE()
+	if not blurAbility:IsFullyCastable() or bot:IsInvisible() then
+		return BOT_ACTION_DESIRE_NONE
+	end
 	-- Dodge: Blur disjoints incoming projectiles (datafeed), so a stun projectile on its way is cast
 	-- out of the air, near a tower too. It was only used to hide, never to dodge. 1000 range: Blur has
 	-- a 0.3s cast point (game data), and any projectile already in flight is dodged.
-	if blurAbility:IsFullyCastable() and not bot:IsInvisible() and Fu.IsStunProjectileIncoming(bot, 1000) then
+	local stunSpell = IncomingStunSpell(1000)
+	if stunSpell ~= nil then
 		if DotaTime() >= (bot._paBlurLogAt or -999) then
 			bot._paBlurLogAt = DotaTime() + 3
 			pcall(print, string.format("[SHy-PA] t=%.0f blur-disjoint hp=%.2f", DotaTime(), Fu.GetHP(bot)))
 		end
+		if bot._paBlurWatch == nil then
+			bot._paBlurWatch = { at = DotaTime(), spell = stunSpell, stunned = false, thinks = 0 }
+		end
 		return BOT_ACTION_DESIRE_HIGH
 	end
-	local enemyTowers = bot:GetNearbyTowers(878, true)
-	if
-		not blurAbility:IsFullyCastable()
-		or bot:IsInvisible()
-		or #enemyTowers >= 1
-		or bot:DistanceFromFountain() < 600
-	then
-		return BOT_ACTION_DESIRE_NONE, 0
+	if bot:DistanceFromFountain() < 600 then
+		return BOT_ACTION_DESIRE_NONE
 	end
-	if Fu.IsRetreating(bot) and bot:WasRecentlyDamagedByAnyHero(3.1) and (botLevel >= 6 or hpRatio <= 0.3) then
-		local enemiesInRange = Fu.GetNearbyHeroes(bot, 740, true, BOT_MODE_NONE)
-		if #enemiesInRange == 0 then
+	local nearTowers = bot:GetNearbyTowers(878, true)
+	local towerNear = nearTowers ~= nil and #nearTowers >= 1
+	-- Escape: enemy heroes within 740 or a tower within 878 used to stop it. Maintainer (game 069): "not completely
+	-- wasted, casting blur near tower or enemy hero has 0.8 vanish buffer" (datafeed fade_duration 0.8), and the
+	-- disjoint and +12% speed work anyway.
+	if Fu.IsRetreating(bot) then
+		local heroesNear = Fu.GetNearbyHeroes(bot, 740, true, BOT_MODE_NONE)
+		local ok, why = PaBlurRules.Escape({
+			retreating = true,
+			hitByHero = bot:WasRecentlyDamagedByAnyHero(3.1),
+			level = botLevel,
+			hp = hpRatio,
+			heroesNear = heroesNear and #heroesNear or 0,
+			towerNear = towerNear,
+		})
+		if ok then
+			LogBlur(
+				"escape",
+				"near=%s heroes=%d tower=%s hp=%.2f",
+				why,
+				heroesNear and #heroesNear or 0,
+				towerNear and "yes" or "no",
+				hpRatio
+			)
 			return BOT_ACTION_DESIRE_HIGH
 		end
 	end
-	if Fu.IsInEnemyArea(bot) and botLevel >= 7 then
-		local enemiesInArea = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-		local enemyHeroes = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-		local enemyTowers = bot:GetNearbyTowers(1600, true)
-		-- "enemyTowers" is the tower list: compare its length. The old "enemyTowers == 0" compared a table with 0 and was always false.
-		if #enemiesInArea == 0 and #enemyHeroes <= 2 and #enemyTowers == 0 then
+	-- Chase-approach (maintainer, game 069: only when hunting a lone enemy): close in unseen and 12% faster.
+	local hunting = Fu.IsGoingOnSomeone(bot)
+	if hunting and Fu.IsValidHero(botTarget) and not Fu.IsSuspiciousIllusion(botTarget) then
+		local dist = GetUnitToUnitDistance(bot, botTarget)
+		local targetLoc = botTarget:GetLocation()
+		local targetId = botTarget:GetPlayerID()
+		local others = 0
+		for _, playerId in pairs(Fu.GetLastSeenEnemiesNearLoc(targetLoc, PaBlurRules.LONE_RADIUS)) do
+			if playerId ~= targetId then
+				others = others + 1
+			end
+		end
+		local attackTarget = bot:GetAttackTarget()
+		local strikeReach = 0
+		if phantomStrikeAbility:IsFullyCastable() then
+			strikeReach = phantomStrikeAbility:GetCastRange() + aetherRange
+		end
+		local ok = PaBlurRules.Approach({
+			hunting = true,
+			dist = dist,
+			othersNearTarget = others,
+			-- 1000: the 600 reveal radius plus a tower's reach; IsLocHaveTower also counts the enemy base.
+			towerNearTarget = towerNear or Fu.IsLocHaveTower(1000, true, targetLoc),
+			attackingOther = attackTarget ~= nil and attackTarget ~= botTarget,
+			hp = hpRatio,
+			strikeReach = strikeReach,
+			manaAfter = bot:GetMana() - blurAbility:GetManaCost(),
+			strikeCost = phantomStrikeAbility:GetManaCost(),
+		})
+		if ok then
+			LogBlur(
+				"approach",
+				"target=%s dist=%d hp=%.2f",
+				(string.gsub(botTarget:GetUnitName(), "npc_dota_hero_", "")),
+				math.floor(dist),
+				hpRatio
+			)
 			return BOT_ACTION_DESIRE_HIGH
 		end
 	end
-	if Fu.IsFarming(bot) then
-		local farmTarget = Fu.GetProperTarget(bot)
-		if Fu.IsValid(farmTarget) and (farmTarget:IsAncientCreep() or hpRatio < 0.28) and hpRatio <= 0.58 then
-			return BOT_ACTION_DESIRE_HIGH
-		end
+	-- Hide in the enemy half, or while farming where enemies were seen (#48). Maintainer (game 069): only the reveal
+	-- radius matters (datafeed radius 600): heroes farther away don't see her, and hitting lane or jungle creeps
+	-- does not end Blur while no enemy hero or tower is near. Not while going on someone (the approach rule owns
+	-- that) and not under 50% HP (the 45s cooldown is also her escape).
+	local revealHeroes = Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), PaBlurRules.HIDE_CLEAR)
+	local revealTowers = bot:GetNearbyTowers(PaBlurRules.HIDE_CLEAR, true)
+	local seenNear = Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), PaBlurRules.FARM_SEEN_RADIUS)
+	local inEnemyArea = Fu.IsInEnemyArea(bot)
+	local ok, why = PaBlurRules.Hide({
+		hunting = hunting,
+		level = botLevel,
+		hp = hpRatio,
+		inEnemyArea = inEnemyArea,
+		farming = Fu.IsFarming(bot),
+		enemySeenNear = #seenNear > 0,
+		heroesInReveal = #revealHeroes,
+		towerInReveal = revealTowers ~= nil and #revealTowers > 0,
+	})
+	if ok then
+		LogBlur(why, "enemyArea=%s seen=%d hp=%.2f", inEnemyArea and "yes" or "no", #seenNear, hpRatio)
+		return BOT_ACTION_DESIRE_HIGH
 	end
 	return 0
 end

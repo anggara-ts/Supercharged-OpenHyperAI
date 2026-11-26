@@ -77,8 +77,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 bot._taTraps = bot._taTraps or {}
 function X.MinionThink(minion)
 	if Minion.IsValidUnit(minion) then
@@ -598,8 +597,6 @@ function X.ConsiderR()
 	local castRange = psionicTrapAbility:GetCastRange()
 	local castPoint = psionicTrapAbility:GetCastPoint()
 	local abilityLevel = psionicTrapAbility:GetLevel()
-	local enemyCreeps = bot:GetNearbyCreeps(1000, true)
-	local closeEnemies = Fu.GetNearbyHeroes(bot, 600, true, BOT_MODE_NONE)
 	if Fu.IsRetreating(bot) then
 		local enemyHeroes = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 		for _, enemyHero in pairs(enemyHeroes) do
