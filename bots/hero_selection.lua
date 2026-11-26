@@ -562,10 +562,11 @@ local function QueueSwapReply(plan, teamPlayers, teamTag, who)
 end
 -- Position chat commands (#210). `!pos`: every bot of the team says its position (the bots answer from their own
 -- think, ability_item_usage_generic.lua, through Role.PosListRequest). `!pos Y` and `!Xpos Y` (pre-game only): one
--- two-way swap, bots/lib/systems/pos_command_rules.lua PlanSwap: the mover takes Y, the holder of Y takes the mover's
--- old position, nobody else moves. X counts the players of the team in GetTeamPlayers order (humans included), the
--- same index as Role.RoleAssignment. hero_selection.lua and the team's bots share the Role module (game 068: Radiant
--- slot 1 Puck played pos 2, a value only this file writes into Role.RoleAssignment), so the bots see the new positions.
+-- two-way swap, bots/lib/systems/pos_command_rules.lua PlanSwap. `!Xpos Y` swaps the holders of positions X and Y
+-- (current positions, as `!pos` lists them; maintainer, game 087), so a repeat undoes it; `!pos Y` swaps the sender
+-- with the holder of Y. Nobody else moves. hero_selection.lua and the team's bots share the Role module (game 068:
+-- Radiant slot 1 Puck played pos 2, a value only this file writes into Role.RoleAssignment), so the bots see the new
+-- positions.
 local function handlePosCommand(posCommand, commandText, senderId, teamPlayers)
 	local senderTeam = GetTeamForPlayer(senderId)
 	local who = ShortHeroName(senderId)
@@ -616,31 +617,40 @@ local function handlePosCommand(posCommand, commandText, senderId, teamPlayers)
 			end
 		end
 	end
-	local mover = posCommand.kind == "take" and senderSlot or posCommand.index
-	if mover == nil then
-		RoleLog('%s cmd="%s" team=%s result=refused why=sender-not-found', who, commandText, teamTag)
-		return
+	local fromPos = posCommand.from
+	if posCommand.kind == "take" then
+		if senderSlot == nil or roles[senderSlot] == nil then
+			RoleLog(
+				'%s cmd="%s" team=%s result=refused why=%s',
+				who,
+				commandText,
+				teamTag,
+				senderSlot == nil and "sender-not-found" or "sender-no-pos"
+			)
+			return
+		end
+		fromPos = roles[senderSlot]
 	end
-	local plan = PosRules.PlanSwap(roles, humans, cores, mover, posCommand.pos, senderSlot)
+	local rolesBefore = PosRules.RolesText(roles)
+	local plan = PosRules.PlanSwap(roles, humans, cores, fromPos, posCommand.pos, senderSlot)
 	if PosRules.Apply(roles, plan) then
 		ApplyLanesFromRoles(ownTeamKey)
 		-- Role.GetPosition re-reads Role.RoleAssignment in pre-game once its cache is empty.
 		Role.HeroPositions = {}
 	end
+	-- from= / to= are the two positions, fromHero= / toHero= their holders before the swap; rolesBefore= and roles= are
+	-- the positions of team slots 1..5 before and after it.
 	RoleLog(
-		'%s swap cmd="%s" team=%s idx=%d hero=%s pos=%s->%s holder=%s holderHero=%s holderPos=%s->%s result=%s roles=%s',
+		'%s swap cmd="%s" team=%s from=%s to=%s fromHero=%s toHero=%s result=%s rolesBefore=%s roles=%s',
 		who,
 		commandText,
 		teamTag,
-		mover,
-		ShortHeroName(teamPlayers[mover]),
 		tostring(plan.from),
 		tostring(plan.to),
-		tostring(plan.holder or "-"),
+		plan.mover ~= nil and ShortHeroName(teamPlayers[plan.mover]) or "-",
 		plan.holder ~= nil and ShortHeroName(teamPlayers[plan.holder]) or "-",
-		tostring(plan.holderFrom or "-"),
-		tostring(plan.holderTo or "-"),
 		plan.result,
+		rolesBefore,
 		PosRules.RolesText(roles)
 	)
 	QueueSwapReply(plan, teamPlayers, teamTag, who)

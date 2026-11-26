@@ -1,5 +1,5 @@
--- bots/lib/systems/pos_command_rules.lua (#210): parsing `!pos` / `!pos Y` / `!Xpos Y`, the two-way swap, the
--- position names and the `!pos` answer throttle.
+-- bots/lib/systems/pos_command_rules.lua (#210): parsing `!pos` / `!pos Y` / `!Xpos Y`, the two-way swap of two
+-- positions, the position names and the `!pos` answer throttle.
 local T = ...
 
 local function rules()
@@ -16,11 +16,13 @@ T.test("pos rules: parse the three commands", function()
 	T.eq(take.pos, 2)
 	local swap = PosRules.Parse("!3pos 5")
 	T.eq(swap.kind, "swap")
-	T.eq(swap.index, 3)
+	T.eq(swap.from, 3)
 	T.eq(swap.pos, 5)
-	T.eq(PosRules.Parse("!pos 6").kind, "bad")
+	-- Whole numbers outside 1..5 parse, and PlanSwap refuses them as "missing" ("no pos 6").
+	T.eq(PosRules.Parse("!pos 6").pos, 6)
+	T.eq(PosRules.Parse("!0pos 1").from, 0)
 	T.eq(PosRules.Parse("!pos two").kind, "bad")
-	T.eq(PosRules.Parse("!0pos 1").kind, "bad")
+	T.eq(PosRules.Parse("!pos 2.5").kind, "bad")
 	T.eq(PosRules.Parse("!3pos").kind, "bad")
 	T.eq(PosRules.Parse("!pick lion"), nil)
 	T.eq(PosRules.Parse("!position").kind, "bad")
@@ -36,8 +38,10 @@ end
 T.test("pos rules: !pos Y swaps the human with the holder only", function()
 	local PosRules = rules()
 	local roles, humans = team()
-	local plan = PosRules.PlanSwap(roles, humans, {}, 1, 2, 1)
+	-- `!pos 2` from the human: PlanSwap(<his position 5>, 2).
+	local plan = PosRules.PlanSwap(roles, humans, {}, 5, 2, 1)
 	T.eq(plan.result, "ok")
+	T.eq(plan.mover, 1)
 	T.eq(plan.holder, 3)
 	T.eq(plan.from, 5)
 	T.eq(plan.holderTo, 5)
@@ -48,38 +52,108 @@ end)
 T.test("pos rules: a core bot is not pushed onto the human's old 4/5", function()
 	local PosRules = rules()
 	local roles, humans = team()
-	local plan = PosRules.PlanSwap(roles, humans, { [2] = true }, 1, 1, 1)
+	local plan = PosRules.PlanSwap(roles, humans, { [2] = true }, 5, 1, 1)
 	T.eq(plan.result, "core-holder")
 	T.ok(not PosRules.Apply(roles, plan))
 	T.eq(PosRules.RolesText(roles), "5,1,2,3,4")
 	-- A non-core holder takes the 5.
 	local roles2, humans2 = team()
-	T.eq(PosRules.PlanSwap(roles2, humans2, { [2] = true }, 1, 3, 1).result, "ok")
+	T.eq(PosRules.PlanSwap(roles2, humans2, { [2] = true }, 5, 3, 1).result, "ok")
 end)
 
-T.test("pos rules: another human's position is refused", function()
+T.test("pos rules: !Xpos Y swaps the holders of positions X and Y, a repeat undoes it", function()
+	local PosRules = rules()
+	local roles, humans = team()
+	-- `!3pos 2` from the human: slot 4 (pos 3) and slot 3 (pos 2) swap.
+	local plan = PosRules.PlanSwap(roles, humans, {}, 3, 2, 1)
+	T.eq(plan.result, "ok")
+	T.eq(plan.mover, 4)
+	T.eq(plan.holder, 3)
+	PosRules.Apply(roles, plan)
+	T.eq(PosRules.RolesText(roles), "5,1,3,2,4")
+	-- The same command again restores the roles.
+	T.ok(PosRules.Apply(roles, PosRules.PlanSwap(roles, humans, {}, 3, 2, 1)))
+	T.eq(PosRules.RolesText(roles), "5,1,2,3,4")
+	-- `!2pos 3` is the same swap as `!3pos 2`.
+	PosRules.Apply(roles, PosRules.PlanSwap(roles, humans, {}, 2, 3, 1))
+	T.eq(PosRules.RolesText(roles), "5,1,3,2,4")
+end)
+
+-- Game 087 (Dire, team order Zeus, Marci, Dark Willow, Ringmaster, Winter Wyvern; the maintainer is Marci, slot 2).
+-- After `!pos 1` and `!5pos 2` the roles were 5,1,3,4,2. `!2pos 1` answered "you're already pos 1" because X was the
+-- team-list index (Marci, already pos 1); X is a position now, so pos 2 (Wyvern) and pos 1 (Marci) swap.
+T.test("pos rules: game 087 !2pos 1 swaps pos 2 and pos 1, the sender may be one of them", function()
+	local PosRules = rules()
+	local roles, humans = { 5, 1, 3, 4, 2 }, { [2] = true }
+	local plan = PosRules.PlanSwap(roles, humans, {}, 2, 1, 2)
+	T.eq(plan.result, "ok")
+	T.eq(plan.mover, 5)
+	T.eq(plan.holder, 2)
+	PosRules.Apply(roles, plan)
+	T.eq(PosRules.RolesText(roles), "5,2,3,4,1")
+	-- The sender as the mover side: `!2pos 3` from Marci (now pos 2).
+	plan = PosRules.PlanSwap(roles, humans, {}, 2, 3, 2)
+	T.eq(plan.result, "ok")
+	T.eq(plan.mover, 2)
+end)
+
+T.test("pos rules: another human's position is refused on either side", function()
 	local PosRules = rules()
 	local roles = { 5, 1, 2, 3, 4 }
 	local humans = { [1] = true, [3] = true }
-	T.eq(PosRules.PlanSwap(roles, humans, {}, 1, 2, 1).result, "human")
-	-- `!3pos 4` from slot 1: slot 3 is a human, only he moves himself.
-	T.eq(PosRules.PlanSwap(roles, humans, {}, 3, 4, 1).result, "human-mover")
+	-- `!pos 2` from slot 1: pos 2 is the human in slot 3.
+	local plan = PosRules.PlanSwap(roles, humans, {}, 5, 2, 1)
+	T.eq(plan.result, "human")
+	T.eq(plan.humanSlot, 3)
+	T.eq(plan.humanPos, 2)
+	-- `!2pos 4` from slot 1: pos 2 (X) is the other human.
+	plan = PosRules.PlanSwap(roles, humans, {}, 2, 4, 1)
+	T.eq(plan.result, "human")
+	T.eq(plan.humanSlot, 3)
+	T.eq(plan.humanPos, 2)
+	-- `!3pos 2` from slot 1: pos 2 (Y) is the other human.
+	plan = PosRules.PlanSwap(roles, humans, {}, 3, 2, 1)
+	T.eq(plan.result, "human")
+	T.eq(plan.humanPos, 2)
+	T.ok(not PosRules.Apply(roles, plan))
+	-- Two bots: any player may swap them.
+	T.eq(PosRules.PlanSwap(roles, humans, {}, 1, 3, 1).result, "ok")
+	T.eq(PosRules.PlanSwap(roles, humans, {}, 1, 3, 3).result, "ok")
 end)
 
-T.test("pos rules: !Xpos Y swaps bot X and the holder of Y", function()
+T.test("pos rules: a core bot is refused on 4/5 in both directions", function()
+	local PosRules = rules()
+	local humans = { [1] = true }
+	-- `!1pos 4`: the core on pos 1 (slot 2) would take 4.
+	T.eq(PosRules.PlanSwap({ 5, 1, 2, 3, 4 }, humans, { [2] = true }, 1, 4, 1).result, "core")
+	-- `!4pos 1`: the same swap named the other way; the core holder would get 4.
+	T.eq(PosRules.PlanSwap({ 5, 1, 2, 3, 4 }, humans, { [2] = true }, 4, 1, 1).result, "core-holder")
+	-- A core bot already on 4 can be swapped off it; the repeat that would put it back is refused.
+	local roles = { 5, 2, 1, 3, 4 }
+	T.ok(PosRules.Apply(roles, PosRules.PlanSwap(roles, humans, { [5] = true }, 4, 1, 1)))
+	T.eq(PosRules.RolesText(roles), "5,2,4,3,1")
+	T.eq(PosRules.PlanSwap(roles, humans, { [5] = true }, 4, 1, 1).result, "core-holder")
+end)
+
+T.test("pos rules: same position, missing and out-of-range positions", function()
 	local PosRules = rules()
 	local roles, humans = team()
-	local plan = PosRules.PlanSwap(roles, humans, {}, 4, 4, 1)
-	T.eq(plan.result, "ok")
-	T.eq(plan.holder, 5)
-	PosRules.Apply(roles, plan)
-	T.eq(PosRules.RolesText(roles), "5,1,2,4,3")
-	-- Already there.
-	T.eq(PosRules.PlanSwap(roles, humans, {}, 4, 4, 1).result, "same")
-	-- A core bot asked to play 4/5.
-	T.eq(PosRules.PlanSwap({ 5, 1, 2, 3, 4 }, humans, { [2] = true }, 2, 4, 1).result, "core")
-	-- No such slot.
-	T.eq(PosRules.PlanSwap({ 5, 1, 2 }, humans, {}, 5, 1, 1).result, "missing")
+	T.eq(PosRules.PlanSwap(roles, humans, {}, 3, 3, 1).result, "same")
+	local plan = PosRules.PlanSwap(roles, humans, {}, 7, 2, 1)
+	T.eq(plan.result, "missing")
+	T.eq(plan.missingPos, 7)
+	plan = PosRules.PlanSwap(roles, humans, {}, 2, 0, 1)
+	T.eq(plan.result, "missing")
+	T.eq(plan.missingPos, 0)
+	-- Nobody holds pos 5 in a team of four.
+	plan = PosRules.PlanSwap({ 1, 2, 3, 4 }, {}, {}, 5, 1, nil)
+	T.eq(plan.result, "missing")
+	T.eq(plan.missingPos, 5)
+	-- Nobody holds Y: X moves there alone.
+	roles = { 1, 2, 3, 4 }
+	T.ok(PosRules.Apply(roles, PosRules.PlanSwap(roles, {}, {}, 4, 5, nil)))
+	T.eq(PosRules.RolesText(roles), "1,2,3,5,-")
+	T.eq(PosRules.Apply(roles, nil), false)
 end)
 
 T.test("pos rules: position names and lines", function()
@@ -126,9 +200,10 @@ end
 local ENGLISH = {
 	say_pos_refused_core = "{hero} can't play pos {pos}",
 	say_pos_refused_human = "pos {pos} is {hero}'s",
-	say_pos_refused_human_mover = "only {hero} can move himself",
 	say_pos_refused_same = "you're already pos {pos}",
-	say_pos_refused_missing = "no player {index}",
+	say_pos_refused_same_self = "I'm already pos {pos}",
+	say_pos_refused_same_other = "{hero} is already pos {pos}",
+	say_pos_refused_missing = "no pos {pos}",
 }
 local function replyLine(PosRules, plan)
 	local key, fields = PosRules.Reply(plan, heroOf)
@@ -141,6 +216,7 @@ end
 T.test("pos rules: game 082 core-holder refusal names Puck and pos 5", function()
 	local PosRules = rules()
 	local roles = { 1, 2, 3, 4, 5 }
+	-- `!pos 2` from Nature's Prophet (pos 5).
 	local plan = PosRules.PlanSwap(roles, { [5] = true }, { [1] = true, [2] = true }, 5, 2, 5)
 	T.eq(plan.result, "core-holder")
 	T.eq(replyLine(PosRules, plan), "Puck can't play pos 5")
@@ -154,32 +230,56 @@ end)
 
 T.test("pos rules: every refused result has its own reply", function()
 	local PosRules = rules()
-	-- core: bot Alchemist (slot 1, core) told to take pos 5.
+	-- core: bot Alchemist (pos 1, core) told to take pos 5 (`!1pos 5`).
 	local plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, {}, { [1] = true }, 1, 5, nil)
 	T.eq(plan.result, "core")
 	T.eq(replyLine(PosRules, plan), "Alchemist can't play pos 5")
-	-- human: pos 5 belongs to the human in slot 5.
-	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [5] = true }, {}, 4, 5, 5)
+	-- human: pos 5 belongs to the human in slot 5, `!4pos 5` from the human in slot 1.
+	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [1] = true, [5] = true }, {}, 4, 5, 1)
 	T.eq(plan.result, "human")
 	T.eq(replyLine(PosRules, plan), "pos 5 is Nature's Prophet's")
-	-- human-mover: the human in slot 1 types `!5pos 1` for the human in slot 5.
-	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [1] = true, [5] = true }, {}, 5, 1, 1)
-	T.eq(plan.result, "human-mover")
-	T.eq(replyLine(PosRules, plan), "only Nature's Prophet can move himself")
-	-- same
+	-- human on the X side: `!5pos 2` from the human in slot 1.
+	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [1] = true, [5] = true }, {}, 5, 2, 1)
+	T.eq(plan.result, "human")
+	T.eq(replyLine(PosRules, plan), "pos 5 is Nature's Prophet's")
+	-- same, the sender's own position (`!pos 5` or `!5pos 5` from slot 5).
 	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [5] = true }, {}, 5, 5, 5)
 	T.eq(plan.result, "same")
 	T.eq(replyLine(PosRules, plan), "you're already pos 5")
-	-- missing: a team of four, `!5pos 1`.
+	-- missing: a team of four, `!5pos 1`; and `!pos 7`.
 	plan = PosRules.PlanSwap({ 1, 2, 3, 4 }, {}, {}, 5, 1, nil)
 	T.eq(plan.result, "missing")
-	T.eq(replyLine(PosRules, plan), "no player 5")
+	T.eq(replyLine(PosRules, plan), "no pos 5")
+	T.eq(replyLine(PosRules, PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, {}, {}, 1, 7, 1)), "no pos 7")
 	-- ok has no reply.
 	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, {}, {}, 4, 5, nil)
 	T.eq(plan.result, "ok")
 	T.eq(PosRules.Reply(plan, heroOf), nil)
 	T.eq(PosRules.FillReply(nil, {}), nil)
 	T.eq(PosRules.FillReply("{hero} x", {}), "? x")
+end)
+
+-- Game 087 (t=-31): the maintainer typed `!3pos 2` a second time and Dark Willow, a bot already on pos 2, said
+-- "you're already pos 2" about itself. "you're" is only for the human who typed the command.
+T.test("pos rules: a bot that already holds the position does not say you're", function()
+	local PosRules = rules()
+	local humans = { [5] = true }
+	-- `!3pos 3` from the human in slot 5: the holder of pos 3 is the bot Spirit Breaker, and it is the speaker.
+	local plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, humans, {}, 3, 3, 5)
+	T.eq(plan.result, "same")
+	local line = replyLine(PosRules, plan)
+	T.eq(line, "I'm already pos 3")
+	T.ok(line:find("you're", 1, true) == nil, line)
+	local players = { 10, 11, 12, 13, 14 }
+	T.eq(
+		PosRules.ReplySpeaker(players, plan.mover, function(playerId)
+			return playerId ~= 14
+		end),
+		12
+	)
+	-- Another human already on pos 1 (`!1pos 1` from slot 5).
+	plan = PosRules.PlanSwap({ 1, 2, 3, 4, 5 }, { [1] = true, [5] = true }, {}, 1, 1, 5)
+	T.eq(replyLine(PosRules, plan), "Alchemist is already pos 1")
 end)
 
 T.test("pos rules: the reply speaker is the mover bot, else the first bot", function()

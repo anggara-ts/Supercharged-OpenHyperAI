@@ -14,9 +14,17 @@ PosRules.AnswerStep = 0.6
 -- A request older than this is dropped without an answer.
 PosRules.AnswerMaxAge = 20
 
--- "!pos" -> { kind = "list" }; "!pos 2" -> { kind = "take", pos = 2 }; "!3pos 5" -> { kind = "swap", index = 3,
--- pos = 5 }. Anything else that starts with "!pos" / "!Npos" -> { kind = "bad" }; other text -> nil.
--- Positions outside 1..5 and indexes outside 1..5 are "bad" too.
+-- "!pos" -> { kind = "list" }; "!pos 2" -> { kind = "take", pos = 2 }; "!3pos 5" -> { kind = "swap", from = 3,
+-- pos = 5 } (swap positions 3 and 5). Whole numbers outside 1..5 still parse ("!pos 7", "!0pos 1"): PlanSwap refuses
+-- them as "missing" so the player hears "no pos 7". Anything else that starts with "!pos" / "!Npos" ->
+-- { kind = "bad" }; other text -> nil.
+local function wholeNumber(text)
+	local number = tonumber(text)
+	if number ~= nil and number == math.floor(number) then
+		return number
+	end
+	return nil
+end
 function PosRules.Parse(text)
 	if type(text) ~= "string" then
 		return nil
@@ -27,17 +35,17 @@ function PosRules.Parse(text)
 	end
 	local takeArg = command:match("^!pos%s+(%S+)$")
 	if takeArg ~= nil then
-		local pos = tonumber(takeArg)
-		if pos ~= nil and pos >= 1 and pos <= 5 and pos == math.floor(pos) then
+		local pos = wholeNumber(takeArg)
+		if pos ~= nil then
 			return { kind = "take", pos = pos }
 		end
 		return { kind = "bad" }
 	end
-	local indexText, posText = command:match("^!(%d+)pos%s+(%S+)$")
-	if indexText ~= nil then
-		local index, pos = tonumber(indexText), tonumber(posText)
-		if index >= 1 and index <= 5 and pos ~= nil and pos >= 1 and pos <= 5 and pos == math.floor(pos) then
-			return { kind = "swap", index = index, pos = pos }
+	local fromText, posText = command:match("^!(%d+)pos%s+(%S+)$")
+	if fromText ~= nil then
+		local from, pos = wholeNumber(fromText), wholeNumber(posText)
+		if from ~= nil and pos ~= nil then
+			return { kind = "swap", from = from, pos = pos }
 		end
 		return { kind = "bad" }
 	end
@@ -47,45 +55,72 @@ function PosRules.Parse(text)
 	return nil
 end
 
--- One swap: slot `mover` takes `newPos`, the slot that held `newPos` takes the mover's old position, every other slot
--- keeps its position.
+local function isPosition(pos)
+	return type(pos) == "number" and pos >= 1 and pos <= 5
+end
+
+-- One two-way swap between the holders of position `fromPos` and position `toPos` (current positions, as `!pos`
+-- lists them; maintainer, game 087: "yes make X and Y as the current position"). `!Xpos Y` is PlanSwap(X, Y); `!pos
+-- Y` is PlanSwap(<the sender's position>, Y). Only the two holders move, and a swap is symmetric: `!3pos 2` twice
+-- restores the roles, and `!3pos 2` is the same swap as `!2pos 3`.
 --   roles[slot]  = position (1..5) of team slot 1..5
 --   humans[slot] = true for a human player
 --   cores[slot]  = true for a bot whose hero is clearly a core (never put on 4/5)
---   sender       = the slot of the player who typed the command (nil when unknown)
--- Returns a plan { result = "ok" | "same" | "missing" | "human-mover" | "human" | "core" | "core-holder",
--- mover, from, to, holder, holderFrom, holderTo }. Nothing is changed; PosRules.Apply does that.
---   human-mover: `!Xpos Y` names another human (a human only moves himself, with `!pos Y`).
---   human:       Y belongs to another human.
---   core:        the mover is a core bot and Y is 4 or 5.
---   core-holder: the holder of Y is a core bot and would get the mover's old 4 or 5.
-function PosRules.PlanSwap(roles, humans, cores, mover, newPos, sender)
+--   sender       = the slot of the player who typed the command (nil when unknown); any player may swap two bots
+-- Returns a plan { result = "ok" | "same" | "missing" | "human" | "core" | "core-holder", from, to, mover, holder,
+-- holderFrom, holderTo, sender, moverHuman, humanSlot, humanPos, missingPos }. mover is the slot that holds `fromPos`
+-- (it moves to `toPos`), holder the slot that holds `toPos` (it moves to `fromPos`; nil when nobody holds it).
+-- Nothing is changed; PosRules.Apply does that.
+--   missing:     a position outside 1..5, or nobody holds `fromPos` (missingPos says which).
+--   same:        fromPos == toPos.
+--   human:       one of the two holders is a human other than the sender (humanSlot / humanPos: who and where).
+--   core:        the mover is a core bot and `toPos` is 4 or 5.
+--   core-holder: the holder is a core bot and would get `fromPos` 4 or 5.
+-- A core bot already on 4/5 can be swapped off it, but the repeat that would put it back is refused (core rule).
+function PosRules.PlanSwap(roles, humans, cores, fromPos, toPos, sender)
 	humans = humans or {}
 	cores = cores or {}
-	local plan = { mover = mover, to = newPos, from = roles[mover] }
-	if plan.from == nil then
+	local plan = { from = fromPos, to = toPos, sender = sender }
+	if not isPosition(fromPos) or not isPosition(toPos) then
 		plan.result = "missing"
+		plan.missingPos = isPosition(fromPos) and toPos or fromPos
 		return plan
 	end
 	for slot = 1, 5 do
-		if slot ~= mover and roles[slot] == newPos then
+		if roles[slot] == fromPos then
+			plan.mover = slot
+			break
+		end
+	end
+	if plan.mover == nil then
+		plan.result = "missing"
+		plan.missingPos = fromPos
+		return plan
+	end
+	local mover = plan.mover
+	plan.moverHuman = humans[mover] == true
+	for slot = 1, 5 do
+		if slot ~= mover and roles[slot] == toPos then
 			plan.holder = slot
 			break
 		end
 	end
-	if plan.holder ~= nil then
-		plan.holderFrom = newPos
-		plan.holderTo = plan.from
+	local holder = plan.holder
+	if holder ~= nil then
+		plan.holderFrom = toPos
+		plan.holderTo = fromPos
 	end
-	if plan.from == newPos then
+	if fromPos == toPos then
 		plan.result = "same"
 	elseif humans[mover] and mover ~= sender then
-		plan.result = "human-mover"
-	elseif plan.holder ~= nil and humans[plan.holder] then
 		plan.result = "human"
-	elseif not humans[mover] and cores[mover] and newPos >= 4 then
+		plan.humanSlot, plan.humanPos = mover, fromPos
+	elseif holder ~= nil and humans[holder] and holder ~= sender then
+		plan.result = "human"
+		plan.humanSlot, plan.humanPos = holder, toPos
+	elseif not humans[mover] and cores[mover] and toPos >= 4 then
 		plan.result = "core"
-	elseif plan.holder ~= nil and not humans[plan.holder] and cores[plan.holder] and plan.from >= 4 then
+	elseif holder ~= nil and not humans[holder] and cores[holder] and fromPos >= 4 then
 		plan.result = "core-holder"
 	else
 		plan.result = "ok"
@@ -113,11 +148,13 @@ PosRules.ReplyMaxAge = 10
 
 -- Localization key and fields for each refused result (nil for "ok" and unknown results).
 --   heroOf(slot) -> the display name of that slot's hero
+-- "same" names who already holds the position: "you're" only for the human who typed the command, "I'm" when the
+-- holder is a bot (PosRules.ReplySpeaker makes that bot the speaker), "<hero> is" for another human (game 087: Dark
+-- Willow, a bot, said "you're already pos 2" about itself).
 local replyKeys = {
 	["core-holder"] = "say_pos_refused_core",
 	core = "say_pos_refused_core",
 	human = "say_pos_refused_human",
-	["human-mover"] = "say_pos_refused_human_mover",
 	same = "say_pos_refused_same",
 	missing = "say_pos_refused_missing",
 }
@@ -134,18 +171,24 @@ function PosRules.Reply(plan, heroOf)
 	elseif result == "core" then
 		fields.hero, fields.pos = heroOf(plan.mover), plan.to
 	elseif result == "human" then
-		fields.hero, fields.pos = heroOf(plan.holder), plan.to
-	elseif result == "human-mover" then
-		fields.hero = heroOf(plan.mover)
+		fields.hero, fields.pos = heroOf(plan.humanSlot), plan.humanPos
 	elseif result == "same" then
 		fields.pos = plan.to
+		if plan.mover ~= nil and plan.mover ~= plan.sender then
+			if plan.moverHuman then
+				key = "say_pos_refused_same_other"
+				fields.hero = heroOf(plan.mover)
+			else
+				key = "say_pos_refused_same_self"
+			end
+		end
 	else
-		fields.index = plan.mover
+		fields.pos = plan.missingPos
 	end
 	return key, fields
 end
 
--- Fills "{hero}", "{pos}" and "{index}" in a localized template.
+-- Fills "{hero}" and "{pos}" in a localized template.
 function PosRules.FillReply(template, fields)
 	if type(template) ~= "string" then
 		return nil
