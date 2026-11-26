@@ -88,11 +88,22 @@ DiveRules.HOLD_RELEASE = 150
 
 -- dist: the bot's distance to the tower; range: the tower's attack range; inside: the bot was in the zone at the
 -- last check; margin: the zone beyond the range (HOLD_MARGIN, or APPROACH_MARGIN after a stop before the edge).
--- Returns whether to run out now, and the new "inside" state.
-function DiveRules.TowerHoldRun(dist, range, inside, margin)
+-- Returns whether to run out now, the new "inside" state, and whether the bot just came back into the zone after a
+-- run had walked it out (entered: the caller latches the hold, see below).
+-- latched: a re-entry in this hold latched it: the bot runs until the hold ends (TowerHoldEnd: the time is over and
+-- the bot is out of the zone), with no distance release and no push pause. Game 087, Zeus: a run ends at the zone +
+-- HOLD_RELEASE, and the mode that walked him in walks him in again at once. Radiant's bottom T1, t=948-957: attack
+-- (0.95, chasing Lion) walked him back from 1021 to 630 after the stop, retreat 1.10 ran him out, push 0.91 took
+-- over: push>attack>retreat>push>attack>retreat>push in 9s. Radiant's mid T1, t=1027-1037: push walked him in during
+-- the pause and dropped (push-gate cannot-push), team roam (help-core) walked him from 1099 to 882 and 859, retreat and
+-- push flipped, and he died at t=1037 with 4 enemies on him.
+function DiveRules.TowerHoldRun(dist, range, inside, margin, latched)
 	margin = margin or DiveRules.HOLD_MARGIN
+	if latched then
+		return true, true, false
+	end
 	if dist < range + margin then
-		return true, true
+		return true, true, not inside
 	end
 	if inside and dist < range + margin + DiveRules.HOLD_RELEASE then
 		return true, true
@@ -115,17 +126,32 @@ end
 -- was pushing, and attack mode walked him back under it once the hold was gone.
 --   pushLaneTower    the hold tower is in the lane the bot pushes; alliesAtTower: other allied heroes at it
 --   why              the stop's reason
+--   mustRun          the bot has to run now (TowerHoldRun: inside the zone, or the hold is latched). A push pauses the
+--                    hold only while the bot is out of the zone: a push that walks it back in ends the pause, and the
+--                    hold runs (a re-entry: TowerHoldRun latches it). Game 087, t=1030, Zeus at Radiant's mid T1: the
+--                    push walked him from 1099 into the zone during the pause, then dropped, and the hold resumed with
+--                    him at 882 (zone 900) in team roam. nil: the old rule (a push always pauses).
 -- Returns "expire" (drop the hold), "siege" (drop it: team siege), "pause", "resume" (first check after a pause)
 -- or "keep".
 DiveRules.SIEGE_ALLIES = 2
-function DiveRules.TowerHoldState(now, untilTime, towerValid, pushing, paused, pushLaneTower, alliesAtTower, why)
+function DiveRules.TowerHoldState(
+	now,
+	untilTime,
+	towerValid,
+	pushing,
+	paused,
+	pushLaneTower,
+	alliesAtTower,
+	why,
+	mustRun
+)
 	if now > untilTime or not towerValid then
 		return "expire"
 	end
 	if pushing and pushLaneTower and (alliesAtTower or 0) >= DiveRules.SIEGE_ALLIES and why == "no-target" then
 		return "siege"
 	end
-	if pushing then
+	if pushing and not mustRun then
 		return "pause"
 	end
 	if paused then
