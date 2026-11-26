@@ -11463,12 +11463,12 @@ function ItemUsageThink()
 		end
 	end
 	MatchTrace.Tick(bot)
-	-- Difficulty (#232): danger episodes end on time; recent retreat / evasive mode for the reactive casts.
-	pcall(Usage.Difficulty.Tick, bot)
 	pcall(MuteCloneChat)
 	pcall(TrackCyclone)
 	-- Ability charges for every bot (the API has no ability-charge read); before any gate below.
 	pcall(ChargeTracker.Tick, bot)
+	-- Difficulty (#232): danger episodes end on time; recent retreat / evasive mode for the reactive casts.
+	pcall(Usage.Difficulty.Tick, bot)
 	local tWatch = PartStart()
 	pcall(Usage.TrackTeleportJump)
 	pcall(Usage.WatchStillUnderHit)
