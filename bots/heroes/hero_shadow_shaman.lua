@@ -123,7 +123,7 @@ nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "shadow_shaman_voodoo", kind = "unit" } }
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end

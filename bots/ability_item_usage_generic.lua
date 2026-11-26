@@ -126,7 +126,7 @@ if BotBuild == nil then
 	log("[ERROR] BotBuild is nil for %s - hero file failed to load. No items/abilities.", botName)
 	return
 end
-local useDefaultItem = BotBuild["bDeafaultItem"]
+local useDefaultItem = BotBuild["bDefaultItem"]
 local abilityLevelUpList = BotBuild["sSkillList"]
 local radiantFountain = Vector(-6619, -6336, 384)
 local direFountain = Vector(6928, 6372, 392)
@@ -148,7 +148,7 @@ local function ReloadBotBuild(reason)
 	local loaded, build = pcall(dofile, GetScriptDirectory() .. "/heroes/" .. heroFile)
 	if loaded and build ~= nil then
 		BotBuild = build
-		useDefaultItem = BotBuild["bDeafaultItem"]
+		useDefaultItem = BotBuild["bDefaultItem"]
 		if build["sSkillList"] ~= nil and #build["sSkillList"] > 0 then
 			local fullSkillList = build["sSkillList"]
 			-- Drop what is already learned, by each ability's own level (#45). "Hero level minus unspent
@@ -194,7 +194,7 @@ local function CheckArdmHeroSwap()
 		end
 		if loaded and build ~= nil and build["sSkillList"] ~= nil and #build["sSkillList"] > 0 then
 			BotBuild = build
-			useDefaultItem = BotBuild["bDeafaultItem"]
+			useDefaultItem = BotBuild["bDefaultItem"]
 			abilityLevelUpList = BotBuild["sSkillList"]
 			log(
 				"[ARDM] Loaded bots/heroes for %s with %s skill entries, first: %s",
@@ -11889,7 +11889,7 @@ function AbilityLevelUpThink()
 		LevelUpAbilities()
 	end
 end
-function Usage.SetAbilityItemList(enableDefaultAbility, enableDefaultItem, levelUpList)
+function Usage.SetAbilityItemList(enableDefaultItem, levelUpList)
 	useDefaultItem = enableDefaultItem
 	abilityLevelUpList = levelUpList
 end

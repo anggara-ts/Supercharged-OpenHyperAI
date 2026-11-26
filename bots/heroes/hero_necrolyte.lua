@@ -139,7 +139,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end

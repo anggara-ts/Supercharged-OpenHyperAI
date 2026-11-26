@@ -131,7 +131,7 @@ nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
 -- Tusk is invulnerable inside his snowball; spell logic must still run to launch it.
 X["bThinkWhileInvulnerable"] = true
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end

@@ -106,7 +106,7 @@ nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "lich_chain_frost", kind = "unit" } }
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	if Minion.IsValidUnit(minionUnit) and minionUnit:GetUnitName() ~= "npc_dota_lich_ice_spire" then
 		Minion.IllusionThink(minionUnit)
