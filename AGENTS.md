@@ -151,14 +151,15 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   and 084). A cache for anything a cast decision reads may not outlive the frame. In a test, a hero whose state
   changes is seen once `Stub.time` moves too (a frame is `1 / 30`).
 - **A performance change is measured in a game** (maintainer, 2026-11-25: "the lua may call fewer API but overall
-  CPU usage (API engine vs Lua) should be measured"). Fewer engine calls are not proof, and neither are two games,
-  one before and one after: two games of one build differ by 7% to 12% in script time (#153). Put the change behind
-  a switch and run it against the old code on neighbouring frames of one game with the A/B harness of #251
-  (`bots/lib/systems/perf_ab.lua`, taken out when #252 merged: `git fetch origin pull/252/head` then
-  `git show 4865f1e8:bots/lib/systems/perf_ab.lua`, its hooks in `perf.lua` in the same commit): `[SHy-AB]` prints
-  each variant's script time per frame, its difference from the old code and the standard error of that
-  difference. The `off` variant must be the old code with one test in front of it, and a build that still has the
-  switch is not merged.
+  CPU usage (API engine vs Lua) should be measured"). Fewer engine calls are not proof. Neither is a timing with the
+  tests' stub (for #251 its interpreted and its compiled run gave opposite answers), and neither are two games, one
+  before and one after: two games of one build differ by 7% to 12% in script time (#153). Put the change behind a switch of the
+  A/B harness (`PerfAb.Define` in `bots/lib/systems/perf_ab.lua`; the steps are in `docs/MEASURING_PERFORMANCE.md`):
+  it runs the change against the old code on neighbouring frames of one game, and `[SHy-AB]` prints each variant's
+  script time per frame, its difference from the old code and the standard error of that difference. Check first
+  with `luajit tests/decision_trace.lua` that no variant changes a decision. The harness stays on `main`, dormant
+  (nothing requires it, #268). An experiment does not: its `PerfAb.Define`, its switch tests and the code path that
+  lost come out before the PR merges, and a build that still has them is not merged.
 - Bot chat stays short (maintainer, 2026-11-23): a line that narrates a decision ("Going for X", "Pushing top",
   "Defend mid", lotus / shrine) goes through `ChatRules.SayDecision` (`bots/lib/systems/chat_rules.lua`), which says
   it only while the team's `!chatty` chat mode is on. There is no `!debug` command (maintainer, 2026-11-24: "we
