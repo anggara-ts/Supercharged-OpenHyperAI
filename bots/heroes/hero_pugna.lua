@@ -127,7 +127,6 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 X["bDeafaultItem"] = true
 -- Declared before MinionThink: it was declared below it, so MinionThink set a global and the
 -- Decrepify-the-ward check in ConsiderW read a local that was always nil (datafeed notes:

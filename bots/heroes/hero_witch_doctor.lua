@@ -121,7 +121,6 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
 X["bDeafaultItem"] = true
 function X.MinionThink(minionUnit)
 	if Minion.IsValidUnit(minionUnit) and minionUnit:GetUnitName() ~= "npc_dota_witch_doctor_death_ward" then
