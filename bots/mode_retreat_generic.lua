@@ -1192,13 +1192,80 @@ local function TowerHoldCheck()
 	if hold.paused then
 		hold.untilTime = DiveRules.TowerHoldPausedUntil(now, hold.remaining, hold.startTime)
 	end
+	-- Team finish (DiveRules.TeamFinish, decision D9 on #159): read on every check, in any mode and for any stop. The
+	-- allies are counted round the tower, over the team slots (humans too), not round the bot: a latched bot runs to
+	-- 1700+ and would lose the far allies from its own nearby list. Proximity, not each ally's attack target: that
+	-- changes every swing (creep, tower, creep) and would bring the flipping back. The creeps are the bot's nearby lane
+	-- creeps (radius 1600) inside the tower's range; a bot far from the tower may miss some, which only keeps the latch.
+	-- Not read once the bot is dead (the clear line prints the last check's values).
+	if bot:IsAlive() then
+		local healthy = 0
+		for slot = 1, 5 do
+			local ally = GetTeamMember(slot)
+			if
+				ally ~= nil
+				and ally ~= bot
+				and Fu.IsValidHero(ally)
+				and not ally:IsIllusion()
+				and GetUnitToLocationDistance(ally, hold.loc) <= DiveRules.FINISH_RADIUS
+				and Fu.GetHP(ally) >= DiveRules.FINISH_HEALTHY_HP
+			then
+				healthy = healthy + 1
+			end
+		end
+		local creeps = false
+		for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
+			if Fu.IsValid(creep) and GetUnitToLocationDistance(creep, hold.loc) <= hold.range then
+				creeps = true
+				break
+			end
+		end
+		local botHealthy = Fu.GetHP(bot) >= DiveRules.FINISH_HEALTHY_HP
+		local finishOn
+		finishOn, hold.finishFullAt = DiveRules.TeamFinish(healthy, botHealthy, creeps, now, hold.finishFullAt)
+		hold.finishHealthy, hold.finishCreeps = healthy, creeps
+		if finishOn ~= (hold.finish == true) then
+			hold.finish = finishOn or nil
+			-- finishSeen (clear line): the finish was on at some check of this hold, so its runs= can pass 2.
+			hold.finishSeen = hold.finishSeen or finishOn
+			hold.finishChanges = (hold.finishChanges or 0) + 1
+		end
+		-- A line when the state differs from the last one printed for this hold, at most one per 2s: a change inside the
+		-- 2s prints when they are over, if it still holds (changes=: the changes since the last line, 1 when none was
+		-- skipped), so the lines of a hold alternate on=1 / on=0.
+		if (hold.finish == true) ~= (hold.finishLogged == true) and now >= (hold.finishLogAt or -999) then
+			hold.finishLogAt = now + 2
+			hold.finishLogged = hold.finish
+			pcall(
+				print,
+				string.format(
+					"[SHy-RETREAT] t=%.0f %s tower-hold-finish on=%d healthy=%d botHealthy=%d creeps=%d hp=%.2f tower=%s dist=%d latched=%d stop=%s mode=%d age=%.1f changes=%d",
+					now,
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					hold.finish and 1 or 0,
+					healthy,
+					botHealthy and 1 or 0,
+					creeps and 1 or 0,
+					Fu.GetHP(bot),
+					tostring(hold.name),
+					math.floor(dist),
+					hold.latched and 1 or 0,
+					tostring(hold.why),
+					activeMode or -1,
+					now - (hold.startTime or now),
+					hold.finishChanges or 0
+				)
+			)
+			hold.finishChanges = nil
+		end
+	end
 	-- Every end of a hold says why (tower-hold-end why=siege has its own line below). age: seconds since the stop;
 	-- lastDist / lastAgo: the bot's distance to the tower at the last check before (for why=death: where it died).
 	local function logClear(why)
 		pcall(
 			print,
 			string.format(
-				"[SHy-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d vis=%d alive=%d latched=%d runs=%d",
+				"[SHy-RETREAT] t=%.0f %s tower-hold-clear why=%s stop=%s tower=%s dist=%d left=%.1f hp=%.2f mode=%d age=%.1f stopMode=%d lastDist=%d lastAgo=%.1f null=%d vis=%d alive=%d latched=%d runs=%d finish=%d healthy=%d creeps=%d finishSeen=%d",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				why,
@@ -1216,7 +1283,11 @@ local function TowerHoldCheck()
 				towerSeen and 1 or 0,
 				towerAlive and 1 or 0,
 				hold.latched and 1 or 0,
-				hold.runs or 0
+				hold.runs or 0,
+				hold.finish and 1 or 0,
+				hold.finishHealthy or 0,
+				hold.finishCreeps and 1 or 0,
+				hold.finishSeen and 1 or 0
 			)
 		)
 	end
@@ -1262,8 +1333,11 @@ local function TowerHoldCheck()
 	-- A push pauses the hold, it doesn't end it (DiveRules.TowerHoldState; game 064, 12:24-12:31, Alchemist).
 	-- The end is TowerHoldEnd's (above): a hold past its time with the bot still in the zone goes on here.
 	-- A re-entry latches the hold (DiveRules.TowerHoldRun; game 087, Zeus at Radiant's bottom and mid T1), and a push
-	-- doesn't pause a latched hold.
-	local run, inside, entered = DiveRules.TowerHoldRun(dist, hold.range, hold.inside, hold.margin, hold.latched)
+	-- doesn't pause a latched hold. While the team finish is on (above) the latch is off: a latched hold acts unlatched
+	-- (the push pauses it again) and a re-entry doesn't latch; hold.latched is kept, so the latch is back once the
+	-- finish ends.
+	local holdLatched = hold.latched == true and not hold.finish
+	local run, inside, entered = DiveRules.TowerHoldRun(dist, hold.range, hold.inside, hold.margin, holdLatched)
 	local zone = hold.range + (hold.margin or DiveRules.HOLD_MARGIN)
 	local state = DiveRules.TowerHoldState(
 		now,
@@ -1274,7 +1348,7 @@ local function TowerHoldCheck()
 		pushLaneTower,
 		alliesAtTower,
 		hold.why,
-		hold.latched == true
+		holdLatched
 	)
 	if state == "siege" then
 		pcall(
@@ -1349,7 +1423,8 @@ local function TowerHoldCheck()
 	end
 	hold.paused = nil
 	hold.inside = inside
-	if entered then
+	-- No latch while the team finish is on (decision D9).
+	if entered and not hold.finish then
 		hold.latched = true
 	end
 	-- inZone / depth (zone minus dist): game 087, t=1030, Zeus resumed 18 inside the zone (882 of 900) after team
@@ -1362,14 +1437,15 @@ local function TowerHoldCheck()
 		return 0
 	end
 	-- One line at the start of each run stretch (the 3s tower-hold line below hides when a run starts): entry=first
-	-- for the stop's own run, reentry when a mode walked the bot back into the zone (that latches the hold).
+	-- for the stop's own run, reentry when a mode walked the bot back into the zone (that latches the hold, unless the
+	-- team finish is on).
 	if not hold.running then
 		hold.running = true
 		hold.runs = (hold.runs or 0) + 1
 		pcall(
 			print,
 			string.format(
-				"[SHy-RETREAT] t=%.0f %s tower-hold-run entry=%s latched=%d why=%s tower=%s dist=%d zone=%d left=%.1f hp=%.2f mode=%d age=%.1f",
+				"[SHy-RETREAT] t=%.0f %s tower-hold-run entry=%s latched=%d why=%s tower=%s dist=%d zone=%d left=%.1f hp=%.2f mode=%d age=%.1f finish=%d healthy=%d creeps=%d",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				entered and "reentry" or "first",
@@ -1381,7 +1457,10 @@ local function TowerHoldCheck()
 				hold.untilTime - now,
 				hpRatio,
 				activeMode or -1,
-				now - (hold.startTime or now)
+				now - (hold.startTime or now),
+				hold.finish and 1 or 0,
+				hold.finishHealthy or 0,
+				hold.finishCreeps and 1 or 0
 			)
 		)
 	end

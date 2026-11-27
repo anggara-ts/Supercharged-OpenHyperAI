@@ -111,6 +111,44 @@ function DiveRules.TowerHoldRun(dist, range, inside, margin, latched)
 	return false, false
 end
 
+-- Team finish (maintainer's decision D9 on #159, 2026-11-27: "team finish wins: no latch while 3+ allies push the
+-- same tower. count only healthy bots, unhealthy bots shuld stay away from tower if there are no creeps to deflect
+-- tower attack"). While it is on, a re-entry does not latch the hold and a latched hold acts unlatched (a push pauses
+-- it again); when it turns off, the latch rule applies again. Game 087, 15:48-15:57: the latch would have walked Zeus
+-- out of Radiant's bottom T1 for about 5s while 4 allies finished it.
+--   healthyAllies   other allied heroes (humans too; not the bot, no illusions) alive within FINISH_RADIUS of the
+--                   hold tower with HP at or above FINISH_HEALTHY_HP
+--   botHealthy      the bot's own HP is at or above FINISH_HEALTHY_HP
+--   creepsInRange   allied lane creeps stand inside the tower's attack range (they can take its aggro)
+--   now, fullAt     game time, and the last time the full rule held (nil: it is off)
+-- Returns whether the finish is on and the new fullAt (store it for the next check).
+-- On needs FINISH_ALLIES (3) healthy allies. Once on, it stays on while FINISH_KEEP_ALLIES (2) are there, for up to
+-- FINISH_KEEP_SECONDS after the full rule last held: one ally stepping out past 1200 or dipping under 60% for a moment
+-- would otherwise flip latch / no latch every think, the push / attack / retreat flipping the latch was made to stop.
+-- Below 2 allies it ends at once (no team to finish with). The bot's own cover has no grace: an unhealthy bot with no
+-- creeps in the range ends it at once, as the decision says (it should stay away; the HP only falls under the tower).
+-- 0.6: the HP under which a push steps out of tower aggro (push.lua tower-step-out, hpRatio < 0.6) and retreat's
+-- hard-retreat starts (HardRetreatDesire, hpRatio < 0.6). A lower line would let the finish pause the hold while the
+-- push walks the bot out anyway.
+DiveRules.FINISH_ALLIES = 3
+DiveRules.FINISH_KEEP_ALLIES = 2
+DiveRules.FINISH_KEEP_SECONDS = 2
+DiveRules.FINISH_RADIUS = 1200
+DiveRules.FINISH_HEALTHY_HP = 0.6
+function DiveRules.TeamFinish(healthyAllies, botHealthy, creepsInRange, now, fullAt)
+	healthyAllies = healthyAllies or 0
+	if not (botHealthy or creepsInRange) or healthyAllies < DiveRules.FINISH_KEEP_ALLIES then
+		return false, nil
+	end
+	if healthyAllies >= DiveRules.FINISH_ALLIES then
+		return true, now
+	end
+	if fullAt ~= nil and now - fullAt <= DiveRules.FINISH_KEEP_SECONDS then
+		return true, fullAt
+	end
+	return false, nil
+end
+
 -- What the hold does at this check. A push pauses it instead of ending it: PushThink steps out of tower aggro itself,
 -- and retreat must not pull a bot out of a team siege. Game 064, 12:24-12:31: Alchemist was stopped at Dire's mid T1
 -- (tower-entry-stop), one push-mode think during the hold cleared it, and attack mode walked him back under the

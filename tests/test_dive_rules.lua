@@ -353,16 +353,18 @@ T.test("walk home from behind an enemy tower: behind test, start and stop (game 
 end)
 
 -- One hold check as mode_retreat_generic.lua TowerHoldCheck runs it (run first, then the state), on a 700-range tower
--- with the edge margin (zone 900). Returns the state and whether the bot runs.
+-- with the edge margin (zone 900). hold.finish: the team finish is on (DiveRules.TeamFinish; the latch is off while
+-- it is). Returns the state and whether the bot runs.
 local function holdStep(R, hold, now, dist, pushing)
-	local run, inside, entered = R.TowerHoldRun(dist, 700, hold.inside, nil, hold.latched)
-	local state = R.TowerHoldState(now, hold.untilTime, true, pushing, hold.paused, false, 0, hold.why, hold.latched)
+	local latched = hold.latched == true and not hold.finish
+	local run, inside, entered = R.TowerHoldRun(dist, 700, hold.inside, nil, latched)
+	local state = R.TowerHoldState(now, hold.untilTime, true, pushing, hold.paused, false, 0, hold.why, latched)
 	if state == "pause" then
 		hold.paused = true
 		return state, false
 	end
 	hold.paused, hold.inside = nil, inside
-	if entered then
+	if entered and not hold.finish then
 		hold.latched = true
 	end
 	return state, run
@@ -433,6 +435,106 @@ T.test("tower hold: a resume inside the zone after a push latches (game 087, Zeu
 	T.eq(R.TowerHoldState(1031, hold.untilTime, true, true, nil, true, 4, "no-target", true), "siege", "siege")
 	-- The retreat file runs the hold first and passes it to the state, and latches on a re-entry.
 	local src = T.read("bots/mode_retreat_generic.lua")
-	T.ok(string.find(src, "hold.why,%s+hold.latched == true%s+%)") ~= nil, "TowerHoldState gets the latch")
+	T.ok(string.find(src, "hold.why,%s+holdLatched%s+%)") ~= nil, "TowerHoldState gets the latch")
 	T.ok(string.find(src, "hold.latched = true", 1, true) ~= nil, "re-entry latches")
+end)
+
+T.test(
+	"team finish: 3 other healthy allies at the tower, and the bot healthy or creeps in range (decision D9)",
+	function()
+		local R = rules()
+		T.eq(R.FINISH_ALLIES, 3, "3 allies")
+		T.eq(R.FINISH_HEALTHY_HP, 0.6, "healthy = the push tower-step-out line")
+		-- The threshold: 3 other allies turn it on, 2 do not (fresh, nothing held before).
+		T.eq((R.TeamFinish(3, true, false, 950, nil)), true, "3 healthy allies, healthy bot: on")
+		T.eq((R.TeamFinish(4, true, true, 950, nil)), true, "4 allies: on")
+		T.eq((R.TeamFinish(2, true, true, 950, nil)), false, "2 allies: off")
+		T.eq((R.TeamFinish(0, true, true, 950, nil)), false, "no allies: off")
+		T.eq((R.TeamFinish(nil, true, true, 950, nil)), false, "nil count: off")
+		-- The bot is not counted: the caller counts the others, so the bot plus 2 allies (3 heroes) is still 2.
+		T.eq((R.TeamFinish(2, true, true, 950, nil)), false, "bot + 2 allies: off")
+		-- An unhealthy bot: on only with allied creeps in the tower's range to take its aggro.
+		T.eq((R.TeamFinish(4, false, true, 950, nil)), true, "unhealthy bot, creeps in range: on")
+		T.eq((R.TeamFinish(4, false, false, 950, nil)), false, "unhealthy bot, no creeps: off (stay away)")
+		-- The full rule stores the time; the result is the new fullAt.
+		local on, fullAt = R.TeamFinish(3, true, false, 950, nil)
+		T.eq(on, true, "on")
+		T.eq(fullAt, 950, "fullAt = now")
+		on, fullAt = R.TeamFinish(2, true, false, 950, nil)
+		T.eq(fullAt, nil, "off: no fullAt")
+	end
+)
+
+T.test("team finish: hysteresis - stays on at 2 allies for 2s, ends below 2 or without cover at once", function()
+	local R = rules()
+	T.eq(R.FINISH_KEEP_ALLIES, 2, "keep at 2")
+	T.eq(R.FINISH_KEEP_SECONDS, 2, "for 2s")
+	-- On at t=950 with 3; one ally steps out past 1200 at t=951: still on (no latch flip), the time stays 950.
+	local on, fullAt = R.TeamFinish(3, true, false, 950, nil)
+	on, fullAt = R.TeamFinish(2, true, false, 951, fullAt)
+	T.eq(on, true, "t=951, 2 allies: still on")
+	T.eq(fullAt, 950, "the last full time is kept")
+	-- Back to 3 at t=951.5: on, and the time moves.
+	on, fullAt = R.TeamFinish(3, true, false, 951.5, fullAt)
+	T.eq(fullAt, 951.5, "t=951.5 back at 3")
+	-- 2 allies for more than 2s after the last full check: off.
+	on, fullAt = R.TeamFinish(2, true, false, 953.4, fullAt)
+	T.eq(on, true, "t=953.4: 1.9s at 2, on")
+	on, fullAt = R.TeamFinish(2, true, false, 953.6, fullAt)
+	T.eq(on, false, "t=953.6: 2.1s at 2, off")
+	T.eq(fullAt, nil, "off clears the time")
+	-- Once off, 2 allies do not turn it on again: it needs 3.
+	on = R.TeamFinish(2, true, false, 953.7, fullAt)
+	T.eq(on, false, "off, 2 allies: stays off")
+	-- Below 2 it ends at once, inside the 2s too.
+	on, fullAt = R.TeamFinish(3, true, false, 960, nil)
+	on, fullAt = R.TeamFinish(1, true, false, 960.5, fullAt)
+	T.eq(on, false, "1 ally: off at once")
+	-- The bot's cover has no grace: unhealthy with no creeps ends it at once, even with 4 allies.
+	on, fullAt = R.TeamFinish(4, true, false, 970, nil)
+	on, fullAt = R.TeamFinish(4, false, false, 970.5, fullAt)
+	T.eq(on, false, "bot under 60%, no creeps: off at once")
+	-- ... and an unhealthy bot inside the 2s at 2 allies keeps it only with creeps.
+	on, fullAt = R.TeamFinish(3, false, true, 980, nil)
+	on = R.TeamFinish(2, false, true, 981, fullAt)
+	T.eq(on, true, "unhealthy, creeps, 2 allies inside 2s: on")
+end)
+
+T.test("tower hold: the team finish turns the latch off (decision D9, game 087 Zeus at Radiant's bottom T1)", function()
+	local R = rules()
+	-- Zeus's bottom T1 hold with 4 allies there: the re-entry does not latch, and the push pauses the hold.
+	local hold = { inside = true, untilTime = 948 + R.HOLD_SECONDS, why = "not-killable", finish = true }
+	local state, run = holdStep(R, hold, 948.2, 884, false)
+	T.eq(run, true, "t=948 the stop's own run")
+	state, run = holdStep(R, hold, 948.6, 1060, false)
+	T.eq(run, false, "out")
+	state, run = holdStep(R, hold, 950.5, 890, false)
+	T.eq(run, true, "re-entry at 890 still runs (unlatched hold, not pushing)")
+	T.eq(hold.latched, nil, "finish on: the re-entry does not latch")
+	state = holdStep(R, hold, 951, 890, true)
+	T.eq(state, "pause", "push with the team: the hold pauses")
+	-- A hold latched before the finish turned on acts unlatched: the push pauses it again.
+	local latched = { inside = true, untilTime = 948 + R.HOLD_SECONDS, why = "not-killable", latched = true }
+	state, run = holdStep(R, latched, 952, 1700, false)
+	T.eq(run, true, "latched, finish off: runs at 1700")
+	latched.finish = true
+	state = holdStep(R, latched, 953, 1100, true)
+	T.eq(state, "pause", "latched, finish on: the push pauses it")
+	T.eq(latched.latched, true, "the stored latch stays")
+	-- The finish ends (allies left): the latch rule applies again, no pause.
+	latched.finish = nil
+	state, run = holdStep(R, latched, 954, 1100, true)
+	T.eq(state, "resume", "finish off: the latched hold resumes")
+	T.eq(run, true, "and runs")
+	state, run = holdStep(R, latched, 954.5, 1100, true)
+	T.eq(state, "keep", "push: no pause on the latched hold")
+	-- The retreat file reads the finish on every check, ahead of the end checks, and gates the latch on it.
+	local src = T.read("bots/mode_retreat_generic.lua")
+	local finishAt =
+		string.find(src, "DiveRules.TeamFinish(healthy, botHealthy, creeps, now, hold.finishFullAt)", 1, true)
+	local endAt = string.find(src, "local endWhy = DiveRules.TowerHoldEnd(", 1, true)
+	T.ok(finishAt ~= nil and endAt ~= nil and finishAt < endAt, "finish read before the end checks")
+	T.ok(string.find(src, "local holdLatched = hold.latched == true and not hold.finish", 1, true) ~= nil, "latch gate")
+	T.ok(string.find(src, "if entered and not hold.finish then", 1, true) ~= nil, "no latch while finish is on")
+	T.ok(string.find(src, "tower-hold-finish on=%d healthy=%d", 1, true) ~= nil, "finish line")
 end)
