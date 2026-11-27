@@ -1,4 +1,5 @@
 -- Tower defense desire, and the team chat that asks allies to come defend.
+local SafetyRules = require(GetScriptDirectory() .. "/lib/systems/safety_rules")
 local function arrayFilter(self, callback, thisArg)
 	local result = {}
 	local count = 0
@@ -1283,6 +1284,40 @@ function Defend.GetDefendDesireHelper(bot, lane)
 				Fu.GetHP(bot)
 			)
 		)
+	end
+	-- #12, game 067 50:49-50:53: Primal Beast (43% at the group-up, 29% at defend 0.77) was held at his base while Death
+	-- Prophet and Nyx hit him, and died 732 from the fountain. A hurt bot that heroes are hitting is let go by every
+	-- defend rule below (group-up, base floors; the last stand only under 35%), so retreat takes it; it comes back when
+	-- healed (SafetyRules.DefendLowHpRelease). Not when the Ancient is under 40%.
+	if not ancientLow then
+		local heroHit = bot:WasRecentlyDamagedByAnyHero(2.0)
+		local releaseWhy = nil
+		if heroHit then
+			local enemiesNear = #(bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {})
+			local alliesNear = math.max(0, #(bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE) or {}) - 1)
+			releaseWhy =
+				SafetyRules.DefendLowHpRelease(Fu.GetHP(bot), heroHit, enemiesNear, alliesNear, lastStand == true)
+			if releaseWhy ~= nil and DotaTime() >= (bot._defendLowHpLogAt or -999) then
+				bot._defendLowHpLogAt = DotaTime() + 3
+				pcall(
+					print,
+					string.format(
+						"[SHy-DEFEND] t=%.0f %s group-up-skip why=%s hp=%.2f hitBy=%d allies=%d siege=%s fountainDist=%d",
+						DotaTime(),
+						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+						releaseWhy,
+						Fu.GetHP(bot),
+						enemiesNear,
+						alliesNear,
+						tostring(Defend.GetBaseSiege() ~= nil),
+						math.floor(bot:DistanceFromFountain())
+					)
+				)
+			end
+		end
+		if releaseWhy ~= nil then
+			return DefNone(bot, "low-hp-hit")
+		end
 	end
 	-- Group up before taking on a base siege (SiegeGroupUp). 0.7: above the 0.65 attack "follow ally"
 	-- that pulled heroes in from 2000-4000 away, and above farm's usual 0.6.
