@@ -204,6 +204,73 @@ T.test("backup swing: stopped when the core's hit kills first, at the last look"
 	T.eq(R.WindupDecision(s), "release", "not a backup: nothing to stop")
 end)
 
+T.test("backup: no late go while the core's hit on its way kills (game 087 t=318)", function()
+	local R = rules()
+	-- Dark Willow behind Ringmaster: his projectile in the air, death=0.04 (it counted his projectile), coreEta 0.54
+	-- (his next hit), myEta 0.42. Before: late, and she took his creep.
+	T.ok(R.CoreTooLate(true, 0.04, 0.54, false), "without the hit on its way: too late (the old reading)")
+	T.ok(not R.CoreTooLate(true, 0.04, 0.54, true), "the core's own hit on its way kills: never too late")
+	T.ok(R.CoreOnWayKills(64, 48.8, false), "64 on a creep at 48.8 when it lands")
+	T.ok(not R.CoreOnWayKills(30, 48.8, false), "a hit that leaves it alive")
+	T.ok(not R.CoreOnWayKills(64, 48.8, true), "others kill it before the core's hit lands")
+	T.ok(not R.CoreOnWayKills(nil, 48.8, false), "no hit on its way")
+	local b = {
+		coreKillsFirst = false,
+		coreState = "attacking",
+		coreOnWay = true,
+		coreTooLate = R.CoreTooLate(true, 0.04, 0.54, true),
+		coreCanKill = true,
+		myDelay = 0.42,
+		coreEta = 0.54,
+		ourKills = true,
+	}
+	local decision, why = R.BackupDecision(b)
+	T.eq(decision, "wait", "the support leaves it to the core's hit in the air")
+	T.eq(why, "on-way")
+	for _, state in ipairs({ "busy", "far", "free" }) do
+		b.coreState = state
+		T.eq(R.BackupDecision(b), "wait", "whatever the core does now: " .. state)
+		T.eq(R.BackupNextWhy(b), "core-on-way", "a backup swing stops for it: " .. state)
+	end
+	b.coreKillsFirst = true
+	T.eq(R.BackupDecision(b), "core", "it lands before ours: the core-first answer")
+	b.coreKillsFirst, b.coreOnWay, b.coreTooLate = false, false, true
+	decision, why = R.BackupDecision(b)
+	T.eq(decision, "go", "no hit on its way and the creep dies before the core's next: late")
+	T.eq(why, "late")
+end)
+
+T.test("backup: a core holding the creep after stopping its swing keeps it (games 081 / 083 / 085)", function()
+	local R = rules()
+	local b = {
+		coreKillsFirst = false,
+		coreState = "attacking",
+		coreHolding = true,
+		coreTooLate = false,
+		coreCanKill = false,
+		myDelay = 0.6,
+		coreEta = 0.4,
+		ourKills = true,
+	}
+	local decision, why = R.BackupDecision(b)
+	T.eq(decision, "wait", "before: go behind (its hit alone does not kill); now it waits for the core's next swing")
+	T.eq(why, "core-hold")
+	T.eq(R.BackupNextWhy(b), "core-hold", "a released backup swing stops at its last look")
+	T.ok(R.RECHECK_CANCEL["core-hold"] and R.RECHECK_CANCEL["core-on-way"], "a decided release may stop for both")
+	b.coreTooLate = true
+	decision, why = R.BackupDecision(b)
+	T.eq(decision, "go", "the creep dies before the core's next hit: the backup takes it")
+	T.eq(why, "late")
+	T.eq(R.BackupNextWhy(b), nil, "and its swing is not stopped")
+	b.coreHolding, b.coreTooLate = false, false
+	T.eq(select(2, R.BackupDecision(b)), "behind", "no hold: the old behind rule")
+	local s = { predictedHp = 30, ourHit = 45, incomingKills = false, frameGap = 0.033, early = false, backup = true }
+	s.coreNext, s.coreNextWhy, s.remaining = true, "core-hold", 0.05
+	decision, why = R.WindupDecision(s)
+	T.eq(decision, "cancel")
+	T.eq(why, "core-hold", "the cancel names it")
+end)
+
 T.test("walk-in too late: the hit lands after the creep's estimated death", function()
 	local R = rules()
 	-- Game 064 t=61 Abaddon: creep 53 HP, expect=2.47, took=0.93. Two melee creeps at ~19 a hit per second: 1.39s.
@@ -221,4 +288,93 @@ T.test("deny over a timed last hit: only a more valuable creep", function()
 	T.ok(not R.DenyBeatsTimedHit("melee", "ranged"), "a melee deny does not stop a ranged last hit")
 	T.ok(R.DenyBeatsTimedHit("flag", "melee"), "a flagbearer deny beats a melee last hit")
 	T.ok(R.DenyBeatsTimedHit("siege", "ranged"), "a siege deny beats a ranged last hit")
+end)
+
+T.test("ally swing: time left to the attack point, none past it or in the backswing", function()
+	local R = rules()
+	-- Puck in the [SHy-LH] probe: attackPoint 0.5 at attack speed 1.18 (0.424s wind-up).
+	T.near(R.SwingRemaining(0.5, 1.18, 0, nil, nil), 0.5 / 1.18, 1e-9, "a swing just started: the whole wind-up")
+	T.near(R.SwingRemaining(0.5, 1.18, 0.2, 5, 1.441), 0.3 / 1.18, 1e-9, "the open part, as the bot's own swing")
+	T.eq(R.SwingRemaining(0.5, 1.18, 0.5, 5, 1.441), nil, "at the attack point: the hit is out")
+	T.eq(R.SwingRemaining(0.4, 1.15, 0.69, 5, 1.45), nil, "game 074 Leshrac cycle 0.69: the backswing")
+	-- Released 0.1s ago: the backswing of that attack, whatever the cycle says.
+	T.eq(R.SwingRemaining(0.5, 1.18, 0.3, 0.1, 1.441), nil, "just released: not a new wind-up")
+	T.near(R.SwingRemaining(0.5, 1.18, 0.1, 1.2, 1.441), 0.4 / 1.18, 1e-9, "after the cooldown: a new wind-up")
+	T.eq(R.SwingRemaining(0.5, 1.18, nil, 5, 1.441), nil, "no cycle: not counted")
+end)
+
+T.test("ally swing: only the swings landing before our hit count", function()
+	local R = rules()
+	local swings = { { eta = 0.3, damage = 50 }, { eta = 0.2, damage = 30 }, { eta = 0.6, damage = 40 } }
+	local total, first = R.SwingDamage(swings, 0.5)
+	T.eq(total, 80, "0.3 and 0.2 land before 0.5")
+	T.eq(first.eta, 0.2, "the first to land")
+	total, first = R.SwingDamage(swings, 0.2)
+	T.eq(total, 0, "strictly before: a tie does not count (two swings never both yield)")
+	T.eq(first, nil)
+	T.eq((R.SwingDamage({}, 1)), 0, "no swings")
+end)
+
+T.test("ally swing: others kill it, and whether only with the allied swing", function()
+	local R = rules()
+	local kills, bySwing = R.OthersKill(41, 10, 50)
+	T.ok(kills and bySwing, "40 HP: creeps 10 + the ally's 50")
+	kills, bySwing = R.OthersKill(41, 45, 0)
+	T.ok(kills and not bySwing, "the creeps alone kill it")
+	kills, bySwing = R.OthersKill(41, 45, 50)
+	T.ok(kills and not bySwing, "the creeps kill it anyway: not the ally's")
+	kills, bySwing = R.OthersKill(100, 10, 50)
+	T.ok(not kills and not bySwing, "alive after both")
+end)
+
+T.test("ally swing: yield reasons", function()
+	local R = rules()
+	T.eq(R.YieldReason({ class = nil, swingKill = true }), "ally-swing", "the ally's hit kills it first")
+	local s = { class = "sure", swingKill = false, support = true, coreSwing = true, ownSwing = false }
+	T.eq(R.YieldReason(s), "core-swing", "a support leaves the core's creep even when its own hit kills")
+	s.support = false
+	T.eq(R.YieldReason(s), nil, "a core does not yield to another core's swing that does not kill")
+	s.support, s.ownSwing = true, true
+	T.eq(R.YieldReason(s), nil, "our own swing already winding up: the wind-up watch decides")
+	s.ownSwing, s.coreSwing = false, false
+	T.eq(R.YieldReason(s), nil, "no core swinging")
+	s.coreSwing, s.class = true, nil
+	T.eq(R.YieldReason(s), nil, "not taken anyway: nothing to yield")
+end)
+
+T.test("wind-up yield: who stops for whom", function()
+	local R = rules()
+	T.eq(R.WindupYield(2, 1, true), "ally-swing", "position 2 for position 1, whose hit kills first")
+	T.eq(R.WindupYield(1, 2, true), nil, "never for a higher position number: only one of the two stops")
+	T.eq(R.WindupYield(2, 1, false), nil, "a core keeps its swing when the other core's hit does not kill")
+	T.eq(R.WindupYield(5, 1, false), "core-swing", "a support never steals a core's creep")
+	T.eq(R.WindupYield(5, 4, false), nil, "a support's swing that does not kill: no yield")
+	T.eq(R.WindupYield(5, 4, true), "ally-swing", "the other support's hit kills first")
+	T.eq(R.WindupYield(4, 5, true), nil)
+	T.eq(R.WindupYield(3, 3, true), nil, "the same position (a human read as 2): nobody stops")
+	T.eq(R.WindupYield(5, nil, true), nil)
+end)
+
+T.test("wind-up yield: wait to the last look, then stop; decided swings only for these reasons", function()
+	local R = rules()
+	local s = { predictedHp = 30, ourHit = 45, incomingKills = false, remaining = 0.3, frameGap = 0.033, early = false }
+	T.eq((R.WindupDecision(s)), "release", "no yield: our hit kills, released")
+	s.yield = "core-swing"
+	T.eq((R.WindupDecision(s)), "wait", "an ally to yield to: keep looking")
+	s.remaining = 0.05
+	local decision, why = R.WindupDecision(s)
+	T.eq(decision, "cancel")
+	T.eq(why, "core-swing")
+	-- A backup whose core kills it first: its own reason first.
+	s.backup, s.incomingKills = true, true
+	T.eq(select(2, R.WindupDecision(s)), "core")
+	T.ok(
+		R.LastLook(0.32, 0.2) and not R.LastLook(0.33, 0.2),
+		"0.2s gap: the last look is 0.32s or less before the point"
+	)
+	T.ok(R.RECHECK_CANCEL["ally-swing"] and R.RECHECK_CANCEL["core-swing"] and R.RECHECK_CANCEL.core)
+	T.ok(
+		R.RECHECK_CANCEL["core-next"] and not R.RECHECK_CANCEL.survives,
+		"a decided release is never stopped for survives"
+	)
 end)

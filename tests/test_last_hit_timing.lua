@@ -311,6 +311,97 @@ T.test("backup: a wind-up ahead of the core's hit is stopped (core-next)", funct
 	T.eq(state.orders[1], "clear", "the core holds this creep and its hit kills it: our swing stops")
 end)
 
+local function printedCount(pattern)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, pattern, 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("backup: no late go while the core's projectile in the air kills (game 087 t=318)", function()
+	local _, Timing, bot, creep, state = setup(48)
+	Stub.time = 1090
+	local props = { attacking = false }
+	local core = addCore(creep, props)
+	local coreDamage = 64
+	core.GetAttackDamage = function()
+		return coreDamage
+	end
+	core.GetAttackProjectileSpeed = function()
+		return 600
+	end
+	-- His attack released: the projectile is 400 from the creep (0.67s), he is in his backswing, not swinging.
+	local inFlight = { { is_attack = true, caster = core, location = creep:GetLocation() + Vector(400, 0, 0) } }
+	creep.GetIncomingTrackingProjectiles = function()
+		return inFlight
+	end
+	bot.GetNearbyLaneCreeps = function()
+		return {}
+	end
+	bot.GetNearbyTowers = function()
+		return {}
+	end
+	local facts = Timing.BackupFacts(bot, core, creep, 60)
+	T.near(facts.coreOnWayEta, 400 / 600, 1e-9, "the projectile's flight")
+	T.ok(facts.coreOnWay, "64 on 48 HP when it lands")
+	T.ok(not facts.coreTooLate, "the death estimate (it counts his projectile) does not make him late")
+	T.ok(not facts.coreKillsFirst, "it lands after our hit would")
+	T.ok(facts.ourKills, "our 60 would kill it first: the old 'late' steal")
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 60, allowEarly = false, walk = true, backupCore = core })
+		Timing.Tick(bot)
+	end
+	T.eq(#state.orders, 0, "no backup swing while the core's hit is in the air")
+	T.eq(printedCount("backup wait why=on-way from=walk"), 1, "one [SHy-LH] backup wait why=on-way line")
+	-- A projectile that leaves the creep alive does not hold the backup.
+	coreDamage = 30
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 60, allowEarly = false, walk = true, backupCore = core })
+	Timing.Tick(bot)
+	print = mutedPrint
+	T.eq(state.orders[1], "attack", "its hit does not kill: the backup goes")
+	T.eq(printedCount("death=99.00 onway=0.67"), 1, "the go line names the hit on its way")
+end)
+
+T.test("backup: a released backup stops when the core stops its swing and holds the creep", function()
+	local _, Timing, bot, creep, state = setup(80)
+	Stub.time = 1095
+	local props = { attacking = true }
+	local core = addCore(creep, props)
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	-- The core's pending 50 lands first (0.3s against 0.5s) and ours kills what is left: released at the first look.
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+	state.activity = 1503
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+	Timing.Tick(bot)
+	T.eq(bot._lhTiming.phase, "decided", "backup release decided")
+	-- The core stops its swing ("survives") and holds the creep to swing again.
+	props.attacking = false
+	core._lhTiming = { creep = creep, phase = "hold" }
+	local count = 31
+	for frame = 1, 30 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, backupCore = core })
+		Timing.Tick(bot)
+		if #state.orders > 0 then
+			count = frame
+			break
+		end
+	end
+	print = mutedPrint
+	T.ok(count < 15, "stopped before our attack point (frame " .. count .. ")")
+	T.eq(state.orders[1], "clear", "the released backup stopped")
+	T.eq(printedCount("result=cancel why=core-hold"), 1, "[SHy-LH] backup ... result=cancel why=core-hold")
+end)
+
 T.test("a laning Think that gave another order drops the timing at the next frame's Tick", function()
 	local _, Timing, bot, creep, state = setup(60)
 	Stub.time = 1100
@@ -403,4 +494,299 @@ T.test("team roam's overlay owns a hit (#171 bot._lhOwn): no arm, no order, one 
 	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
 	Timing.Tick(bot)
 	T.eq(state.orders[1], "attack", "the sure walk-in attacks once the overlay let go")
+end)
+
+-- An allied hero in the bot's team slots (GetTeamMember) winding up on creep (#71, maintainer 2026-11-23).
+local function addSwinger(creep, props)
+	local ally = GetTeamMember(2)
+	ally._loc = creep:GetLocation() + Vector(-100, 0, 0)
+	ally.GetAttackTarget = function()
+		return props.attacking and creep or nil
+	end
+	ally.GetAnimActivity = function()
+		return props.attacking and 1503 or 0
+	end
+	-- props.startAt: the swing started then and its cycle runs with the clock (attack speed 1).
+	ally.GetAnimCycle = function()
+		if props.startAt ~= nil then
+			return GameTime() - props.startAt
+		end
+		return props.cycle or 0.1
+	end
+	ally.GetAttackPoint = function()
+		return props.point or 0.3
+	end
+	ally.GetAttackSpeed = function()
+		return 1
+	end
+	ally.GetLastAttackTime = function()
+		return props.lastAttack or -50
+	end
+	ally.GetAttackDamage = function()
+		return props.damage or 50
+	end
+	return ally
+end
+
+local function yieldLines(why)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "yield why=" .. why, 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("ally swing: an ally's wind-up that kills the creep first is counted", function()
+	local _, Timing, _, creep = setup(40)
+	Stub.time = 1200
+	local props = { attacking = true, cycle = 0.1 }
+	addSwinger(creep, props)
+	local predictedHp, _, incomingKills, swingKill = Timing.Predict(creep, 45, 0.5)
+	T.ok(incomingKills, "40 HP, the ally's 50 lands in 0.2s, before our hit at 0.5s")
+	T.ok(swingKill ~= nil and swingKill.ally == GetTeamMember(2), "the ally's swing made it")
+	T.near(swingKill.eta, 0.2, 1e-9, "(0.3 - 0.1) / 1, melee: no flight")
+	T.near(predictedHp, 40.8 - 50, 1e-9, "its hit is taken off the predicted HP")
+	props.cycle = 0.35
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "past its attack point: the hit is out")
+	props.cycle, props.lastAttack = 0.1, GameTime() - 0.1
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "its previous attack's backswing: no new wind-up")
+	props.lastAttack, props.point = nil, 0.9
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "its hit lands after ours (0.8s): not counted")
+	props.point = 0.3
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5, 0, GetTeamMember(2))), "left out (exclude)")
+	props.attacking = false
+	T.ok(not select(3, Timing.Predict(creep, 45, 0.5)), "not attacking it")
+end)
+
+T.test("ally swing: the bot does not walk in on a creep an ally's swing kills, logs it once", function()
+	local _, Timing, bot, creep, state = setup(40)
+	Stub.time = 1300
+	local props = { attacking = true, cycle = 0.05 }
+	addSwinger(creep, props)
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "no attack: the ally takes it")
+	T.eq(yieldLines("ally-swing"), 1, "one [SHy-LH] yield line for this creep")
+	-- The ally cancels its swing: the bot may take it.
+	props.attacking = false
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "the ally stopped: the sure hit goes")
+end)
+
+T.test("ally swing: a support leaves the creep its core is swinging at (core-swing)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1400
+	local props = { attacking = true, cycle = 0.05, damage = 20 }
+	local ally = addSwinger(creep, props)
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and 5 or hero == ally and 1 or getPosition(hero)
+	end
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "our hit would kill (40 - 20 < 45) but the core is swinging at it")
+	T.eq(yieldLines("core-swing"), 1, "logged once")
+	T.eq(yieldLines("ally-swing"), 0, "the core's 20 does not kill it alone")
+	-- A core bot does not yield to another core's swing that does not kill.
+	Fu.GetPosition = function(hero)
+		return hero == bot and 2 or hero == ally and 1 or getPosition(hero)
+	end
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "a core takes it")
+	Fu.GetPosition = getPosition
+end)
+
+T.test("ally swing: a backup behind a core in a team slot counts its pending hit once", function()
+	local Fu, Timing, bot, creep, state = setup(80)
+	Stub.time = 1500
+	-- The core in slot 2 (seen by AllySwings) winding up: hit 50, 0.25s left (cycle 0.05 of 0.3).
+	local props = { attacking = true, cycle = 0.05, damage = 50 }
+	local core = addSwinger(creep, props)
+	core.IsBot = function()
+		return true
+	end
+	core.GetActiveMode = function()
+		return BOT_MODE_LANING
+	end
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and 5 or hero == core and 1 or getPosition(hero)
+	end
+	local facts = Timing.BackupFacts(bot, core, creep, 45)
+	-- 80 HP + 0.8: the core's 50 once leaves 30.8 (twice would be -19.2).
+	T.near(facts.predictedHp, 80.8 - 50, 1e-9, "the core's pending hit taken off once")
+	T.eq(facts.coreState, "attacking")
+	T.ok(not facts.coreKillsFirst, "its hit alone does not kill 80")
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	for _ = 1, 5 do
+		Stub.time = Stub.time + 1 / 30
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true, backupCore = core })
+		Timing.Tick(bot)
+	end
+	print = mutedPrint
+	T.eq(#state.orders, 0, "no backup swing while the core winds up")
+	T.eq(yieldLines("core-swing"), 1, "one core-swing line")
+	-- The core's hit is out (past its attack point): the backup may go.
+	props.cycle = 0.35
+	Stub.time = Stub.time + 1 / 30
+	Timing.Arm(bot, creep, { damage = 45, allowEarly = false, walk = true, backupCore = core })
+	Timing.Tick(bot)
+	T.eq(state.orders[1], "attack", "the backup swing after the core's hit")
+	Fu.GetPosition = getPosition
+end)
+
+-- The wind-up yield (#71, games 083-085): the bot's own swing is stopped for an ally.
+local function rangedBot(bot)
+	-- Ranged, slow projectile: the creep at 100 (less the 39 offset) takes 61 / 250 = 0.244s to reach.
+	bot.GetAttackRange = function()
+		return 600
+	end
+	bot.GetAttackProjectileSpeed = function()
+		return 250
+	end
+end
+
+local function withPositions(Fu, bot, myPos, ally, allyPos, fn)
+	local getPosition = Fu.GetPosition
+	Fu.GetPosition = function(hero)
+		return hero == bot and myPos or hero == ally and allyPos or getPosition(hero)
+	end
+	local mutedPrint = print
+	print = OHA_RAW_PRINT or print
+	local ok, err = pcall(fn)
+	print = mutedPrint
+	Fu.GetPosition = getPosition
+	if not ok then
+		error(err, 0)
+	end
+end
+
+local function windupYieldLines(why)
+	local lines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "yield why=" .. why .. " at=windup", 1, true) then
+			lines = lines + 1
+		end
+	end
+	return lines
+end
+
+T.test("wind-up yield: a core stops its swing for a lower-position core's swing that kills first", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1600
+	rangedBot(bot)
+	-- Positions 2 and 1 swing at one creep together.
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = GameTime() }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 2, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
+		state.activity = 1503
+		frames(Timing, bot, creep, 3, 45)
+		T.eq(bot._lhTiming.phase, "windup", "our hit would kill, but the ally's lands first: waiting, not released")
+		local count = untilOrder(Timing, bot, creep, state, 45)
+		T.ok(count < 15, "stopped inside the 0.5s wind-up (frame " .. count .. ")")
+		T.eq(state.orders[1], "clear", "our swing stopped")
+		T.eq(bot._lhTiming.phase, "hold", "holding after the stop")
+		T.eq(windupYieldLines("ally-swing"), 1, "[SHy-LH] yield why=ally-swing at=windup")
+	end)
+end)
+
+T.test("wind-up yield: never for a higher position number (one of two heroes yields, never both)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1650
+	rangedBot(bot)
+	local props = { attacking = true, point = 0.5, damage = 50, startAt = GameTime() }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 1, ally, 2, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = true })
+		state.activity = 1503
+		frames(Timing, bot, creep, 20, 45)
+		T.eq(#state.orders, 0, "position 1 keeps its swing")
+		T.eq(bot._lhTiming.phase, "decided", "released (others): as before")
+		T.eq(windupYieldLines("ally-swing"), 0)
+	end)
+end)
+
+T.test("wind-up yield: a decided support swing stops at the last look for a core's new swing", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1700
+	rangedBot(bot)
+	-- Games 083-085: the support released at its first look, then the core (cancelled, holding) swung again.
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		frames(Timing, bot, creep, 1, 45, false)
+		T.eq(bot._lhTiming.phase, "decided", "our hit kills: release decided at the first look")
+		props.attacking, props.startAt = true, GameTime()
+		frames(Timing, bot, creep, 5, 45, false)
+		T.eq(#state.orders, 0, "not before the last look")
+		local count = untilOrder(Timing, bot, creep, state, 45)
+		T.ok(count < 15, "stopped before our attack point (frame " .. count .. ")")
+		T.eq(state.orders[1], "clear", "the decided swing stopped")
+		T.eq(windupYieldLines("core-swing"), 1, "[SHy-LH] yield why=core-swing at=windup (the core's 20 does not kill)")
+	end)
+end)
+
+T.test("wind-up yield: a decided swing is not stopped when no ally swings (release stays a release)", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1750
+	rangedBot(bot)
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		frames(Timing, bot, creep, 1, 45, false)
+		T.eq(bot._lhTiming.phase, "decided")
+		-- The creep heals out of one hit: a "survives" at the last look does not stop a decided release.
+		creep._hp = 80
+		frames(Timing, bot, creep, 20, 45, false)
+		T.eq(#state.orders, 0, "no stop")
+	end)
+end)
+
+T.test("wind-up yield: looks 0.2s apart still stop the swing before the attack point", function()
+	local Fu, Timing, bot, creep, state = setup(40)
+	Stub.time = 1800
+	rangedBot(bot)
+	bot._lhtGap = 0.2
+	bot._lhtFrameAt = Stub.time
+	local props = { attacking = false, point = 0.6, damage = 20 }
+	local ally = addSwinger(creep, props)
+	local function look()
+		Stub.time = Stub.time + 0.2
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		Timing.Tick(bot)
+	end
+	withPositions(Fu, bot, 5, ally, 1, function()
+		Timing.Arm(bot, creep, { damage = 45, allowEarly = false })
+		state.activity = 1503
+		look()
+		T.eq(bot._lhTiming.phase, "decided", "first look 0.1s into the 0.5s wind-up: released")
+		props.attacking, props.startAt = true, GameTime()
+		look()
+		T.eq(state.orders[1], "clear", "the next look (0.2s left, last look at a 0.2s gap) stops it")
+		T.ok(GameTime() < bot._lhTiming.cancelPointAt, "before the attack point")
+	end)
 end)
