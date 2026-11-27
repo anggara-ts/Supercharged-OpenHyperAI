@@ -703,7 +703,7 @@ end
 function getGameState()
 	local now = DotaTime()
 	if gameStateCache and now - gameStateCache.lastUpdate < stateCacheSeconds then
-		return gameStateCache
+		return Cache.OwnLaningPhase(gameStateCache, "push")
 	end
 	local team = GetTeam()
 	local enemyTeam = GetOpposingTeam()
@@ -731,7 +731,7 @@ function getGameState()
 		isLateGame = Fu.IsLateGame(),
 		isLaningPhase = Fu.IsInLaningPhase(),
 	}
-	return gameStateCache
+	return Cache.OwnLaningPhase(gameStateCache, "push")
 end
 function getLocationState()
 	local now = DotaTime()

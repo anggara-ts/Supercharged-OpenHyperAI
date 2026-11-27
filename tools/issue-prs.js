@@ -35,8 +35,8 @@ const START = new Set(
 const GH = require("./github_cli")();
 const ROOT = path.join(__dirname, "..");
 
-const gh = (args) => cp.execFileSync(GH, args, { encoding: "utf8", cwd: ROOT });
-const git = (args) => cp.execFileSync("git", args, { encoding: "utf8", cwd: ROOT }).trim();
+const gh = (args) => cp.execFileSync(GH, args, { encoding: "utf8", cwd: ROOT, maxBuffer: 256 * 1024 * 1024 });
+const git = (args) => cp.execFileSync("git", args, { encoding: "utf8", cwd: ROOT, maxBuffer: 256 * 1024 * 1024 }).trim();
 
 function prefixFor(labels) {
 	if (labels.includes("enhancement")) return "feat";
