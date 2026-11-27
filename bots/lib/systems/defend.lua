@@ -55,6 +55,8 @@ local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 local getLocationToLocationDistance = Utils.GetLocationToLocationDistance
 local CacheKeys = require(GetScriptDirectory() .. "/lib/systems/cache_keys")
+-- Each bot reads its own laning-phase flag from the shared game state (Cache.OwnLaningPhase, #165).
+local Cache = require(GetScriptDirectory() .. "/lib/systems/cache")
 function getDefendState(bot)
 	if not bot._defend then
 		bot._defend = {
@@ -70,7 +72,7 @@ end
 function getGameState()
 	local now = DotaTime()
 	if gameStateCache and now - gameStateCache.lastUpdate < stateCacheSeconds then
-		return gameStateCache
+		return Cache.OwnLaningPhase(gameStateCache, "defend")
 	end
 	local team = GetTeam()
 	local enemyTeam = GetOpposingTeam()
@@ -109,7 +111,7 @@ function getGameState()
 		ancientHP = ourAncient ~= nil and ourAncient:IsAlive() and Fu.GetHP(ourAncient) or 1,
 		defendersAtAncient = defendersAtAncient,
 	}
-	return gameStateCache
+	return Cache.OwnLaningPhase(gameStateCache, "defend")
 end
 function getLaneState()
 	local now = DotaTime()
