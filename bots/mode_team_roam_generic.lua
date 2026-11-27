@@ -25,6 +25,7 @@ local HuntTrace = require(GetScriptDirectory() .. "/lib/systems/hunt_trace")
 local RoamRules = require(GetScriptDirectory() .. "/lib/systems/team_roam_rules")
 local LastHitOverlay = require(GetScriptDirectory() .. "/lib/systems/last_hit_overlay")
 local TeamRoam = {}
+TeamRoam.Difficulty = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
 local team = GetTeam()
 local engageTarget = nil
 local isAttackingTowerCreep, towerCreepTarget = false, nil
@@ -243,6 +244,15 @@ function GetDesire()
 	if offerUnit ~= nil then
 		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
 	end
+	-- Difficulty (#232): hero hunts off on Passive / Easy, careful on Medium; no help fights on Passive.
+	desire, roamWhy = TeamRoam.Difficulty.GateRoam(
+		bot,
+		desire,
+		roamWhy,
+		engageTarget,
+		alliesNear and #alliesNear or 0,
+		enemiesNear and #enemiesNear or 0
+	)
 	return RoamDone(desire, adjustDesire(desire))
 end
 -- [SHy-ROAM] hunt-end: a hero / courier hunt that ran as team roam stopped (RoamRules.HuntExitWhy, or the hunt found

@@ -797,6 +797,9 @@ function CDOTA_Bot_Script:Action_AttackUnit(target, isOnce)
 	end
 	return originalActionAttackUnit(self, target, isOnce)
 end
+-- Difficulty levels (#232): reactive / cast rolls and Passive gates on every cast and attack order, outside the guards
+-- above. Unfair (today's play) passes every order straight through: bots/lib/systems/difficulty_hooks.lua.
+require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks").InstallUnitHooks(CDOTA_Bot_Script)
 local originalGetAssignedLane = CDOTA_Bot_Script.GetAssignedLane
 function CDOTA_Bot_Script:GetAssignedLane()
 	if not self or self:GetTeam() ~= GetTeam() then

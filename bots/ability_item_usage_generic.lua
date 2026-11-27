@@ -1,5 +1,8 @@
 -- Casts abilities and uses items while the bot is already in some other mode.
 local Usage = {}
+-- Difficulty levels (#232): reactive and cast rolls, smoke gate, late last hits (a field: this chunk is near the
+-- 200-locals limit).
+Usage.Difficulty = require(GetScriptDirectory() .. "/lib/systems/difficulty_hooks")
 local PerfParts = require(GetScriptDirectory() .. "/lib/systems/perf")
 -- Perf.Part helpers for ItemUsageThink (#52).
 local function PartStart()
@@ -15,6 +18,8 @@ local botName = bot:GetUnitName()
 if bot == nil or bot:IsInvulnerable() or not bot:IsHero() or not string.find(botName, "hero") or bot:IsIllusion() then
 	return
 end
+-- [SHy-DIFF] start line (#232): the lobby difficulty this bot plays, read once.
+Usage.Difficulty.Get(bot)
 if not bot.frameProcessTime then
 	bot.frameProcessTime = 0.1
 end
@@ -2431,6 +2436,10 @@ function Usage.TimedTrackingProjectile(item, target, finder, searchRange)
 		return nil
 	end
 	if found ~= nil then
+		-- Difficulty (#232): the bot's reactive roll for this danger episode ([SHy-DIFF] roll kind=reactive).
+		if not Usage.Difficulty.DodgeAllowed(target, "item-tracking") then
+			return nil
+		end
 		return found, timing
 	end
 	if late ~= nil then
@@ -8445,6 +8454,9 @@ Usage.ConsiderItemDesire["item_smoke_of_deceit"] = function(item)
 	end
 	return desire, target, castType, reason
 end
+-- Difficulty (#232): no Smoke on Passive / Easy, only with 3 heroes together on Medium ([SHy-DIFF] held what=smoke).
+Usage.ConsiderItemDesire["item_smoke_of_deceit"] =
+	Usage.Difficulty.WrapSmoke(bot, Usage.ConsiderItemDesire["item_smoke_of_deceit"])
 local enemyPlayerIds = nil
 -- Dust only from a main slot (game 036: 308 "item can't be used from stash" refusals, bursts with the
 -- Dust loop on Ogre Magi). The rule below is unchanged otherwise.
@@ -11459,6 +11471,8 @@ function ItemUsageThink()
 	pcall(Usage.TrackTeleportJump)
 	pcall(Usage.WatchStillUnderHit)
 	pcall(Usage.WatchArrivals)
+	-- Difficulty (#232): danger episodes end on time; recent retreat / evasive mode for the reactive casts.
+	pcall(Usage.Difficulty.Tick, bot)
 	pcall(Usage.DumpBotApi)
 	pcall(Usage.DumpHeroAbilities)
 	pcall(Usage.ProbeHiddenItems)
@@ -11522,6 +11536,8 @@ function ItemUsageThink()
 	-- Laning last hits every frame (#71): the attack on the right frame, the wind-up release / cancel. While it owns
 	-- the hit, no kiting step, item or spell order replaces it. It lets go while an enemy tower hits the bot, so the
 	-- tower-aggro step below still runs.
+	-- Difficulty (#232): a last hit held for the level's timing error goes out on the frame its wait is over.
+	pcall(Usage.Difficulty.LastHitRetry, bot)
 	local okLastHit, timingLastHit = pcall(LastHitTiming.Tick, bot)
 	if not okLastHit and not bot._lhTimingErr then
 		-- Once per bot: a broken hook would silently drop every timed last hit.
@@ -11750,6 +11766,9 @@ function BuybackUsageThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	-- Difficulty (#232): the danger-episode tick here too, so an episode can end why=dead (if this think runs while
+	-- the bot is dead; unverified).
+	pcall(Usage.Difficulty.Tick, bot)
 	Usage.WatchFountainPings()
 	if bot.lastBuybackFrameProcessTime == nil then
 		bot.lastBuybackFrameProcessTime = DotaTime()
