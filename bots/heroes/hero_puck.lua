@@ -1607,12 +1607,15 @@ function X.TowerOrbJaunt()
 	end
 	local clearIn = math.max(0, clear - orbToTower) / orbSpeed
 	local hp, loss = Fu.GetHP(bot), X.HpLoss()
+	-- Safer: farther from the nearest seen enemy hero than she is (none seen counts), and for a hop (she waits outside
+	-- the range while the Orb flies through it) not inside the tower's range.
+	local orbSafer = (nearHer == math.huge or nearOrb > nearHer) and (hop.towerHome == nil or orbToTower > hop.range)
 	local urgent = EscapeRules.TowerJauntNow(
 		heroOnHer,
 		hp,
 		loss,
 		orbFromHer,
-		nearOrb > nearHer,
+		orbSafer,
 		clearIn,
 		(etherealJauntAbility:GetCastPoint() or 0) + 0.1
 	)
