@@ -35,6 +35,7 @@ local function fakeHero(props)
 		maxHp = props.maxHp or 1000,
 		mode = props.mode or BOT_MODE_ATTACK,
 		attacks = {},
+		moves = {},
 	}
 	unit._loc = props.loc
 	function unit:GetLocation()
@@ -95,6 +96,9 @@ local function fakeHero(props)
 	end
 	function unit:Action_AttackUnit(target)
 		self.attacks[#self.attacks + 1] = target
+	end
+	function unit:Action_MoveToUnit(target)
+		self.moves[#self.moves + 1] = target
 	end
 	return unit
 end
@@ -211,7 +215,10 @@ T.test("chain: a root or silence, an unread time or an unlisted modifier never h
 	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "not stunned")
 	stun(axe, 2.0, "modifier_some_new_stun")
 	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "unlisted modifier")
-	T.eq(#lines("[SHy-CHAIN] t=600 sven unknown hero=axe spell=sven_storm_bolt mods=modifier_item_phase_boots"), 1)
+	-- The disable-looking name comes first, the count names every unlisted modifier.
+	local unknown = "[SHy-CHAIN] t=600 sven unknown hero=axe spell=sven_storm_bolt n=2 "
+		.. "mods=modifier_some_new_stun,modifier_item_phase_boots"
+	T.eq(#lines(unknown), 1)
 	stun(axe, -1)
 	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), false, "a -1 read")
 end)
@@ -354,4 +361,48 @@ T.test("chain: the cast guard refuses a held order before the engine sees it", f
 	bot:Action_UseAbilityOnEntity(bolt, axe)
 	T.eq(engine.n, 1, "free hero: the order reaches the engine")
 	T.eq(#lines("error where="), 0, "no hook error")
+end)
+
+T.test("chain: Dream Coil's break stun is a listed stun (game 088)", function()
+	local Chain, sven, _, axe, bolt = setup()
+	stun(axe, 2.0, "modifier_puck_coil_break_stun")
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), true, "held")
+	T.eq(#lines("mod=modifier_puck_coil_break_stun"), 1, "hold line names the coil stun")
+	T.eq(#lines("unknown"), 0, "no unknown line")
+end)
+
+T.test("chain: a hold on a hero in Cold Embrace walks to him, no attack into the cocoon", function()
+	local Chain, sven, _, axe, bolt = setup()
+	stun(axe, 3.0, "modifier_winter_wyvern_cold_embrace")
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), true, "held until the cocoon ends")
+	T.eq(#sven.attacks, 0, "no attack order")
+	T.eq(#sven.moves, 1, "one move order")
+	T.ok(sven.moves[1] == axe, "to the frozen hero")
+end)
+
+T.test("chain: the unknown line keeps a disable-looking name past the cap and counts every name", function()
+	local _, Chain = load()
+	-- Game 088 t=1445 (Rubick): 12 names hit the old cap of 12; a stun after them would have been cut.
+	local names = {
+		"modifier_rubick_curiosity",
+		"modifier_rubick_curiosity_from_heroes_tracker",
+		"modifier_item_ring_of_basilius_effect",
+		"modifier_rubick_spell_steal",
+		"modifier_abyssal_underlord_atrophy_aura_effect",
+		"modifier_abyssal_underlord_pit_of_malice_slow",
+		"modifier_abyssal_underlord_firestorm_burn",
+		"modifier_item_shadow_amulet_fade",
+		"modifier_item_polliwog_charm_buff",
+		"modifier_item_dustofappearance",
+		"modifier_lion_finger_of_death",
+		"modifier_item_phase_boots_active",
+		"modifier_item_magic_wand",
+		"modifier_some_new_stun",
+	}
+	local mods, count = Chain.UnknownNames(names, 12)
+	T.eq(count, 14, "every unlisted name counted")
+	T.ok(string.find(mods, "^modifier_some_new_stun,modifier_rubick_curiosity,") ~= nil, "stun first, then in order")
+	T.eq(select(2, string.gsub(mods, ",", ",")) + 1, 12, "cut at the cap")
+	T.ok(string.find(mods, "magic_wand", 1, true) == nil, "the last plain name is cut")
+	T.eq(Chain.UnknownNames({}, 12), "", "an empty list")
 end)

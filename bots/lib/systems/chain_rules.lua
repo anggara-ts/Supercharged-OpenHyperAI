@@ -24,7 +24,8 @@
 -- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= dist= src=" (throttled), "... cast hero= spell=
 -- left= need= gap= dist= held= real= why=" (a disable cast into a running disable, once per bot, spell and hero
 -- every 3s; why=held after a hold, chain without one, blocked / far / cap when the rule did not wait),
--- "... unknown hero= spell= mods=" (stunned or hexed but no listed modifier: the list misses a name), "... off"
+-- "... unknown hero= spell= n= mods=" (stunned or hexed but no listed modifier: the list misses a name; n= counts
+-- the unlisted names, disable-looking ones first, at most UNKNOWN_CAP shown), "... off"
 -- (the time left did not count down: the rule switches itself off for the game), "... error" (once per game).
 local Chain = {}
 
@@ -136,7 +137,24 @@ Chain.MODIFIERS = {
 	modifier_faceless_void_timelock_freeze = true,
 	modifier_techies_stasis_trap_stunned = true,
 	modifier_spirit_breaker_greater_bash = true,
+	-- Dream Coil's break stun (game 088 [SHy-CHAIN] unknown lines; datafeed hero_id 13: coil_stun_duration 1.5-2.5).
+	modifier_puck_coil_break_stun = true,
+	-- Cold Embrace freezes the enemy Wyvern's ally solid for 4s (datafeed hero_id 112: duration 4): the engine
+	-- calls him stunned (game 088 t=1445: Rubick inside it read as stunned with no listed modifier). A stun that
+	-- lands inside it is wasted, so the next one waits for its end. The cocoon blocks physical damage: the hold
+	-- walks to him instead of attacking (NO_ATTACK).
+	modifier_winter_wyvern_cold_embrace = true,
 }
+
+-- Listed modifiers whose hero takes no physical damage: a hold on them moves to the hero instead of attacking.
+Chain.NO_ATTACK = {
+	modifier_winter_wyvern_cold_embrace = true,
+}
+
+-- The unknown line names at most UNKNOWN_CAP modifiers; names that look like a disable come first, so a long list
+-- (auras, item buffs, trackers) does not cut the one the MODIFIERS list misses.
+Chain.UNKNOWN_CAP = 16
+Chain.DISABLE_WORDS = { "stun", "hex", "voodoo", "bash", "freeze", "frozen", "sleep", "embrace", "coil", "impale" }
 
 Chain.enabled = true
 Chain.live = 0 -- bots with a live hold stamp (Fu.IsDisabled's fast path)
@@ -214,6 +232,27 @@ function Chain.Record(verdict)
 		return true
 	end
 	return false
+end
+
+-- The unlisted modifier names for the unknown line: disable-looking names first (in their order), then the rest,
+-- cut at cap. Returns the joined names and the total count.
+function Chain.UnknownNames(names, cap)
+	local first, rest = {}, {}
+	for _, name in ipairs(names or {}) do
+		local looks = false
+		for _, word in ipairs(Chain.DISABLE_WORDS) do
+			if string.find(name, word, 1, true) then
+				looks = true
+				break
+			end
+		end
+		local into = looks and first or rest
+		into[#into + 1] = name
+	end
+	for _, name in ipairs(rest) do
+		first[#first + 1] = name
+	end
+	return table.concat(first, ",", 1, math.min(#first, cap or Chain.UNKNOWN_CAP)), #first
 end
 
 -- Game side ----------------------------------------------------------------------------------------------------
@@ -386,14 +425,16 @@ function Chain.OnCast(bot, ability, target, kind)
 		left, src = claimLeft, "claim"
 	end
 	if unlisted ~= nil and left == nil and Throttled(botName .. "|unknown", now, 30) then
+		local mods, count = Chain.UnknownNames(unlisted)
 		print(
 			string.format(
-				"[SHy-CHAIN] t=%.0f %s unknown hero=%s spell=%s mods=%s",
+				"[SHy-CHAIN] t=%.0f %s unknown hero=%s spell=%s n=%d mods=%s",
 				now,
 				short(botName),
 				short(heroName),
 				spellName,
-				table.concat(unlisted, ",", 1, math.min(#unlisted, 12))
+				count,
+				mods
 			)
 		)
 	end
@@ -461,7 +502,12 @@ function Chain.OnCast(bot, ability, target, kind)
 		end
 		-- The hero file may have cleared the queue (Fu.SetQueuePtToINT) and queued Soul Ring / a Treads switch:
 		-- one plain attack order on the disabled hero replaces them, so the bot hits him instead of standing.
-		pcall(bot.Action_AttackUnit, bot, hero, false)
+		-- A hero who takes no physical damage (Cold Embrace): walk to him instead.
+		if src == "modifier" and Chain.NO_ATTACK[modName] then
+			pcall(bot.Action_MoveToUnit, bot, hero)
+		else
+			pcall(bot.Action_AttackUnit, bot, hero, false)
+		end
 		return true
 	end
 	-- The order goes through. A cast into a running disable is a chain: log it. why=held after a hold of this bot,
