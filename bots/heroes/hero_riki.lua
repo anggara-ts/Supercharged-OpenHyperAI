@@ -147,8 +147,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -483,7 +482,6 @@ function X.ConsiderE()
 	local manaCost = tricksOfTheTradeAbility:GetManaCost()
 	local damage = tricksOfTheTradeAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local radius = tricksOfTheTradeAbility:GetSpecialValueInt("radius") -- datafeed: Tricks of the Trade has "radius" (425), no "range" (read 0)
 	local retreatLocation = Fu.GetLocationTowardDistanceLocation(bot, Fu.GetTeamFountain(), castRange)
 	local castLocation = nil

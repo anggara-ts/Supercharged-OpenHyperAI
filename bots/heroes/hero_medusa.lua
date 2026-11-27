@@ -89,10 +89,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "medusa_stone_gaze", kind = "none" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -158,7 +157,6 @@ function X.ConsiderGorgonGrasp()
 	-- Float: duration is 0.8/1.2/1.6/2.0 (game data); the Int read gave 0/1/1/2 and undercounted the kill damage.
 	local duration = gorgonGraspAbility:GetSpecialValueFloat("duration")
 	botTarget = Fu.GetProperTarget(bot)
-	local nearbyAllyHeroes = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	local totalDelay = castPoint + delay
 	for _, enemyHero in pairs(nearbyEnemyHeroes) do

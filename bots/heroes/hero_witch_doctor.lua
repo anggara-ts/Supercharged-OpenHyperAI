@@ -117,8 +117,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	if Minion.IsValidUnit(minionUnit) and minionUnit:GetUnitName() ~= "npc_dota_witch_doctor_death_ward" then
 		Minion.IllusionThink(minionUnit)
@@ -556,7 +555,6 @@ function X.ConsiderE()
 	local manaCost = maledictAbility:GetManaCost()
 	local damage = maledictAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 32, true, BOT_MODE_NONE)
 	local radius = maledictAbility:GetSpecialValueInt("radius")
 	if Fu.IsInTeamFight(bot, 1200) then
 		local aoeLocation = Fu.GetAoeEnemyHeroLocation(bot, castRange, radius, 2)
@@ -650,7 +648,6 @@ function X.ConsiderAS()
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	local radius = 700
-	local castRange = voodooSwitcherooAbility:GetCastRange()
 	local castPoint = voodooSwitcherooAbility:GetCastPoint()
 	local manaCost = voodooSwitcherooAbility:GetManaCost()
 	local enemiesNearby = Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)

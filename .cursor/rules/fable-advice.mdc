@@ -1,0 +1,14 @@
+---
+description: Ask Claude Fable 5.2 for a second opinion before a design decision
+alwaysApply: true
+---
+
+# Second opinion
+
+When a decision needs a second opinion, ask Claude Fable 5.2 and resume that session for the next question on the same topic:
+
+`claude -p --model claude-fable-5-2 --resume <session-id>`
+
+The alias is `fable`. Keep a topic's session id locally and pass it as `<session-id>`. Do not write a real session id in this file.
+
+This rule is for Cursor only. Do not copy it into `AGENTS.md`; Claude Code reads that file.

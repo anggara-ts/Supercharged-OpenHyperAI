@@ -118,8 +118,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	if Minion.IsValidUnit(hMinionUnit) then
 		if Fu.IsValidHero(hMinionUnit) and hMinionUnit:IsIllusion() then
@@ -291,7 +290,6 @@ function X.ConsiderBlink()
 	if Fu.IsPushing(bot) and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_HIGH then
 		local nearbyAllies = Fu.GetAlliesNearLoc(bot:GetLocation(), 600)
 		local nearbyEnemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
-		local enemyTowers = bot:GetNearbyTowers(700, true)
 		local enemyLaneCreeps = bot:GetNearbyLaneCreeps(1200, true)
 		if
 			enemyLaneCreeps ~= nil

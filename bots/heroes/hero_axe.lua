@@ -127,10 +127,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "axe_berserkers_call", kind = "none" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -197,7 +196,6 @@ function X.ConsiderQ()
 	-- 7.42 game files: special_bonus_unique_axe_2 (+70) is linked into axe_berserkers_call "radius", and the
 	-- read includes it once learned (bots/lib/systems/talent_watch.lua). The old talent "value" read added 0 (#46).
 	local radius = berserkersCallAbility:GetSpecialValueInt("radius")
-	local castRange = radius
 	local castPoint = berserkersCallAbility:GetCastPoint()
 	local manaCost = berserkersCallAbility:GetManaCost()
 	local damage = 0
@@ -442,7 +440,6 @@ function X.ConsiderR()
 		damage = 175 + 100 * abilityLevel
 	end
 	local damageType = DAMAGE_TYPE_PURE
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local enemiesInRangeWide = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castTarget = nil
 	local castReason = nil

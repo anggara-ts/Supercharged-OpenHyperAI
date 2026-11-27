@@ -150,8 +150,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(hMinionUnit)
 	if Minion.IsValidUnit(hMinionUnit) and hMinionUnit:GetUnitName() ~= "npc_dota_zeus_cloud" then
 		Minion.IllusionThink(hMinionUnit)
@@ -481,7 +480,6 @@ function X.ConsiderR()
 	if not wrathAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local castRange = 1600
 	local castPoint = wrathAbility:GetCastPoint()
 	local manaCost = wrathAbility:GetManaCost()
 	-- The +damage talent was read from sTalentList[5], which in the current talent order

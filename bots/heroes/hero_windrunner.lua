@@ -158,8 +158,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -381,7 +380,6 @@ function X.ConsiderPowershot()
 	local damage = powershotAbility:GetSpecialValueInt("powershot_damage")
 	local attackRange = bot:GetAttackRange()
 	local manaRatio = mpRatio
-	local nearbyAllies = Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_NONE)
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -526,7 +524,6 @@ function X.ConsiderWindrun()
 		return BOT_ACTION_DESIRE_NONE
 	end
 	local manaAfter = Fu.GetManaAfter(windrunAbility:GetManaCost())
-	local nearbyAllies = Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_NONE)
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 	if isGoingOnSomeone then
 		if
@@ -614,7 +611,6 @@ function X.ConsiderFocusFire()
 	-- Now: attacks in about 5s, at twice the current rate for the bonus attack speed (estimate).
 	local attackCount = 10 / math.max(0.2, bot:GetSecondsPerAttack())
 	local attackDamage = bot:GetAttackDamage()
-	local nearbyAllies = Fu.GetNearbyHeroes(bot, 1600, false, BOT_MODE_NONE)
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if

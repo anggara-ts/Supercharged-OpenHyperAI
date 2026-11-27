@@ -110,8 +110,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -199,7 +198,6 @@ function X.ConsiderQ()
 		return 0
 	end
 	local abilityLevel = innerFireAbility:GetLevel()
-	local castRange = innerFireAbility:GetCastRange()
 	local castPoint = innerFireAbility:GetCastPoint()
 	local manaCost = innerFireAbility:GetManaCost()
 	local damage = innerFireAbility:GetSpecialValueInt("damage")
@@ -320,10 +318,8 @@ function X.ConsiderW()
 	local manaCost = burningSpearAbility:GetManaCost()
 	local damage = burningSpearAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, attackRange, true, BOT_MODE_NONE)
 	local attackDamage = bot:GetAttackDamage()
 	local enemyTowers = bot:GetNearbyTowers(800, true)
-	local enemyHeroesInRange = Fu.GetNearbyHeroes(bot, attackRange, true, BOT_MODE_NONE)
 	local weakestUnit = Fu.GetAttackableWeakestUnit(bot, attackRange, true, true)
 	if botLevel >= 7 then
 		if
@@ -480,7 +476,6 @@ function X.ConsiderR()
 	local manaCost = lifeBreakAbility:GetManaCost()
 	local damage = lifeBreakAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)

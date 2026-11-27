@@ -121,10 +121,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "lion_voodoo", kind = "unit" } }
-X["bDeafaultItem"] = true
+X["bDefaultItem"] = true
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -597,7 +596,6 @@ function X.ConsiderE()
 	local manaCost = manaDrainAbility:GetManaCost()
 	local damage = manaDrainAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local duration = manaDrainAbility:GetSpecialValueFloat("duration")
 	local drainAmount = manaDrainAbility:GetSpecialValueInt("mana_per_second") * duration
 	local missingMana = bot:GetMaxMana() - bot:GetMana()

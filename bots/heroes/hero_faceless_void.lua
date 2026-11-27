@@ -129,10 +129,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "faceless_void_chronosphere", kind = "point" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -301,7 +300,6 @@ function X.ConsiderTimeWalk()
 		end
 	end
 	if Fu.IsLaning(bot) then
-		local laneCreeps = bot:GetNearbyLaneCreeps(range, true)
 		if
 			(bot:GetMana() - timeWalkAbility:GetManaCost()) / bot:GetMaxMana() > 0.85
 			and bot:DistanceFromFountain() > 100

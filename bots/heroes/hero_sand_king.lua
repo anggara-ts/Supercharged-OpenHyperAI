@@ -130,10 +130,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "sandking_epicenter", kind = "none" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minion)
 	Minion.MinionThink(minion)
 end
@@ -303,7 +302,6 @@ function X.ConsiderW()
 		return 0
 	end
 	local abilityLevel = sandStormAbility:GetLevel()
-	local castRange = sandStormAbility:GetCastRange()
 	local castPoint = sandStormAbility:GetCastPoint()
 	local manaCost = sandStormAbility:GetManaCost()
 	local damage = sandStormAbility:GetAbilityDamage()
@@ -518,12 +516,10 @@ function X.ConsiderR()
 		return 0
 	end
 	local abilityLevel = epicenterAbility:GetLevel()
-	local castRange = epicenterAbility:GetCastRange()
 	local castPoint = epicenterAbility:GetCastPoint()
 	local manaCost = epicenterAbility:GetManaCost()
 	local damage = epicenterAbility:GetAbilityDamage()
 	local damageType = DAMAGE_TYPE_MAGICAL
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	-- datafeed: there is no "epicenter_radius" (it read 0); the radius starts at epicenter_radius_base (450) and
 	-- grows by epicenter_radius_increment (13) per pulse.
 	local radius = epicenterAbility:GetSpecialValueInt("epicenter_radius_base")

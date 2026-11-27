@@ -134,8 +134,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -207,7 +206,6 @@ function X.ConsiderE()
 	local abilityLevel = multishotAbility:GetLevel()
 	local manaCost = multishotAbility:GetManaCost()
 	local nTargetLocation = nil
-	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 100, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		local target = Fu.GetProperTarget(bot)
 		if
@@ -409,7 +407,6 @@ function X.ConsiderQ()
 	local attackDamage = bot:GetAttackDamage() + frostArrowsAbility:GetSpecialValueInt("damage")
 	local damageType = DAMAGE_TYPE_PHYSICAL
 	local nearbyEnemyTowers = bot:GetNearbyTowers(900, true)
-	local laneCreepsInRange = bot:GetNearbyLaneCreeps(attackRange + 30, true)
 	local closeLaneCreeps = bot:GetNearbyLaneCreeps(400, true)
 	local weakestCreep = Fu.GetAttackableWeakestUnit(bot, attackRange + 30, false, true)
 	local weakestCreepHealth = 10000

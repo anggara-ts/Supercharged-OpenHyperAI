@@ -119,8 +119,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = true
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
@@ -274,7 +273,6 @@ function X.ConsiderW()
 	local abilityLevel = realityRiftAbility:GetLevel()
 	local damage = 0
 	local hasTalent6 = talent6:IsTrained()
-	local enemiesInCastRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsGoingOnSomeone(bot) then
 		if
 			Fu.IsValidHero(botTarget)
@@ -351,7 +349,6 @@ function X.ConsiderR()
 	if not phantasmAbility:IsFullyCastable() or bot:DistanceFromFountain() < 500 then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local nearbyAllies = Fu.GetAlliesNearLoc(bot:GetLocation(), 1200)
 	local nearbyEnemyList = Fu.GetEnemyList(bot, 1600)
 	local nearbyTowers = bot:GetNearbyTowers(700, true)
 	local nearbyBarracks = bot:GetNearbyBarracks(400, true)
