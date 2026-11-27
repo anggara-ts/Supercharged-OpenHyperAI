@@ -152,3 +152,24 @@ T.test(
 		T.eq(Fu.GetMostUltimateCDUnit(), silencer, "Silencer in slot 5")
 	end
 )
+
+-- Role.GetPosition's fallback (#286), used when no player's selected hero has the bot's unit name: it took the
+-- player ID + 1 (Radiant) or - 4 (Dire) as the RoleAssignment index. Game 087 had Radiant IDs 0,2,3,4,5 and Dire
+-- 6,1,7,8,9, so that named another player's entry or none. It now finds the ID in GetTeamPlayers.
+T.test("team order: Role.GetPosition's fallback reads the entry at the player's GetTeamPlayers index", function()
+	Stub.reset({ hero = "npc_dota_hero_lich", slot = 1, time = 600 })
+	local Role = require(GetScriptDirectory() .. "/lib/systems/role")
+	local bot = GetBot()
+	local ids = GetTeamPlayers(GetTeam())
+	-- Our order lists the bot (slot 1) third.
+	GetTeamPlayers = function()
+		return { ids[2], ids[3], ids[1], ids[4], ids[5] }
+	end
+	-- The hero-name lookup finds nobody.
+	bot.GetUnitName = function()
+		return "npc_dota_hero_not_selected"
+	end
+	Role.RoleAssignment.TEAM_RADIANT = { 1, 2, 4, 3, 5 }
+	Role.RoleAssignment.TEAM_DIRE = { 1, 2, 4, 3, 5 }
+	T.eq(Role.GetPosition(bot), 4, "the entry at index 3")
+end)

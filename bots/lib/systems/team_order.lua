@@ -63,20 +63,26 @@ function TeamOrder.Describe(players, engine, slotIds, names, roles)
 		mixed
 end
 
--- `[SHy-ROLE] team-order` once per team (per script VM), before the horn, when all five GetTeamMember slots hold a
--- hero (they spawn at about -90; game 087 printed its first bot lines at t=-88). Shows both orders and the position
--- each hero gets, so a game shows whether the pick and the role used one order.
+-- `[SHy-ROLE] team-order` once per team (per script VM), before the horn, when every GetTeamMember slot of the team
+-- holds a hero (they spawn at about -90; game 087 printed its first bot lines at t=-88). Shows both orders and the
+-- position each hero gets, so a game shows whether the pick and the role used one order.
 local logged = false
 function TeamOrder.LogOnce(bot, roleAssignment)
-	if logged or bot == nil or DotaTime() >= 0 then
+	if logged or bot == nil then
+		return
+	end
+	if DotaTime() >= 0 then
+		-- Past the horn (a late start or a script reload): never print, and stop asking.
+		logged = true
 		return
 	end
 	local team = bot:GetTeam()
 	if team ~= GetTeam() then
 		return
 	end
+	local players = GetTeamPlayers(team) or {}
 	local slotIds = {}
-	for slot = 1, 5 do
+	for slot = 1, math.min(5, #players) do
 		local member = GetTeamMember(slot)
 		if member == nil then
 			return
@@ -84,7 +90,6 @@ function TeamOrder.LogOnce(bot, roleAssignment)
 		slotIds[slot] = member:GetPlayerID()
 	end
 	logged = true
-	local players = GetTeamPlayers(team) or {}
 	local teamKey = team == TEAM_RADIANT and "TEAM_RADIANT" or "TEAM_DIRE"
 	local roles = (roleAssignment or {})[teamKey] or {}
 	local names, roleList = {}, {}
