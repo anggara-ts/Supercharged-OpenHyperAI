@@ -12,15 +12,13 @@ local tAllAbilityBuildList = { { 1, 3, 1, 2, 1, 6, 1, 3, 3, 3, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 168,938 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 144,411 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_faerie_fire",
 	"item_magic_wand",
-	"item_urn_of_shadows",
 	"item_power_treads",
 	"item_radiance",
 	"item_manta",
@@ -32,65 +30,63 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_ultimate_scepter_2",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 3,291 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,593 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
 	"item_double_branches",
-	"item_magic_stick",
+	"item_circlet",
 	"item_magic_wand",
-	"item_urn_of_shadows",
 	"item_power_treads",
 	"item_radiance",
 	"item_manta",
 	"item_basher",
 	"item_skadi",
-	"item_ultimate_scepter",
-	"item_abyssal_blade",
 	"item_aghanims_shard",
+	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
 	"item_black_king_bar",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4 has 625 matches, built from pos 5 (1,139) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4 has 702 matches, built from pos 5 (1,122) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_quelling_blade",
-	"item_double_branches",
+	"item_branches",
 	"item_magic_stick",
+	"item_circlet",
 	"item_magic_wand",
-	"item_urn_of_shadows",
 	"item_power_treads",
 	"item_radiance",
 	"item_manta",
 	"item_basher",
 	"item_skadi",
 	"item_abyssal_blade",
-	"item_ultimate_scepter_2",
-	"item_diffusal_blade",
+	"item_disperser",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,139 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,122 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_quelling_blade",
-	"item_double_branches",
+	"item_branches",
 	"item_magic_stick",
+	"item_circlet",
 	"item_magic_wand",
-	"item_urn_of_shadows",
 	"item_power_treads",
 	"item_radiance",
 	"item_manta",
 	"item_basher",
 	"item_skadi",
 	"item_abyssal_blade",
-	"item_ultimate_scepter_2",
-	"item_diffusal_blade",
+	"item_disperser",
 	"item_aghanims_shard",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 5,782 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 5,815 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -102,23 +98,15 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_radiance",
 	"item_manta",
 	"item_basher",
-	"item_skadi",
+	"item_heart",
 	"item_aghanims_shard",
-	"item_ultimate_scepter_2",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 -- Sell pair { owned item, item to sell }: Quelling Blade goes once Manta Style is owned. The old trigger was
 -- Black King Bar, which no Spectre list buys (#9), so the Quelling Blade was never sold.
-X["sSellList"] = {
-	"item_manta",
-	"item_quelling_blade",
-	-- Sold once the item before it is owned, to keep six slots (tools/item-builds/generate.js):
-	"item_butterfly",
-	"item_urn_of_shadows",
-	"item_ultimate_scepter",
-	"item_urn_of_shadows",
-}
+X["sSellList"] = { "item_manta", "item_quelling_blade" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
 	X["sBuyList"], X["sSellList"] = { "PvN_antimage" }, {}
 end

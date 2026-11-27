@@ -23,7 +23,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 12,232 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 25,078 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -32,20 +32,19 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_gauntlets",
 	"item_magic_wand",
 	"item_phase_boots",
+	"item_soul_ring",
 	"item_blink",
 	"item_black_king_bar",
 	"item_ultimate_scepter",
 	"item_shivas_guard",
 	"item_bloodstone",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
 	"item_kaya_and_sange",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 46,003 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 72,259 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -58,21 +57,21 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	"item_ultimate_scepter",
 	"item_shivas_guard",
-	"item_heart",
-	"item_travel_boots",
+	"item_bloodstone",
 	"item_ultimate_scepter_2",
-	"item_crellas_crozier",
+	"item_overwhelming_blink",
+	"item_armlet",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 205 matches, built from pos 3 (46,003) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 361 matches, built from pos 3 (72,259) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,812 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,218 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_double_gauntlets",
 	"item_double_branches",
+	"item_quelling_blade",
 	"item_magic_wand",
 	"item_soul_ring",
 	"item_phase_boots",
@@ -80,17 +79,18 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_black_king_bar",
 	"item_shivas_guard",
 	"item_ultimate_scepter_2",
-	"item_bloodstone",
 	"item_veil_of_discord",
+	"item_bloodstone",
 	"item_mekansm",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5 has 637 matches, built from pos 4 (1,812) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 718 matches, built from pos 4 (2,218) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_double_gauntlets",
 	"item_double_branches",
+	"item_quelling_blade",
 	"item_magic_wand",
 	"item_soul_ring",
 	"item_phase_boots",
@@ -98,8 +98,8 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_black_king_bar",
 	"item_shivas_guard",
 	"item_ultimate_scepter_2",
-	"item_bloodstone",
 	"item_veil_of_discord",
+	"item_bloodstone",
 	"item_glimmer_cape",
 	"item_aghanims_shard",
 	"item_moon_shard",

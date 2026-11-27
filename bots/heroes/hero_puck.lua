@@ -14,7 +14,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sMagicImmuneItem = RandomInt(1, 2) == 1 and "item_black_king_bar" or "item_sphere"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 50,775 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 57,130 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -30,38 +30,38 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter",
 	"item_greater_crit",
 	"item_ultimate_scepter_2",
-	"item_overwhelming_blink",
 	"item_wind_waker",
+	"item_overwhelming_blink",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 251 matches, built from pos 2 (50,775) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 219 matches, built from pos 2 (57,130) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 3 has 532 matches, built from pos 2 (50,775) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3 has 483 matches, built from pos 2 (57,130) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_2"]
 -- Pos 4/5: a support start (Stratz 7.41f pos 4, n=902: Tango 100%, Blood Grenade 47%, Magic Stick 47%,
 -- Branches 70%) and the same core items (Blink 105%, Witch Blade 59%, Eul's 59%).
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,196 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,134 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_faerie_fire",
-	"item_null_talisman",
+	"item_mantle",
 	"item_magic_wand",
+	"item_null_talisman",
 	"item_power_treads",
+	"item_witch_blade",
 	"item_blink",
-	"item_cyclone",
-	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_travel_boots",
-	"item_octarine_core",
-	"item_maelstrom",
-	"item_mjollnir",
-	"item_moon_shard",
+	"item_devastator",
 	"item_ultimate_scepter_2",
+	"item_sphere",
+	"item_octarine_core",
+	"item_sheepstick",
+	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5 has 728 matches, built from pos 4 (1,196) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 703 matches, built from pos 4 (1,134) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

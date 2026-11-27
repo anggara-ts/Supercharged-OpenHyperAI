@@ -17,7 +17,7 @@ end
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 18,900 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 33,360 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -27,44 +27,41 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_magic_wand",
 	"item_falcon_blade",
 	"item_power_treads",
+	"item_maelstrom",
 	"item_lesser_crit",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
 	"item_greater_crit",
 	"item_satanic",
-	"item_butterfly",
 	"item_ultimate_scepter_2",
-	"item_travel_boots",
-	"item_moon_shard",
-	"item_manta",
+	"item_swift_blink",
 	"item_aghanims_shard",
-	"item_travel_boots_2",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 7,035 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 8,222 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_circlet",
 	"item_slippers",
+	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
+	"item_maelstrom",
 	"item_dragon_lance",
-	"item_lesser_crit",
 	"item_ultimate_scepter",
-	"item_travel_boots",
 	"item_black_king_bar",
-	"item_greater_crit",
 	"item_satanic",
 	"item_ultimate_scepter_2",
-	"item_maelstrom",
-	"item_hurricane_pike",
+	"item_blink",
+	"item_mjollnir",
+	"item_hydras_breath",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
 -- Support builds: Dotabuff 7-day meta has Gyrocopter mostly at support-off (pos 4).
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 36,979 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 31,187 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -76,16 +73,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_phylactery",
 	"item_glimmer_cape",
 	"item_force_staff",
-	"item_cyclone",
-	"item_soul_booster",
-	"item_octarine_core",
-	"item_wind_waker",
+	"item_spirit_vessel",
+	"item_consecrated_wraps",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
 -- One pair of boots in this build (user rule; tools/boots-check.js).
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 19,972 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 16,870 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -94,32 +89,32 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_faerie_fire",
 	"item_magic_wand",
 	"item_arcane_boots",
+	"item_phylactery",
 	"item_glimmer_cape",
 	"item_force_staff",
-	"item_cyclone",
-	"item_soul_booster",
 	"item_spirit_vessel",
-	"item_octarine_core",
+	"item_consecrated_wraps",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 3,083 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,065 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_circlet",
+	"item_faerie_fire",
+	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_lesser_crit",
+	"item_maelstrom",
 	"item_dragon_lance",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_greater_crit",
 	"item_satanic",
 	"item_ultimate_scepter_2",
-	"item_phylactery",
+	"item_blink",
+	"item_mjollnir",
 	"item_hurricane_pike",
 	"item_aghanims_shard",
 	"item_moon_shard",
@@ -129,7 +124,7 @@ X["sSellList"] = {
 	"item_black_king_bar",
 	"item_quelling_blade",
 	-- Sold once the item before it is owned, to keep six slots (tools/item-builds/generate.js):
-	"item_butterfly",
+	"item_satanic",
 	"item_falcon_blade",
 }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then

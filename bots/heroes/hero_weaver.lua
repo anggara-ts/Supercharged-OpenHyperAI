@@ -18,7 +18,7 @@ local sRoleItemsBuyList = {}
 -- Linken's, Daedalus, Satanic, then Butterfly or MKB). It sat after Magic Wand for the test games only (game
 -- 051: 4 ally rewinds, 3 of those allies lived). The Blessing at the end still gives the effect without a slot.
 sRoleItemsBuyList["pos_1"] = {
-	-- Stratz 7.41f, week of 9 Nov 2026: pos 1, 41,730 matches (tools/item-builds/generate.js).
+	-- Stratz 7.42, week of 19 Nov 2026: pos 1, 43,823 matches (tools/item-builds/generate.js).
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
@@ -35,12 +35,11 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_black_king_bar",
 	"item_greater_crit",
 	sCarryItem,
-	"item_travel_boots",
 	"item_moon_shard",
 	"item_hurricane_pike",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 13,889 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 15,644 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -54,7 +53,6 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_dragon_lance",
 	"item_pers",
 	"item_aghanims_shard",
-	"item_lesser_crit",
 	"item_sphere",
 	"item_greater_crit",
 	sCarryItem,
@@ -68,7 +66,7 @@ sRoleItemsBuyList["pos_2"] = {
 -- Spirit Vessel 65% / 61%, Circlet 57% / 53%, Magic Stick 50% / 50%, Perseverance 42% / 40% (Linken's Sphere
 -- 24% / 24%), Power Treads 29% / 32% (the most bought boots), Desolator 29% / 32%, Orchid 27% / 25%, Aghanim's
 -- Shard 20% / 21%, Aghanim's Scepter 18% / 19% (1% on pos 1; it gives the ally Time Lapse), Bloodthorn 8% / 7%.
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 25,362 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 29,316 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -79,15 +77,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_urn_of_shadows",
 	"item_spirit_vessel",
 	"item_power_treads",
+	"item_desolator",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
+	"item_rod_of_atos",
 	"item_black_king_bar",
-	"item_cyclone",
-	"item_maelstrom",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 11,197 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 12,998 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -96,17 +93,16 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_stick",
 	"item_magic_wand",
 	"item_urn_of_shadows",
-	"item_power_treads",
 	"item_spirit_vessel",
-	"item_desolator",
+	"item_power_treads",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_black_king_bar",
 	"item_rod_of_atos",
+	"item_dragon_lance",
+	"item_black_king_bar",
 	"item_ultimate_scepter_2",
-	"item_lotus_orb",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 8,346 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,904 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -123,9 +119,8 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_sphere",
 	"item_greater_crit",
 	sCarryItem,
-	"item_travel_boots",
-	"item_moon_shard",
 	"item_hurricane_pike",
+	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

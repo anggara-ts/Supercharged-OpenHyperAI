@@ -24,35 +24,36 @@ else
 end
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 37,997 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 33,874 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_quelling_blade",
 	"item_magic_wand",
-	"item_diffusal_blade",
 	-- Power Treads instead of Arcane Boots: 80% vs 12% of his matches (Dotabuff, last patch).
 	"item_power_treads",
+	"item_diffusal_blade",
 	"item_blink",
 	"item_ultimate_scepter",
 	"item_aghanims_shard",
 	"item_basher",
-	"item_octarine_core",
 	"item_disperser",
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
+	"item_overwhelming_blink",
+	"item_shivas_guard",
 	"item_mage_slayer",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 20,270 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 17,187 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
 	"item_quelling_blade",
-	"item_magic_wand",
 	"item_bracer",
+	"item_magic_wand",
 	"item_power_treads",
 	"item_diffusal_blade",
 	"item_blink",
@@ -66,15 +67,15 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 623 matches, built from pos 2 (37,997) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 413 matches, built from pos 2 (33,874) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_quelling_blade",
 	"item_magic_wand",
-	"item_diffusal_blade",
 	"item_power_treads",
+	"item_diffusal_blade",
 	"item_blink",
 	"item_ultimate_scepter",
 	"item_aghanims_shard",
@@ -83,17 +84,15 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_disperser",
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
-	"item_overwhelming_blink",
-	"item_mage_slayer",
+	"item_shivas_guard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,157 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,182 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_faerie_fire",
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_diffusal_blade",
@@ -102,12 +101,13 @@ sRoleItemsBuyList["pos_4"] = {
 	sUtility,
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
-	"item_mage_slayer",
+	"item_overwhelming_blink",
+	"item_cyclone",
 	"item_disperser",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5 has 381 matches, built from pos 4 (1,157) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 435 matches, built from pos 4 (1,182) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }

@@ -39,13 +39,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_mekansm",
 	"item_lotus_orb",
 	"item_guardian_greaves",
+	"item_force_staff",
 	"item_solar_crest",
-	"item_kaya_and_sange",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 7,674 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 8,059 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -60,8 +60,8 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_mekansm",
 	"item_lotus_orb",
 	"item_guardian_greaves",
+	"item_force_staff",
 	"item_solar_crest",
-	"item_kaya_and_sange",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
@@ -73,21 +73,19 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_double_gauntlets",
 	"item_double_branches",
 	"item_bracer",
-	"item_magic_wand",
 	"item_soul_ring",
+	"item_magic_wand",
 	"item_phase_boots",
 	"item_kaya_and_sange",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_shivas_guard",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_crellas_crozier",
 	"item_sphere",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 1,608 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 1,748 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -100,34 +98,15 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_kaya_and_sange",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_aghanims_shard",
 	"item_shivas_guard",
 	"item_ultimate_scepter_2",
+	"item_spirit_vessel",
 	"item_phylactery",
-	"item_bloodstone",
-	"item_moon_shard",
-}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1 has 178 matches, built from pos 3 (11,750) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_1"] = {
-	"item_tango",
-	"item_double_gauntlets",
-	"item_double_branches",
-	"item_bracer",
-	"item_magic_wand",
-	"item_soul_ring",
-	"item_phase_boots",
-	"item_kaya_and_sange",
-	"item_ultimate_scepter",
-	"item_black_king_bar",
-	"item_shivas_guard",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
-	"item_crellas_crozier",
-	"item_sphere",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 133 matches, built from pos 3 (10,828) (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then

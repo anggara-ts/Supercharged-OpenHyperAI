@@ -36,34 +36,35 @@ if sRole == "pos_5" then
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 88,819 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 79,836 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_mantle",
-	"item_enchanted_mango",
+	"item_circlet",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_kaya",
-	"item_phylactery",
 	"item_ultimate_scepter",
 	"item_yasha_and_kaya",
 	"item_refresher",
+	"item_travel_boots",
 	"item_octarine_core",
 	"item_ultimate_scepter_2",
+	"item_phylactery",
 	"item_aether_lens",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 3,673 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,389 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_branches",
+	"item_mantle",
 	"item_circlet",
 	"item_enchanted_mango",
-	"item_mantle",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_arcane_boots",
@@ -72,36 +73,35 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_yasha_and_kaya",
 	"item_refresher",
 	"item_octarine_core",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_aether_lens",
 	"item_phylactery",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 1,998 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,475 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
-	"item_magic_stick",
+	"item_mantle",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_yasha_and_kaya",
-	"item_dragon_lance",
 	"item_ultimate_scepter",
-	"item_hurricane_pike",
+	"item_soul_booster",
 	"item_refresher",
 	"item_octarine_core",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_aether_lens",
+	"item_black_king_bar",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 103,857 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 92,338 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -116,32 +116,30 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_refresher",
 	"item_yasha_and_kaya",
 	"item_octarine_core",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_aether_lens",
-	"item_phylactery",
+	"item_force_staff",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 58,402 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 52,956 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
 	"item_enchanted_mango",
-	"item_branches",
 	"item_magic_stick",
+	"item_branches",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_kaya",
 	"item_ultimate_scepter",
-	"item_refresher",
 	"item_yasha_and_kaya",
+	"item_refresher",
 	"item_octarine_core",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_aether_lens",
-	"item_phylactery",
+	"item_force_staff",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }

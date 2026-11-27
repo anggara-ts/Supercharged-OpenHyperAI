@@ -13,7 +13,7 @@ local tAllAbilityBuildList = { { 3, 1, 1, 2, 1, 6, 1, 3, 3, 3, 6, 2, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 33,201 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 40,544 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -21,20 +21,18 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_magic_wand",
-	"item_ring_of_basilius",
 	"item_arcane_boots",
-	"item_aether_lens",
 	"item_blink",
-	"item_aghanims_shard",
+	"item_aether_lens",
 	"item_ultimate_scepter",
-	"item_guardian_greaves",
+	"item_gungir",
 	"item_ultimate_scepter_2",
 	"item_aeon_disk",
 	"item_sheepstick",
-	"item_wind_waker",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 56,124 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 60,347 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -42,17 +40,14 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_magic_wand",
-	"item_ring_of_basilius",
 	"item_arcane_boots",
 	"item_glimmer_cape",
-	"item_aether_lens",
 	"item_blink",
-	"item_headdress",
-	"item_aghanims_shard",
-	"item_guardian_greaves",
-	"item_ultimate_scepter_2",
+	"item_ultimate_scepter",
+	"item_gungir",
 	"item_aeon_disk",
-	"item_sheepstick",
+	"item_ultimate_scepter_2",
+	"item_aghanims_shard",
 	"item_moon_shard",
 }
 sRoleItemsBuyList["pos_3"] = {

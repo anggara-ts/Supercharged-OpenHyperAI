@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 2, 3, 2, 3, 2, 6, 2, 3, 3, 1, 6, 1, 1, 1, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 55,365 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 55,811 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -30,12 +30,12 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_greater_crit",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_moon_shard",
 	"item_aghanims_shard",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2 has 644 matches, built from pos 1 (55,365) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2 has 624 matches, built from pos 1 (55,811) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = sRoleItemsBuyList["pos_1"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 1,172 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,034 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -50,15 +50,15 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_dagon_5",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
+	"item_swift_blink",
+	"item_glimmer_cape",
 	"item_skadi",
-	"item_dragon_lance",
-	"item_hurricane_pike",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5 has 787 matches, built from pos 4 (1,172) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 797 matches, built from pos 4 (1,034) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 1,203 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,177 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -66,14 +66,12 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_circlet",
 	"item_wraith_band",
 	"item_magic_wand",
-	"item_falcon_blade",
 	"item_power_treads",
+	"item_falcon_blade",
 	"item_manta",
 	"item_dragon_lance",
 	"item_skadi",
 	"item_black_king_bar",
-	"item_greater_crit",
-	"item_travel_boots",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",

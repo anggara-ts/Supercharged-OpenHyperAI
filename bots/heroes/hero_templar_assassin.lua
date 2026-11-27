@@ -16,14 +16,13 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sphereOrBkb = RandomInt(1, 9) > 6 and "item_sphere" or "item_black_king_bar"
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 64,192 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 42,363 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_faerie_fire",
 	"item_magic_stick",
 	"item_magic_wand",
-	"item_falcon_blade",
 	"item_power_treads",
 	"item_desolator",
 	"item_dragon_lance",
@@ -34,11 +33,10 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_black_king_bar",
 	"item_aghanims_shard",
 	"item_swift_blink",
-	"item_travel_boots",
-	"item_moon_shard",
 	"item_ultimate_scepter_2",
+	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 23,925 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 22,766 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -48,29 +46,24 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_magic_wand",
 	"item_power_treads",
 	"item_desolator",
-	"item_blink",
 	"item_dragon_lance",
-	"item_greater_crit",
+	"item_blink",
+	"item_lesser_crit",
 	"item_black_king_bar",
+	"item_greater_crit",
 	"item_aghanims_shard",
 	"item_swift_blink",
 	"item_travel_boots",
-	"item_moon_shard",
 	"item_hydras_breath",
+	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
 sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_1"]
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_1"]
--- Stratz 7.41f, week of 9 Nov 2026: pos 3 has 744 matches, built from pos 1 (64,192) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3 has 694 matches, built from pos 1 (42,363) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_1"]
 X["sBuyList"] = sRoleItemsBuyList[sRole]
-X["sSellList"] = {
-	"item_black_king_bar",
-	"item_quelling_blade",
-	-- Sold once the item before it is owned, to keep six slots (tools/item-builds/generate.js):
-	"item_black_king_bar",
-	"item_falcon_blade",
-}
+X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then
 	X["sBuyList"], X["sSellList"] = { "PvN_TA" }, {}
 end

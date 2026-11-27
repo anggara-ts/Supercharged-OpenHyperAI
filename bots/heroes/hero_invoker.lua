@@ -27,11 +27,11 @@ local sRoleItemsBuyList = {}
 -- of three upgrades. Tested (games 016 and 017): bought, they sit in the inventory as castable
 -- items with no buff; cast by the bot, nothing changes (same abilities, still inert). The bot API
 -- cannot make the pick, so he does not buy them.
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 259,009 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 251,104 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
-	"item_circlet",
 	"item_double_branches",
+	"item_circlet",
 	"item_mantle",
 	"item_faerie_fire",
 	"item_null_talisman",
@@ -42,15 +42,15 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_blink",
 	"item_octarine_core",
 	"item_black_king_bar",
-	"item_refresher",
+	"item_sheepstick",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 2_qe, 259,009 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2_qe, 251,104 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2_qe"] = {
 	"item_tango",
-	"item_circlet",
 	"item_double_branches",
+	"item_circlet",
 	"item_mantle",
 	"item_faerie_fire",
 	"item_null_talisman",
@@ -61,37 +61,36 @@ sRoleItemsBuyList["pos_2_qe"] = {
 	"item_blink",
 	"item_octarine_core",
 	"item_black_king_bar",
-	"item_refresher",
+	"item_sheepstick",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 1,274 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,261 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_circlet",
-	"item_faerie_fire",
 	"item_mantle",
+	"item_faerie_fire",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_boots",
+	"item_meteor_hammer",
 	"item_witch_blade",
 	"item_travel_boots",
 	"item_blink",
-	"item_octarine_core",
 	"item_black_king_bar",
 	"item_refresher",
-	"item_devastator",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 3,329 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,274 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
-	"item_circlet",
 	"item_double_branches",
-	"item_faerie_fire",
+	"item_circlet",
 	"item_mantle",
+	"item_faerie_fire",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_boots",
@@ -100,48 +99,48 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_blink",
 	"item_octarine_core",
 	"item_black_king_bar",
-	"item_refresher",
+	"item_spirit_vessel",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 63,227 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 64,837 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
-	"item_circlet",
 	"item_branches",
-	"item_magic_stick",
+	"item_circlet",
+	"item_mantle",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_urn_of_shadows",
 	"item_boots",
 	"item_spirit_vessel",
-	"item_rod_of_atos",
+	"item_force_staff",
 	"item_blink",
 	"item_travel_boots",
 	"item_octarine_core",
-	"item_refresher",
+	"item_rod_of_atos",
 	"item_gungir",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 34,457 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 35,500 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
-	"item_circlet",
 	"item_branches",
-	"item_magic_stick",
+	"item_circlet",
+	"item_mantle",
 	"item_null_talisman",
 	"item_magic_wand",
 	"item_urn_of_shadows",
 	"item_boots",
 	"item_spirit_vessel",
-	"item_rod_of_atos",
+	"item_force_staff",
 	"item_blink",
 	"item_travel_boots",
 	"item_octarine_core",
-	"item_meteor_hammer",
+	"item_rod_of_atos",
 	"item_gungir",
 	"item_moon_shard",
 	"item_travel_boots_2",

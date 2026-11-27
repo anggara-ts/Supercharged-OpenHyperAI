@@ -23,7 +23,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.41f, week of 9 Nov 2026: pos 2, 29,299 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 36,540 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -39,14 +39,12 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_greater_crit",
 	"item_black_king_bar",
 	"item_aghanims_shard",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
+	"item_armlet",
 	"item_assault",
-	"item_refresher",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 3, 53,758 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 57,931 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -61,14 +59,12 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	"item_aghanims_shard",
 	"item_shivas_guard",
-	"item_travel_boots",
 	"item_ultimate_scepter_2",
-	"item_assault",
-	"item_blink",
+	"item_armlet",
+	"item_silver_edge",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 1, 1,808 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,877 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -78,13 +74,12 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_bracer",
 	"item_magic_wand",
 	"item_phase_boots",
-	"item_invis_sword",
+	"item_radiance",
 	"item_greater_crit",
-	"item_silver_edge",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_aghanims_shard",
 	"item_assault",
+	"item_aghanims_shard",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_blade_mail",
@@ -93,7 +88,7 @@ sRoleItemsBuyList["pos_1"] = {
 }
 -- Support builds: Hand of Midas, Basher, MKB, Assault Cuirass and Abyssal Blade were carry items on a pos 4/5
 -- support; swapped for save/utility items (Force Staff, Lotus Orb, Scythe of Vyse).
--- Stratz 7.41f, week of 9 Nov 2026: pos 4, 4,259 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 4,854 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -105,16 +100,15 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_phase_boots",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
+	"item_black_king_bar",
 	"item_shivas_guard",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
 	"item_blade_mail",
 	"item_spirit_vessel",
-	"item_black_king_bar",
+	"item_ultimate_scepter_2",
 	"item_blink",
 	"item_moon_shard",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,962 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,107 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -125,15 +119,13 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_phase_boots",
 	"item_aghanims_shard",
-	"item_blink",
 	"item_ultimate_scepter",
 	"item_shivas_guard",
-	"item_travel_boots",
-	"item_ultimate_scepter_2",
-	"item_blade_mail",
+	"item_greater_crit",
 	"item_spirit_vessel",
-	"item_aether_lens",
+	"item_blink",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }
