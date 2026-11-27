@@ -26,7 +26,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 41,832 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 52,354 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -48,7 +48,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,243 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,789 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -69,7 +69,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 24,131 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 30,032 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -89,7 +89,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 95,242 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 118,407 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -109,7 +109,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 94,361 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 117,578 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	-- Arcane Boots instead of Tranquil Boots, and Blink Dagger instead of
 	-- Spirit Vessel: Arcane 71% (#2), Blink 64% (#3) of his matches (Dotabuff, last patch).

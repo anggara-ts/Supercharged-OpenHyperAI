@@ -17,7 +17,7 @@ end
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 27,024 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 33,360 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -38,7 +38,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 6,663 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 8,222 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -54,14 +54,14 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_black_king_bar",
 	"item_satanic",
 	"item_ultimate_scepter_2",
-	"item_monkey_king_bar",
+	"item_blink",
 	"item_mjollnir",
 	"item_hydras_breath",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
 -- Support builds: Dotabuff 7-day meta has Gyrocopter mostly at support-off (pos 4).
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 24,958 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 31,187 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -73,14 +73,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_phylactery",
 	"item_glimmer_cape",
 	"item_force_staff",
-	"item_ancient_janggo",
+	"item_spirit_vessel",
 	"item_consecrated_wraps",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
 -- One pair of boots in this build (user rule; tools/boots-check.js).
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 13,718 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 16,870 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -98,12 +98,12 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,427 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,065 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
 	"item_magic_stick",
-	"item_circlet",
+	"item_faerie_fire",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",

@@ -15,7 +15,7 @@ local tAllAbilityBuildList = { { 2, 3, 2, 1, 2, 6, 2, 1, 1, 1, 6, 3, 3, 3, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 35,703 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 44,073 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_double_branches",
 	"item_magic_wand",
@@ -35,7 +35,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 7,199 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 8,813 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_double_branches",
 	"item_enchanted_mango",
@@ -48,18 +48,19 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_butterfly",
 	"item_aghanims_shard",
 	"item_skadi",
+	"item_lesser_crit",
 	"item_ultimate_scepter",
+	"item_greater_crit",
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_moon_shard",
 	"item_maelstrom",
 	"item_mjollnir",
-	"item_sphere",
 	"item_travel_boots_2",
 }
 sRoleItemsBuyList["pos_4"] = sRoleItemsBuyList["pos_2"]
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,155 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,628 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_double_branches",
 	"item_enchanted_mango",

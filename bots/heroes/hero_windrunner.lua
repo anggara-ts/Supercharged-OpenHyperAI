@@ -48,7 +48,7 @@ end
 local sUtilityList = { "item_heavens_halberd", "item_nullifier" }
 local sUtility = sUtilityList[RandomInt(1, #sUtilityList)]
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 24,920 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 31,397 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -67,7 +67,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_hurricane_pike",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 66,770 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 83,380 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -87,7 +87,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 22,253 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 28,162 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -110,7 +110,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_travel_boots_2",
 }
 -- Support builds: Dotabuff 7-day meta has Windranger most often at support-off (pos 4).
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 87,358 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 114,274 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -131,7 +131,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_ultimate_scepter_2",
 }
 -- One pair of boots in this build (user rule; tools/boots-check.js).
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 36,394 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 47,066 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

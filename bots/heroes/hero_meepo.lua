@@ -17,7 +17,7 @@ local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 -- and before the Shard: by minute 24, 61% of pos 2 Meepos have Blink and 16% the Shard (Shard 38% in all).
 -- Pos 3 gets Sange and Yasha too (94% of its matches; it was missing from that list).
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 5,447 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 6,931 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_circlet",
@@ -36,7 +36,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_diffusal_blade",
 	"item_disperser",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 28,954 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 36,540 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_circlet",
@@ -57,7 +57,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_swift_blink",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,897 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,437 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_circlet",

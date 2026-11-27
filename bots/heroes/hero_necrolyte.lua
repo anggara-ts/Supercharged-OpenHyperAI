@@ -24,7 +24,7 @@ else
 end
 local sUtility = RandomInt(1, 2) == 1 and "item_heavens_halberd" or "item_pipe"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 100,880 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 124,575 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -40,13 +40,12 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_heart",
 	"item_shivas_guard",
 	"item_ultimate_scepter_2",
-	"item_wind_waker",
 	"item_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 61,653 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 76,361 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -70,7 +69,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 11,925 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 14,959 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -92,7 +91,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 5,481 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 6,838 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_branches",
@@ -111,7 +110,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_blade_mail",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,015 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,802 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_branches",
@@ -126,10 +125,10 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_aghanims_shard",
 	"item_guardian_greaves",
 	"item_heart",
-	"item_blink",
 	"item_lotus_orb",
 	"item_ultimate_scepter_2",
 	"item_blade_mail",
+	"item_pipe",
 	"item_moon_shard",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]

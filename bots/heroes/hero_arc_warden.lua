@@ -63,7 +63,7 @@ end
 -- after Midas) and Spirit Vessel from both mid lists (32 of 60,560 pos 2 matches). Hydra's Breath is not added:
 -- 32% of pos 1 and 26% of pos 2 matches, at ~33 min, under the ~35% bar used for adding an item.
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 3,598 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 4,505 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -86,9 +86,8 @@ sRoleItemsBuyList["pos_1"] = {
 }
 -- One list for pos 2 (maintainer, 2026-11-20: the data's list, not a Magical or Physical list picked at random;
 -- items by enemy lineup may come later). The talent tree still follows sMidBuildType.
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 58,499 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 74,060 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
-	"item_tango",
 	"item_double_branches",
 	"item_double_circlet",
 	"item_faerie_fire",
@@ -105,9 +104,9 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3 has 536 matches, built from pos 2 (58,499) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3 has 656 matches, built from pos 2 (74,060) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,160 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,783 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -130,7 +129,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,950 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,352 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -145,7 +144,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_travel_boots",
 	"item_sheepstick",
 	"item_essence_distiller",
-	"item_force_staff",
+	"item_blink",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",

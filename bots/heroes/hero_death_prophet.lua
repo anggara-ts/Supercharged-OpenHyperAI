@@ -26,7 +26,7 @@ else
 end
 local sRoleItemsBuyList = {}
 -- No starting Circlet (user report, game 033 20:00: still in her bag): nothing in these builds uses it.
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 84,622 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 98,742 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -42,12 +42,12 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_black_king_bar",
 	"item_ultimate_scepter_2",
 	"item_consecrated_wraps",
-	"item_blink",
 	"item_wind_waker",
 	"item_devastator",
+	"item_heart",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 55,514 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 64,867 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -69,7 +69,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_heart",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 9,638 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 10,578 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -86,11 +86,11 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_devastator",
 	"item_ultimate_scepter_2",
 	"item_mjollnir",
-	"item_shivas_guard",
+	"item_cyclone",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 14,653 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 17,598 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -100,16 +100,16 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_magic_wand",
 	"item_arcane_boots",
 	"item_cyclone",
+	"item_consecrated_wraps",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_black_king_bar",
 	"item_wind_waker",
 	"item_kaya_and_sange",
 	"item_spirit_vessel",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 10,403 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 12,311 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

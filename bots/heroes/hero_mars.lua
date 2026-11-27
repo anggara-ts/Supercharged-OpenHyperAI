@@ -15,7 +15,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local teamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 73,794 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 91,720 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -35,9 +35,9 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 352 matches, built from pos 3 (73,794) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 462 matches, built from pos 3 (91,720) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,616 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,524 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -59,7 +59,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_armlet",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,888 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,364 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -80,8 +80,26 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5 has 861 matches, built from pos 4 (1,888) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,087 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_blood_grenade",
+	"item_branches",
+	"item_gauntlets",
+	"item_magic_stick",
+	"item_magic_wand",
+	"item_soul_ring",
+	"item_phase_boots",
+	"item_blink",
+	"item_aghanims_shard",
+	"item_cyclone",
+	teamAuraItem,
+	"item_blade_mail",
+	"item_desolator",
+	"item_wind_waker",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+}
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_black_king_bar", "item_quelling_blade" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then

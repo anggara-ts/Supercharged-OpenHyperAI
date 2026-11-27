@@ -13,7 +13,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 53,839 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 66,464 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -28,14 +28,13 @@ sRoleItemsBuyList["pos_3"] = {
 	sUtility,
 	"item_aghanims_shard",
 	"item_overwhelming_blink",
-	"item_ultimate_scepter",
 	"item_ultimate_scepter_2",
 	"item_helm_of_the_dominator",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 519 matches, built from pos 3 (53,839) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 689 matches, built from pos 3 (66,464) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 1,240 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 1,533 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -55,7 +54,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,902 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,371 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -74,7 +73,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5 has 857 matches, built from pos 4 (1,902) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,081 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -84,11 +83,13 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_phase_boots",
 	"item_blink",
-	"item_aghanims_shard",
+	"item_blade_mail",
 	"item_buckler",
 	sUtility,
 	"item_shivas_guard",
+	"item_overwhelming_blink",
 	"item_ultimate_scepter",
+	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }

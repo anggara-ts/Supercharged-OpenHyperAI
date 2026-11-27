@@ -28,7 +28,7 @@ else
 end
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,510 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,637 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -49,7 +49,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_hand_of_midas",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 62,672 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 77,622 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -70,7 +70,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,413 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,917 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -82,16 +82,16 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_phase_boots",
 	"item_radiance",
 	"item_blink",
+	"item_aghanims_shard",
 	"item_black_king_bar",
 	sUtility,
 	"item_ultimate_scepter",
 	"item_overwhelming_blink",
 	"item_ultimate_scepter_2",
 	"item_hand_of_midas",
-	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,942 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,571 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -111,7 +111,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_overwhelming_blink",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,270 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,594 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -119,16 +119,16 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_stick",
 	"item_gauntlets",
 	"item_magic_wand",
+	"item_headdress",
 	"item_phase_boots",
 	"item_ancient_janggo",
 	"item_blink",
 	"item_aghanims_shard",
 	sUtility,
 	"item_ultimate_scepter",
-	"item_ultimate_scepter_2",
 	"item_wind_waker",
-	"item_hand_of_midas",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_power_treads", "item_quelling_blade" }

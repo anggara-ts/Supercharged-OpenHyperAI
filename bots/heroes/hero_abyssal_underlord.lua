@@ -14,7 +14,7 @@ local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
 local sUtilityList = { "item_lotus_orb", "item_crimson_guard", "item_heavens_halberd" }
 local sUtility = sUtilityList[RandomInt(1, #sUtilityList)]
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 399 matches, built from pos 3 (54,179) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 477 matches, built from pos 3 (67,288) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -34,7 +34,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_crimson_guard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 2,033 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 2,528 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -50,12 +50,12 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_gungir",
 	"item_shivas_guard",
 	"item_ultimate_scepter_2",
+	"item_blade_mail",
 	"item_pipe",
 	"item_octarine_core",
-	"item_harpoon",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 54,179 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 67,288 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -75,7 +75,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_crimson_guard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 5,222 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 6,429 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_magic_stick",
@@ -84,8 +84,8 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_magic_wand",
 	"item_ring_of_basilius",
 	"item_arcane_boots",
-	"item_rod_of_atos",
 	"item_headdress",
+	"item_rod_of_atos",
 	"item_mekansm",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
@@ -93,12 +93,12 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_guardian_greaves",
 	sUtility,
 	"item_vanguard",
-	"item_ultimate_scepter_2",
 	"item_heart",
+	"item_ultimate_scepter_2",
 	"item_veil_of_discord",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,006 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,681 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

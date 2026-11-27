@@ -38,7 +38,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 4,249 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 5,329 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -54,13 +54,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_vladmir",
 	"item_aghanims_shard",
 	"item_guardian_greaves",
-	"item_ultimate_scepter",
 	"item_force_staff",
 	"item_solar_crest",
+	"item_glimmer_cape",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 13,849 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 17,736 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -78,9 +78,9 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_guardian_greaves",
 	"item_ultimate_scepter",
 	"item_solar_crest",
-	"item_glimmer_cape",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_glimmer_cape",
+	"item_force_staff",
 }
 -- Maintainer (2026-11-21): Chen pos 1 and pos 2 follow the pos 4 support list. Stratz has 58 / 126 matches
 -- there, and they build Basilius, Headdress, Mekansm and Drum, not the old Dagon / Octarine list (#9).

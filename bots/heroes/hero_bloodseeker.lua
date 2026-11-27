@@ -35,7 +35,7 @@ if sRole == "pos_3" then
 end
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 25,252 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 31,818 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -55,7 +55,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_blade_mail",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 9,803 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 12,268 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -73,10 +73,10 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_aghanims_shard",
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
-	"item_monkey_king_bar",
+	"item_butterfly",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 7,052 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,877 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -89,16 +89,14 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	sUtility,
 	"item_basher",
+	"item_ultimate_scepter",
 	"item_aghanims_shard",
-	"item_dragon_lance",
-	"item_travel_boots",
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
 	"item_butterfly",
 	"item_moon_shard",
-	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,365 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,704 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -109,9 +107,8 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_phase_boots",
 	"item_blade_mail",
 	"item_ultimate_scepter",
-	sUtility,
 	"item_basher",
-	"item_travel_boots",
+	sUtility,
 	"item_abyssal_blade",
 	"item_ultimate_scepter_2",
 	"item_mjollnir",
@@ -119,8 +116,25 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5 has 871 matches, built from pos 4 (1,365) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,071 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_5"] = {
+	"item_tango",
+	"item_branches",
+	"item_quelling_blade",
+	"item_circlet",
+	"item_magic_stick",
+	"item_magic_wand",
+	"item_phase_boots",
+	"item_maelstrom",
+	"item_basher",
+	"item_black_king_bar",
+	sUtility,
+	"item_abyssal_blade",
+	"item_rod_of_atos",
+	"item_aghanims_shard",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+}
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = { "item_power_treads", "item_quelling_blade", "item_abyssal_blade", "item_magic_wand" }
 if Fu.Role.IsPvNMode() or Fu.Role.IsAllShadow() then

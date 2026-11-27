@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 2, 5, 4, 4, 2, 6, 2, 4, 4, 2, 6, 5, 5, 5, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 48,120 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 63,219 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -31,7 +31,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_ultimate_scepter_2",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,547 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,562 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -55,45 +55,45 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 4 has 944 matches, built from pos 5 (1,109) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4 has 793 matches, built from pos 5 (1,049) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
+	"item_branches",
 	"item_quelling_blade",
-	"item_double_branches",
-	"item_magic_stick",
+	"item_circlet",
+	"item_slippers",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_bfury",
-	"item_basher",
-	"item_black_king_bar",
-	"item_satanic",
-	"item_abyssal_blade",
-	"item_diffusal_blade",
 	"item_aghanims_shard",
+	"item_sange_and_yasha",
+	"item_black_king_bar",
+	"item_basher",
+	"item_satanic",
+	"item_diffusal_blade",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.41f, week of 9 Nov 2026: pos 5, 1,109 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,049 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
+	"item_branches",
 	"item_quelling_blade",
-	"item_double_branches",
-	"item_magic_stick",
+	"item_circlet",
+	"item_slippers",
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_bfury",
-	"item_basher",
-	"item_black_king_bar",
-	"item_satanic",
-	"item_abyssal_blade",
-	"item_diffusal_blade",
 	"item_aghanims_shard",
+	"item_sange_and_yasha",
+	"item_black_king_bar",
+	"item_basher",
+	"item_satanic",
+	"item_diffusal_blade",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,946 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 5,048 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_quelling_blade",

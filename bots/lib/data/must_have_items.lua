@@ -10,7 +10,7 @@ return {
 			{ "item_ultimate_scepter", 15500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
-			{ "item_ultimate_scepter", 9500, done = { "item_ultimate_scepter_2" } },
+			{ "item_ultimate_scepter", 10000, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
 			{ "item_ultimate_scepter", 10000, done = { "item_ultimate_scepter_2" } },
@@ -56,9 +56,7 @@ return {
 			{ "item_dragon_lance", 18500, done = { "item_hurricane_pike" } },
 		},
 		[3] = {
-			{ "item_witch_blade", 8000, done = { "item_devastator" } },
-			{ "item_ultimate_scepter", 13000, done = { "item_ultimate_scepter_2" } },
-			{ "item_dragon_lance", 18500, done = { "item_hurricane_pike" } },
+			{ "item_ultimate_scepter", 17500, done = { "item_ultimate_scepter_2" } },
 		},
 	},
 	antimage = {
@@ -85,12 +83,12 @@ return {
 		[2] = {
 			{ "item_hand_of_midas", 4500 },
 			{ "item_mjollnir", 12000 },
-			{ "item_orchid", 16500, done = { "item_bloodthorn" } },
+			{ "item_orchid", 16000, done = { "item_bloodthorn" } },
 		},
 		[3] = {
 			{ "item_hand_of_midas", 4500 },
 			{ "item_mjollnir", 12000 },
-			{ "item_orchid", 16500, done = { "item_bloodthorn" } },
+			{ "item_orchid", 16000, done = { "item_bloodthorn" } },
 		},
 	},
 	axe = {
@@ -133,13 +131,13 @@ return {
 		},
 		[3] = {
 			{ "item_ancient_janggo", 6000, done = { "item_boots_of_bearing" } },
-			{ "item_blink", 8500 },
+			{ "item_blink", 9000 },
 			{ "item_black_king_bar", 18500 },
 		},
 	},
 	beastmaster = {
 		[1] = {
-			{ "item_ultimate_scepter", 9500, done = { "item_ultimate_scepter_2" } },
+			{ "item_ultimate_scepter", 10000, done = { "item_ultimate_scepter_2" } },
 			{ "item_blink", 12500, done = { "item_swift_blink" } },
 			{ "item_black_king_bar", 18000 },
 		},
@@ -167,13 +165,18 @@ return {
 			{ "item_black_king_bar", 12500 },
 		},
 	},
+	bounty_hunter = {
+		[1] = {
+			{ "item_desolator", 9000 },
+		},
+	},
 	brewmaster = {
 		[1] = {
 			{ "item_ultimate_scepter", 11000, done = { "item_ultimate_scepter_2" } },
 			{ "item_blink", 13500, done = { "item_overwhelming_blink" } },
 		},
 		[2] = {
-			{ "item_blink", 7500 },
+			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
 			{ "item_ultimate_scepter", 12500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
@@ -183,7 +186,7 @@ return {
 	},
 	bristleback = {
 		[1] = {
-			{ "item_sange", 12000, done = { "item_sange_and_yasha" } },
+			{ "item_sange", 13000, done = { "item_sange_and_yasha" } },
 		},
 	},
 	broodmother = {
@@ -279,8 +282,9 @@ return {
 			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
-			{ "item_blink", 7000 },
-			{ "item_ultimate_scepter", 12000, done = { "item_ultimate_scepter_2" } },
+			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
+			{ "item_ultimate_scepter", 12500, done = { "item_ultimate_scepter_2" } },
+			{ "item_shivas_guard", 20000 },
 		},
 		[3] = {
 			{ "item_blink", 8500, done = { "item_overwhelming_blink" } },
@@ -332,6 +336,7 @@ return {
 	},
 	death_prophet = {
 		[1] = {
+			{ "item_witch_blade", 8000, done = { "item_devastator" } },
 			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
 			{ "item_black_king_bar", 24000 },
 		},
@@ -341,23 +346,23 @@ return {
 	},
 	disruptor = {
 		[1] = {
-			{ "item_blink", 10500 },
-			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
+			{ "item_blink", 7500 },
+			{ "item_ultimate_scepter", 18500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
-			{ "item_blink", 10500 },
-			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
+			{ "item_blink", 7500 },
+			{ "item_ultimate_scepter", 18500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
-			{ "item_blink", 10500 },
-			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
+			{ "item_blink", 7500 },
+			{ "item_ultimate_scepter", 18500, done = { "item_ultimate_scepter_2" } },
 		},
 	},
 	doom_bringer = {
 		[1] = {
 			{ "item_radiance", 10500 },
 			{ "item_blink", 13000, done = { "item_overwhelming_blink" } },
-			{ "item_black_king_bar", 18500 },
+			{ "item_black_king_bar", 20000 },
 		},
 		[2] = {
 			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
@@ -455,10 +460,12 @@ return {
 	enchantress = {
 		[1] = {
 			{ "item_dragon_lance", 7000, done = { "item_hurricane_pike" } },
+			{ "item_ultimate_scepter", 12000, done = { "item_ultimate_scepter_2" } },
 			{ "item_hurricane_pike", 15500 },
 		},
 		[2] = {
 			{ "item_dragon_lance", 7000, done = { "item_hurricane_pike" } },
+			{ "item_ultimate_scepter", 12000, done = { "item_ultimate_scepter_2" } },
 			{ "item_hurricane_pike", 15500 },
 		},
 		[3] = {
@@ -473,7 +480,7 @@ return {
 			{ "item_black_king_bar", 13000 },
 		},
 		[2] = {
-			{ "item_blink", 6000, done = { "item_overwhelming_blink" } },
+			{ "item_blink", 6000 },
 			{ "item_black_king_bar", 11000 },
 			{ "item_ultimate_scepter", 16500, done = { "item_ultimate_scepter_2" } },
 		},
@@ -530,10 +537,10 @@ return {
 		},
 		[2] = {
 			{ "item_maelstrom", 8000, done = { "item_mjollnir" } },
-			{ "item_lesser_crit", 15000, done = { "item_greater_crit" } },
+			{ "item_lesser_crit", 14500, done = { "item_greater_crit" } },
 		},
 		[3] = {
-			{ "item_maelstrom", 7500 },
+			{ "item_maelstrom", 8500 },
 		},
 	},
 	huskar = {
@@ -552,9 +559,6 @@ return {
 		},
 	},
 	invoker = {
-		[1] = {
-			{ "item_meteor_hammer", 6500 },
-		},
 		[2] = {
 			{ "item_meteor_hammer", 6500 },
 		},
@@ -577,7 +581,6 @@ return {
 		},
 		[2] = {
 			{ "item_blink", 12000, done = { "item_swift_blink" } },
-			{ "item_ultimate_scepter", 17500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
 			{ "item_bfury", 9500 },
@@ -603,9 +606,9 @@ return {
 			{ "item_ultimate_scepter", 17500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
-			{ "item_mage_slayer", 8500 },
 			{ "item_desolator", 13000 },
 			{ "item_ultimate_scepter", 18000, done = { "item_ultimate_scepter_2" } },
+			{ "item_black_king_bar", 23000 },
 		},
 		[3] = {
 			{ "item_desolator", 13000 },
@@ -614,11 +617,11 @@ return {
 	},
 	kunkka = {
 		[1] = {
-			{ "item_greater_crit", 15000 },
+			{ "item_greater_crit", 17000 },
 		},
 		[2] = {
-			{ "item_ultimate_scepter", 12500, done = { "item_ultimate_scepter_2" } },
-			{ "item_black_king_bar", 21500 },
+			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
+			{ "item_black_king_bar", 24500 },
 		},
 		[3] = {
 			{ "item_ultimate_scepter", 12500, done = { "item_ultimate_scepter_2" } },
@@ -660,6 +663,20 @@ return {
 			{ "item_kaya_and_sange", 14500 },
 		},
 	},
+	lich = {
+		[1] = {
+			{ "item_blink", 9000 },
+			{ "item_ultimate_scepter", 16000, done = { "item_ultimate_scepter_2" } },
+		},
+		[2] = {
+			{ "item_blink", 9000 },
+			{ "item_ultimate_scepter", 16000, done = { "item_ultimate_scepter_2" } },
+		},
+		[3] = {
+			{ "item_blink", 9000 },
+			{ "item_ultimate_scepter", 16000, done = { "item_ultimate_scepter_2" } },
+		},
+	},
 	life_stealer = {
 		[1] = {
 			{ "item_radiance", 10000 },
@@ -667,7 +684,7 @@ return {
 			{ "item_ultimate_scepter", 23500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
-			{ "item_armlet", 8000 },
+			{ "item_armlet", 7500 },
 		},
 		[3] = {
 			{ "item_radiance", 10500 },
@@ -685,8 +702,8 @@ return {
 	},
 	lion = {
 		[1] = {
-			{ "item_blink", 6000 },
-			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
+			{ "item_blink", 6000, done = { "item_swift_blink" } },
+			{ "item_ultimate_scepter", 14500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
 			{ "item_blink", 7000, done = { "item_swift_blink" } },
@@ -695,7 +712,6 @@ return {
 		},
 		[3] = {
 			{ "item_blink", 6000 },
-			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
 		},
 	},
 	luna = {
@@ -725,14 +741,15 @@ return {
 		},
 		[3] = {
 			{ "item_helm_of_the_dominator", 5000 },
+			{ "item_harpoon", 13500 },
 			{ "item_black_king_bar", 18500 },
 		},
 	},
 	magnataur = {
 		[1] = {
-			{ "item_echo_sabre", 10000, done = { "item_harpoon" } },
-			{ "item_blink", 13000, done = { "item_overwhelming_blink" } },
-			{ "item_harpoon", 15500 },
+			{ "item_echo_sabre", 8500, done = { "item_harpoon" } },
+			{ "item_blink", 11500 },
+			{ "item_harpoon", 14000 },
 		},
 		[2] = {
 			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
@@ -808,15 +825,14 @@ return {
 	},
 	monkey_king = {
 		[1] = {
-			{ "item_black_king_bar", 22500 },
+			{ "item_ultimate_scepter", 15500, done = { "item_ultimate_scepter_2" } },
+			{ "item_black_king_bar", 20500 },
 		},
 		[2] = {
-			{ "item_diffusal_blade", 8500 },
 			{ "item_black_king_bar", 18000 },
 		},
 		[3] = {
-			{ "item_echo_sabre", 11000 },
-			{ "item_black_king_bar", 16000 },
+			{ "item_black_king_bar", 21500 },
 		},
 	},
 	morphling = {
@@ -826,6 +842,9 @@ return {
 		},
 		[2] = {
 			{ "item_manta", 13000 },
+		},
+		[3] = {
+			{ "item_manta", 12500 },
 		},
 	},
 	muerta = {
@@ -849,12 +868,12 @@ return {
 			{ "item_orchid", 17500, done = { "item_bloodthorn" } },
 		},
 		[2] = {
-			{ "item_diffusal_blade", 7000, done = { "item_disperser" } },
+			{ "item_diffusal_blade", 7000 },
 			{ "item_manta", 13000 },
-			{ "item_heart", 19500 },
+			{ "item_heart", 27500 },
 		},
 		[3] = {
-			{ "item_diffusal_blade", 7500 },
+			{ "item_diffusal_blade", 7500, done = { "item_disperser" } },
 			{ "item_manta", 13500 },
 		},
 	},
@@ -864,7 +883,7 @@ return {
 			{ "item_heart", 21500 },
 		},
 		[2] = {
-			{ "item_radiance", 9000, done = { "item_wind_waker" } },
+			{ "item_radiance", 9000 },
 		},
 		[3] = {
 			{ "item_radiance", 9500, done = { "item_wind_waker" } },
@@ -887,7 +906,7 @@ return {
 	},
 	night_stalker = {
 		[1] = {
-			{ "item_blink", 10500 },
+			{ "item_blink", 10500, done = { "item_overwhelming_blink" } },
 			{ "item_black_king_bar", 18500 },
 		},
 		[2] = {
@@ -979,7 +998,7 @@ return {
 	},
 	phantom_assassin = {
 		[1] = {
-			{ "item_bfury", 9500 },
+			{ "item_bfury", 9000 },
 			{ "item_desolator", 13500 },
 			{ "item_black_king_bar", 18500 },
 		},
@@ -1076,11 +1095,11 @@ return {
 	pugna = {
 		[1] = {
 			{ "item_aether_lens", 7000 },
-			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
+			{ "item_ultimate_scepter", 18500, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
 			{ "item_aether_lens", 7000 },
-			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
+			{ "item_ultimate_scepter", 18500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
 			{ "item_aether_lens", 7000 },
@@ -1137,7 +1156,6 @@ return {
 	},
 	rubick = {
 		[1] = {
-			{ "item_phylactery", 6500 },
 			{ "item_blink", 9500 },
 			{ "item_ultimate_scepter", 14500, done = { "item_ultimate_scepter_2" } },
 		},
@@ -1180,7 +1198,6 @@ return {
 		[1] = {
 			{ "item_blink", 7000 },
 			{ "item_aether_lens", 9500 },
-			{ "item_ultimate_scepter", 15000, done = { "item_ultimate_scepter_2" } },
 		},
 		[2] = {
 			{ "item_blink", 7000 },
@@ -1222,7 +1239,8 @@ return {
 		},
 		[3] = {
 			{ "item_witch_blade", 8000, done = { "item_devastator" } },
-			{ "item_hurricane_pike", 13500 },
+			{ "item_force_staff", 10500, done = { "item_hurricane_pike" } },
+			{ "item_dragon_lance", 13000, done = { "item_hurricane_pike" } },
 		},
 	},
 	skeleton_king = {
@@ -1252,15 +1270,14 @@ return {
 			{ "item_ultimate_scepter", 20000, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
-			{ "item_rod_of_atos", 7000, done = { "item_gungir" } },
-			{ "item_kaya", 9500, done = { "item_kaya_and_sange" } },
+			{ "item_rod_of_atos", 7000 },
 		},
 	},
 	slardar = {
 		[1] = {
 			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
 			{ "item_echo_sabre", 10500, done = { "item_harpoon" } },
-			{ "item_black_king_bar", 17500 },
+			{ "item_black_king_bar", 20000 },
 		},
 		[2] = {
 			{ "item_blink", 7500, done = { "item_overwhelming_blink" } },
@@ -1287,9 +1304,6 @@ return {
 		},
 	},
 	snapfire = {
-		[1] = {
-			{ "item_blink", 9000, done = { "item_overwhelming_blink" } },
-		},
 		[2] = {
 			{ "item_blink", 9000, done = { "item_overwhelming_blink" } },
 		},
@@ -1311,12 +1325,12 @@ return {
 	},
 	spectre = {
 		[1] = {
-			{ "item_radiance", 11000 },
-			{ "item_manta", 16500 },
-			{ "item_skadi", 24000 },
+			{ "item_radiance", 9500 },
+			{ "item_manta", 15500 },
+			{ "item_skadi", 22500 },
 		},
 		[2] = {
-			{ "item_manta", 18500 },
+			{ "item_manta", 15500 },
 		},
 		[3] = {
 			{ "item_radiance", 12500 },
@@ -1408,14 +1422,13 @@ return {
 			{ "item_skadi", 21000 },
 		},
 		[3] = {
-			{ "item_manta", 11000 },
-			{ "item_dragon_lance", 13500, done = { "item_hurricane_pike" } },
-			{ "item_skadi", 21000 },
+			{ "item_manta", 11500 },
+			{ "item_dragon_lance", 14000 },
 		},
 	},
 	tidehunter = {
 		[1] = {
-			{ "item_blink", 15500, done = { "item_overwhelming_blink" } },
+			{ "item_blink", 15500 },
 		},
 		[2] = {
 			{ "item_blink", 11000, done = { "item_overwhelming_blink" } },
@@ -1559,10 +1572,23 @@ return {
 			{ "item_ultimate_scepter", 13500, done = { "item_ultimate_scepter_2" } },
 		},
 	},
+	warlock = {
+		[1] = {
+			{ "item_ultimate_scepter", 9000, done = { "item_ultimate_scepter_2" } },
+			{ "item_refresher", 23000 },
+		},
+		[2] = {
+			{ "item_ultimate_scepter", 9000, done = { "item_ultimate_scepter_2" } },
+			{ "item_refresher", 23000 },
+		},
+		[3] = {
+			{ "item_ultimate_scepter", 9000, done = { "item_ultimate_scepter_2" } },
+			{ "item_refresher", 23000 },
+		},
+	},
 	weaver = {
 		[1] = {
 			{ "item_desolator", 10000 },
-			{ "item_dragon_lance", 12500, done = { "item_hurricane_pike" } },
 			{ "item_lesser_crit", 17000, done = { "item_greater_crit" } },
 		},
 		[2] = {
@@ -1598,9 +1624,9 @@ return {
 			{ "item_ultimate_scepter", 15500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
-			{ "item_witch_blade", 8000, done = { "item_skadi" } },
-			{ "item_hurricane_pike", 13500 },
-			{ "item_ultimate_scepter", 19000, done = { "item_ultimate_scepter_2" } },
+			{ "item_witch_blade", 8500, done = { "item_skadi" } },
+			{ "item_hurricane_pike", 14000 },
+			{ "item_ultimate_scepter", 19500, done = { "item_ultimate_scepter_2" } },
 		},
 	},
 	wisp = {
@@ -1628,7 +1654,6 @@ return {
 			{ "item_ultimate_scepter", 16500, done = { "item_ultimate_scepter_2" } },
 		},
 		[3] = {
-			{ "item_blink", 7000 },
 			{ "item_ultimate_scepter", 16500, done = { "item_ultimate_scepter_2" } },
 		},
 	},

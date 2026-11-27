@@ -13,7 +13,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 72,998 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 90,656 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -33,7 +33,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_wind_waker",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 69,356 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 86,835 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -54,7 +54,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_wind_waker",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 5,356 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 6,613 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -71,17 +71,17 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_ultimate_scepter_2",
 	"item_blink",
 	"item_hurricane_pike",
-	"item_sheepstick",
 	"item_cyclone",
+	"item_glimmer_cape",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,609 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,030 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_blood_grenade",
-	"item_branches",
+	"item_double_branches",
 	"item_circlet",
-	"item_magic_stick",
+	"item_sobi_mask",
 	"item_magic_wand",
 	"item_urn_of_shadows",
 	"item_arcane_boots",
@@ -96,7 +96,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_invis_sword",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,444 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,249 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_blood_grenade",

@@ -16,7 +16,7 @@ local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sMkbOrAbyssal = RandomInt(1, 9) > 5 and "item_monkey_king_bar" or "item_abyssal_blade"
 local sButterfly = "item_butterfly"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 253,535 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 306,155 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -38,7 +38,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_moon_shard",
 	"item_dragon_lance",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 6,014 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 7,110 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -58,7 +58,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_dragon_lance",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,059 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,260 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_double_branches",
@@ -76,7 +76,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_ultimate_scepter_2",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,749 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,076 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_double_branches",
@@ -93,10 +93,10 @@ sRoleItemsBuyList["pos_5"] = {
 	sButterfly,
 	sMkbOrAbyssal,
 	"item_ultimate_scepter_2",
-	"item_basher",
+	"item_dragon_lance",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 5,901 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 7,063 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_quelling_blade",

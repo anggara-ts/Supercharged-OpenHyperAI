@@ -26,12 +26,12 @@ local heroConfig = buildHeroConfig(bot, {
 	skills = { default = { 2, 1, 2, 3, 2, 6, 2, 3, 3, 3, 6, 1, 1, 1, 6 } },
 	talents = { default = { t25 = { 10, 0 }, t20 = { 10, 0 }, t15 = { 0, 10 }, t10 = { 0, 10 } } },
 	items = {
-		-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,493 matches (tools/item-builds/generate.js).
+		-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,889 matches (tools/item-builds/generate.js).
 		pos_1 = {
 			"item_tango",
 			"item_double_branches",
-			"item_gauntlets",
 			"item_magic_stick",
+			"item_gauntlets",
 			"item_magic_wand",
 			"item_soul_ring",
 			"item_helm_of_the_dominator",
@@ -47,7 +47,7 @@ local heroConfig = buildHeroConfig(bot, {
 			"item_aghanims_shard",
 			"item_moon_shard",
 		},
-		-- Stratz 7.42, week of 19 Nov 2026: pos 2, 8,543 matches (tools/item-builds/generate.js).
+		-- Stratz 7.42, week of 19 Nov 2026: pos 2, 10,617 matches (tools/item-builds/generate.js).
 		pos_2 = {
 			"item_tango",
 			"item_double_branches",
@@ -63,7 +63,7 @@ local heroConfig = buildHeroConfig(bot, {
 			"item_wind_waker",
 			"item_lotus_orb",
 		},
-		-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,121 matches (tools/item-builds/generate.js).
+		-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,412 matches (tools/item-builds/generate.js).
 		pos_3 = {
 			"item_tango",
 			"item_double_branches",
@@ -81,7 +81,7 @@ local heroConfig = buildHeroConfig(bot, {
 			"item_octarine_core",
 			"item_mekansm",
 		},
-		-- Stratz 7.42, week of 19 Nov 2026: pos 4, 10,166 matches (tools/item-builds/generate.js).
+		-- Stratz 7.42, week of 19 Nov 2026: pos 4, 12,706 matches (tools/item-builds/generate.js).
 		pos_4 = {
 			"item_tango",
 			"item_blood_grenade",
@@ -101,7 +101,7 @@ local heroConfig = buildHeroConfig(bot, {
 			"item_moon_shard",
 			"item_ultimate_scepter_2",
 		},
-		-- Stratz 7.42, week of 19 Nov 2026: pos 5, 27,355 matches (tools/item-builds/generate.js).
+		-- Stratz 7.42, week of 19 Nov 2026: pos 5, 34,371 matches (tools/item-builds/generate.js).
 		pos_5 = {
 			"item_tango",
 			"item_blood_grenade",

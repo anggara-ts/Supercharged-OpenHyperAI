@@ -36,7 +36,7 @@ if sRole == "pos_5" then
 end
 local sTeamAuraItem = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 16,153 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 19,754 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -56,7 +56,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 16,407 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 20,576 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -75,7 +75,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 8,635 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 10,767 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -95,24 +95,22 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 305 matches, built from pos 3 (16,153) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 383 matches, built from pos 3 (19,754) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 1,940 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 2,385 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
-	"item_blood_grenade",
 	"item_double_branches",
 	"item_faerie_fire",
-	"item_ring_of_regen",
+	"item_magic_stick",
 	"item_magic_wand",
 	"item_tranquil_boots",
 	"item_blink",
-	"item_black_king_bar",
 	sTeamAuraItem,
+	"item_black_king_bar",
 	"item_ultimate_scepter",
 	"item_refresher",
 	"item_ultimate_scepter_2",
-	"item_overwhelming_blink",
 	"item_hand_of_midas",
 	"item_aghanims_shard",
 	"item_moon_shard",

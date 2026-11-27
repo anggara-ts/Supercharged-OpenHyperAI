@@ -14,7 +14,7 @@ local tAllAbilityBuildList = { { 2, 1, 1, 3, 2, 6, 1, 1, 3, 3, 6, 3, 2, 2, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 89,000 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 111,563 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -27,14 +27,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_aghanims_shard",
 	"item_glimmer_cape",
 	"item_ultimate_scepter",
-	"item_kaya_and_sange",
 	"item_ultimate_scepter_2",
 	"item_gungir",
 	"item_force_staff",
 	"item_blink",
+	"item_cyclone",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 65,960 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 82,692 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -54,7 +54,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_force_staff",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 321 matches, built from pos 2 (24,715) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 394 matches, built from pos 2 (30,930) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_mantle",
@@ -75,7 +75,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 24,715 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 30,930 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_mantle",
@@ -96,7 +96,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,033 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,278 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_mantle",
@@ -104,17 +104,14 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_null_talisman",
 	"item_arcane_boots",
 	"item_rod_of_atos",
-	"item_kaya",
 	"item_aghanims_shard",
-	"item_kaya_and_sange",
-	"item_ultimate_scepter",
 	"item_travel_boots",
-	"item_gungir",
+	"item_ultimate_scepter",
+	"item_sheepstick",
 	"item_ultimate_scepter_2",
+	"item_ethereal_blade",
 	"item_aether_lens",
-	"item_cyclone",
-	"item_force_staff",
-	"item_wind_waker",
+	"item_octarine_core",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }

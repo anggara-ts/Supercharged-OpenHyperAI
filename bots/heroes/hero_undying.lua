@@ -17,7 +17,7 @@ local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
 -- One pair of boots in this build (user rule; tools/boots-check.js).
 -- No Boots of Travel: this build's Guardian Greaves / Boots of Bearing are its one pair of boots.
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 78,025 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 95,684 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -38,7 +38,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 68,662 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 83,850 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -48,8 +48,8 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_magic_wand",
 	"item_ring_of_basilius",
 	"item_arcane_boots",
-	"item_headdress",
-	"item_glimmer_cape",
+	"item_mekansm",
+	"item_blade_mail",
 	"item_guardian_greaves",
 	"item_ultimate_scepter",
 	"item_force_staff",
@@ -59,7 +59,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 2,477 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 3,022 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -82,7 +82,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_lotus_orb",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 6,918 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 8,116 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -102,7 +102,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 62,472 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 75,774 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -115,7 +115,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
-	"item_shivas_guard",
+	"item_heart",
 	"item_ultimate_scepter_2",
 	"item_consecrated_wraps",
 	"item_pipe",

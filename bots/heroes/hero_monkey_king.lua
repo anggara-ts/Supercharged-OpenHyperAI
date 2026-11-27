@@ -33,7 +33,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 66,964 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 96,501 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -43,10 +43,10 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_wraith_band",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_echo_sabre",
-	"item_desolator",
+	"item_radiance",
 	"item_ultimate_scepter",
 	"item_black_king_bar",
+	"item_witch_blade",
 	"item_aghanims_shard",
 	"item_skadi",
 	"item_ultimate_scepter_2",
@@ -54,7 +54,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_disperser",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 39,152 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 52,575 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -75,7 +75,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_abyssal_blade",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,627 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 11,272 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -87,16 +87,17 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_power_treads",
 	"item_diffusal_blade",
 	"item_echo_sabre",
-	"item_black_king_bar",
 	"item_ultimate_scepter",
+	"item_black_king_bar",
 	"item_aghanims_shard",
-	"item_skadi",
 	"item_ultimate_scepter_2",
 	"item_abyssal_blade",
+	"item_witch_blade",
 	"item_disperser",
+	"item_devastator",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 5,976 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 7,665 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -108,14 +109,14 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_diffusal_blade",
 	"item_echo_sabre",
 	"item_black_king_bar",
-	"item_orchid",
 	"item_skadi",
+	"item_orchid",
 	"item_harpoon",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,422 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,121 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

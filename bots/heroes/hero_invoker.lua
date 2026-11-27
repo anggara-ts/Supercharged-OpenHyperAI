@@ -27,7 +27,7 @@ local sRoleItemsBuyList = {}
 -- of three upgrades. Tested (games 016 and 017): bought, they sit in the inventory as castable
 -- items with no buff; cast by the bot, nothing changes (same abilities, still inert). The bot API
 -- cannot make the pick, so he does not buy them.
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 199,603 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 251,104 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -46,7 +46,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2_qe, 199,603 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2_qe, 251,104 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2_qe"] = {
 	"item_tango",
 	"item_double_branches",
@@ -65,9 +65,26 @@ sRoleItemsBuyList["pos_2_qe"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 990 matches, built from pos 2 (199,603) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,584 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,261 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_circlet",
+	"item_mantle",
+	"item_faerie_fire",
+	"item_null_talisman",
+	"item_magic_wand",
+	"item_boots",
+	"item_meteor_hammer",
+	"item_witch_blade",
+	"item_travel_boots",
+	"item_blink",
+	"item_black_king_bar",
+	"item_refresher",
+	"item_moon_shard",
+	"item_travel_boots_2",
+}
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,274 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -86,7 +103,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 51,207 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 64,837 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -107,7 +124,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 28,180 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 35,500 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

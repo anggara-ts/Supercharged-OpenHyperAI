@@ -34,7 +34,7 @@ if sRole == "pos_5" then
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 21,766 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 26,983 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -54,7 +54,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,367 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 1,707 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -70,16 +70,16 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
 	"item_glimmer_cape",
+	"item_sheepstick",
 	"item_cyclone",
 	"item_ethereal_blade",
-	"item_sheepstick",
 	"item_wind_waker",
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 452 matches, built from pos 2 (21,766) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 551 matches, built from pos 2 (26,983) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 12,816 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 15,964 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -104,7 +104,7 @@ sRoleItemsBuyList["pos_4"] = {
 -- Urn of Shadows 47%, Force Staff 40%, Spirit Vessel 37%, Glimmer Cape 35%. Order by when they are bought:
 -- Wand and Urn by minute 10, Vessel ~17, Force Staff and Glimmer ~24, Scepter ~29. Pos 4 (12,985 matches)
 -- reads the same: Scepter 81%, Urn 55%, Wand 54%, Vessel 41%, Force Staff 41%; Kaya and Sange 0.5%.
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 7,977 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 9,931 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -118,8 +118,8 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_ultimate_scepter",
 	"item_aghanims_shard",
 	"item_ultimate_scepter_2",
-	"item_sheepstick",
 	"item_cyclone",
+	"item_sheepstick",
 	"item_octarine_core",
 	"item_dagon_5",
 	"item_moon_shard",

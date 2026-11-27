@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 3, 1, 2, 3, 3, 6, 3, 2, 2, 2, 6, 1, 1, 1, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 30,100 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 37,866 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -31,7 +31,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 23,112 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 29,342 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -50,7 +50,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 567 matches, built from pos 3 (8,415) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 720 matches, built from pos 3 (10,535) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.
@@ -71,7 +71,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 5,523 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 6,958 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.
@@ -89,11 +89,11 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_echo_sabre",
 	"item_harpoon",
 	"item_overwhelming_blink",
+	"item_ultimate_scepter_2",
 	"item_aghanims_shard",
 	"item_moon_shard",
-	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,415 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 10,535 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	-- No Aghanim's Scepter on the core: its Walrus Kick often knocked a ganked enemy away
 	-- to safety. Blink to land the snowball/punch, BKB to stay in the fight.

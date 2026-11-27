@@ -23,7 +23,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 48,348 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 58,592 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -44,7 +44,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 19,904 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 23,965 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -62,11 +62,11 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_greater_crit",
 	"item_overwhelming_blink",
 	"item_ultimate_scepter_2",
-	"item_manta",
+	"item_satanic",
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 1,678 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,096 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -87,9 +87,9 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5 has 648 matches, built from pos 4 (1,678) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5 has 818 matches, built from pos 4 (2,096) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = sRoleItemsBuyList["pos_4"]
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 105,130 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 128,987 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_gauntlets",
@@ -103,8 +103,8 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_black_king_bar",
 	"item_octarine_core",
 	"item_ultimate_scepter",
-	"item_ultimate_scepter_2",
 	"item_overwhelming_blink",
+	"item_ultimate_scepter_2",
 	"item_orchid",
 	"item_maelstrom",
 	"item_bloodthorn",

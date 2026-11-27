@@ -27,7 +27,7 @@ else
 end
 local sUtility = "item_team_aura"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 27,137 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 32,152 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -46,7 +46,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_sheepstick",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,090 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,692 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -69,7 +69,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_consecrated_wraps",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 3,106 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 3,770 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -89,7 +89,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_yasha_and_kaya",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 2,996 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,700 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -103,12 +103,12 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_aghanims_shard",
 	sUtility,
 	"item_shivas_guard",
-	"item_black_king_bar",
+	"item_meteor_hammer",
 	"item_wind_waker",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,840 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,268 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -122,7 +122,7 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_veil_of_discord",
 	"item_aghanims_shard",
 	sUtility,
-	"item_shivas_guard",
+	"item_black_king_bar",
 	"item_wind_waker",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",

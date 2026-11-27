@@ -15,7 +15,7 @@ local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sUtility = RandomInt(1, 2) == 1 and "item_lotus_orb" or "item_heavens_halberd"
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 134,546 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 165,683 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_gauntlets",
@@ -36,7 +36,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_mage_slayer",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,339 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,682 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -51,13 +51,14 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_desolator",
 	"item_blink",
 	"item_aghanims_shard",
+	"item_ultimate_scepter",
 	"item_greater_crit", -- was "item_great_scepter", not an item in items.txt; Daedalus fills the damage slot (pos_2 has MKB here)
-	"item_black_king_bar",
-	"item_overwhelming_blink",
+	"item_satanic",
 	"item_ultimate_scepter_2",
+	"item_mage_slayer",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,570 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 4,439 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_quelling_blade",
@@ -75,12 +76,12 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_shivas_guard",
 	"item_overwhelming_blink",
 	"item_ultimate_scepter_2",
-	"item_refresher",
 	"item_black_king_bar",
+	"item_refresher",
 	"item_moon_shard",
 }
 -- No Boots of Travel: this build's Guardian Greaves / Boots of Bearing are its one pair of boots.
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 6,130 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 7,643 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_double_branches",
@@ -101,7 +102,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_mage_slayer",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 2,828 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 3,563 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

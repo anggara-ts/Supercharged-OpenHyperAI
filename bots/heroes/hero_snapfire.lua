@@ -12,7 +12,7 @@ local tAllAbilityBuildList = { { 1, 2, 1, 2, 1, 6, 1, 2, 2, 3, 6, 3, 3, 3, 6 } }
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 21,309 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 25,729 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -27,15 +27,33 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_black_king_bar",
 	"item_greater_crit",
 	"item_overwhelming_blink",
-	"item_refresher",
+	"item_desolator",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 909 matches, built from pos 2 (21,309) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_2"]
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 6,636 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,149 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = {
+	"item_tango",
+	"item_double_branches",
+	"item_faerie_fire",
+	"item_magic_stick",
+	"item_magic_wand",
+	"item_arcane_boots",
+	"item_maelstrom",
+	"item_blink",
+	"item_travel_boots",
+	"item_greater_crit",
+	"item_black_king_bar",
+	"item_hurricane_pike",
+	"item_mjollnir",
+	"item_aghanims_shard",
+	"item_moon_shard",
+	"item_ultimate_scepter_2",
+	"item_travel_boots_2",
+}
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 8,114 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -62,7 +80,7 @@ sRoleItemsBuyList["pos_3"] = {
 -- Supports had the carry list (Maelstrom, Daedalus, BKB). Snapfire's most common role is pos 4
 -- (hero_pos_weights 60), so give pos 4/5 a support build like Hoodwink's. Aghanim's Scepter grants
 -- Gobble Up / Spit Out, and the Shard makes Firesnap Cookie heal and launch a Mortimer Kiss (datafeed).
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 46,544 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 57,577 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -77,12 +95,12 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_force_staff",
 	"item_guardian_greaves",
 	"item_yasha_and_kaya",
-	"item_cyclone",
+	"item_ultimate_scepter",
 	"item_aghanims_shard",
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 31,287 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 38,781 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

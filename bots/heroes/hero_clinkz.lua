@@ -25,7 +25,7 @@ else
 	nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList[2])
 end
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1, 28,236 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 37,276 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -46,7 +46,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_moon_shard",
 	"item_sphere",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 30,945 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 39,704 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -70,7 +70,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_nullifier",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 2,635 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 3,336 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_branches",
@@ -90,9 +90,10 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_travel_boots",
 	"item_ultimate_scepter_2",
 	"item_sphere",
+	"item_hurricane_pike",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 3,752 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 4,749 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -101,7 +102,6 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_faerie_fire",
 	"item_magic_wand",
 	"item_power_treads",
-	"item_oblivion_staff",
 	"item_orchid",
 	"item_desolator",
 	"item_aghanims_shard",
@@ -112,7 +112,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 	"item_ultimate_scepter_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,473 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 1,876 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -129,11 +129,11 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_bloodthorn",
 	"item_greater_crit",
 	"item_travel_boots",
-	"item_ultimate_scepter_2",
-	"item_sheepstick",
+	"item_ultimate_scepter",
 	"item_monkey_king_bar",
 	"item_hydras_breath",
 	"item_moon_shard",
+	"item_ultimate_scepter_2",
 }
 X["sBuyList"] = sRoleItemsBuyList[sRole]
 X["sSellList"] = {

@@ -14,7 +14,7 @@ local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
 local sUtilityList = { "item_pipe", "item_lotus_orb", "item_crimson_guard", "item_heavens_halberd" }
 local sUtility = sUtilityList[RandomInt(1, #sUtilityList)]
--- Stratz 7.42, week of 19 Nov 2026: pos 3, 34,390 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3, 42,617 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -35,9 +35,28 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_aghanims_shard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 931 matches, built from pos 3 (34,390) (tools/item-builds/generate.js).
-sRoleItemsBuyList["pos_1"] = sRoleItemsBuyList["pos_3"]
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 9,346 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1, 1,174 matches (tools/item-builds/generate.js).
+sRoleItemsBuyList["pos_1"] = {
+	"item_tango",
+	"item_branches",
+	"item_quelling_blade",
+	"item_gauntlets",
+	"item_circlet",
+	"item_magic_wand",
+	"item_bracer",
+	"item_phase_boots",
+	"item_invis_sword",
+	"item_ultimate_scepter",
+	"item_silver_edge",
+	"item_black_king_bar",
+	"item_ultimate_scepter_2",
+	"item_echo_sabre",
+	"item_heart",
+	"item_sange_and_yasha",
+	"item_aghanims_shard",
+	"item_moon_shard",
+}
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 11,575 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -59,7 +78,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_moon_shard",
 }
 -- Support builds: Dotabuff 7-day meta has Spirit Breaker mostly at support-off (pos 4, S tier).
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 150,922 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 188,857 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -79,7 +98,7 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_moon_shard",
 }
 -- One pair of boots in this build (user rule; tools/boots-check.js).
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 38,411 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 47,976 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",

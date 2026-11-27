@@ -21,7 +21,7 @@ end
 local nAbilityBuildList = Fu.Skill.GetRandomBuild(tAllAbilityBuildList)
 local nTalentBuildList = Fu.Skill.GetTalentBuild(tTalentTreeList)
 local sRoleItemsBuyList = {}
--- Stratz 7.42, week of 19 Nov 2026: pos 1 has 310 matches, built from pos 2 (2,566) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 1 has 405 matches, built from pos 2 (3,156) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_1"] = {
 	"item_tango",
 	"item_double_branches",
@@ -44,7 +44,7 @@ sRoleItemsBuyList["pos_1"] = {
 	"item_wind_waker",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 2, 2,566 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 2, 3,156 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_2"] = {
 	"item_tango",
 	"item_double_branches",
@@ -67,7 +67,7 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_wind_waker",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 3 has 621 matches, built from pos 2 (2,566) (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 3 has 810 matches, built from pos 2 (3,156) (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_3"] = {
 	"item_tango",
 	"item_double_branches",
@@ -91,7 +91,7 @@ sRoleItemsBuyList["pos_3"] = {
 	"item_moon_shard",
 	"item_travel_boots_2",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 4, 57,647 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 4, 73,588 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_4"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -104,13 +104,13 @@ sRoleItemsBuyList["pos_4"] = {
 	"item_glimmer_cape",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_aeon_disk",
 	"item_ultimate_scepter_2",
+	"item_aeon_disk",
 	"item_cyclone",
 	"item_shivas_guard",
 	"item_moon_shard",
 }
--- Stratz 7.42, week of 19 Nov 2026: pos 5, 73,467 matches (tools/item-builds/generate.js).
+-- Stratz 7.42, week of 19 Nov 2026: pos 5, 93,875 matches (tools/item-builds/generate.js).
 sRoleItemsBuyList["pos_5"] = {
 	"item_tango",
 	"item_blood_grenade",
@@ -123,8 +123,8 @@ sRoleItemsBuyList["pos_5"] = {
 	"item_glimmer_cape",
 	"item_aghanims_shard",
 	"item_ultimate_scepter",
-	"item_ultimate_scepter_2",
 	"item_aeon_disk",
+	"item_ultimate_scepter_2",
 	"item_cyclone",
 	"item_moon_shard",
 }
