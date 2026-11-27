@@ -73,6 +73,16 @@ T.test("Arc Warden: no Spirit Vessel, Diffusal Blade or Disperser", function()
 	end
 end)
 
+-- #38 (PR #246): Marci pos 1 and 2 share the sell pair "Abyssal Blade sells Armlet". An Armlet bought after the
+-- Abyssal Blade would be sold at once (the 7.42 data buys it at minute 41 in pos 2), so pins.json forbids it there.
+T.test("Marci pos 1/2: an Armlet, if bought, comes before the Abyssal Blade that sells it", function()
+	for slot = 1, 2 do
+		local list = buyList("hero_marci", slot)
+		local armlet, abyssal = indexOf(list, "item_armlet"), indexOf(list, "item_abyssal_blade")
+		T.ok(armlet == nil or abyssal == nil or armlet < abyssal, "pos " .. slot .. " Armlet before Abyssal Blade")
+	end
+end)
+
 T.test("Spectre's sell pair is triggered by an item her list buys", function()
 	Stub.reset({ hero = "npc_dota_hero_spectre", slot = 1 })
 	local ok, result = Stub.load("bots/heroes/hero_spectre")

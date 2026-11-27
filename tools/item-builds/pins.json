@@ -19,6 +19,7 @@
 		{"hero":"lina","pos":[1],"boots":"item_boots","reason":"#38 (PR #115): plain Boots, then Boots of Travel"},
 		{"hero":"necrolyte","pos":[3],"boots":"item_boots","reason":"#38 (PR #115): plain Boots, then Boots of Travel"},
 		{"hero":"tinker","pos":[2],"next":["item_bottle"],"require":["item_bottle"],"forbid":["item_circlet"],"reason":"#38 (PR #115): mid Tinker starts without Circlets and buys Bottle next"},
+		{"hero":"marci","pos":[2],"forbid":["item_armlet"],"reason":"#38 (PR #246): pos 2 shares her pos 1 sell pairs, where Abyssal Blade sells Armlet (hero_marci.lua sRoleSellList); the 7.42 data buys Armlet after Abyssal Blade (minute 41), so it would be sold at once. generate.js does not read per-role sell tables"},
 		{"hero":"spectre","pos":[1],"require":["item_manta"],"reason":"#9: her sell pair (Manta Style sells the Quelling Blade) is triggered by an item her carry list buys"},
 		{"hero":"lone_druid","keep":true,"reason":"the live list is the hero-and-bear block (two inventories); the data mixes what both carry"}
 	],

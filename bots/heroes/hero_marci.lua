@@ -81,10 +81,10 @@ sRoleItemsBuyList["pos_2"] = {
 	"item_ultimate_scepter",
 	"item_basher",
 	"item_abyssal_blade",
-	"item_armlet",
 	"item_ultimate_scepter_2",
 	"item_satanic",
 	"item_consecrated_wraps",
+	"item_nullifier",
 	"item_moon_shard",
 }
 -- Stratz 7.42, week of 19 Nov 2026: pos 4, 14,890 matches (tools/item-builds/generate.js).
