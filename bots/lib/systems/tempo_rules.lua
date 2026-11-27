@@ -1,7 +1,8 @@
 -- Shared bot system: pure rules that keep an even game moving (#12, no bot API calls, tested with plain numbers in
 -- tests/test_tempo_rules.lua). Maintainer, 2026-11-25 (game 084): "the bot farms too long is the most users reported
 -- and boring". The callers: bots/lib/systems/push.lua (lane-front gate), bots/mode_retreat_generic.lua (early-game
--- anti-dive), bots/lib/systems/roshan_window.lua (Roshan in the respawn window).
+-- anti-dive), bots/lib/systems/roshan_window.lua (Roshan in the respawn window), bots/lib/systems/deep_tower.lua
+-- (early-game deep tower), bots/ability_item_usage_generic.lua (lane / farm TP away from a fight).
 local TempoRules = {}
 
 -- Lane-front push gate. Before: 2+ enemy heroes within 2200 of the lane front cancelled every push on that lane,
@@ -52,6 +53,32 @@ end
 function TempoRules.TowerTier(unitName)
 	local tier = type(unitName) == "string" and unitName:match("tower(%d)") or nil
 	return tier ~= nil and tonumber(tier) or nil
+end
+
+-- Early-game deep tower (#12, game 087 0:26-0:31): Puck, Largo and a third Radiant hero harassed Marci from past
+-- Dire's mid T1 into the mid T2's range (`[SHy-HARASS] t=26 puck hit target=marci`), and the T2 shot Puck from 0.82
+-- to 0.06 HP in 3.5s. The laning harass only knew the lane's T1, and the anti-dive above never saw the T2: a T2 is
+-- invulnerable while its T1 stands, and Fu.IsValidBuilding (so every tower list the checks read) skips invulnerable
+-- units. In the early game (Fu.IsEarlyGame: before 12:00, 7:00 in Turbo) no harass, last hit or dive inside a tier-2+
+-- enemy tower's range: its attack range (700 when unknown, the fallback the other tower checks use) plus
+-- DEEP_TOWER_SLACK, the margin of the anti-dive's tower test. A tier-1 tower keeps its own rules.
+-- tier: 1-4 (nil: not a tower, never blocks); dist: from the tower to the spot; early: Fu.IsEarlyGame().
+TempoRules.DEEP_TOWER_SLACK = 200
+function TempoRules.DeepTowerBlocks(tier, dist, range, early)
+	if not early or tier == nil or tier < 2 or dist == nil then
+		return false
+	end
+	return dist < (range or 700) + TempoRules.DEEP_TOWER_SLACK
+end
+
+-- Lane / farm TP away from a fight (#12, game 087 11:42-11:50): Zeus TP'd from mid to his bot lane at full HP with
+-- an enemy and an ally next to him (`tpscroll why=出去发育 ... foes=1 allies=1`), and Lion and Puck ganked the
+-- maintainer there. The laning TP and the farm TP from the fountain wait while a visible enemy hero is within 1600 of
+-- the bot or of an allied hero within 1600 of it (enemies), or enemy heroes hit our tower within 1600 of the bot
+-- (towerHit). Returns blocked.
+TempoRules.TP_DANGER_RADIUS = 1600
+function TempoRules.LaneTpBlocked(enemies, towerHit)
+	return (enemies or 0) >= 1 or towerHit == true
 end
 
 -- Roshan respawn window. Roshan respawns 8-11 minutes after his death (turbo: half; the commonly cited respawn time,

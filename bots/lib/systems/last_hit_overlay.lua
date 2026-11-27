@@ -15,6 +15,7 @@ local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Rules = require(GetScriptDirectory() .. "/lib/systems/team_roam_rules")
 local RoamStats = require(GetScriptDirectory() .. "/lib/systems/roam_stats")
 local HuntTrace = require(GetScriptDirectory() .. "/lib/systems/hunt_trace")
+local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
 
 local X = {}
 
@@ -487,6 +488,18 @@ function X.Think(bot)
 			logSkip(bot, skip, why, unit, skip == "busy" and state.busyWhy or nil)
 		end
 		return false
+	end
+	-- Early game: no hit from or on a spot inside a tier-2+ enemy tower's range (#12, game 087: Puck died to Dire's
+	-- mid T2 at 0:31). A creep under their T1 is fine. A hold on such a unit is released.
+	do
+		local deepTower, deepDist = DeepTower.InReach(bot:GetLocation(), unit:GetLocation())
+		if deepTower ~= nil then
+			if bot._lhOwn ~= nil then
+				release(bot, "skip-deep-tower")
+			end
+			DeepTower.LogSkip(bot, "overlay", deepTower, deepDist, unit)
+			return false
+		end
 	end
 	local mode = bot:GetActiveMode()
 	local modeName = mode == BOT_MODE_TEAM_ROAM and "team_roam" or RoamStats.ModeName(mode)

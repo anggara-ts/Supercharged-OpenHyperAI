@@ -1200,9 +1200,17 @@ function Retreat.ShouldRun()
 			or assignedLane == LANE_MID and enemyFountainDistance < (team == TEAM_RADIANT and 9000 or 8000)
 			or assignedLane == LANE_BOT and enemyFountainDistance < (team == TEAM_RADIANT and 8700 or 11500)
 		local nearbyEnemyTowers = bot:GetNearbyTowers(950, true)
-		local isDivingTower = Fu.IsValidBuilding(nearbyEnemyTowers[1])
-			and GetUnitToUnitDistance(bot, nearbyEnemyTowers[1])
-				< (nearbyEnemyTowers[1]:GetAttackRange() or 700) + 200
+		local diveTower = nearbyEnemyTowers[1]
+		local isDivingTower = Fu.IsValidBuilding(diveTower)
+			and GetUnitToUnitDistance(bot, diveTower) < (diveTower:GetAttackRange() or 700) + 200
+		-- #12, game 087 0:26-0:31: a T2 is invulnerable while its T1 stands, so Fu.IsValidBuilding skipped it and the
+		-- tier-2 rule below never ran before the T1 fell (no `anti-dive why=tower-tier2` line in games 086 / 087).
+		-- The deep tower is read by its id instead (bots/lib/systems/deep_tower.lua), with the same reach.
+		if not isDivingTower and Fu.IsValidHero(botTarget) then
+			local DeepTower = require(GetScriptDirectory() .. "/lib/systems/deep_tower")
+			diveTower = DeepTower.InReach(bot:GetLocation())
+			isDivingTower = diveTower ~= nil
+		end
 		-- Game 044, 6:00: this ran Kez (87% HP, 2 allies to 1) off a Puck at 16% HP next to Dire's T1: "deep in the
 		-- lane" alone triggered it, and "two right-clicks" ignored his spells and his allies. Now only inside the
 		-- enemy tower's reach, and not when the target dies to what we and the allies near can do in ~3s, or is
@@ -1220,7 +1228,7 @@ function Retreat.ShouldRun()
 						+ (ally:GetEstimatedDamageToTarget(true, botTarget, 3.0, DAMAGE_TYPE_ALL) or 0)
 				end
 			end
-			local tower = nearbyEnemyTowers[1]
+			local tower = diveTower
 			local towerOnUs = tower:GetAttackTarget() == bot
 			local killable = teamDamage >= botTarget:GetHealth()
 			local lowTarget = Fu.GetHP(botTarget) < 0.25 and not towerOnUs
