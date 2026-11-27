@@ -4,11 +4,50 @@ local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 -- Eye cliffs pinged in the current map. Ground point under the cliff, used after that lane's T1 falls.
 local UBER_WALK = 7000
 local OBS_GAP = 1500
+-- Maintainer's pings, game 063 (#15): Radiant bottom (-1288, -4340) and Dire top (1028, 3581) are the spots already
+-- here. Radiant top (-4365, -1012, by the Radiant outpost) and Dire bottom (4610, 770, by the Dire outpost) are back:
+-- they are the right spots. As (-4348, -1008) and (4612, 767) they were not walkable, so ValidateSpot moved them to
+-- (-4348, -1108) and (4439, 667), where the plant order did nothing (games 018-062: 36 and 39 give-ups
+-- `why=in-range-no-plant`). keep = true (these two only): the ping stays the target (no move), and the plant retry
+-- in mode_ward_generic.lua tries points around it when the order does not plant. label (the game 063 pings): a bare word
+-- the [SHy-WARD] give-up, plant-retry and dispenser lines print, so a game check can name the spot.
 local UberWardSpots = {
-	{ location = Vector(1015, 3593, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "uber", side = "dire" },
-	{ location = Vector(4612, 767, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "uber", side = "dire" },
-	{ location = Vector(-1287, -4329, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "uber", side = "radiant" },
-	{ location = Vector(-4348, -1008, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "uber", side = "radiant" },
+	-- The other two cliffs are labelled too (#15, game 087: Largo's observer on our own Radiant bottom cliff at 12:37
+	-- printed no name).
+	{
+		location = Vector(1015, 3593, 0),
+		label = "uber-dire-top",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "uber",
+		side = "dire",
+	},
+	{
+		location = Vector(4610, 770, 0),
+		label = "uber-dire-bottom",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "uber",
+		side = "dire",
+		keep = true,
+	},
+	{
+		location = Vector(-1287, -4329, 0),
+		label = "uber-radiant-bottom",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "uber",
+		side = "radiant",
+	},
+	{
+		location = Vector(-4365, -1012, 0),
+		label = "uber-radiant-top",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "uber",
+		side = "radiant",
+		keep = true,
+	},
 }
 local RoshSpots = {
 	{ location = Vector(-3379, 743, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "contest", side = "radiant" },
@@ -29,6 +68,11 @@ local HuntSpots = {
 	{ location = Vector(-4876, 624, 0), plant_time_obs = 0, plant_time_sentry = 0, role = "hunt", side = "radiant" },
 }
 -- Lotus pools and twin gates. Same contest rules as Roshan: after 6:00, still blocked behind a living tier-1.
+-- The first two are the lotus pools (pools at -7548,4209 and 7504,-4405 in [SHy-LOTUS] lines). Twin Gates (#15,
+-- maintainer's pings, game 063): top (-2808, 8257) and bottom (2780, -8151) watch the gate ambush. The old gate
+-- spots (-6244, 7147) and (6206, -6958) were removed (game 067, too risky to reach). Side of the
+-- new spots by fountain distance, as LaneSpots does: top 10091 from the Dire base (-> dire), 15535 from the
+-- Radiant one; bottom 10064 from the Radiant base (-> radiant), 15331 from the Dire one.
 local GateSpots = {
 	{
 		location = Vector(-7421, 4238, 0),
@@ -47,29 +91,37 @@ local GateSpots = {
 		deep = true,
 	},
 	{
-		location = Vector(-6244, 7147, 0),
-		plant_time_obs = 0,
-		plant_time_sentry = 0,
-		role = "contest",
-		side = "radiant",
-		deep = true,
-	},
-	{
-		location = Vector(6206, -6958, 0),
+		location = Vector(-2808, 8257, 0),
+		label = "gate-top",
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "contest",
 		side = "dire",
 		deep = true,
+		gate = "top",
+	},
+	{
+		location = Vector(2780, -8151, 0),
+		label = "gate-bottom",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "contest",
+		side = "radiant",
+		deep = true,
+		gate = "bottom",
 	},
 }
+
 local radiantEarlyWardSpots = {
 	-- Radiant mid: the user's safe spots, pinged in game 022 (2026-11-16), on Radiant's side of the
 	-- river so the support does not cross it. Replace the Dire bank of the top rune (-627, 850),
 	-- where Mirana was killed walking back (game 020 and 021), and (-245, -996). safe = true lets
 	-- them through the "early wards go on the enemy side" filter.
+	-- Game 063 pings (#15): by the top river rune (-1223, -1) replaces (-1386, -171), and "option 1" (-300, -909)
+	-- replaces (-303, -1001). (-882, -1000) is gone (game 067, maintainer: too close to our mid T1).
 	[1] = {
-		location = Vector(-1386, -171, 0),
+		location = Vector(-1223, -1, 0),
+		label = "mid-radiant-rune",
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "early",
@@ -77,7 +129,8 @@ local radiantEarlyWardSpots = {
 		safe = true,
 	},
 	[2] = {
-		location = Vector(-303, -1001, 0),
+		location = Vector(-300, -909, 0),
+		label = "mid-radiant-1",
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "early",
@@ -85,21 +138,13 @@ local radiantEarlyWardSpots = {
 		safe = true,
 	},
 	[3] = {
-		location = Vector(-882, -1000, 0),
-		plant_time_obs = 0,
-		plant_time_sentry = 0,
-		role = "early",
-		side = "radiant",
-		safe = true,
-	},
-	[4] = {
 		location = Vector(6113, -3427, 0),
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "early",
 		side = "dire",
 	},
-	[5] = {
+	[4] = {
 		location = Vector(5308, -4362, 0),
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
@@ -112,8 +157,12 @@ local direEarlyWardSpots = {
 	-- (632, -281), on Dire's side of the river. Replace the Radiant bank of the bottom rune
 	-- (44, -1232; it planted, but across the river) and (-627, 850). safe = true lets them through
 	-- the "early wards go on the enemy side" filter.
+	-- Game 063 pings (#15; game 052: the Dire mid ward stood too close to the Dire mid T1): "option 1" (-533, 737)
+	-- replaces (-501, 696), "option 2" (488, -100) replaces (632, -281), and the spot by the top river rune
+	-- (-521, 901) is new ([6]). (12, 257) was not pinged again and stays.
 	[1] = {
-		location = Vector(-501, 696, 0),
+		location = Vector(-533, 737, 0),
+		label = "mid-dire-1",
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "early",
@@ -129,7 +178,8 @@ local direEarlyWardSpots = {
 		safe = true,
 	},
 	[3] = {
-		location = Vector(632, -281, 0),
+		location = Vector(488, -100, 0),
+		label = "mid-dire-2",
 		plant_time_obs = 0,
 		plant_time_sentry = 0,
 		role = "early",
@@ -149,6 +199,15 @@ local direEarlyWardSpots = {
 		plant_time_sentry = 0,
 		role = "early",
 		side = "radiant",
+	},
+	[6] = {
+		location = Vector(-521, 901, 0),
+		label = "mid-dire-rune",
+		plant_time_obs = 0,
+		plant_time_sentry = 0,
+		role = "early",
+		side = "dire",
+		safe = true,
 	},
 }
 function Ward.GetEarlyGameWardSpots()
@@ -214,6 +273,13 @@ local function DropDeepEnemySpots(list)
 	end
 	return kept
 end
+-- Twin Gates: only the new spots (game 067, maintainer: the old corner spots are too risky - Vengeful Spirit walked past
+-- the enemy wave and heroes at 9:00 to plant a sentry there - so they were removed).
+local function ConsiderGates(spots, consider)
+	for i = 1, #GateSpots do
+		consider(GateSpots[i])
+	end
+end
 -- Home/defend ground spots sit on our T3. Skip them until that lane's T1 is gone,
 -- unless enemies are already on the high ground (handled by the caller).
 local function HomeWardTooEarly(loc)
@@ -240,19 +306,48 @@ local function HomeWardTooEarly(loc)
 	end
 	return not sawTower or not laneOpen
 end
+-- Plant retry points around a spot (#15, mode_ward_generic.lua PlantRetry): 8 directions at 50, then at 100, as
+-- { x, y } pairs, nearest first.
+function Ward.RetryPoints(center)
+	local points = {}
+	for _, radius in ipairs({ 50, 100 }) do
+		for step = 0, 7 do
+			local angle = step * math.pi / 4
+			points[#points + 1] = { center.x + math.cos(angle) * radius, center.y + math.sin(angle) * radius }
+		end
+	end
+	return points
+end
 function Ward.WalkLimit(spot)
 	if spot and spot.role == "uber" then
 		return UBER_WALK
 	end
 	return 4000
 end
+-- Why a spot can't take an observer now (nil: it can). ward-near: one of our observers within OBS_GAP (the four Dire
+-- mid spots are within 1500 of each other, the two Radiant mid ones 1295 apart, so one observer holds the whole
+-- group); ally-going: another support walks there; enemy-sentry: a known enemy sentry within 1100; recent: planted
+-- or given up in the last 6 min.
+local function ObsBlockWhy(spot)
+	if spot == nil or spot.location == nil then
+		return "no-spot"
+	end
+	if Ward.IsOtherWardClose(spot.location, "npc_dota_observer_wards", OBS_GAP, true, false) then
+		return "ward-near"
+	end
+	if Ward.AllyGoingTo(spot.location, OBS_GAP) then
+		return "ally-going"
+	end
+	if Ward.IsThereEnemySentry(spot.location, 1100) then
+		return "enemy-sentry"
+	end
+	if spot.plant_time_obs ~= 0 and DotaTime() <= spot.plant_time_obs + 360 then
+		return "recent"
+	end
+	return nil
+end
 local function ObsFree(spot)
-	return spot ~= nil
-		and spot.location ~= nil
-		and not Ward.IsOtherWardClose(spot.location, "npc_dota_observer_wards", OBS_GAP, true, false)
-		and not Ward.AllyGoingTo(spot.location, OBS_GAP)
-		and not Ward.IsThereEnemySentry(spot.location, 1100)
-		and (spot.plant_time_obs == 0 or DotaTime() > spot.plant_time_obs + 360)
+	return ObsBlockWhy(spot) == nil
 end
 local function SentryFree(spot)
 	return spot ~= nil
@@ -292,7 +387,8 @@ local function NeedsCover(spot)
 end
 -- Lane spots (user call: after towers fall, bots never warded along the lane paths, only the fixed
 -- spots). For a lane where a tier-1 tower (either team's) is down, after 10:00: a point on the lane
--- path a little ahead of our wave, toward the enemy, so the vision follows the front both ways.
+-- path ahead of our wave (900, or farther to keep clear of our own towers, see PickLaneSpot), toward the
+-- enemy, so the vision follows the front both ways.
 -- Positions come from the game's lane data (GetLaneFrontLocation with a forward offset, as push.lua
 -- uses it backward with -500), so they are on walkable ground on the lane path. One spot table per
 -- lane is kept and moved only when the front has moved 900+, so a planted or given-up mark stays.
@@ -326,6 +422,164 @@ local function LaneTier1Down(lane)
 	local t1 = lane == LANE_TOP and TOWER_TOP_1 or lane == LANE_MID and TOWER_MID_1 or TOWER_BOT_1
 	return GetTower(TEAM_RADIANT, t1) == nil or GetTower(TEAM_DIRE, t1) == nil
 end
+-- Gap between a lane observer and our own towers (#15, game 080, 23:40: Largo planted a lane observer at the rim of
+-- our top T2's range, where the tower already sees most of what the ward sees). Maintainer's rule: the ward stands
+-- at least the tower's attack range plus the observer's vision away from every living tower of ours, so its vision
+-- starts where the tower's area ends. Observer vision 1600: 7.42 game files, item_ward_observer
+-- vision_range_tooltip 1600 (Valve datafeed item 42, the same). Tower range from tower:GetAttackRange() at runtime
+-- (700 in npc_units.txt for every tower, the fallback). LANE_GAP_MARGIN: the ward can land off the spot (the plant
+-- retry tries up to 100 out, PlantShort plants up to ~230 short of it), so the spot keeps that much more.
+local OBS_VISION = 1600
+local LANE_GAP_MARGIN = 250
+local OWN_TOWER_IDS = {
+	TOWER_TOP_1,
+	TOWER_TOP_2,
+	TOWER_TOP_3,
+	TOWER_MID_1,
+	TOWER_MID_2,
+	TOWER_MID_3,
+	TOWER_BOT_1,
+	TOWER_BOT_2,
+	TOWER_BOT_3,
+	TOWER_BASE_1,
+	TOWER_BASE_2,
+}
+function Ward.OwnTowerGap(range)
+	return (range or 700) + OBS_VISION
+end
+-- Our living towers as { x =, y =, range = } (plain numbers, for the pure helpers below).
+function Ward.OwnTowerList()
+	local towers = {}
+	for _, id in ipairs(OWN_TOWER_IDS) do
+		local tower = GetTower(GetTeam(), id)
+		if tower ~= nil and not tower:IsNull() then
+			local loc = tower:GetLocation()
+			towers[#towers + 1] = { x = loc.x, y = loc.y, range = tower:GetAttackRange() or 700 }
+		end
+	end
+	return towers
+end
+-- Pure: the distance from (x, y) to the nearest tower in towers, and the smallest margin (distance minus that
+-- tower's OwnTowerGap) over all of them. Both nil without towers.
+function Ward.OwnTowerClearance(x, y, towers)
+	local nearest, margin = nil, nil
+	for _, tower in ipairs(towers) do
+		local dist = math.sqrt((tower.x - x) ^ 2 + (tower.y - y) ^ 2)
+		local room = dist - Ward.OwnTowerGap(tower.range)
+		if nearest == nil or dist < nearest then
+			nearest = dist
+		end
+		if margin == nil or room < margin then
+			margin = room
+		end
+	end
+	return nearest, margin
+end
+-- Pure: picks the lane observer point. points are candidates on the lane path ahead of our wave, ordered from the
+-- wave forward, each { x =, y =, enemyNear = bool, inBase = bool }; first is the index of the preferred point (900
+-- ahead). Walks forward from it to the first point clear of our towers (margin >= extra); a point in enemy tower range
+-- or inside a base ends the walk (deeper is worse). When the preferred point itself is in enemy tower range, the
+-- points behind it are tried, back toward the wave (the old pull-back to 300), with the same own-tower rule.
+-- Returns the index, or nil and why ("own-tower", "enemy-tower", "base").
+function Ward.PickLaneSpot(points, first, towers, extra)
+	extra = extra or 0
+	local function clear(point)
+		local _, margin = Ward.OwnTowerClearance(point.x, point.y, towers)
+		return margin == nil or margin >= extra
+	end
+	local why = "own-tower"
+	for i = first, #points do
+		local point = points[i]
+		if point.inBase then
+			why = "base"
+			break
+		end
+		if point.enemyNear then
+			why = "enemy-tower"
+			break
+		end
+		if clear(point) then
+			return i
+		end
+	end
+	if points[first] ~= nil and points[first].enemyNear then
+		for i = first - 1, 1, -1 do
+			local point = points[i]
+			if not point.enemyNear and not point.inBase and clear(point) then
+				return i
+			end
+		end
+	end
+	return nil, why
+end
+-- Offsets ahead of the wave the lane spot can take: 300 and 600 (pull-back), 900 (preferred), then forward in steps
+-- of 300 up to 6900. A fixed list: GetLaneFrontLocation is called once per offset, at most every LANE_RECALC seconds.
+local LANE_OFFSETS = {}
+for offset = 300, 6900, 300 do
+	LANE_OFFSETS[#LANE_OFFSETS + 1] = offset
+end
+local LANE_FIRST = LANE_AHEAD / 300
+local LANE_RECALC = 2
+local laneCalc = {}
+local laneLog = {}
+local LANE_NAMES = { [LANE_TOP] = "top", [LANE_MID] = "mid", [LANE_BOT] = "bot" }
+-- One line per lane when its spot moves or when the lane has none (and why changed): `[SHy-WARD] lane-spot`.
+local function LaneSpotLog(lane, key, text)
+	if laneLog[lane] == key then
+		return
+	end
+	laneLog[lane] = key
+	local me = GetBot()
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s lane-spot lane=%s %s",
+			DotaTime(),
+			me ~= nil and (string.gsub(me:GetUnitName(), "npc_dota_hero_", "")) or "?",
+			LANE_NAMES[lane] or tostring(lane),
+			text
+		)
+	)
+end
+-- The lane observer point for one lane: { loc =, offset = } or { why = } when there is none.
+local function LaneSpotPick(lane, fountain, enemyFountain)
+	local calc = laneCalc[lane]
+	if calc ~= nil and DotaTime() - calc.t < LANE_RECALC then
+		return calc
+	end
+	local points = {}
+	for idx, offset in ipairs(LANE_OFFSETS) do
+		local loc = GetLaneFrontLocation(GetTeam(), lane, offset)
+		if loc == nil then
+			break
+		end
+		-- Not under an enemy tower (user question: a wave pushing their T2 put the spot in its range; the deep filter
+		-- only covers towers that still have an outer tower in front). Not inside either base: a front pushed to a
+		-- barracks is a siege, not a ward spot.
+		points[idx] = {
+			x = loc.x,
+			y = loc.y,
+			loc = loc,
+			offset = offset,
+			enemyNear = NearEnemyTower(loc),
+			inBase = fountain ~= nil
+				and enemyFountain ~= nil
+				and (Fu.GetDistance(loc, fountain) < 4000 or Fu.GetDistance(loc, enemyFountain) < 4000),
+		}
+	end
+	local idx, why = nil, "no-front"
+	if points[LANE_FIRST] ~= nil then
+		idx, why = Ward.PickLaneSpot(points, LANE_FIRST, Ward.OwnTowerList(), LANE_GAP_MARGIN)
+	end
+	calc = { t = DotaTime() }
+	if idx ~= nil then
+		calc.loc, calc.offset = points[idx].loc, points[idx].offset
+	else
+		calc.why = why
+	end
+	laneCalc[lane] = calc
+	return calc
+end
 local function LaneSpots()
 	local out = {}
 	if DotaTime() < 10 * 60 then
@@ -335,22 +589,9 @@ local function LaneSpots()
 	local enemyFountain = Fu.GetEnemyFountain and Fu.GetEnemyFountain() or nil
 	for _, lane in ipairs({ LANE_TOP, LANE_MID, LANE_BOT }) do
 		if LaneTier1Down(lane) then
-			local loc = GetLaneFrontLocation(GetTeam(), lane, LANE_AHEAD)
-			-- Not under an enemy tower (user question: a wave pushing their T2 put the spot in its
-			-- range; the deep filter only covers towers that still have an outer tower in front).
-			-- Pull back to 300 ahead of the wave, else no lane spot for now.
-			if loc ~= nil and NearEnemyTower(loc) then
-				loc = GetLaneFrontLocation(GetTeam(), lane, 300)
-				if loc ~= nil and NearEnemyTower(loc) then
-					loc = nil
-				end
-			end
-			-- Not inside either base: a front pushed to a barracks is a siege, not a ward spot.
-			local inBase = fountain ~= nil
-				and enemyFountain ~= nil
-				and loc ~= nil
-				and (Fu.GetDistance(loc, fountain) < 4000 or Fu.GetDistance(loc, enemyFountain) < 4000)
-			if loc ~= nil and not inBase then
+			local pick = LaneSpotPick(lane, fountain, enemyFountain)
+			local loc = pick.loc
+			if loc ~= nil then
 				local cur = laneSpots[lane]
 				if cur == nil or Fu.GetDistance(cur.location, loc) >= 900 then
 					local ours = fountain ~= nil
@@ -358,10 +599,31 @@ local function LaneSpots()
 						and Fu.GetDistance(loc, fountain) < Fu.GetDistance(loc, enemyFountain)
 					local ourSide = TeamSide()
 					local side = ours and ourSide or (ourSide == "radiant" and "dire" or "radiant")
-					cur = { location = loc, plant_time_obs = 0, plant_time_sentry = 0, role = "lane", side = side }
+					cur = {
+						location = loc,
+						plant_time_obs = 0,
+						plant_time_sentry = 0,
+						role = "lane",
+						side = side,
+						lane = LANE_NAMES[lane],
+					}
 					laneSpots[lane] = cur
+					local nearest = Ward.OwnTowerClearance(loc.x, loc.y, Ward.OwnTowerList())
+					LaneSpotLog(
+						lane,
+						string.format("%.0f,%.0f", loc.x, loc.y),
+						string.format(
+							"at=%.0f,%.0f ahead=%d ownTower=%.0f",
+							loc.x,
+							loc.y,
+							pick.offset or -1,
+							nearest or 99999
+						)
+					)
 				end
 				out[#out + 1] = cur
+			else
+				LaneSpotLog(lane, "none:" .. tostring(pick.why), "none why=" .. tostring(pick.why))
 			end
 		end
 	end
@@ -428,60 +690,178 @@ local function DefendingHighGround()
 	local enemiesNearAncient = ancient ~= nil and Fu.Utils.CountEnemyHeroesNear(ancient:GetLocation(), 2500) or 0
 	return enemiesNearAncient >= 1 or Fu.Utils.CountEnemyHeroesOnHighGround(GetTeam()) >= 1
 end
+-- One line per eye cliff and list (obs / sentry) held back, at most once a minute per spot and list.
+local function UberSkipLog(bot, spot, why, list)
+	spot._uberSkipLogAt = spot._uberSkipLogAt or {}
+	if DotaTime() < (spot._uberSkipLogAt[list] or -999) then
+		return
+	end
+	spot._uberSkipLogAt[list] = DotaTime() + 60
+	print(
+		string.format(
+			"[SHy-WARD] t=%.0f %s uber-skip why=%s spot=%s at=%.0f,%.0f list=%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			why,
+			tostring(spot.label or spot.side),
+			spot.location.x,
+			spot.location.y,
+			list
+		)
+	)
+end
+-- Why each labelled spot (the maintainer's pings) is on the observer list or not (#15, game 087 item 7: most labels
+-- took no ward and no line said why). `[SHy-WARD] t= <hero> offer <label>=<why> ...`: ok:<dist> = offered (the
+-- nearest offered spot is taken, an eye cliff within 7000 first); else the reason (ObsBlockWhy, own-side, late = an
+-- early spot after the early game, before-6min, no-cover, defending, pushing, home-too-early, not-pushing, too-deep).
+-- Per bot, when a reason changes (at most every 30s) or every 120s.
+local function OfferLog(bot, labelled, offer)
+	if #labelled == 0 then
+		return
+	end
+	local keys, parts = {}, {}
+	for i = 1, #labelled do
+		local spot = labelled[i]
+		local why = offer[spot] or "?"
+		keys[i] = spot.label .. "=" .. why
+		if why == "ok" then
+			why = string.format("ok:%d", math.floor(GetUnitToLocationDistance(bot, spot.location)))
+		end
+		parts[i] = spot.label .. "=" .. why
+	end
+	local sig = table.concat(keys, " ")
+	local now = DotaTime()
+	local last = bot._wardOfferLog
+	if last ~= nil and (now < last.at + 30 or (sig == last.sig and now < last.at + 120)) then
+		return
+	end
+	bot._wardOfferLog = { at = now, sig = sig }
+	print(
+		string.format(
+			"[SHy-WARD] t=%.0f %s offer %s",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			table.concat(parts, " ")
+		)
+	)
+end
+-- Drops the deep enemy spots, marks the labelled ones it dropped, logs the labelled spots' reasons.
+local function FinishObserverSpots(bot, spots, labelled, offer)
+	local kept = DropDeepEnemySpots(spots)
+	local keptSet = {}
+	for i = 1, #kept do
+		keptSet[kept[i]] = true
+	end
+	for i = 1, #labelled do
+		local spot = labelled[i]
+		if offer[spot] == "ok" and not keptSet[spot] then
+			offer[spot] = "too-deep"
+		end
+	end
+	OfferLog(bot, labelled, offer)
+	return kept
+end
 function Ward.GetAvailabeObserverWardSpots(bot)
 	local spots = {}
+	local ourSide = TeamSide()
+	-- The labelled spots this team can use, in log order, and why each is (not) offered.
+	local labelled, offer = {}, {}
+	local function label(spot, why)
+		if spot.label ~= nil then
+			if offer[spot] == nil then
+				labelled[#labelled + 1] = spot
+			end
+			offer[spot] = why
+		end
+	end
+	for _, spot in pairs(Ward.GetEarlyGameWardSpots()) do
+		label(spot, "late")
+	end
+	for i = 1, #UberWardSpots do
+		label(UberWardSpots[i], "before-6min")
+	end
+	for i = 1, #GateSpots do
+		label(GateSpots[i], "before-6min")
+	end
 	if DotaTime() < 0 or Fu.IsEarlyGame() then
-		local ourSide = TeamSide()
 		for _, spot in pairs(Ward.GetEarlyGameWardSpots()) do
 			-- Early observers go on the enemy side. Own-side cliffs look back into our jungle.
-			if ObsFree(spot) and (spot.side ~= ourSide or spot.safe) then
+			local why = ObsBlockWhy(spot)
+			if why == nil and not (spot.side ~= ourSide or spot.safe) then
+				why = "own-side"
+			end
+			label(spot, why or "ok")
+			if why == nil then
 				table.insert(spots, spot)
 			end
 		end
 		if DotaTime() < 6 * 60 then
-			return DropDeepEnemySpots(spots)
+			return FinishObserverSpots(bot, spots, labelled, offer)
 		end
 	end
-	local ourSide = TeamSide()
 	local defending = DefendingHighGround()
 	local pushing = not defending and EnemyOuterDown()
-	local function consider(spot)
-		if not ObsFree(spot) then
-			return
+	-- nil: the spot is offered; else why not.
+	local function check(spot)
+		local blockWhy = ObsBlockWhy(spot)
+		if blockWhy ~= nil then
+			return blockWhy
 		end
 		local onOurs = spot.side == ourSide
 		if not onOurs and NeedsCover(spot) and not EnemySideCovered(bot, spot.location) then
-			return
+			return "no-cover"
 		end
 		if spot.role == "uber" then
 			-- Own eye cliff looks back into our jungle. While pushing, ward the enemy cliff.
 			if defending and not onOurs then
-				return
+				return "defending"
 			end
 			if pushing and onOurs then
-				return
+				return "pushing"
+			end
+			-- Game 069 6:28 (maintainer): an observer on our own cliff with every tower up watches nothing. Our cliff is a
+			-- defensive ward (a lane of ours with its T1 down, as the hunt spots use), the enemy's an offensive one
+			-- (pushing, or past the early game).
+			local skipWhy = nil
+			if onOurs and not defending and HomeWardTooEarly(spot.location) then
+				skipWhy = "home-too-early"
+			elseif not onOurs and Fu.IsEarlyGame() and not pushing then
+				skipWhy = "not-pushing"
+			end
+			if skipWhy ~= nil then
+				UberSkipLog(bot, spot, skipWhy, "obs")
+				return skipWhy
 			end
 		elseif spot.role == "contest" then
 			if defending and not onOurs then
-				return
+				return "defending"
 			end
 		elseif spot.role == "hunt" then
 			if onOurs then
 				if not defending and HomeWardTooEarly(spot.location) then
-					return
+					return "home-too-early"
 				end
-			elseif defending or (Fu.IsEarlyGame() and not pushing) then
-				return
+			elseif defending then
+				return "defending"
+			elseif Fu.IsEarlyGame() and not pushing then
+				return "not-pushing"
 			end
 		elseif spot.role == "lane" then
 			-- Defending our high ground: no lane ward on their half.
 			if defending and not onOurs then
-				return
+				return "defending"
 			end
 		else
-			return
+			return "role"
 		end
-		table.insert(spots, spot)
+		return nil
+	end
+	local function consider(spot)
+		local why = check(spot)
+		label(spot, why or "ok")
+		if why == nil then
+			table.insert(spots, spot)
+		end
 	end
 	for _, spot in ipairs(LaneSpots()) do
 		consider(spot)
@@ -498,13 +878,11 @@ function Ward.GetAvailabeObserverWardSpots(bot)
 			consider(spot)
 		end
 	end
-	for i = 1, #GateSpots do
-		consider(GateSpots[i])
-	end
+	ConsiderGates(spots, consider)
 	for i = 1, #HuntSpots do
 		consider(HuntSpots[i])
 	end
-	return DropDeepEnemySpots(spots)
+	return FinishObserverSpots(bot, spots, labelled, offer)
 end
 function Ward.GetClosestObserverWardSpot(bot, spots)
 	local closestDistance = 100000
@@ -592,6 +970,34 @@ function Ward.GetObjectiveWardSpot(bot)
 	end
 	return best, kind
 end
+-- Which spot the sentry list wants after the early game (pure, tests/test_ward_rules.lua). Defending: our side only;
+-- pushing: their side only; else the contest spots and the eye cliffs. Our own eye cliff waits for the first T1 of
+-- ours to fall (homeTooEarly, HomeWardTooEarly), as on the observer list (#15, game 087: this list still offered it,
+-- and the ward think planted an observer there: Zuus two on the Dire bottom cliff at 7:01, Largo a sentry on the
+-- Radiant top cliff at 9:53 and an observer on the Radiant bottom cliff at 12:37, every T1 of theirs still up).
+-- Returns want, skipWhy (skipWhy: the cliff was held back).
+function Ward.SentryWant(role, onOurs, defending, pushing, homeTooEarly)
+	if defending then
+		return onOurs, nil
+	end
+	if pushing then
+		return not onOurs, nil
+	end
+	if role == "uber" and onOurs and homeTooEarly then
+		return false, "home-too-early"
+	end
+	return role == "contest" or role == "uber", nil
+end
+-- An own eye cliff while all our T1s stand and our high ground is not attacked (#15): no ward of ours belongs there.
+-- mode_ward_generic.lua prints `[SHy-WARD] cliff-early` when one goes down there anyway.
+function Ward.OwnCliffTooEarly(spot)
+	return spot ~= nil
+		and spot.role == "uber"
+		and spot.location ~= nil
+		and spot.side == TeamSide()
+		and not DefendingHighGround()
+		and HomeWardTooEarly(spot.location)
+end
 function Ward.GetPossibleSentryWardSpots(bot)
 	local spots = {}
 	local ourSide = TeamSide()
@@ -615,13 +1021,14 @@ function Ward.GetPossibleSentryWardSpots(bot)
 		if not onOurs and NeedsCover(spot) and not EnemySideCovered(bot, spot.location) then
 			return
 		end
-		local want = false
-		if defending then
-			want = onOurs
-		elseif pushing then
-			want = not onOurs
-		else
-			want = spot.role == "contest" or spot.role == "uber"
+		local homeTooEarly = spot.role == "uber"
+			and onOurs
+			and not defending
+			and not pushing
+			and HomeWardTooEarly(spot.location)
+		local want, skipWhy = Ward.SentryWant(spot.role, onOurs, defending, pushing, homeTooEarly)
+		if skipWhy ~= nil then
+			UberSkipLog(bot, spot, skipWhy, "sentry")
 		end
 		if want then
 			table.insert(spots, spot)
@@ -633,9 +1040,7 @@ function Ward.GetPossibleSentryWardSpots(bot)
 	for i = 1, #RoshSpots do
 		consider(RoshSpots[i])
 	end
-	for i = 1, #GateSpots do
-		consider(GateSpots[i])
-	end
+	ConsiderGates(spots, consider)
 	for i = 1, #HuntSpots do
 		consider(HuntSpots[i])
 	end

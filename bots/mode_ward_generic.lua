@@ -28,6 +28,8 @@ local sentryCastRange = 500
 local observerWard = nil
 local sentryWard = nil
 local wardSpot = nil
+-- Which pick set wardSpot (objective, observer or sentry), for the goal line.
+local wardSpotKind = nil
 local wardModeOffUntil = -math.huge
 -- Switched off on purpose: the ping when a ward is planted (user request) and per-try plant logging. The ward chat
 -- lines need `!debug` instead (ChatRules).
@@ -48,6 +50,27 @@ end
 local function DispenserHasObservers(item)
 	return item ~= nil and (item:GetCurrentCharges() or 0) > 0
 end
+-- Observers and sentries the bot holds (dispenser: current = observers, secondary = sentries).
+local function WardCharges()
+	local obs, sen = 0, 0
+	for slot = 0, 8 do
+		local item = bot:GetItemInSlot(slot)
+		if item ~= nil then
+			local itemName = item:GetName()
+			if itemName == "item_ward_observer" then
+				obs = obs + (item:GetCurrentCharges() or 0)
+			elseif itemName == "item_ward_sentry" then
+				sen = sen + (item:GetCurrentCharges() or 0)
+			elseif itemName == "item_ward_dispenser" then
+				obs = obs + (item:GetCurrentCharges() or 0)
+				sen = sen + DispenserSentryCharges(item)
+			end
+		end
+	end
+	return obs, sen
+end
+-- Defined below AnnounceWard: the result of a dispenser cast the ward think no longer watches (#15).
+local CheckDispenserTry
 -- Plant from a Ward Dispenser. Which toggle state means observer is not documented, and the old
 -- code toggled whenever the state read false and returned, so the next think could toggle it
 -- back: game 014 Lina and game 016 Techies stood on the bottom-rune spot holding a dispenser and
@@ -57,6 +80,10 @@ end
 -- issued an order or is waiting on one.
 -- Game 031, 0:31: Earthshaker at a top ward spot with a dispenser holding 1 observer kept
 -- switching it and never planted; nothing in the log. Each dispenser order is logged.
+-- " <label>" for a spot that has one (bots/lib/systems/ward.lua, the game 063 pings), else "".
+local function SpotLabel(spot)
+	return spot ~= nil and spot.label ~= nil and (" " .. spot.label) or ""
+end
 local function DispLog(step, item, loc, wantObs, obs, sen)
 	local okT, tog = pcall(function()
 		return item:GetToggleState()
@@ -64,7 +91,7 @@ local function DispLog(step, item, loc, wantObs, obs, sen)
 	pcall(
 		print,
 		string.format(
-			"[SHy-WARD] t=%.1f %s dispenser %s want=%s obs=%d sen=%d toggle=%s dist=%.0f",
+			"[SHy-WARD] t=%.1f %s dispenser %s want=%s obs=%d sen=%d toggle=%s dist=%.0f at=%.0f,%.0f%s",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			step,
@@ -72,7 +99,10 @@ local function DispLog(step, item, loc, wantObs, obs, sen)
 			obs,
 			sen,
 			okT and tostring(tog) or "?",
-			GetUnitToLocationDistance(bot, loc)
+			GetUnitToLocationDistance(bot, loc),
+			loc.x,
+			loc.y,
+			SpotLabel(wardSpot)
 		)
 	)
 end
@@ -82,6 +112,9 @@ local function DispenserPlant(item, loc, wantObs)
 	local sen = DispenserSentryCharges(item)
 	local pendingTry = bot._dispTry
 	if pendingTry ~= nil and (pendingTry.loc ~= loc or pendingTry.wantObs ~= wantObs or now - pendingTry.at > 4) then
+		-- A new spot or a stale try: the old cast may have planted (game 068: the next spot is picked once the ward
+		-- is down, and the planted line was lost). Log it before the new cast.
+		CheckDispenserTry(pendingTry.loc ~= loc and "new-cast" or "stale")
 		pendingTry = nil
 	end
 	if pendingTry == nil then
@@ -91,6 +124,7 @@ local function DispenserPlant(item, loc, wantObs)
 		local okT, tog = pcall(function()
 			return item:GetToggleState()
 		end)
+		local allObs, allSen = WardCharges()
 		if okT and type(tog) == "boolean" and tog ~= wantObs then
 			bot._dispTry = {
 				at = now,
@@ -101,12 +135,26 @@ local function DispenserPlant(item, loc, wantObs)
 				toggled = true,
 				recast = true,
 				castAt = now + 0.4,
+				spot = wardSpot,
+				allObs = allObs,
+				allSen = allSen,
 			}
 			DispLog("pre-toggle", item, loc, wantObs, obs, sen)
 			bot:Action_UseAbilityOnEntity(item, bot)
 			return true
 		end
-		bot._dispTry = { at = now, loc = loc, wantObs = wantObs, obs = obs, sen = sen, toggled = false, castAt = now }
+		bot._dispTry = {
+			at = now,
+			loc = loc,
+			wantObs = wantObs,
+			obs = obs,
+			sen = sen,
+			toggled = false,
+			castAt = now,
+			spot = wardSpot,
+			allObs = allObs,
+			allSen = allSen,
+		}
 		DispLog("cast", item, loc, wantObs, obs, sen)
 		bot:Action_UseAbilityOnLocation(item, loc)
 		return true
@@ -158,20 +206,54 @@ local function PickChat(key, fallback)
 	end
 	return fallback
 end
-local function RememberWard(kind)
-	if wardSpot == nil or wardSpot.location == nil then
+-- Each ward placed, once (#15, game 087 item 7): a plain Observer or Sentry Ward printed no line with its spot's
+-- label (Zuus's t=25 observer on mid-dire-2 showed only in the end-of-game dump), so a label that took one looked
+-- unused. A plain ward is placed on the order, a dispenser ward once its charge went down. `cliff-early`: the spot is
+-- our own eye cliff while all our T1s stand (Ward.OwnCliffTooEarly); no pick should lead there.
+local function RememberWard(kind, spot, at)
+	spot = spot or wardSpot
+	if spot == nil or spot.location == nil then
 		return
 	end
-	local x = math.floor(wardSpot.location.x)
-	local y = math.floor(wardSpot.location.y)
+	local x = math.floor(spot.location.x)
+	local y = math.floor(spot.location.y)
 	local now = DotaTime()
 	local last = planted[#planted]
 	if last and last.kind == kind and last.x == x and last.y == y and now - last.t < 20 then
 		return
 	end
-	planted[#planted + 1] = { t = now, kind = kind, role = wardSpot.role or "spot", x = x, y = y }
+	planted[#planted + 1] = { t = now, kind = kind, role = spot.role or "spot", x = x, y = y, label = spot.label }
 	if #planted > 40 then
 		table.remove(planted, 1)
+	end
+	local loc = at or spot.location
+	local name = (string.gsub(bot:GetUnitName(), "npc_dota_hero_", ""))
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s placed kind=%s role=%s at=%.0f,%.0f spot=%s",
+			now,
+			name,
+			kind,
+			tostring(spot.role or "spot"),
+			loc.x,
+			loc.y,
+			tostring(spot.label or "-")
+		)
+	)
+	if Ward.OwnCliffTooEarly(spot) then
+		pcall(
+			print,
+			string.format(
+				"[SHy-WARD] t=%.0f %s cliff-early kind=%s spot=%s at=%.0f,%.0f",
+				now,
+				name,
+				kind,
+				tostring(spot.label or "-"),
+				loc.x,
+				loc.y
+			)
+		)
 	end
 end
 -- Each bot's ward list, once, near the end of the game. Bot scripts stop when the game enters POST_GAME (game 050:
@@ -205,21 +287,68 @@ local function DumpWards()
 		local entry = planted[idx]
 		print(
 			string.format(
-				"[SHy-WARD] %s %s t=%.0f role=%s %d,%d",
+				"[SHy-WARD] %s %s t=%.0f role=%s %d,%d%s",
 				name,
 				entry.kind,
 				entry.t,
 				entry.role,
 				entry.x,
-				entry.y
+				entry.y,
+				entry.label ~= nil and (" " .. entry.label) or ""
 			)
 		)
 	end
 end
-local function AnnounceWard(kind)
-	RememberWard(kind)
-	local role = wardSpot and wardSpot.role or nil
-	local wardLoc = wardSpot and wardSpot.location or nil
+-- A lane observer down (#15, game 080): where it went and how far it stands from our nearest living tower.
+-- `ownTower` = that distance, `need` = that tower's range + observer vision 1600 (Ward.OwnTowerGap), `margin` = the
+-- smallest distance minus need over all our towers (>= 0: the ward's vision starts where every tower's area ends).
+-- at = the point the ward was cast on (a plant retry or PlantShort can put it off the spot). Once per ward: the
+-- dispenser path can announce the same plant twice.
+local function LaneObsLog(spot, at)
+	if spot == nil or spot.role ~= "lane" then
+		return
+	end
+	local loc = at or spot.location
+	if loc == nil then
+		return
+	end
+	local last = bot._laneObsLog
+	if last ~= nil and last.spot == spot and DotaTime() - last.t < 20 then
+		return
+	end
+	bot._laneObsLog = { spot = spot, t = DotaTime() }
+	local towers = Ward.OwnTowerList()
+	local nearest, margin = Ward.OwnTowerClearance(loc.x, loc.y, towers)
+	local need = 0
+	for _, tower in ipairs(towers) do
+		local dist = math.sqrt((tower.x - loc.x) ^ 2 + (tower.y - loc.y) ^ 2)
+		if nearest ~= nil and dist <= nearest then
+			need = Ward.OwnTowerGap(tower.range)
+		end
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s lane-obs planted lane=%s at=%.0f,%.0f ownTower=%.0f need=%.0f margin=%.0f",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			tostring(spot.lane or "?"),
+			loc.x,
+			loc.y,
+			nearest or 99999,
+			need,
+			margin or 99999
+		)
+	)
+end
+local function AnnounceWard(kind, spot, at)
+	spot = spot or wardSpot
+	RememberWard(kind, spot, at)
+	if kind == "observer" then
+		LaneObsLog(spot, at)
+	end
+	local role = spot and spot.role or nil
+	local wardLoc = spot and spot.location or nil
 	MatchTrace.Item(
 		bot,
 		kind == "sentry" and "item_ward_sentry" or "item_ward_observer",
@@ -256,14 +385,135 @@ local function AnnounceWard(kind)
 			"[debug] ward %s role=%s at (%.0f, %.0f)",
 			kind,
 			tostring(role or "n/a"),
-			wardSpot and wardSpot.location.x or 0,
-			wardSpot and wardSpot.location.y or 0
+			wardLoc and wardLoc.x or 0,
+			wardLoc and wardLoc.y or 0
 		)
 		bot:ActionImmediate_Chat(extra, false)
 	end
 end
+-- The result of a dispenser cast (#15). DispenserPlant saw the charge drop only when the ward think ran again at the
+-- same spot. Game 068: 3 of 48 dispenser casts printed `dispenser planted`, while the courier tracker showed the
+-- charge going down after most of them (`[SHy-COURIER] dispenser obs=2->1`): once the ward is down the next think
+-- picks another spot (the planted one leaves the list), or another mode takes over, and the try was dropped
+-- unlogged; RememberWard missed those wards too. Checked here on every GetDesire while the bot is out of the ward
+-- mode or the ward mode moved on to the next spot, and by DispenserPlant before it starts a new try. Counts all
+-- wards held (WardCharges), in case the dispenser turns into a plain ward item when one kind runs out. A ward went
+-- down since the cast: planted (via= where it was seen), remembered, the spot marked. Charges that went up (a
+-- courier delivery) raise the baseline. A try with no drop for 6s is dropped.
+CheckDispenserTry = function(via)
+	local try = bot._dispTry
+	if try == nil or try.allObs == nil then
+		return
+	end
+	local now = DotaTime()
+	local obs, sen = WardCharges()
+	local obsDown, senDown = obs < try.allObs, sen < try.allSen
+	if obsDown or senDown then
+		bot._dispTry = nil
+		local kind = obsDown and "observer" or "sentry"
+		local spot = try.spot
+		if spot ~= nil then
+			if obsDown then
+				spot.plant_time_obs = now
+			else
+				spot.plant_time_sentry = now
+			end
+		end
+		pcall(
+			print,
+			string.format(
+				"[SHy-WARD] t=%.1f %s dispenser planted want=%s got=%s obs=%d sen=%d via=%s after=%.1f at=%.0f,%.0f%s",
+				now,
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				try.wantObs and "obs" or "sentry",
+				obsDown and "obs" or "sentry",
+				obs,
+				sen,
+				tostring(via),
+				now - try.at,
+				try.loc.x,
+				try.loc.y,
+				SpotLabel(spot)
+			)
+		)
+		AnnounceWard(kind, spot, try.loc)
+		return
+	end
+	try.allObs, try.allSen = math.max(try.allObs, obs), math.max(try.allSen, sen)
+	if now - try.at > 6 then
+		bot._dispTry = nil
+	end
+end
+-- Plant retry (#15). The maintainer's pinged eye-cliff spots (Radiant top, Dire bottom) took no ward: the bot stood in
+-- range with a Ward Dispenser and the order did nothing for 5s (`give-up why=in-range-no-plant`, games 018-062:
+-- 36 and 39 times). Before giving up, the cast goes to points around the ping, 8 directions at 50 and then at 100,
+-- RETRY_STEP seconds each (the dispenser's cast, and its toggle-and-recast after 1s, fit in it). A point where the
+-- charges went down is kept as the spot's plant point for the rest of the game. A spot where no point worked is
+-- given up at once the next time. Only the dispenser path gets here: a plain ward or sentry marks its spot on the
+-- order, so the bot moves on before 5s. `[SHy-WARD] plant-retry spot= tried= at= ok=`.
+local RETRY_STEP = 1.5
+-- Where to cast for a spot: the retry point being tried, else the point that worked, else the spot.
+local function PlantLoc(spot)
+	return spot._retryLoc or spot.plantAt or spot.location
+end
+local function EndPlantRetry(retry, ok)
+	local spot = retry.spot
+	spot._retryLoc = nil
+	if ok then
+		spot.plantAt = retry.loc
+	else
+		spot._retryFailed = retry.loc == nil or retry.idx > #retry.points
+		spot.plantAt = nil
+	end
+	bot._plantRetry = nil
+	local center = spot.ping or spot.location
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s plant-retry spot=%.0f,%.0f tried=%d at=%s ok=%s%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			center.x,
+			center.y,
+			math.min(retry.idx, #retry.points),
+			ok and string.format("%.0f,%.0f", retry.loc.x, retry.loc.y) or "-",
+			tostring(ok),
+			SpotLabel(spot)
+		)
+	)
+end
+-- A ward went down since the retry started: that point worked. A retry that stopped being driven (another mode, the
+-- bot died) for 3s ends without a result.
+local function CheckPlantRetry()
+	local retry = bot._plantRetry
+	if retry == nil then
+		return
+	end
+	local obs, sen = WardCharges()
+	if obs < retry.obs or sen < retry.sen then
+		if obs < retry.obs then
+			retry.spot.plant_time_obs = DotaTime()
+		else
+			retry.spot.plant_time_sentry = DotaTime()
+		end
+		bot._wardAtSpotSince = nil
+		EndPlantRetry(retry, retry.loc ~= nil)
+		return
+	end
+	-- A courier delivery adds charges: count from there.
+	retry.obs, retry.sen = math.max(retry.obs, obs), math.max(retry.sen, sen)
+	if DotaTime() - retry.lastStep > 3 then
+		EndPlantRetry(retry, false)
+	end
+end
 function GetDesire()
 	DumpWards()
+	CheckPlantRetry()
+	-- Out of the ward mode, or once the ward mode moved on to another spot, nobody else watches a dispenser cast
+	-- (DispenserPlant does only at the spot it cast on).
+	if bot._dispTry ~= nil and (bot:GetActiveMode() ~= BOT_MODE_WARD or bot._dispTry.spot ~= wardSpot) then
+		CheckDispenserTry(bot:GetActiveMode() ~= BOT_MODE_WARD and "mode-left" or "next-spot")
+	end
 	if ShouldSkipBotThink(GetBot()) then
 		return 0
 	end
@@ -352,6 +602,7 @@ function GetDesireHelper()
 		local obj, kind = Ward.GetObjectiveWardSpot(bot)
 		if obj and (not WardMode.IsEnemyCloserToWardLocation(obj.location) or Fu.IsRealInvisible(bot)) then
 			wardSpot = obj
+			wardSpotKind = "objective"
 			if DotaTime() >= (bot._objWardLogAt or -999) + 20 then
 				bot._objWardLogAt = DotaTime()
 				pcall(
@@ -373,6 +624,7 @@ function GetDesireHelper()
 	if observerWard ~= nil and (observerInInventory and Fu.CanCastAbility(observerWard) or not observerInInventory) then
 		local observerSpots = Ward.GetAvailabeObserverWardSpots(bot)
 		wardSpot = Ward.GetClosestObserverWardSpot(bot, observerSpots)
+		wardSpotKind = "observer"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -387,6 +639,7 @@ function GetDesireHelper()
 	if sentryWard ~= nil and (sentryInInventory and Fu.CanCastAbility(sentryWard) or not sentryInInventory) then
 		local sentrySpots = Ward.GetPossibleSentryWardSpots(bot)
 		wardSpot = Ward.GetClosestSentryWardSpot(bot, sentrySpots)
+		wardSpotKind = "sentry"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -406,24 +659,6 @@ end
 -- observers, secondary = sentries). LogPlantTry: each cast order at a spot (every 1s at most)
 -- with distance, whether the spot and the bot's spot are walkable, and the charges.
 -- WatchPlant: when the charges go down after a try, [SHy-WARD] planted ... (the try worked).
-local function WardCharges()
-	local obs, sen = 0, 0
-	for slot = 0, 8 do
-		local item = bot:GetItemInSlot(slot)
-		if item ~= nil then
-			local itemName = item:GetName()
-			if itemName == "item_ward_observer" then
-				obs = obs + (item:GetCurrentCharges() or 0)
-			elseif itemName == "item_ward_sentry" then
-				sen = sen + (item:GetCurrentCharges() or 0)
-			elseif itemName == "item_ward_dispenser" then
-				obs = obs + (item:GetCurrentCharges() or 0)
-				sen = sen + DispenserSentryCharges(item)
-			end
-		end
-	end
-	return obs, sen
-end
 -- Plant tries are no longer printed (ward planting works); kept as a no-op for the call sites.
 local function LogPlantTry(kind, item, loc)
 	if not LOG_PLANT_TRIES then
@@ -493,12 +728,13 @@ local function GiveUpWardSpot(why)
 	pcall(
 		print,
 		string.format(
-			"[SHy-WARD] t=%.0f %s give-up why=%s spot=%s obs=%s sentry=%s",
+			"[SHy-WARD] t=%.0f %s give-up why=%s spot=%s obs=%s sentry=%s%s",
 			now,
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			why,
 			wardSpot ~= nil and string.format("%.0f,%.0f", wardSpot.location.x, wardSpot.location.y) or "-",
 			observerWard ~= nil
+					and not observerWard:IsNull()
 					and string.format(
 						"%s/slot%d/%s",
 						observerWard:GetName(),
@@ -507,13 +743,15 @@ local function GiveUpWardSpot(why)
 					)
 				or "-",
 			sentryWard ~= nil
+					and not sentryWard:IsNull()
 					and string.format(
 						"%s/slot%d/%s",
 						sentryWard:GetName(),
 						bot:FindItemSlot(sentryWard:GetName()),
 						tostring(Fu.CanCastAbility(sentryWard))
 					)
-				or "-"
+				or "-",
+			SpotLabel(wardSpot)
 		)
 	)
 end
@@ -522,6 +760,10 @@ function Think()
 		return
 	end
 	DumpWards()
+	CheckPlantRetry()
+	if bot._plantRetry ~= nil and bot._plantRetry.spot ~= wardSpot then
+		EndPlantRetry(bot._plantRetry, false)
+	end
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
@@ -531,6 +773,9 @@ function Think()
 	then
 		bot._wardAtSpotSince = bot._wardAtSpotSince or DotaTime()
 		if DotaTime() - bot._wardAtSpotSince >= 5 then
+			if WardMode.PlantRetry() then
+				return
+			end
 			GiveUpWardSpot("in-range-no-plant")
 			return
 		end
@@ -576,7 +821,11 @@ local function ValidateSpot(spot)
 	end
 	spot._checked = true
 	local loc = spot.location
-	if IsLocationPassable(loc) then
+	-- The ping the plant retry circles (#15): the spot as written, before any move.
+	spot.ping = spot.ping or loc
+	-- The Radiant top and Dire bottom eye cliffs stay where they were pinged (keep, #15): moving them to walkable
+	-- ground put them where no ward ever planted. The plant retry handles a ping the order can't plant on.
+	if spot.keep or IsLocationPassable(loc) then
 		return
 	end
 	for radius = 50, 250, 50 do
@@ -633,7 +882,8 @@ local function MarkEarlyWard(spot)
 end
 -- Plant the observer from where he stands, as far toward the spot as the cast range allows.
 function WardMode.PlantShort()
-	if wardSpot == nil or observerWard == nil or not Fu.CanCastAbility(observerWard) then
+	-- A sentry pick takes no observer (see WardThink).
+	if wardSpot == nil or wardSpotKind == "sentry" or observerWard == nil or not Fu.CanCastAbility(observerWard) then
 		return false
 	end
 	if observerWard:GetName() == "item_ward_dispenser" and not DispenserHasObservers(observerWard) then
@@ -656,6 +906,8 @@ function WardMode.PlantShort()
 	)
 	pcall(MarkEarlyWard, wardSpot)
 	if observerWard:GetName() == "item_ward_observer" then
+		-- A plain ward plants on the order (no AnnounceWard here): log a short lane plant now.
+		LaneObsLog(wardSpot, loc)
 		bot:Action_UseAbilityOnLocation(observerWard, loc)
 	else
 		DispenserPlant(observerWard, loc, true)
@@ -663,35 +915,84 @@ function WardMode.PlantShort()
 	wardSpot.plant_time_obs = DotaTime()
 	return true
 end
+-- One retry step (see RETRY_STEP above). True while the retry goes on, false when there is nothing (left) to try.
+function WardMode.PlantRetry()
+	local spot = wardSpot
+	if spot == nil or spot.location == nil then
+		return false
+	end
+	local now = DotaTime()
+	local retry = bot._plantRetry
+	if retry == nil or retry.spot ~= spot then
+		-- The remembered point stopped working: retry from scratch.
+		if spot._retryFailed and spot.plantAt == nil then
+			return false
+		end
+		spot.plantAt = nil
+		local obs, sen = WardCharges()
+		retry = {
+			spot = spot,
+			points = Ward.RetryPoints(spot.ping or spot.location),
+			idx = 0,
+			at = -999,
+			obs = obs,
+			sen = sen,
+			lastStep = now,
+		}
+		bot._plantRetry = retry
+	end
+	retry.lastStep = now
+	if now - retry.at >= RETRY_STEP then
+		retry.idx = retry.idx + 1
+		local point = retry.points[retry.idx]
+		if point == nil then
+			EndPlantRetry(retry, false)
+			return false
+		end
+		local center = spot.ping or spot.location
+		retry.loc = Vector(point[1], point[2], center.z)
+		retry.at = now
+		spot._retryLoc = retry.loc
+	end
+	WardMode.WardThinkActed = false
+	WardMode.WardThink()
+	return true
+end
 function WardMode.WardThink()
 	pcall(ValidateSpot, wardSpot)
 	if wardSpot then
+		local plantLoc = PlantLoc(wardSpot)
+		-- No observer on a spot the sentry pick chose (#15, game 087): the sentry list doesn't check for our observers
+		-- or the observer rules, and a bot holding both kinds planted an observer there first. Zuus put two observers
+		-- on the Dire bottom cliff 1.6s apart at 7:01 (the spot stayed on the sentry list), and Largo one on our
+		-- Radiant bottom cliff at 12:37, 16s after the observer list had held it back (uber-skip home-too-early).
 		if
-			observerWard
+			wardSpotKind ~= "sentry"
+			and observerWard
 			and Fu.CanCastAbility(observerWard)
 			and (observerWard:GetName() ~= "item_ward_dispenser" or DispenserHasObservers(observerWard))
 		then
-			if GetUnitToLocationDistance(bot, wardSpot.location) <= observerCastRange then
+			if GetUnitToLocationDistance(bot, plantLoc) <= observerCastRange then
 				if observerWard:GetName() == "item_ward_observer" then
-					AnnounceWard("observer")
+					AnnounceWard("observer", nil, plantLoc)
 					WardMode.WardThinkActed = true
-					LogPlantTry("observer", observerWard, wardSpot.location)
+					LogPlantTry("observer", observerWard, plantLoc)
 					pcall(MarkEarlyWard, wardSpot)
-					bot:Action_UseAbilityOnLocation(observerWard, wardSpot.location)
+					bot:Action_UseAbilityOnLocation(observerWard, plantLoc)
 				else
 					WardMode.WardThinkActed = true
-					LogPlantTry("observer", observerWard, wardSpot.location)
+					LogPlantTry("observer", observerWard, plantLoc)
 					pcall(MarkEarlyWard, wardSpot)
-					if DispenserPlant(observerWard, wardSpot.location, true) then
+					if DispenserPlant(observerWard, plantLoc, true) then
 						return
 					end
-					AnnounceWard("observer")
+					AnnounceWard("observer", nil, plantLoc)
 				end
 				wardSpot.plant_time_obs = DotaTime()
 				return
 			else
 				WardMode.WardThinkActed = true
-				bot:Action_MoveToLocation(wardSpot.location)
+				bot:Action_MoveToLocation(plantLoc)
 				return
 			end
 		end
@@ -700,9 +1001,9 @@ function WardMode.WardThink()
 			and Fu.CanCastAbility(sentryWard)
 			and (sentryWard:GetName() ~= "item_ward_dispenser" or DispenserSentryCharges(sentryWard) > 0)
 		then
-			if GetUnitToLocationDistance(bot, wardSpot.location) <= sentryCastRange then
+			if GetUnitToLocationDistance(bot, plantLoc) <= sentryCastRange then
 				local scatterRadius = 0
-				if Ward.IsOtherWardClose(wardSpot.location, "npc_dota_observer_wards", 300, true, false) then
+				if Ward.IsOtherWardClose(plantLoc, "npc_dota_observer_wards", 300, true, false) then
 					scatterRadius = 30
 				end
 				-- A dispenser: plant through DispenserPlant (cast, watch the charges, toggle only
@@ -712,8 +1013,8 @@ function WardMode.WardThink()
 				-- sentries. Which state means which mode is not documented.
 				if sentryWard:GetName() == "item_ward_dispenser" then
 					WardMode.WardThinkActed = true
-					LogPlantTry("sentry", sentryWard, wardSpot.location)
-					if DispenserPlant(sentryWard, wardSpot.location, false) then
+					LogPlantTry("sentry", sentryWard, plantLoc)
+					if DispenserPlant(sentryWard, plantLoc, false) then
 						return
 					end
 					AnnounceWard("sentry")
@@ -723,13 +1024,13 @@ function WardMode.WardThink()
 				bot._wardToggleAt = nil
 				AnnounceWard("sentry")
 				WardMode.WardThinkActed = true
-				LogPlantTry("sentry", sentryWard, wardSpot.location)
-				bot:Action_UseAbilityOnLocation(sentryWard, wardSpot.location + RandomVector(scatterRadius))
+				LogPlantTry("sentry", sentryWard, plantLoc)
+				bot:Action_UseAbilityOnLocation(sentryWard, plantLoc + RandomVector(scatterRadius))
 				wardSpot.plant_time_sentry = DotaTime()
 				return
 			else
 				WardMode.WardThinkActed = true
-				bot:Action_MoveToLocation(wardSpot.location)
+				bot:Action_MoveToLocation(plantLoc)
 				return
 			end
 		end
