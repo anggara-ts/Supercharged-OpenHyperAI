@@ -303,8 +303,10 @@ local function LevelUpAbilities()
 		ReloadBotBuild("Position swap to pos" .. position)
 		bot.needPurchaseRebuild = true
 		if bot.isBear == nil and bot.announcedRole ~= position then
+			-- After a swap the line answers the player's command: not filtered as a repeat (game 088, #211).
+			local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
 			pcall(function()
-				bot:ActionImmediate_Chat(PlayPosLine(position), false)
+				ChatGuard.SayDirect(bot, PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
@@ -1090,18 +1092,11 @@ do
 		Fu.Role.PosSwapReply = nil
 		local said = "stale"
 		if not stale then
-			-- The same key as the repeat guard in global_overrides.lua: a repeat inside its window is dropped there, so
-			-- name it here instead of logging said=yes for a line nobody saw.
-			local guardKey = tostring(GetTeam()) .. "t:" .. reply.line
-			local lastSaid = ChatGuard.said and ChatGuard.said[guardKey]
-			local now = DotaTime()
-			if lastSaid ~= nil and now >= lastSaid and now - lastSaid < ChatGuard.REPEAT_WINDOW then
-				said = "guarded"
-			else
-				said = pcall(function()
-					bot:ActionImmediate_Chat(reply.line, false)
-				end) and "yes" or "error"
-			end
+			-- A reply to a typed command skips the repeat guard (game 088: the same command typed twice must be answered
+			-- twice), see ChatGuard.SayDirect.
+			said = pcall(function()
+				ChatGuard.SayDirect(bot, reply.line, false)
+			end) and "yes" or "error"
 		end
 		print(
 			string.format(
