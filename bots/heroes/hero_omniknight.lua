@@ -140,8 +140,7 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minionUnit)
 	Minion.MinionThink(minionUnit)
 end
@@ -230,7 +229,6 @@ function X.ConsiderQ()
 		heal = heal + talent7:GetSpecialValueInt("value")
 	end
 	local damageType = DAMAGE_TYPE_PURE
-	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange + radius)
 	local enemiesNearby = Fu.GetAroundEnemyHeroList(castRange + 200 + radius)
 	local allyHeroes = Fu.GetNearbyHeroes(bot, castRange + 350, false, BOT_MODE_NONE)
 	local allyCreeps = bot:GetNearbyCreeps(castRange + 200, false)
@@ -515,8 +513,6 @@ function X.ConsiderE()
 	local abilityLevel = hammerOfPurityAbility:GetLevel()
 	local damage = 25 * abilityLevel + 25 + bot:GetAttackDamage() * (0.5 + abilityLevel * 0.1)
 	local damageType = DAMAGE_TYPE_PURE
-	local allyHeroes = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
-	local enemyHeroesFar = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + 43, true, BOT_MODE_NONE)
 	local enemiesNearRange = Fu.GetNearbyHeroes(bot, castRange + 330, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(enemiesNearRange) do

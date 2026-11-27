@@ -10,6 +10,7 @@ local NumHumanBotPlayersInTeam = Utils.NumHumanBotPlayersInTeam
 local HeroRolesMap = require(GetScriptDirectory() .. "/lib/data/hero_roles_map")
 local EnemyRoleEstimation = require(GetScriptDirectory() .. "/lib/hero/enemy_role_estimation")
 local GetEnemyPosition = EnemyRoleEstimation.GetEnemyPosition
+local TeamOrder = require(GetScriptDirectory() .. "/lib/systems/team_order")
 Role.RoleAssignment = {
 	TEAM_RADIANT = { 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5 },
 	TEAM_DIRE = {
@@ -384,6 +385,7 @@ Role.GetPosition = function(bot)
 		local enemyPosition = GetEnemyPosition(bot:GetPlayerID())
 		return enemyPosition ~= nil and enemyPosition or 3
 	end
+	TeamOrder.LogOnce(bot, Role.RoleAssignment)
 	local position = bot.assignedRole
 	if position == nil and (GetGameMode() == GameMode.Cm or GetGameMode() == GameMode.ReverseCm) then
 		local humanCount, botCount = NumHumanBotPlayersInTeam(bot:GetTeam())
@@ -423,8 +425,11 @@ Role.GetPosition = function(bot)
 				end
 			end
 			if position == nil then
-				local slotIndex = bot:GetTeam() == Team.Radiant and playerId + 1 or playerId - 4
-				if slotIndex >= 1 and slotIndex <= 5 then
+				-- By the player's index in GetTeamPlayers, the order Role.RoleAssignment uses (#286). It was player-ID
+				-- arithmetic (ID + 1 on Radiant, ID - 4 on Dire): game 087 had Radiant IDs 0,2,3,4,5 and Dire 6,1,7,8,9,
+				-- so it named another player's entry, or none.
+				local slotIndex = TeamOrder.IndexOf(teamPlayerIds, playerId)
+				if slotIndex ~= nil and slotIndex <= 5 then
 					position = Role.RoleAssignment[teamKey][slotIndex]
 				end
 			end

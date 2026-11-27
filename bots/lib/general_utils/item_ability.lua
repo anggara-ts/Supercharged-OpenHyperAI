@@ -113,9 +113,12 @@ local function installItemAbility(Fu)
 	function Fu.GetMostUltimateCDUnit()
 		local bestUnit = nil
 		local bestCooldown = 0
-		for index, playerId in pairs(GetTeamPlayers(GetTeam())) do
-			if IsHeroAlive(playerId) then
-				local member = GetTeamMember(index)
+		-- By team slot only (#286): the alive check read GetTeamPlayers' player at the same index, a different player
+		-- on Dire with a human (game 087: GetTeamPlayers 6,1,7,8,9, GetTeamMember(1) the human), so an alive ally was
+		-- skipped while that other player was dead. member:IsAlive() below is the check.
+		for slot = 1, #GetTeamPlayers(GetTeam()) do
+			do
+				local member = GetTeamMember(slot)
 				if
 					member ~= nil
 					and member:IsAlive()
