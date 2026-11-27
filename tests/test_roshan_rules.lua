@@ -189,5 +189,6 @@ T.test("finish clear: under 36% with no foe near the pit", function()
 	T.ok(not R.FinishClear(0.18, 1), "a foe near the pit")
 	T.ok(not R.FinishClear(0.5, 0), "Roshan at half")
 	T.ok(not R.FinishClear(nil, 0), "Roshan's HP unknown")
-	T.eq(R.FINISH_HITTER_RANGE, 1600, "hitter range")
+	-- The stepped-out heroes stood 1618-2014 from the pit in game 088.
+	T.ok(R.FINISH_HITTER_RANGE >= 2014, "hitter range covers them")
 end)

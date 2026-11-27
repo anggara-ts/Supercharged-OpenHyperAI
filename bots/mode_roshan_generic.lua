@@ -389,7 +389,8 @@ do
 	end
 end
 -- One line when the clear-finish rule (RoshanRules.FinishClear) keeps a low Roshan going, at most every 5s per bot.
--- src=safe: the pit counted as safe with one ally and no foe; src=hitters / think: allies within 1600 counted as hitters.
+-- src=safe: fewer than 2 allies within 1600 of the pit, the wider ring made the group; src=hitters: fewer than 2 within
+-- 900 of Roshan; src=think: Think's finish path. allies= is the count within RoshanRules.FINISH_HITTER_RANGE.
 local function LogFinishClear(src, allies, foes)
 	local now = DotaTime()
 	if now < (bot._roshFinishClearLogAt or -999) then
@@ -435,8 +436,8 @@ local function IsRoshanEngageSafe(roshanLocation, finishing)
 		end
 		-- Low Roshan and no enemy hero near the pit (RoshanRules.FinishClear, #12 game 088: t=1727 Dire 4v5 with Roshan
 		-- at 19% and t=1352 Radiant at 35% dropped as finish-unsafe(pit=1 foes=0) and he regenerated): finish him.
+		-- (The two-hitter rule still applies: GetDesireHelper and Think count allies within FINISH_HITTER_RANGE then.)
 		if alliesInPit >= 1 and RoshanRules.FinishClear(roshRatioNow, enemiesInPit) then
-			LogFinishClear("safe", alliesInPit, enemiesInPit)
 			return true, "ok-clear"
 		end
 		return false, string.format("finish-unsafe(pit=%d foes=%d)", alliesInPit, enemiesInPit)
@@ -749,22 +750,31 @@ function GetDesireHelper()
 		local alliesAtRoshan = Fu.Utils.IsValidUnit(roshan) and #(Fu.GetAlliesNearLoc(roshan:GetLocation(), 900) or {})
 			or alliesInPit
 		-- Low Roshan and no enemy hero near the pit (RoshanRules.FinishClear, #12 game 088: t=1347 Radiant at 34% and
-		-- t=1724 Dire at 18% dropped as few-hitters while the heroes he had hit stood 700-1400 away after a step-out):
-		-- allies within 1600 of him count as hitters.
-		if alliesAtRoshan < 2 and roshanLocation ~= nil and Fu.Utils.IsValidUnit(roshan) then
+		-- t=1724 Dire at 18% dropped as few-hitters, t=1352 and t=1727 as finish-unsafe(pit=1 foes=0), while the heroes
+		-- he had hit stood 700-2000 from the pit after a step-out): allies within RoshanRules.FINISH_HITTER_RANGE count
+		-- as hitters and as the group in the pit.
+		local pitGroup = alliesInPit
+		local clearSrc, clearAllies, clearFoes = nil, 0, 0
+		if roshanLocation ~= nil and (alliesAtRoshan < 2 or pitGroup < 2) then
 			local foesNear = #(Fu.GetLastSeenEnemiesNearLoc(roshanLocation, 1600) or {})
 			if RoshanRules.FinishClear(roshRatioNow, foesNear) then
-				local wide = #(Fu.GetAlliesNearLoc(roshan:GetLocation(), RoshanRules.FINISH_HITTER_RANGE) or {})
+				local center = Fu.Utils.IsValidUnit(roshan) and roshan:GetLocation() or roshanLocation
+				local wide = #(Fu.GetAlliesNearLoc(center, RoshanRules.FINISH_HITTER_RANGE) or {})
 				if wide >= 2 then
-					LogFinishClear("hitters", wide, foesNear)
-					alliesAtRoshan = wide
+					clearSrc = pitGroup < 2 and "safe" or "hitters"
+					clearAllies, clearFoes = wide, foesNear
+					alliesAtRoshan = math.max(alliesAtRoshan, wide)
+					pitGroup = math.max(pitGroup, wide)
 				end
 			end
 		end
-		if safeFinish and alliesAtRoshan < 2 and alliesInPit >= 2 and not soloFinish then
+		if safeFinish and alliesAtRoshan < 2 and pitGroup >= 2 and not soloFinish then
 			return Ret(BOT_MODE_DESIRE_NONE, "few-hitters")
 		end
-		if safeFinish and (alliesInPit >= 2 or soloFinish) then
+		if safeFinish and (pitGroup >= 2 or soloFinish) then
+			if clearSrc ~= nil then
+				LogFinishClear(clearSrc, clearAllies, clearFoes)
+			end
 			return Ret(RemapValClamped(roshRatioNow, 0.8, 0.0, 0.9, 1.0), "finishing")
 		end
 		-- Contested / unsafe finish — do not suicide into the pit.
@@ -1046,7 +1056,11 @@ function Think()
 	local dropped = now < (bot._roshNoAckUntil or -999)
 	local answeredZero = now - (bot._roshFinalAt or -999) <= 2 and (bot._roshFinal or 0) <= 0
 	if not humanOrder and (dropped or answeredZero) then
-		bot._roshCommitUntil = nil
+		-- A 0 answer can be short (a 3s step-out while Roshan hits this bot): the take's commit stays, so the gather
+		-- does not restart into the fresh-take numbers when the bot comes back. Only its own drop ends the commit.
+		if dropped then
+			bot._roshCommitUntil = nil
+		end
 		if now >= (bot._roshHoldLogAt or -999) then
 			bot._roshHoldLogAt = now + 10
 			RoshLog(
@@ -1059,9 +1073,9 @@ function Think()
 		bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
 		return
 	end
-	-- Low Roshan and no enemy hero near the pit (RoshanRules.FinishClear, #12 game 088): allies within 1600 of the pit
-	-- count as the group, so the heroes he stepped out from do not turn the finish back into a gather (whose
-	-- weak-group drop ended Dire's take at t=1727 with Roshan at 19%).
+	-- Low Roshan and no enemy hero near the pit (RoshanRules.FinishClear, #12 game 088): allies within
+	-- RoshanRules.FINISH_HITTER_RANGE of the pit count as the group, so the heroes he stepped out from do not turn the
+	-- finish back into a gather (whose weak-group drop ended Dire's take at t=1727 with Roshan at 19%).
 	if finishing and safe and pitCount < 2 then
 		local foesNear = #(Fu.GetLastSeenEnemiesNearLoc(roshanLocation, 1600) or {})
 		if RoshanRules.FinishClear(roshRatioNow, foesNear) then

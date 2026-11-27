@@ -32,10 +32,12 @@ RoshanRules.HALF_CREDIT = 1.0
 -- Finishing a low Roshan with nobody contesting (#12, game 088: Dire had him at 18-20% and Radiant at 34-35% with
 -- foes=0 near the pit; heroes he had focused stepped out a little, the few-hitters and finish-unsafe checks dropped
 -- the take and he regenerated). Under FINISH_CLEAR_BELOW of his HP with no enemy hero seen within 1600 of the pit, the
--- allies within FINISH_HITTER_RANGE of him count as hitters (not only those within 900), and one ally in the pit with
--- no foe there is safe enough to finish.
+-- allies within FINISH_HITTER_RANGE of him count as hitters and as the group in the pit (not only those within 900 of
+-- him and 1600 of the pit), and one ally in the pit with no foe there is safe enough to finish. The range is wider than
+-- the pit's 1600 because the heroes that had stepped out stood 1618-2014 from it (game 088: Puck 1618 at t=1352,
+-- Winter Wyvern 1993 at t=1727, Underlord 2014 at t=1347).
 RoshanRules.FINISH_CLEAR_BELOW = 0.36
-RoshanRules.FINISH_HITTER_RANGE = 1600
+RoshanRules.FINISH_HITTER_RANGE = 2200
 
 -- Is the finish clear? roshRatio: his HP ratio (seen, or last seen; nil when unknown), foesNearPit: enemy heroes seen
 -- within 1600 of the pit.
