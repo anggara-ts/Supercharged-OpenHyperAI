@@ -1170,7 +1170,7 @@ function X.ConsiderCmToTarget(target, delay, travelDistance, radius)
 		(
 			Fu.IsValidHero(target)
 			or Fu.IsValidTarget(target)
-				and (Fu.Unit.IsUnitWithName(target, "roshan") or Fu.Unit.IsUnitWithName(target, "boss"))
+				and (Fu.Utils.IsUnitWithName(target, "roshan") or Fu.Utils.IsUnitWithName(target, "boss"))
 		)
 		and Fu.CanCastOnNonMagicImmune(target)
 		and not Fu.IsSuspiciousIllusion(target)
