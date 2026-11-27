@@ -16,8 +16,10 @@ host's Steam ID and server IPs) and the local test lineup.
    the Workshop copy shows: it has no `build_info.lua`, `[SHy-BUILD]` prints `commit=release`) or `origin/main`.
    `git fetch origin --tags`, then `node tools/export-bots.js --dry-run [--ref vX.Y]`.
 3. **Check the dry run:**
-   - the ref and commit are the ones to publish, `left out` lists the non-script folders, no `required files
-     missing` error;
+   - the ref and commit are the ones to publish, `left out` lists the non-script folders (and `bots/dev/`, the
+     development-only scripts), no `required files missing` error. One that names `dev/...` means an A/B
+     experiment is still in that ref: it comes out in a PR first (`docs/MEASURING_PERFORMANCE.md`), never by
+     copying the file;
    - `is a link`: `vscripts/bots` is the old dev link to the clone. Ask the maintainer before renaming it (e.g. to
      `bots-dev`);
    - `has files this tool did not write`: show them to the maintainer; `--force` (deletes them) only after they
