@@ -1296,7 +1296,9 @@ function X.LogStepError(name, err)
 end
 -- [SHy-PUCK] tower-escape via=walk|rift|orb-jaunt|orb-hop|wait-cast|skip-cast why=hit|behind-tower|<spell> dist= out=
 -- hp= loss= tower=, when the way changes or once per 3s. wait-cast: her own tower Rift / Orb is still in its cast
--- point (why= the spell); skip-cast: that order never went out, so this think walks without it.
+-- point (why= the spell); skip-cast: that order never went out, so this think walks without it. mode= (the active
+-- mode) and outpost-age= (seconds since the outpost mode's desire was last read) name what could cancel a cast
+-- (#36, game 088 t=1227: an Orb order cut in its cast point, then via=skip-cast).
 function X.LogTowerEscape(via, why, tower, dist, out, loss)
 	local key = via .. why
 	if key == bot._towerEscapeLogKey and DotaTime() < (bot._towerEscapeLogAt or -999) then
@@ -1307,7 +1309,7 @@ function X.LogTowerEscape(via, why, tower, dist, out, loss)
 	pcall(
 		print,
 		string.format(
-			"[SHy-PUCK] t=%.0f tower-escape via=%s why=%s dist=%.0f out=%.0f hp=%.2f loss=%.2f tower=%s",
+			"[SHy-PUCK] t=%.0f tower-escape via=%s why=%s dist=%.0f out=%.0f hp=%.2f loss=%.2f tower=%s mode=%d outpost-age=%.2f",
 			DotaTime(),
 			via,
 			why,
@@ -1315,7 +1317,45 @@ function X.LogTowerEscape(via, why, tower, dist, out, loss)
 			out or -1,
 			Fu.GetHP(bot),
 			loss or 0,
-			tower ~= nil and tostring(tower:GetUnitName()) or "-"
+			tower ~= nil and tostring(tower:GetUnitName()) or "-",
+			bot:GetActiveMode(),
+			DotaTime() - (bot._outpostLastDesireAt or -99)
+		)
+	)
+end
+-- Her tower Rift or Orb in its cast point (0.1s for both, datafeed hero 13, 7.42): the outpost mode's hold
+-- (bot._phaseHoldAskUntil, read live by mode_outpost_generic.lua Think and GetDesire) from the order through the cast
+-- point + EscapeRules.CAST_ORDER_SLACK, so no mode's Think gives an order that cuts it (#36, game 088 t=1227: the Orb
+-- was ordered, never went out, and the escape fell back to a walk). The walk branch already held this way.
+function X.HoldTowerCast(ability)
+	if ability == nil or ability:IsNull() then
+		return
+	end
+	local untilAt = DotaTime() + (ability:GetCastPoint() or 0) + EscapeRules.CAST_ORDER_SLACK + 0.1
+	bot._phaseHoldAskUntil = math.max(bot._phaseHoldAskUntil or -1, untilAt)
+end
+-- [SHy-PUCK] tower-jaunt-skip why=expired|jaunt-down|rooted|cant-cast|no-orb|in-range|not-closer|not-past hp= loss=
+-- orbTower= clear= orbFromHer= heroes=: why the Jaunt to a tower-escape Orb did not go out (game 088 t=1487: the Orb
+-- flew, no Jaunt, she died inside the tower's range). When the reason changes or once per 1s.
+function X.LogTowerJauntSkip(why, orbToTower, clear, orbFromHer)
+	why = tostring(why)
+	if why == bot._towerJauntSkipWhy and DotaTime() < (bot._towerJauntSkipAt or -999) then
+		return
+	end
+	bot._towerJauntSkipWhy = why
+	bot._towerJauntSkipAt = DotaTime() + 1
+	pcall(
+		print,
+		string.format(
+			"[SHy-PUCK] t=%.0f tower-jaunt-skip why=%s hp=%.2f loss=%.2f orbTower=%.0f clear=%.0f orbFromHer=%.0f heroes=%s",
+			DotaTime(),
+			why,
+			Fu.GetHP(bot),
+			X.HpLoss(),
+			orbToTower or -1,
+			clear or -1,
+			orbFromHer or -1,
+			tostring(X.HeroOnHer())
 		)
 	)
 end
@@ -1383,16 +1423,22 @@ function X.TowerEscape(canCast)
 		-- Logged for the tower step's own order only (a fight Orb under a tower at full HP is no escape).
 		if ownOrder then
 			X.LogTowerEscape("wait-cast", pending, tower, dist, out, loss)
+			-- Still in its cast point: keep the hold up until it is out.
+			bot._phaseHoldAskUntil = math.max(bot._phaseHoldAskUntil or -1, now + 0.1)
 		end
 		return true
 	end
 	-- The Orb of a tower escape in flight: the Jaunt once it is out of range comes before another walk order.
-	if canCast and bot._towerOrb ~= nil then
-		local okJ, jaunted = pcall(X.TowerOrbJaunt)
-		if not okJ then
-			X.LogStepError("TowerOrbJaunt", jaunted)
-		elseif jaunted then
-			return true
+	if bot._towerOrb ~= nil then
+		if canCast then
+			local okJ, jaunted = pcall(X.TowerOrbJaunt)
+			if not okJ then
+				X.LogStepError("TowerOrbJaunt", jaunted)
+			elseif jaunted then
+				return true
+			end
+		else
+			X.LogTowerJauntSkip("cant-cast")
 		end
 	end
 	local orbJauntReady = canCast
@@ -1419,6 +1465,7 @@ function X.TowerEscape(canCast)
 		local point = X.EscapePoint(riftDistance - 10, threats)
 		X.LogEscapeAction("rift", "tower", point)
 		bot._towerCastOrder = { at = now, ability = waningRiftAbility }
+		X.HoldTowerCast(waningRiftAbility)
 		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
 		return true
 	end
@@ -1430,6 +1477,7 @@ function X.TowerEscape(canCast)
 		bot._towerOrb = { at = now, x = towerAt.x, y = towerAt.y, range = range, why = "hit" }
 		X.LogEscapeAction("orb", "tower", point)
 		bot._towerCastOrder = { at = now, ability = illusoryOrbAbility }
+		X.HoldTowerCast(illusoryOrbAbility)
 		bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
 		return true
 	end
@@ -1504,6 +1552,7 @@ function X.TowerHop(canCast)
 					X.LogTowerEscape("orb-hop", "behind-tower", tower, towerDist, hopAt, X.HpLoss())
 					X.LogEscapeAction("orb", "tower-hop", point)
 					bot._towerCastOrder = { at = DotaTime(), ability = illusoryOrbAbility }
+					X.HoldTowerCast(illusoryOrbAbility)
 					bot:Action_UseAbilityOnLocation(illusoryOrbAbility, point)
 					return true
 				end
@@ -1521,23 +1570,81 @@ function X.TowerOrbJaunt()
 	end
 	if DotaTime() - hop.at > (X.OrbFlightTime() or 2.6) + 0.2 then
 		bot._towerOrb = nil
+		X.LogTowerJauntSkip("expired")
 		return false
 	end
-	if not etherealJauntAbility:IsFullyCastable() or bot:IsRooted() then
+	if not etherealJauntAbility:IsFullyCastable() then
+		X.LogTowerJauntSkip("jaunt-down")
+		return false
+	end
+	if bot:IsRooted() then
+		X.LogTowerJauntSkip("rooted")
 		return false
 	end
 	local orbAt = X.OrbInFlight()
 	if orbAt == nil then
+		X.LogTowerJauntSkip("no-orb")
 		return false
 	end
 	local home = Fu.GetTeamFountain()
 	local orbToTower = math.sqrt((orbAt.x - hop.x) * (orbAt.x - hop.x) + (orbAt.y - hop.y) * (orbAt.y - hop.y))
-	if
-		orbToTower <= hop.range + EscapeRules.TOWER_MARGIN
-		or (home - orbAt):Length2D() >= GetUnitToLocationDistance(bot, home)
+	local clear = hop.range + EscapeRules.TOWER_MARGIN
+	local orbFromHer = GetUnitToLocationDistance(bot, orbAt)
+	-- Heroes killing her before the Orb clears the range (game 088 t=1486-1487: the Orb flew 294, she waited for it to
+	-- leave the T2's range and died at 11% HP with 3 heroes on her): Jaunt now (EscapeRules.TowerJauntNow).
+	local heroOnHer = X.HeroOnHer() or bot:WasRecentlyDamagedByAnyHero(1.0)
+	local nearHer, nearOrb = math.huge, math.huge
+	for _, enemyHero in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemyHero) and not Fu.IsSuspiciousIllusion(enemyHero) then
+			nearHer = math.min(nearHer, GetUnitToUnitDistance(bot, enemyHero))
+			nearOrb = math.min(nearOrb, GetUnitToLocationDistance(enemyHero, orbAt))
+		end
+	end
+	-- orb_speed 750 (datafeed hero 13, 7.42).
+	local orbSpeed = illusoryOrbAbility:GetSpecialValueInt("orb_speed")
+	if orbSpeed == nil or orbSpeed <= 0 then
+		orbSpeed = 750
+	end
+	local clearIn = math.max(0, clear - orbToTower) / orbSpeed
+	local hp, loss = Fu.GetHP(bot), X.HpLoss()
+	local urgent = EscapeRules.TowerJauntNow(
+		heroOnHer,
+		hp,
+		loss,
+		orbFromHer,
+		nearOrb > nearHer,
+		clearIn,
+		(etherealJauntAbility:GetCastPoint() or 0) + 0.1
+	)
+	if urgent ~= nil then
+		bot._towerOrb = nil
+		pcall(
+			print,
+			string.format(
+				"[SHy-PUCK] t=%.0f tower-jaunt-urgent why=%s hp=%.2f loss=%.2f orbTower=%.0f clear=%.0f clearIn=%.2f orbFromHer=%.0f near=%.0f->%.0f",
+				DotaTime(),
+				urgent,
+				hp,
+				loss,
+				orbToTower,
+				clear,
+				clearIn,
+				orbFromHer,
+				nearHer < math.huge and nearHer or -1,
+				nearOrb < math.huge and nearOrb or -1
+			)
+		)
+		X.LogEscapeAction("jaunt", "tower-urgent", orbAt)
+		bot:Action_UseAbility(etherealJauntAbility)
+		return true
+	end
+	local skipWhy = orbToTower <= clear and "in-range"
+		or (home - orbAt):Length2D() >= GetUnitToLocationDistance(bot, home) and "not-closer"
 		-- A hop Jaunts only once the Orb is past the tower (closer to home than it), not just ahead of her.
-		or hop.towerHome ~= nil and (home - orbAt):Length2D() >= hop.towerHome
-	then
+		or hop.towerHome ~= nil and (home - orbAt):Length2D() >= hop.towerHome and "not-past"
+		or nil
+	if skipWhy ~= nil then
+		X.LogTowerJauntSkip(skipWhy, orbToTower, clear, orbFromHer)
 		-- A hop waits outside the tower's range while the Orb flies (about 2.4s for 1800), held from the retreat
 		-- Think that would walk her in (the outpost hold, bot._phaseHoldAskUntil), unless an enemy hero is near.
 		-- The hold gives no order, so her last move would go on: stop it once the Orb is out.

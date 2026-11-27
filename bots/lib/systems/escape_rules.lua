@@ -187,6 +187,27 @@ function EscapeRules.CastPending(inPhase, orderAge, castPoint, onCooldown)
 	end
 	return orderAge < (castPoint or 0) + EscapeRules.CAST_ORDER_SLACK
 end
+-- The Jaunt to a tower-escape Orb before it clears the tower's range (#36, game 088 t=1486-1487: the Orb flew 294,
+-- she waited for it to leave the Dire mid T2's range while 3 heroes hit her, HP 0.29 -> 0.11, dead at 1487). Only
+-- with an enemy hero on her, the Orb at least TOWER_JAUNT_MIN from her (an estimate: past a melee hero's 150 attack
+-- range) and farther from the nearest enemy hero than she is (orbSafer); then when her HP is under TOWER_JAUNT_HP,
+-- or when at the last second's loss she would be dead before the Orb clears the range (clearIn) and the Jaunt is
+-- out (jauntDelay: its cast point + a think). Returns nil | "low-hp" | "burst".
+EscapeRules.TOWER_JAUNT_HP = 0.15
+EscapeRules.TOWER_JAUNT_MIN = 200
+function EscapeRules.TowerJauntNow(heroOnHer, hp, loss, orbFromHer, orbSafer, clearIn, jauntDelay)
+	if heroOnHer ~= true or orbSafer ~= true or (orbFromHer or 0) < EscapeRules.TOWER_JAUNT_MIN then
+		return nil
+	end
+	hp = hp or 1
+	if hp < EscapeRules.TOWER_JAUNT_HP then
+		return "low-hp"
+	end
+	if (loss or 0) * ((clearIn or 0) + (jauntDelay or 0)) >= hp then
+		return "burst"
+	end
+	return nil
+end
 -- Behind an enemy tower on the way home (#36, game 072, 19:56-20:05: after the team's dive past Dire's mid T2 and
 -- the kill, her walk home crossed the T2's range and the tower hit her alone): hop over its range with the Orb and a
 -- Jaunt instead of walking through. behind: she is farther from home than the tower; the line home passes within

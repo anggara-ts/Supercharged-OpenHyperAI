@@ -343,6 +343,18 @@ T.test("escape rules: out of an enemy tower's range, hop over it on the way home
 	T.eq((R.HopDirection(3519, 2718, 1300, 700, 700, -6619, -6336, 1950)), nil, "3000 away: no line clears it")
 end)
 
+T.test("escape rules: Jaunt to a tower-escape Orb before it clears the range (game 088, t=1486-1487)", function()
+	local R = load()
+	-- t=1487: the Orb 294 from her, HP 0.11, loss 0.21 in the last second, 3 heroes on her.
+	T.eq(R.TowerJauntNow(true, 0.11, 0.21, 294, true, 0.3, 0.1), "low-hp", "game 088: 11% HP, Jaunt now")
+	T.eq(R.TowerJauntNow(true, 0.25, 0.30, 300, true, 0.8, 0.1), "burst", "0.30/s for 0.9s kills 25% HP")
+	T.eq(R.TowerJauntNow(true, 0.40, 0.10, 300, true, 0.8, 0.1), nil, "slow loss: wait for the range")
+	T.eq(R.TowerJauntNow(false, 0.10, 0.30, 300, true, 0.8, 0.1), nil, "only the tower on her: the normal rule")
+	T.eq(R.TowerJauntNow(true, 0.10, 0.30, 120, true, 0.8, 0.1), nil, "the Orb still at her feet")
+	T.eq(R.TowerJauntNow(true, 0.10, 0.30, 300, false, 0.8, 0.1), nil, "the Orb nearer the enemies than she is")
+	T.eq(R.TowerJauntNow(true, 0.29, 0.09, 0, true, 1.1, 0.1), nil, "game 088 t=1486: the Orb just thrown")
+end)
+
 T.test("escape rules: no new order while her Rift or Orb is in its cast point (game 087, t=740-741)", function()
 	local R = load()
 	T.eq(R.CastPending(true, nil, 0.1, false), true, "in its ability phase (any caller's order)")
@@ -379,6 +391,8 @@ T.test("puck: the escape helpers run on the stub", function()
 		"TowerEscape",
 		"TowerHop",
 		"TowerOrbJaunt",
+		"HoldTowerCast",
+		"LogTowerJauntSkip",
 		"HeroOnHer",
 		"ExitJauntReady",
 		"EscapeRiftWanted",

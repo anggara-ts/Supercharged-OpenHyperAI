@@ -346,6 +346,13 @@ function Think()
 	if bot._outpostHoldUntil ~= nil and DotaTime() < bot._outpostHoldUntil then
 		return
 	end
+	-- Puck's hold ask (hero_puck.lua bot._phaseHoldAskUntil: a tower walk, a tower Rift / Orb in its cast point, a
+	-- dodge hold), read live: the hero's desire hold sets _outpostHoldUntil only 0.15s ahead and desires are read about
+	-- 3 times a second, so between two reads this Think could give an order that cut her cast (#36, game 088 t=1227:
+	-- the tower Orb was ordered with this mode active and never went out).
+	if DotaTime() < (bot._phaseHoldAskUntil or -1) then
+		return
+	end
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
