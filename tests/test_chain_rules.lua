@@ -371,13 +371,19 @@ T.test("chain: Dream Coil's break stun is a listed stun (game 088)", function()
 	T.eq(#lines("unknown"), 0, "no unknown line")
 end)
 
-T.test("chain: a hold on a hero in Cold Embrace walks to him, no attack into the cocoon", function()
+T.test("chain: a hold on a hero in Cold Embrace sends no attack; it walks only from out of cast range", function()
 	local Chain, sven, _, axe, bolt = setup()
+	-- In cast range (600 of 600): no order at all, the bot stays where it is.
 	stun(axe, 3.0, "modifier_winter_wyvern_cold_embrace")
 	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), true, "held until the cocoon ends")
 	T.eq(#sven.attacks, 0, "no attack order")
+	T.eq(#sven.moves, 0, "no move order in range")
+	-- 650 away, out of the 600 cast range: one move toward him.
+	axe._loc = Vector(650, 0, 0)
+	T.eq(Chain.OnCast(sven, bolt, axe, "entity"), true, "still held")
+	T.eq(#sven.attacks, 0, "still no attack")
 	T.eq(#sven.moves, 1, "one move order")
-	T.ok(sven.moves[1] == axe, "to the frozen hero")
+	T.ok(sven.moves[1] == axe, "toward the frozen hero")
 end)
 
 T.test("chain: the unknown line keeps a disable-looking name past the cap and counts every name", function()

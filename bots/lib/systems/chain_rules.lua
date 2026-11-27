@@ -142,11 +142,13 @@ Chain.MODIFIERS = {
 	-- Cold Embrace freezes the enemy Wyvern's ally solid for 4s (datafeed hero_id 112: duration 4): the engine
 	-- calls him stunned (game 088 t=1445: Rubick inside it read as stunned with no listed modifier). A stun that
 	-- lands inside it is wasted, so the next one waits for its end. The cocoon blocks physical damage: the hold
-	-- walks to him instead of attacking (NO_ATTACK).
+	-- does not attack him (NO_ATTACK).
 	modifier_winter_wyvern_cold_embrace = true,
 }
 
--- Listed modifiers whose hero takes no physical damage: a hold on them moves to the hero instead of attacking.
+-- Listed modifiers whose hero takes no physical damage: a hold on them sends no attack. A bot out of cast range walks
+-- toward the hero; one in range gets no order (its mode keeps it where it is, ready to cast when the cocoon ends:
+-- a move order every think would walk a ranged caster up to the frozen hero, next to the Wyvern).
 Chain.NO_ATTACK = {
 	modifier_winter_wyvern_cold_embrace = true,
 }
@@ -502,9 +504,11 @@ function Chain.OnCast(bot, ability, target, kind)
 		end
 		-- The hero file may have cleared the queue (Fu.SetQueuePtToINT) and queued Soul Ring / a Treads switch:
 		-- one plain attack order on the disabled hero replaces them, so the bot hits him instead of standing.
-		-- A hero who takes no physical damage (Cold Embrace): walk to him instead.
+		-- A hero who takes no physical damage (Cold Embrace): no attack; walk toward him only from out of cast range.
 		if src == "modifier" and Chain.NO_ATTACK[modName] then
-			pcall(bot.Action_MoveToUnit, bot, hero)
+			if castRange ~= nil and castRange > 0 and distance ~= nil and distance > castRange then
+				pcall(bot.Action_MoveToUnit, bot, hero)
+			end
 		else
 			pcall(bot.Action_AttackUnit, bot, hero, false)
 		end
