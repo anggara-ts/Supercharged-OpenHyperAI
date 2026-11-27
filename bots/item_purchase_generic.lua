@@ -792,6 +792,11 @@ local function PromoteBackpackCounters()
 	-- maintainer saw no neutral item on Keeper of the Light and nothing in the log could say (#15).
 	local neutralItem = bot:GetItemInSlot(16)
 	local neutralName = neutralItem ~= nil and not neutralItem:IsNull() and neutralItem:GetName() or "none"
+	-- Remember the Forager's Kit as soon as slot 16 shows it (ForeignItems.HadKit): a bot that swaps the kit for
+	-- another neutral still owns, and can eat, the mushrooms the kit grew (maintainer, D8 2026-11-27).
+	if neutralName == "item_foragers_kit" then
+		bot._hadForagersKit = true
+	end
 	if neutralName ~= bot._neutralLogged and DotaTime() > 0 then
 		bot._neutralLogged = neutralName
 		pcall(

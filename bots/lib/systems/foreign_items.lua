@@ -162,10 +162,13 @@ end
 -- Pure: a mushroom in the bag of a bot that does not hold a Forager's Kit, and never held one this game (#116, game
 -- 087: Sven's mushrooms reached Puck, Largo and Brewmaster, none of whom had the kit; each one's eat orders consumed
 -- nothing, 7 orders twice, before it was dropped). It is not eaten or swapped, and DropForeignItems drops it once.
--- hadKit: the bot holds the kit, or held it earlier this game (its own mushrooms stay its own after the kit is
--- replaced; unverified).
--- Unverified the other way too: game 062, Kez printed one eat line for a mushroom without ever holding a kit and no
--- not-consumed line after it, so a mushroom without an owner may be edible by anyone. One sample against three.
+-- hadKit: the bot holds the kit, or held it earlier this game: its own mushrooms stay its own after the kit is
+-- replaced by another neutral (ForeignItems.HadKit; also latched by the slot-16 check in item_purchase_generic.lua).
+-- The rule (maintainer, D8 2026-11-27): "heroes can't eat others (ally/enemy) mushrooms. a hero can only eat their
+-- own mushrooms. one hero may have changed neutral item from Forager's Kit to another item when they still have
+-- Forager's Kit in their inventory." It fits the logs: game 087 (three allies, no eat) and game 062 (Nyx Assassin,
+-- three not-consumed lines on Nature's Prophet's mushroom). Game 062's Kez printed one eat order for a mushroom with
+-- no kit and no not-consumed line after it; one order with no follow-up does not show the mushroom was eaten.
 function ForeignItems.NoKitForage(itemName, hadKit)
 	return ForeignItems.FORAGE[itemName] == true and not hadKit
 end
