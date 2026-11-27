@@ -163,6 +163,9 @@ local function ReadAdvantage(gameState, bot)
 		dead = dead,
 		deadLong = deadLong,
 		baseThreat = baseHit,
+		now = now,
+		-- Players on the enemy team (dead heroes included; an alive or visible count reads 0 in a real wipe).
+		enemyHeroes = #(GetTeamPlayers(GetOpposingTeam()) or {}),
 	})
 	local was = advantage.desire
 	if (desire ~= nil) ~= (was ~= nil) then

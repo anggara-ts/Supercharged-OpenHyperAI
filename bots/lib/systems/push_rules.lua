@@ -39,6 +39,8 @@ end
 --   s.dead         enemy heroes dead with more than 5s of respawn left
 --   s.deadLong     enemy heroes dead with 20s+ of respawn left
 --   s.baseThreat   enemy heroes on our high ground / at our Ancient, or 2+ enemy creeps at our Ancient
+--   s.now          DotaTime() (optional): no window before the horn
+--   s.enemyHeroes  how many heroes the enemy team has, dead ones included (optional): no window without any
 -- Returns desire (nil when no window) and why.
 --   every enemy dead: 0.9 (wipe); 3+ dead for 20s+: 0.9; 2+ dead with 4-5 of ours alive: 0.8;
 --   Aegis with 4+ alive: 0.8 (0.85 on top of a dead window).
@@ -48,6 +50,14 @@ function PushRules.Advantage(s)
 	end
 	if s.baseThreat then
 		return nil, "base-threat"
+	end
+	-- Before the horn, or before the enemy heroes are in the game, "no enemy alive" is not a wipe (#12, game 088:
+	-- t=-88 radiant advantage-start why=wipe dead=0 alive=1/0).
+	if s.now ~= nil and s.now < 0 then
+		return nil, "pre-horn"
+	end
+	if s.enemyHeroes ~= nil and s.enemyHeroes < 1 then
+		return nil, "no-enemy-heroes"
 	end
 	local alliesAlive = s.alliesAlive or 0
 	local enemiesAlive = s.enemiesAlive or 5

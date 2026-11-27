@@ -19,9 +19,34 @@ RoshanRules.STAY_BELOW = 0.5
 -- fights and left Roshan at 60% and 78%).
 RoshanRules.MIN_AVG_HP = 0.7
 -- The time to half HP comes from right-click damage at a flat half through his armor; spells and items are not
--- counted. Game 068's Dire take (5 of 5, t=2500-2520) killed him in about 20s where that model says about 27s, so the
--- tanking pool has to last 0.75 of the modelled time (calibration from one take: unverified).
-RoshanRules.HALF_CREDIT = 0.75
+-- counted. The tanking pool has to last HALF_CREDIT times the modelled time to half.
+-- Was 0.75, from one take (game 068 Dire, 5 of 5, killed in about 20s where the model said about 27s). Game 088
+-- (maintainer decision D7, 2026-11-27: one more game of fit= numbers, then retune) committed two takes that passed at
+-- 0.75 and failed: Radiant t=1297 commit fit=group(tank=16,half=19) left Roshan at 34% (he took about 28s to reach
+-- half, not 19), Dire t=1681 fit=group(tank=14,half=18) left him at 18%. At 1.0 both drop (16 < 19, 14 < 18). The
+-- takes that killed him in games 074-085 had tank/half 1.0-4.8 at the call (082 t=1917 12/12, 081 t=1981 14/11,
+-- 082 t=809 18/16, 078 t=1457 17/13, 084 t=2050 22/16, ...; tests/test_roshan_rules.lua lists them), so they still
+-- pass. Takes that failed with tank/half above 1.0 (087 t=1337 22/10, t=1535 17/10) failed for other reasons
+-- than the tank model: no credit drops them without dropping the kills.
+RoshanRules.HALF_CREDIT = 1.0
+-- Finishing a low Roshan with nobody contesting (#12, game 088: Dire had him at 18-20% and Radiant at 34-35% with
+-- foes=0 near the pit; heroes he had focused stepped out a little, the few-hitters and finish-unsafe checks dropped
+-- the take and he regenerated). Under FINISH_CLEAR_BELOW of his HP with no enemy hero seen within 1600 of the pit, the
+-- allies within FINISH_HITTER_RANGE of him count as hitters (not only those within 900), and one ally in the pit with
+-- no foe there is safe enough to finish.
+RoshanRules.FINISH_CLEAR_BELOW = 0.36
+RoshanRules.FINISH_HITTER_RANGE = 1600
+
+-- Is the finish clear? roshRatio: his HP ratio (seen, or last seen; nil when unknown), foesNearPit: enemy heroes seen
+-- within 1600 of the pit.
+function RoshanRules.FinishClear(roshRatio, foesNearPit)
+	return type(roshRatio) == "number" and roshRatio < RoshanRules.FINISH_CLEAR_BELOW and (foesNearPit or 0) == 0
+end
+
+-- The tank check alone: does a tanking time of `tank` seconds cover `half` seconds to half HP?
+function RoshanRules.TankCovers(tank, half)
+	return (tank or 0) >= (half or 0) * RoshanRules.HALF_CREDIT
+end
 
 -- Can the group that is coming take Roshan before its HP runs out? (#12, game 068: 3 of 4 committed tries failed;
 -- the kill time ignored Roshan's damage on the group.)
@@ -31,7 +56,7 @@ RoshanRules.HALF_CREDIT = 0.75
 --     armor, as in the kill time)
 -- The members' HP above the leave line is the group's tanking pool: Roshan hits one hero at a time (the average of
 -- roshDps) and his Slam hits everyone. The pool must last until Roshan is at half HP, after which nobody leaves.
--- Returns ok, why, numbers { avg, tank, half }.
+-- Returns ok, why, numbers { avg, tank, half, low }.
 function RoshanRules.GroupFit(s)
 	local members = s.members or {}
 	local n = #members
@@ -40,12 +65,21 @@ function RoshanRules.GroupFit(s)
 	end
 	local leave = s.leaveHp or RoshanRules.LEAVE_HP
 	local ratioSum, pool, dpsSum = 0, 0, 0
+	-- low: seconds the weakest member lasts to the leave line while Roshan hits him (and his Slam), for the log: the
+	-- per-member data a later model needs (game 088 Dire t=1686: Rubick left at 42% five seconds after the commit).
+	local low = nil
 	for _, member in ipairs(members) do
 		local maxHp = math.max(1, member.maxHp or 1)
 		local hp = math.max(0, member.hp or 0)
+		local roshDps = member.roshDps or RoshanRules.FALLBACK_DPS
+		local margin = math.max(0, hp - leave * maxHp)
 		ratioSum = ratioSum + hp / maxHp
-		pool = pool + math.max(0, hp - leave * maxHp)
-		dpsSum = dpsSum + (member.roshDps or RoshanRules.FALLBACK_DPS)
+		pool = pool + margin
+		dpsSum = dpsSum + roshDps
+		local lasts = margin / math.max(1, roshDps + RoshanRules.SLAM_DPS)
+		if low == nil or lasts < low then
+			low = lasts
+		end
 	end
 	local avg = ratioSum / n
 	local drain = dpsSum / n + RoshanRules.SLAM_DPS * n
@@ -53,14 +87,18 @@ function RoshanRules.GroupFit(s)
 	local roshMax = math.max(1, s.roshMax or s.roshHp or 1)
 	local toHalf = math.max(0, (s.roshHp or roshMax) - RoshanRules.STAY_BELOW * roshMax)
 		/ math.max(1, (s.groupDps or 0) * 0.5)
-	local numbers = { avg = avg, tank = tank, half = toHalf }
+	local numbers = { avg = avg, tank = tank, half = toHalf, low = low or 0 }
 	if avg < (s.minAvg or RoshanRules.MIN_AVG_HP) then
 		return false, string.format("group-hurt(avg=%.2f,n=%d)", avg, n), numbers
 	end
-	if tank < toHalf * RoshanRules.HALF_CREDIT then
-		return false, string.format("tank-short(tank=%.0f,half=%.0f,avg=%.2f,n=%d)", tank, toHalf, avg, n), numbers
+	if not RoshanRules.TankCovers(tank, toHalf) then
+		return false,
+			string.format("tank-short(tank=%.0f,half=%.0f,avg=%.2f,n=%d,low=%.0f)", tank, toHalf, avg, n, low or 0),
+			numbers
 	end
-	return true, string.format("group(tank=%.0f,half=%.0f,avg=%.2f,n=%d)", tank, toHalf, avg, n), numbers
+	return true,
+		string.format("group(tank=%.0f,half=%.0f,avg=%.2f,n=%d,low=%.0f)", tank, toHalf, avg, n, low or 0),
+		numbers
 end
 
 return RoshanRules

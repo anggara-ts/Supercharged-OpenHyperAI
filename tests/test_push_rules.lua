@@ -36,6 +36,23 @@ T.test("advantage: Aegis and dead enemies open the window, a base threat closes 
 	)
 end)
 
+T.test("advantage: no wipe window before the horn or without enemy heroes (game 088 t=-88)", function()
+	local R = rules()
+	-- Game 088 t=-88: `radiant advantage-start why=wipe dead=0 alive=1/0` (the enemy heroes were not in the game yet).
+	local desire, why =
+		R.Advantage({ alliesAlive = 1, enemiesAlive = 0, dead = 0, deadLong = 0, now = -88, enemyHeroes = 5 })
+	T.eq(desire, nil, "pre-horn desire")
+	T.eq(why, "pre-horn", "pre-horn why")
+	desire, why = R.Advantage({ alliesAlive = 5, enemiesAlive = 0, dead = 0, deadLong = 0, now = 30, enemyHeroes = 0 })
+	T.eq(desire, nil, "no enemy heroes desire")
+	T.eq(why, "no-enemy-heroes", "no enemy heroes why")
+	-- A real wipe after the horn: every enemy hero dead, five on their team.
+	desire, why =
+		R.Advantage({ alliesAlive = 4, enemiesAlive = 0, dead = 5, deadLong = 5, now = 1376, enemyHeroes = 5 })
+	T.eq(desire, 0.9, "wipe desire")
+	T.eq(why, "wipe", "wipe why")
+end)
+
 T.test("five-alive cap: 0.41 for an even game, joiners when ahead or at a T1/T2", function()
 	local R = rules()
 	-- Game 067 33:00: Radiant mid T1 (tier 1), 5 alive each, about even.

@@ -1100,14 +1100,15 @@ function GetDesireHelper()
 				pcall(
 					print,
 					string.format(
-						"[SHy-RETREAT] t=%.0f %s rosh-leave why=%s hp=%.2f desire=%.2f creepLow=%.2f mode=%d",
+						"[SHy-RETREAT] t=%.0f %s rosh-leave why=%s hp=%.2f desire=%.2f creepLow=%.2f mode=%d rosh=%.2f",
 						DotaTime(),
 						HeroName(),
 						leaveWhy,
 						hpRatio,
 						leaveDesire,
 						roshanLow,
-						activeMode or -1
+						activeMode or -1,
+						bot._roshLeaveRoshHp or -1
 					)
 				)
 			end
