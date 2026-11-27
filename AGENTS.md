@@ -367,7 +367,10 @@ came with (or a small `docs/` PR).
 
 - **Reporting.** End every summary to the maintainer with the test-game readiness as the last sentence ("Ready
   for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
-  reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
+  reads the end first. The ready sentence also says where to sit (maintainer, 2026-11-27): spectating, or which
+  team, lobby slot and position to play, with the reason (a tracked item that needs a human, such as a chat
+  command or a human on Dire) and which lineup hero the seat leaves out. Pick the seat that leaves out the
+  lineup hero whose pending items matter least. Record every decision the maintainer makes on the issue card or PR it is about (a comment
   that quotes it), so later sessions and agents see it.
 - **GitHub account.** Every GitHub call in this repo uses `gh_personal` (the anggara-ts login). The tools
   (`tools/github_cli.js`) pick `gh_personal` when it is on PATH, and `gh` only when that wrapper is missing.
