@@ -11,10 +11,13 @@ local WardMode = {}
 local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Ward = require(GetScriptDirectory() .. "/lib/systems/ward")
+local WardGoal = require(GetScriptDirectory() .. "/lib/systems/ward_goal")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local localizationOk, Localization = pcall(require, GetScriptDirectory() .. "/lib/systems/localization")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+-- Supports stack camps on the minute (#229): runs inside this mode, see bots/lib/systems/stack.lua.
+local Stack = require(GetScriptDirectory() .. "/lib/systems/stack")
 if not localizationOk then
 	Localization = {
 		Get = function()
@@ -28,6 +31,8 @@ local sentryCastRange = 500
 local observerWard = nil
 local sentryWard = nil
 local wardSpot = nil
+-- Which pick set wardSpot (objective, observer or sentry), for the goal line.
+local wardSpotKind = nil
 local wardModeOffUntil = -math.huge
 -- Switched off on purpose: the ping when a ward is planted (user request) and per-try plant logging. The ward chat
 -- lines need `!debug` instead (ChatRules).
@@ -292,7 +297,15 @@ function GetDesire()
 		end
 		return BOT_MODE_DESIRE_NONE
 	end
+	-- A running stack (#229) keeps the mode; otherwise a stack may start when there is no ward to plant.
+	if Stack.IsActive(bot) then
+		return Stack.Desire(bot, false)
+	end
 	local desire = GetDesireHelper()
+	local stackDesire = Stack.Desire(bot, desire > 0)
+	if stackDesire > 0 then
+		return stackDesire
+	end
 	return RemapValClamped(Fu.GetHP(bot) * desire, 0, 1, BOT_MODE_DESIRE_NONE, desire)
 end
 function GetDesireHelper()
@@ -352,6 +365,7 @@ function GetDesireHelper()
 		local obj, kind = Ward.GetObjectiveWardSpot(bot)
 		if obj and (not WardMode.IsEnemyCloserToWardLocation(obj.location) or Fu.IsRealInvisible(bot)) then
 			wardSpot = obj
+			wardSpotKind = "objective"
 			if DotaTime() >= (bot._objWardLogAt or -999) + 20 then
 				bot._objWardLogAt = DotaTime()
 				pcall(
@@ -373,6 +387,7 @@ function GetDesireHelper()
 	if observerWard ~= nil and (observerInInventory and Fu.CanCastAbility(observerWard) or not observerInInventory) then
 		local observerSpots = Ward.GetAvailabeObserverWardSpots(bot)
 		wardSpot = Ward.GetClosestObserverWardSpot(bot, observerSpots)
+		wardSpotKind = "observer"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -387,6 +402,7 @@ function GetDesireHelper()
 	if sentryWard ~= nil and (sentryInInventory and Fu.CanCastAbility(sentryWard) or not sentryInInventory) then
 		local sentrySpots = Ward.GetPossibleSentryWardSpots(bot)
 		wardSpot = Ward.GetClosestSentryWardSpot(bot, sentrySpots)
+		wardSpotKind = "sentry"
 		if wardSpot and (not WardMode.IsEnemyCloserToWardLocation(wardSpot.location) or Fu.IsRealInvisible(bot)) then
 			local skipSpot = isHighGroundThreatened and not WardMode.IsWardSpotDefensiveOrNearby(wardSpot.location)
 			if skipSpot then
@@ -481,6 +497,39 @@ local function WatchPlant()
 		bot._wardTry = nil
 	end
 end
+-- The spot the mode walks to (#15, game 087: Dark Willow went back and forth near the secret shop in ward mode, and
+-- no line said where she was going). Once per pick or change, at most every 2s per bot (lib/systems/ward_goal.lua):
+-- spot = its label, else its point; kind = the pick that chose it; at = the point walked to; me = the bot;
+-- changed = target changes in the last 10s (2 or more: the target flips).
+local function LogWardGoal()
+	if wardSpot == nil or wardSpot.location == nil then
+		return
+	end
+	local loc = wardSpot.location
+	bot._wardGoal = bot._wardGoal or {}
+	local due, changed = WardGoal.Step(bot._wardGoal, WardGoal.Key(loc.x, loc.y), DotaTime())
+	if not due then
+		return
+	end
+	local myLocation = bot:GetLocation()
+	pcall(
+		print,
+		string.format(
+			"[SHy-WARD] t=%.0f %s goal spot=%s kind=%s role=%s at=%.0f,%.0f me=%.0f,%.0f dist=%d changed=%d",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			wardSpot.label ~= nil and tostring(wardSpot.label) or WardGoal.Key(loc.x, loc.y),
+			tostring(wardSpotKind or "?"),
+			tostring(wardSpot.role or "?"),
+			loc.x,
+			loc.y,
+			myLocation.x,
+			myLocation.y,
+			math.floor(GetUnitToLocationDistance(bot, loc)),
+			changed
+		)
+	)
+end
 local function GiveUpWardSpot(why)
 	local now = DotaTime()
 	if wardSpot ~= nil then
@@ -525,6 +574,15 @@ function Think()
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
+	-- A stack (#229) runs here before the ward-spot bookkeeping: the give-up timers below would otherwise mark a
+	-- stale ward spot planted while the bot waits at the camp.
+	if Stack.IsActive(bot) then
+		bot._wardAtSpotSince = nil
+		bot._wardProgress = nil
+		bot._wardIdleSince = nil
+		Stack.Think(bot)
+		return
+	end
 	if
 		wardSpot
 		and GetUnitToLocationDistance(bot, wardSpot.location) <= math.max(observerCastRange, sentryCastRange)
@@ -555,6 +613,7 @@ function Think()
 			return
 		end
 	end
+	LogWardGoal()
 	WardMode.WardThinkActed = false
 	WardMode.WardThink()
 	if WardMode.WardThinkActed then
