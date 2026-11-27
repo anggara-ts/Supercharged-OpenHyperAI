@@ -733,6 +733,7 @@ local function chooseHeroForSlot(slot, playerId)
 	end
 	return heroName
 end
+local TeamOrder = require(GetScriptDirectory() .. "/lib/systems/team_order")
 local function pickNextBotHero()
 	local teamPlayers = GetTeamPlayers(GetTeam(), true)
 	-- Keep debug force-pick order stable (pos 1..N as listed).
@@ -747,6 +748,11 @@ local function pickNextBotHero()
 	elseif not pickOrderShuffled[ownTeamKey] and hasDebugForcedPicks then
 		pickOrderShuffled[ownTeamKey] = true
 	end
+	-- Pick for the position the bot will play (#286). teamPlayers is the engine's order and keys the pick times;
+	-- Role.RoleAssignment and Role.GetPosition use our GetTeamPlayers order, which differs on Dire with a human.
+	-- Game 087 (engine 1,6,7,8,9, ours 6,1,7,8,9): Zeus took the pos-2 lineup hero by his engine index 2, then played
+	-- pos 1 by his index 1 in ours, and the pos-1 lineup hero was never picked.
+	local rolePlayers = GetTeamPlayers(GetTeam())
 	for slot, playerId in pairs(teamPlayers) do
 		if
 			IsPlayerBot(playerId)
@@ -754,9 +760,23 @@ local function pickNextBotHero()
 			and IsPlayerInHeroSelectionControl(playerId)
 			and GameTime() >= (pickState.NextPickAt[slot] or math.huge)
 		then
-			local heroName = chooseHeroForSlot(slot, playerId)
+			local roleIdx = TeamOrder.RoleIndex(rolePlayers, playerId, slot)
+			local heroName = chooseHeroForSlot(roleIdx, playerId)
 			SelectHero(playerId, heroName)
 			pickState.NextPickAt[slot] = math.huge
+			print(
+				string.format(
+					"[SHy-PICK] t=%.0f %s pick team=%s id=%s slot=%d role-idx=%d pos=%s forced=%s",
+					DotaTime(),
+					(string.gsub(tostring(heroName), "npc_dota_hero_", "")),
+					GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+					tostring(playerId),
+					slot,
+					roleIdx,
+					tostring(Role.RoleAssignment[ownTeamKey][roleIdx]),
+					forcedSlot[roleIdx] == true and "yes" or "no"
+				)
+			)
 			break
 		end
 	end
