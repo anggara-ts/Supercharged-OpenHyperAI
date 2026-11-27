@@ -228,7 +228,11 @@ T.test("tower hold end: death, fell, expire, unseen (game 068)", function()
 	T.eq(R.TowerHoldEnd({ died = true, invalidFor = 4, fell = false, expired = true }), "death", "Puck 848")
 	-- Puck / Zeus t=1080-1081: Dire's mid T1 fell at t=1078 with them at it.
 	T.eq(R.TowerHoldEnd({ invalidFor = 2.5, fell = true, expired = true, insideZone = true }), "invalid", "fell")
-	T.eq(R.TowerHoldEnd({ invalidFor = 1, fell = true, expired = false, insideZone = true }), nil, "fell <2s: grace")
+	T.eq(
+		R.TowerHoldEnd({ invalidFor = 1, fell = true, expired = false, insideZone = true }),
+		nil,
+		"unseen dead <2s: grace"
+	)
 	-- Zeus t=813: Dire's mid T1 stood (fell at t=1078), out of vision with Zeus 2239 away, 4.3s left.
 	T.eq(R.TowerHoldEnd({ invalidFor = 2.5, fell = false, expired = false, insideZone = false }), "unseen", "Zeus 813")
 	-- Out of sight with the bot inside the zone (night): the hold goes on at the stored spot.
@@ -236,6 +240,20 @@ T.test("tower hold end: death, fell, expire, unseen (game 068)", function()
 	-- Out of sight, the time over and the bot out of the zone: plain expire.
 	T.eq(R.TowerHoldEnd({ invalidFor = 5, fell = false, expired = true, outOfZone = true }), "expire", "expire")
 	T.eq(R.TowerHoldEnd({ expired = false, insideZone = true }), nil, "valid tower, time left")
+end)
+
+T.test("tower hold end: a tower seen dead or a null handle ends the hold at once (game 088)", function()
+	local R = rules()
+	-- Dire's top T1 fell at 791.6 with Puck latched inside the zone (null=0 vis=1 alive=0): the first check after.
+	local seenDead = { invalidFor = 0.1, fell = true, seen = true, null = false, insideZone = true }
+	T.eq(R.TowerHoldEnd(seenDead), "invalid", "seen and dead: no grace")
+	T.eq(R.TowerHoldEnd({ invalidFor = 0, fell = true, null = true, insideZone = true }), "invalid", "null handle")
+	-- Out of sight and reading dead: the grace still applies.
+	T.eq(R.TowerHoldEnd({ invalidFor = 1, fell = true, seen = false, null = false, insideZone = true }), nil, "unseen")
+	-- Seen and alive: the hold goes on.
+	T.eq(R.TowerHoldEnd({ fell = false, seen = true, null = false, insideZone = true }), nil, "standing")
+	-- The death still comes first.
+	T.eq(R.TowerHoldEnd({ died = true, fell = true, seen = true }), "death", "died")
 end)
 
 T.test("tower hold end: the time alone doesn't end it inside the zone; the 20s cap does (game 069)", function()

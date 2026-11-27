@@ -230,7 +230,12 @@ end
 --   s.died        the bot died since the stop. Game 068: Puck's hold (stopped t=809, dead t=812) was cleared only at
 --                 t=848, 4s after her respawn, with left=-30.3 and why=invalid.
 --   s.invalidFor  seconds the tower handle has not read valid (not null, seen and alive), or nil
---   s.fell        the handle is null or reads dead: the tower fell. After HOLD_INVALID_GRACE: "invalid".
+--   s.fell        the handle is null or reads dead: the tower fell.
+--   s.null, s.seen   the handle is null / the tower is in sight. A null handle, or a tower in sight that reads dead,
+--                 ends the hold at once ("invalid"). Game 088: Dire's top T1 fell at 791.6 and Radiant's bottom T1 at
+--                 1051.7 with null=0 vis=1 alive=0, the clears came 2.3s later (t=794, t=1054), and in between Puck
+--                 and Underlord latched re-entries on the dead tower. A tower out of sight that reads dead ends it
+--                 after HOLD_INVALID_GRACE (in the logs up to game 088, all 68 clear lines with vis=0 read alive=1).
 --   s.age         seconds since the stop: past HOLD_MAX_AGE the hold ends whatever else ("cap")
 --   s.expired     the 9s (paused time not counted) are over ...
 --   s.outOfZone   ... and the bot is out of the zone by HOLD_EXPIRE_OUT: "expire". Game 069: 5 holds ran out with the
@@ -245,6 +250,9 @@ DiveRules.HOLD_EXPIRE_OUT = 100
 function DiveRules.TowerHoldEnd(s)
 	if s.died then
 		return "death"
+	end
+	if s.fell and (s.null or s.seen) then
+		return "invalid"
 	end
 	local invalidLong = s.invalidFor ~= nil and s.invalidFor > DiveRules.HOLD_INVALID_GRACE
 	if invalidLong and s.fell then

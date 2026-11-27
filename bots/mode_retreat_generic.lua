@@ -1617,6 +1617,8 @@ local function TowerHoldCheck()
 		died = not bot:IsAlive() or (hold.deaths ~= nil and deathsNow ~= nil and deathsNow > hold.deaths),
 		invalidFor = hold.invalidSince ~= nil and now - hold.invalidSince or nil,
 		fell = towerNull or not towerAlive,
+		null = towerNull,
+		seen = towerSeen,
 		age = now - (hold.startTime or now),
 		expired = now > hold.untilTime,
 		-- The time alone doesn't end a hold with the bot still inside the zone (game 069: 5 did, see TowerHoldEnd).
