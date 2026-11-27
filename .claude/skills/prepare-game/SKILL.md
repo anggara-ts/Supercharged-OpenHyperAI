@@ -31,4 +31,6 @@ Rules: `AGENTS.md` (workflow steps 4-6). Checklist:
    Any later change to the lineup or the build needs this step again before the game.
 5. **Tell the user:** branch and build that will run (the `[SHy-BUILD]` version the export printed), the lineup
    table (pos / hero / what it tests), and the log lines to expect. Remind them to launch with `-condebug` in a
-   Local Host lobby with Local Dev Script.
+   Local Host lobby with Local Dev Script. End with the ready sentence (AGENTS.md, Reporting), including where
+   to sit: spectate, or the team, lobby slot and position to play. Base it on the pending tracker items that need
+   a human (typed chat commands, a human on Dire), and say which lineup hero that seat leaves out.
