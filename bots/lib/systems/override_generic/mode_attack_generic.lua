@@ -206,7 +206,7 @@ function AttackMode.GetDesire()
 					(string.gsub(bestTarget:GetUnitName(), "npc_dota_hero_", "")),
 					bestScore,
 					#nearbyEnemyHeroes,
-					#nearbyAllyHeroes
+					#alliesNearby
 				)
 			)
 		end
