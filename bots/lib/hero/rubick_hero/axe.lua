@@ -22,24 +22,27 @@ function X.ConsiderStolenSpell(ability)
 		local CullingBladeDesire, CullingBladeTarget = X.ConsiderCullingBlade()
 		if CullingBladeDesire > 0 then
 			bot:Action_UseAbilityOnEntity(cullingBladeAbility, CullingBladeTarget)
-			return
+			return "cast", CullingBladeTarget
 		end
+		return true
 	end
 	if abilityName == "axe_berserkers_call" then
 		berserkersCallAbility = ability
 		local BerserkersCallDesire = X.ConsiderBerserkersCall()
 		if BerserkersCallDesire > 0 then
 			bot:Action_UseAbility(berserkersCallAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "axe_battle_hunger" then
 		battleHungerAbility = ability
 		local BattleHungerDesire, BattleHungerTarget = X.ConsiderBattleHunger()
 		if BattleHungerDesire > 0 then
 			bot:Action_UseAbilityOnEntity(battleHungerAbility, BattleHungerTarget)
-			return
+			return "cast", BattleHungerTarget
 		end
+		return true
 	end
 end
 function X.ConsiderBerserkersCall()
@@ -200,7 +203,12 @@ function X.ConsiderCullingBlade()
 	end
 	local abilityLevel = cullingBladeAbility:GetLevel()
 	local castRange = Fu.GetProperCastRange(false, bot, cullingBladeAbility:GetCastRange())
-	local damage = 150 + 100 * abilityLevel
+	-- Valve datafeed hero_id=2: Culling Blade's "damage" is 275/375/475 pure (150 + 100 * level was 25 low), as in
+	-- hero_axe.lua.
+	local damage = cullingBladeAbility:GetSpecialValueInt("damage")
+	if damage <= 0 then
+		damage = 175 + 100 * abilityLevel
+	end
 	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	for _, enemyHero in pairs(enemiesInExtendedRange) do
 		if
@@ -209,7 +217,7 @@ function X.ConsiderCullingBlade()
 			and enemyHero:GetHealth() + enemyHero:GetHealthRegen() * 0.8 < damage
 			and not Fu.IsHaveAegis(enemyHero)
 			and not enemyHero:IsInvulnerable()
-			and not enemyHero:IsMagicImmune()
+			-- datafeed: Culling Blade pierces debuff immunity (immunity 3), so a magic-immune hero is a target.
 			and not X.HasSpecialModifier(enemyHero)
 			and not X.IsKillBotAntiMage(enemyHero)
 		then

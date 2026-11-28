@@ -17,6 +17,7 @@ end
 local Item = require(GetScriptDirectory() .. "/lib/systems/item")
 local Role = require(GetScriptDirectory() .. "/lib/systems/role")
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+local PauseDiff = require(GetScriptDirectory() .. "/lib/systems/pause_diff")
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local MatchTrace = require(GetScriptDirectory() .. "/lib/systems/match_trace")
 local TeamItems = require(GetScriptDirectory() .. "/lib/systems/item_strategy")
@@ -1429,6 +1430,8 @@ local function BuyBasicItemTurbo()
 end
 function ItemPurchaseThink()
 	now = DotaTime()
+	-- #15: what a pause changed in the stash, bag and gold ([SHy-BUY] pause-diff).
+	pcall(PauseDiff.Watch, bot)
 	local isStale, currentHero, currentName = Fu.IsStaleARDMHero(bot, botName)
 	if isStale then
 		return

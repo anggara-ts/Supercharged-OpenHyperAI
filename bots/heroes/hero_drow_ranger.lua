@@ -158,7 +158,6 @@ function X.SkillsComplement()
 		return
 	end
 	local context = AbilityContext.Build(bot)
-	aetherRange = context.aetherRange
 	botLevel = context.level
 	mpRatio = context.mp
 	hpRatio = context.hp
@@ -278,6 +277,7 @@ function X.ConsiderWM()
 	local enemyList = nearbyEnemies
 	local closeEnemies = Fu.GetNearbyHeroes(bot, 500, true, BOT_MODE_NONE)
 	local target = Fu.GetProperTarget(bot)
+	local nTargetLocation = nil
 	if
 		Fu.IsGoingOnSomeone(bot)
 		and #closeEnemies == 0

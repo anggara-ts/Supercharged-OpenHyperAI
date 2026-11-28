@@ -10,8 +10,10 @@ local HuntTrace = {}
 
 -- target(bot): the hunt's target as the hero script knows it, or nil (an escape cast: no trace).
 local SPECS = {
-	-- Skeleton Walk (clinkz_wind_walk). Main's hero_clinkz.lua keeps no target of its own: its engage cast is for
-	-- the bot's target 1600+ away; open PR #97 adds bot._huntTarget. Read both, nil-safe.
+	-- Skeleton Walk (clinkz_wind_walk): hero_clinkz.lua's hunt target (bot._huntTarget), else the bot's target or
+	-- attack target, so it traces walks with no hunt too (travel, farm). That stays on purpose: an open trace blocks
+	-- team roam's creep snipes (bot._huntTrace, which would end the walk). Its end why= / changes= are per walk; the
+	-- per-hunt numbers are [SHy-CLINKZ] hunt-end (#94: game 068, 6 of 30 traced walks had no hunt lock).
 	npc_dota_hero_clinkz = {
 		modifier = "modifier_clinkz_wind_walk",
 		spell = "skeleton_walk",
