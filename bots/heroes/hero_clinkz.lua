@@ -288,6 +288,33 @@ function X.CanSpendPact(why)
 end
 -- The reveal of an invisible hunt, measured 2.5 s later: did the target lose HP (hunt result=).
 local huntReveal = nil
+-- The scoreboard's death count for a player ID, nil when unreadable.
+function X.HeroDeaths(pid)
+	if pid == nil then
+		return nil
+	end
+	local okD, deaths = pcall(GetHeroDeaths, pid)
+	if okD and type(deaths) == "number" then
+		return deaths
+	end
+	return nil
+end
+-- Pure: the hunt's result 2.5 s after the reveal (#94). died: the scoreboard says the player died since the reveal
+-- (nil: unreadable, then the handle decides as before); handleAlive / seen: the target handle now; dmg: HP it lost
+-- since the reveal. Games 064-067: 4 of 19 result=kill had no death of the target near then (064 t=2191, 2846,
+-- 2877; 067 t=4027): a hero out of sight reads not-alive on its handle, so a kill needs the scoreboard.
+function X.HuntResult(died, handleAlive, seen, dmg)
+	if died == true then
+		return "kill"
+	end
+	if died == nil and not handleAlive then
+		return "kill"
+	end
+	if not handleAlive or not seen then
+		return "lost"
+	end
+	return dmg > 0 and "hit" or "miss"
+end
 local function CheckHuntResult()
 	if huntReveal == nil or DotaTime() < huntReveal.at + 2.5 then
 		return
@@ -295,23 +322,32 @@ local function CheckHuntResult()
 	local reveal = huntReveal
 	huntReveal = nil
 	local target = reveal.target
-	local result
 	local dmg = 0
-	-- A null handle is a hero out of vision, not a kill (game 065): ask the player ID.
-	local goneAlive = false
-	if (target == nil or target:IsNull()) and reveal.pid ~= nil then
-		local okAlive, alive = pcall(IsHeroAlive, reveal.pid)
-		goneAlive = okAlive and alive == true
-	end
-	if goneAlive then
-		result = "lost"
-	elseif target == nil or target:IsNull() or not target:IsAlive() then
-		result = "kill"
-	elseif target:CanBeSeen() then
+	local handleAlive = target ~= nil and not target:IsNull() and target:IsAlive()
+	local seen = handleAlive and target:CanBeSeen()
+	if seen then
 		dmg = reveal.hp - target:GetHealth()
-		result = dmg > 0 and "hit" or "miss"
-	else
-		result = "lost"
+	end
+	-- Died since the reveal: the scoreboard by player ID; without it, the player ID's alive flag (a null handle is a
+	-- hero out of vision, not a kill, game 065).
+	local died = nil
+	local deathsNow = X.HeroDeaths(reveal.pid)
+	if reveal.deaths ~= nil and deathsNow ~= nil then
+		died = deathsNow > reveal.deaths
+	elseif reveal.pid ~= nil then
+		local okAlive, alive = pcall(IsHeroAlive, reveal.pid)
+		if okAlive and type(alive) == "boolean" then
+			died = not alive
+		end
+	end
+	local result = X.HuntResult(died, handleAlive, seen, dmg)
+	-- The hunt-end line carries the result: kept on the running hunt, or printed now for a hunt already let go.
+	local count = bot._huntCount
+	if count ~= nil and count.revealed and count.hit == nil then
+		count.hit = result
+	elseif reveal.count ~= nil then
+		reveal.count.hit = result
+		pcall(print, X.FormatHuntEnd(DotaTime(), reveal.count))
 	end
 	pcall(
 		print,
@@ -352,6 +388,7 @@ function X.SkillsComplement()
 	end
 	if not okH then
 		bot._clinkzHuntUntil = nil
+		X.NoteHuntEnd("error")
 		if DotaTime() >= (bot._huntErrAt or -999) then
 			bot._huntErrAt = DotaTime() + 10
 			pcall(print, string.format("[SHy-CLINKZ] t=%.0f hunt error %s", DotaTime(), tostring(hunted)))
@@ -452,7 +489,7 @@ end
 -- lets it go (bot._huntTarget cleared: after the reveal's first hits, a drop, a cancel, a tower skip). The [SHy-HUNT]
 -- trace (bots/lib/systems/hunt_trace.lua) runs for the whole Skeleton Walk, also a walk used for travel 5000-14000
 -- away (game 067 t=2038, 2507, 3930), so its changes= mixes travel flips into the hunt's. One line per hunt:
--- [SHy-CLINKZ] t= hunt modes target= changes= lasted= path=<mode>><mode>... (the first 8 modes).
+-- the hunt-end line below (flips=, path=<mode>><mode>..., the first 8 modes). It replaces the hunt modes line.
 -- count: { name, mode, changes, at, path }; returns true when the mode changed.
 function X.HuntModeStep(count, mode, modeName)
 	if mode == count.mode then
@@ -465,43 +502,134 @@ function X.HuntModeStep(count, mode, modeName)
 	end
 	return true
 end
-function X.EndHuntCount()
+-- One line per hunt (#94, game 063 item: "24 hunts, 0 hits, about 4 mode changes each" was read off the [SHy-HUNT]
+-- trace, which counts every Skeleton Walk, also walks with no hunt; games 064-068 had 32 reveals: 15 kills with a
+-- death line, 11 hits, 4 "kills" of a target that only left vision, 1 lost, 1 miss; and game 068 about one mode change
+-- per locked hunt). From the lock (X.LockHuntTarget) until the hunt lets its target
+-- go; a revealed hunt is printed when its result is known (2.5 s after the reveal):
+--   [SHy-CLINKZ] t= hunt-end target= why= hit= flips= lasted= path=
+-- why: the first reason noted (X.NoteHuntEnd): revealed | backup | outnumbered | tower | invis-gone | no-walk (the
+-- walk never came up) | target-gone | lost-sight | timeout | too-far | low-hp | retarget | died | error | other.
+-- hit: kill | hit | miss | lost (X.HuntResult) after a reveal, none without one. flips: mode changes while locked.
+-- lasted: lock to end; 0.0 is a hunt dropped in the think that locked it.
+function X.FormatHuntEnd(now, count)
+	return string.format(
+		"[SHy-CLINKZ] t=%.0f hunt-end target=%s why=%s hit=%s flips=%d lasted=%.1f path=%s",
+		now,
+		count.name or "-",
+		count.why or "other",
+		count.hit or (count.revealed and "-" or "none"),
+		count.changes,
+		(count.endAt or now) - count.at,
+		table.concat(count.path, ">")
+	)
+end
+-- The first reason a hunt ends with (later ones, like the timeout after a reveal's hits, don't replace it).
+function X.NoteHuntEnd(why)
+	local count = bot._huntCount
+	if count ~= nil and count.why == nil then
+		count.why = why
+	end
+end
+function X.EndHuntCount(why)
 	local count = bot._huntCount
 	if count == nil then
 		return
 	end
 	bot._huntCount = nil
-	pcall(
-		print,
-		string.format(
-			"[SHy-CLINKZ] t=%.0f hunt modes target=%s changes=%d lasted=%.1f path=%s",
-			DotaTime(),
-			count.name or "-",
-			count.changes,
-			DotaTime() - count.at,
-			table.concat(count.path, ">")
-		)
-	)
+	if count.why == nil then
+		count.why = why
+	end
+	if count.why == "invis-gone" and not count.walked then
+		count.why = "no-walk"
+	end
+	count.endAt = DotaTime()
+	-- Revealed and the result not in yet: CheckHuntResult prints it.
+	if count.revealed and count.hit == nil and huntReveal ~= nil and huntReveal.count == nil then
+		huntReveal.count = count
+		return
+	end
+	pcall(print, X.FormatHuntEnd(DotaTime(), count))
 end
 function X.StartHuntCount(name)
 	local count = bot._huntCount
 	if count ~= nil and count.name == name then
+		-- The same hero locked again in the same think it was dropped (HuntTarget: a timeout or too-far, then the
+		-- re-pick): the hunt goes on, so the drop's reason is not its end.
+		if not count.revealed then
+			count.why = nil
+		end
 		return
 	end
-	X.EndHuntCount()
+	X.EndHuntCount("retarget")
 	local mode = bot:GetActiveMode()
-	bot._huntCount = { name = name, mode = mode, changes = 0, at = DotaTime(), path = { RoamStats.ModeName(mode) } }
+	bot._huntCount = {
+		name = name,
+		mode = mode,
+		changes = 0,
+		at = DotaTime(),
+		path = { RoamStats.ModeName(mode) },
+		-- Locked during the walk (engage-target hunts): no-walk / hunt invis-gone need to know the walk was up.
+		walked = bot:HasModifier("modifier_clinkz_wind_walk"),
+	}
+end
+-- Why the outpost hold let another mode in during a live, unrevealed hunt (#94, game 068 t=3610-3616: outpost ->
+-- attack -> outpost -> attack 500-967 from Zeus, then the walk ended on an attack on the Radiant Ancient with no
+-- reveal; the log can't say which hold input lapsed). At most every 2 s:
+--   [SHy-CLINKZ] t= hunt flip to=<mode> desire= beat=<s since the hunt step ran> hold=<s left on the short hold>
+--   off=<s left on the no-hunt pause> tgt=seen|unseen|dead|null hp= outpost=<its last desire>@<s ago>
+function X.LogHuntFlip(count, modeName)
+	if count.revealed or modeName == "outpost" or not bot:HasModifier("modifier_clinkz_wind_walk") then
+		return
+	end
+	local now = DotaTime()
+	if now < (bot._huntFlipLogAt or -999) then
+		return
+	end
+	bot._huntFlipLogAt = now + 2
+	local target = bot._huntTarget
+	local tgt = "null"
+	if target ~= nil and not target:IsNull() then
+		tgt = not target:IsAlive() and "dead" or (target:CanBeSeen() and "seen" or "unseen")
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-CLINKZ] t=%.0f hunt flip target=%s to=%s desire=%.2f beat=%.1f busy=%s hold=%.1f off=%.1f tgt=%s hp=%.2f outpost=%.2f@%.1f",
+			now,
+			count.name or "-",
+			modeName,
+			bot:GetActiveModeDesire(),
+			math.min(99, now - (bot._huntBeatAt or -999)),
+			-- beat= over 1.5 with busy=true: the hunt step was blocked (silence, stun, a cast, a queued order); with
+			-- busy=false the spell think was not reached.
+			tostring(Fu.CanNotUseAbility(bot)),
+			(bot._clinkzHuntUntil or now) - now,
+			math.max(0, (bot._huntOffUntil or now) - now),
+			tgt,
+			Fu.GetHP(bot),
+			bot._outpostLastDesire or -1,
+			math.min(99, now - (bot._outpostLastDesireAt or -999))
+		)
+	)
 end
 function X.CountHuntModes()
 	local count = bot._huntCount
 	if count == nil then
 		return
 	end
-	if bot._huntTarget == nil or not bot:IsAlive() then
-		X.EndHuntCount()
+	if not bot:IsAlive() then
+		X.EndHuntCount("died")
 		return
 	end
-	X.HuntModeStep(count, bot:GetActiveMode(), RoamStats.ModeName(bot:GetActiveMode()))
+	if bot._huntTarget == nil then
+		X.EndHuntCount("other")
+		return
+	end
+	local modeName = RoamStats.ModeName(bot:GetActiveMode())
+	if X.HuntModeStep(count, bot:GetActiveMode(), modeName) then
+		X.LogHuntFlip(count, modeName)
+	end
 end
 -- Tower pause (#94, game 067 t=3033-3047): a skip-tower ends the hunt and pauses new ones for 5 s, but the outpost
 -- hold ended with it, and Valve's attack mode (0.95; Clinkz is not on the attack override list) and push_tower_bot
@@ -669,6 +797,7 @@ end
 -- could not say why they ended). why = revealed | invis-gone | target-gone | lost-sight | timeout | too-far |
 -- low-hp | outnumbered | tower. keepTarget: the reveal keeps its target for the first hits.
 function X.EndHunt(why, keepTarget)
+	X.NoteHuntEnd(why)
 	local prey = bot._huntPrey
 	if prey ~= nil then
 		local known = Fu.IsValidHero(prey)
@@ -742,6 +871,7 @@ function X.HuntTarget()
 		else
 			-- A hunt on the engage target (no hunt start line): say why the hold ends. The locked target's name too
 			-- (game 064: drop lines printed target=-, so a re-hunt on the same hero could not be told apart).
+			X.NoteHuntEnd(why)
 			X.LogHunt("drop-" .. why, locked, bot._huntName)
 		end
 		-- Really gone (dead, or unseen for 2.5 s): no new hunt for 2.5 s. Game 064: a target-gone end set no pause,
@@ -822,10 +952,35 @@ function X.HuntStep()
 			end
 			return true
 		end
+		-- The walk ended on a live hunt before the reveal (games 064 t=2430, 067 t=1506, 068 t=3616: an attack while
+		-- the hold had lapsed): what he was doing, so the next game names the order that broke it.
+		local count = bot._huntCount
+		if bot._huntTarget ~= nil and count ~= nil and count.walked and not count.revealed then
+			local attackTarget = bot:GetAttackTarget()
+			pcall(
+				print,
+				string.format(
+					"[SHy-CLINKZ] t=%.0f hunt invis-gone target=%s mode=%s act=%s atk=%s since-attack=%.1f lasted=%.1f",
+					DotaTime(),
+					count.name or "-",
+					RoamStats.ModeName(bot:GetActiveMode()),
+					tostring(bot:GetCurrentActionType()),
+					attackTarget ~= nil
+							and not attackTarget:IsNull()
+							and (string.gsub(attackTarget:GetUnitName(), "npc_dota_", ""))
+						or "-",
+					math.min(99, GameTime() - (bot:GetLastAttackTime() or -999)),
+					DotaTime() - count.at
+				)
+			)
+		end
 		X.EndHunt("invis-gone")
 		bot._huntTarget = nil
 		X.EndTowerHold("invis-gone")
 		return false
+	end
+	if bot._huntCount ~= nil then
+		bot._huntCount.walked = true
 	end
 	-- Invisible: a pact on the biggest creep in range first (heal + max HP, keeps him invisible).
 	if X.HasPactCharge() and not bot:HasModifier("modifier_clinkz_death_pact") then
@@ -860,6 +1015,25 @@ function X.HuntStep()
 			bot._huntWaitLogAt = DotaTime() + 3
 			X.LogHunt("wait-unseen", target, bot._huntName)
 		end
+		-- No order here, so an attack order another mode left keeps running and would end the walk (Skeleton Walk
+		-- lasts "until the moment he attacks or uses items", datafeed hero 56). Stop it. Unconfirmed cause: a guard
+		-- for the pre-reveal walk ends above (hunt invis-gone), logged when it fires.
+		local attackTarget = bot:GetAttackTarget()
+		if attackTarget ~= nil and not attackTarget:IsNull() and attackTarget ~= target then
+			bot:Action_ClearActions(true)
+			if DotaTime() >= (bot._huntWaitClearLogAt or -999) then
+				bot._huntWaitClearLogAt = DotaTime() + 3
+				pcall(
+					print,
+					string.format(
+						"[SHy-CLINKZ] t=%.0f hunt step=wait-clear target=%s unit=%s",
+						DotaTime(),
+						bot._huntName or "-",
+						(string.gsub(attackTarget:GetUnitName(), "npc_dota_", ""))
+					)
+				)
+			end
+		end
 		return true
 	end
 	-- A hunt on a lone hero ends when it gets backup (maintainer): another enemy hero within 1200 of the target
@@ -874,6 +1048,7 @@ function X.HuntStep()
 				GetUnitToUnitDistance(bot, target)
 			)
 		)
+		X.NoteHuntEnd("backup")
 		bot._huntTarget, bot._huntPrey, bot._huntLockFor, bot._huntRange = nil, nil, nil, nil
 		bot._huntOffUntil = DotaTime() + 15
 		bot._clinkzHuntUntil = nil
@@ -963,9 +1138,14 @@ function X.HuntStep()
 	bot._huntLockAt, bot._huntLockFor = DotaTime(), 3
 	if huntReveal == nil then
 		local okId, pid = pcall(target.GetPlayerID, target)
+		pid = okId and pid or nil
+		if bot._huntCount ~= nil then
+			bot._huntCount.revealed = true
+		end
 		huntReveal = {
 			target = target,
-			pid = okId and pid or nil,
+			pid = pid,
+			deaths = X.HeroDeaths(pid),
 			name = (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")),
 			hp = target:GetHealth(),
 			at = DotaTime(),
