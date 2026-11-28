@@ -293,6 +293,8 @@ function GetDesireHelper()
 		local weakestUnit = Fu.GetVulnerableWeakestUnit(bot, true, true, bot:GetAttackRange() + 250)
 		if Fu.IsValidHero(weakestUnit) then
 			bot:SetTarget(weakestUnit)
+			-- Think reuses this unit: its own search is narrower (game 085, 49:34: it found nothing and indexed nil).
+			bot._deathDelayTarget, bot._deathDelayTargetAt = weakestUnit, DotaTime()
 			return BOT_MODE_DESIRE_ABSOLUTE * 2
 		end
 	end
@@ -1066,21 +1068,83 @@ local function LogTombstoneSlowHit(where, dist, hitsLeft)
 		)
 	)
 end
+-- [SHy-ROAM] t= <hero> death-delay src=proper|desire|search|nearest|none target= dist= (Wraith Delay or Helm of the
+-- Undying; on a change of source or target, else at most once per 3s per bot; never twice within 0.5s).
+local function LogDeathDelayTarget(src, target)
+	local targetName = "-"
+	local dist = -1
+	if target ~= nil and not target:IsNull() then
+		targetName = string.gsub(target:GetUnitName(), "npc_dota_hero_", "")
+		dist = GetUnitToUnitDistance(bot, target)
+	end
+	local key = src .. "/" .. targetName
+	local sinceLast = DotaTime() - (bot._deathDelayLogAt or -999)
+	if sinceLast < 0.5 or (key == bot._deathDelayLogKey and sinceLast < 3) then
+		return
+	end
+	bot._deathDelayLogKey, bot._deathDelayLogAt = key, DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[SHy-ROAM] t=%.0f %s death-delay src=%s target=%s dist=%d",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			src,
+			targetName,
+			dist
+		)
+	)
+end
 function ThinkGeneralRoaming()
 	local hpRatio = Fu.GetHP(bot)
 	if
 		bot:HasModifier("modifier_skeleton_king_reincarnation_scepter_active")
 		or bot:HasModifier("modifier_item_helm_of_the_undying_active")
 	then
+		-- Game 085, 49:34: Wraith King in Wraith Delay had no proper target and the range+350 search found nothing,
+		-- so target:GetLocation() errored and he stood still. Sources in order: proper target, the unit GetDesire
+		-- picked this second, the search, then an attack-move toward the nearest visible enemy hero within 1200.
+		-- With none of them this block gives no order and the rest of the roaming think runs as for any hero.
 		local target = Fu.GetProperTarget(bot)
+		local src = "proper"
 		if not Fu.IsValid(target) then
-			target = Fu.GetVulnerableWeakestUnit(bot, true, true, bot:GetAttackRange() + 350)
+			target, src = nil, "none"
+			local stored = bot._deathDelayTarget
+			if DotaTime() - (bot._deathDelayTargetAt or -999) <= 1 and Fu.IsValid(stored) then
+				target, src = stored, "desire"
+			end
 		end
-		if GetUnitToUnitDistance(bot, target) > bot:GetAttackRange() + 200 then
-			bot:Action_MoveToLocation(target:GetLocation())
+		if target == nil then
+			target = Fu.GetVulnerableWeakestUnit(bot, true, true, bot:GetAttackRange() + 350)
+			if Fu.IsValid(target) then
+				src = "search"
+			else
+				target = nil
+			end
+		end
+		local nearest = nil
+		if target == nil then
+			local nearestDist = 1200
+			for _, enemyHero in pairs(bot:GetNearbyHeroes(1200, true, BOT_MODE_NONE) or {}) do
+				if Fu.IsValidHero(enemyHero) and GetUnitToUnitDistance(bot, enemyHero) <= nearestDist then
+					nearest, nearestDist = enemyHero, GetUnitToUnitDistance(bot, enemyHero)
+				end
+			end
+			if nearest ~= nil then
+				src = "nearest"
+			end
+		end
+		LogDeathDelayTarget(src, target or nearest)
+		if nearest ~= nil then
+			bot:Action_AttackMove(nearest:GetLocation())
 			return true
-		else
-			bot:Action_AttackUnit(target, false)
+		end
+		if target ~= nil then
+			if GetUnitToUnitDistance(bot, target) > bot:GetAttackRange() + 200 then
+				bot:Action_MoveToLocation(target:GetLocation())
+			else
+				bot:Action_AttackUnit(target, false)
+			end
 			return true
 		end
 	end
@@ -1673,6 +1737,8 @@ function ConsiderGeneralRoamingInConditions()
 		end
 		if Fu.IsValidHero(botTarget) then
 			bot:SetTarget(botTarget)
+			-- Think reuses this unit: this search reaches 1600, Think's own only attack range + 350.
+			bot._deathDelayTarget, bot._deathDelayTargetAt = botTarget, DotaTime()
 			return BOT_ACTION_DESIRE_ABSOLUTE * 2
 		end
 	end
