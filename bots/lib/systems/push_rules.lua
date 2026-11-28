@@ -470,6 +470,82 @@ function PushRules.GlyphSideStep(s)
 	return best[1], best[2], best[3], bestGap
 end
 
+-- The walk out of a glyphed tower's reach (#12, games 089 t=880-887 at the top T2 and 091 t=1657-1664 at the bottom
+-- T2; maintainer, game 091: "dire team still move aside perpendicular to radiant bottom lane, hit obstacle and stand
+-- still being hit by radiant t2 when glyphed"). One move order to the edge on the bot's own bearing (up to 0.8 rad
+-- off the lane) sent Wraith King, Zeus and Winter Wyvern into the trees beside the lane: they got 455-566 from the
+-- tower against a reach of about 850 (`glyph-end ... moves=1`) and Winter Wyvern went from 84% to 25% HP.
+-- Now the bot walks to the first of these candidates, and takes the next one when it has not gained
+-- GLYPH_REPATH_GAIN from the tower in GLYPH_REPATH_SECONDS (PushRules.GlyphExitStalled).
+PushRules.GLYPH_EXIT_ARC = 0.35 -- the bot's own bearing, kept this close to the lane (spreads bots a little)
+PushRules.GLYPH_REPATH_SECONDS = 1
+PushRules.GLYPH_REPATH_GAIN = 50
+
+-- Exit candidates, best first. s: tx, ty (tower), x, y (bot), bx, by (unit vector tower -> our side along the lane),
+-- radius (the edge: reach + 100), lane ({ x =, y = }: a point on the lane path toward our side at least radius from the
+-- tower, or nil), towerHit (the tower hit the bot: straight back along the lane first), passable (optional
+-- function(x, y) -> bool). Kinds: "own" (the bot's bearing within GLYPH_EXIT_ARC), "back" (straight back along the
+-- lane), "lane" (the lane point), "side" (the arc's two ends, the bot's side first). Not tower hit: own, back, lane,
+-- sides; tower hit: back, lane, own, sides. Ground that can't be walked is left out, except the lane point (the lane
+-- is walkable); "own" is left out when it is within 100 of "back". Never empty (falls back to "back").
+-- Returns a list of { x =, y =, kind = }.
+function PushRules.GlyphExitPoints(s)
+	local tx, ty, bx, by, radius = s.tx, s.ty, s.bx, s.by, s.radius
+	local ox, oy = PushRules.GlyphEdgePoint(tx, ty, s.x, s.y, bx, by, radius, PushRules.GLYPH_EXIT_ARC)
+	local backX, backY = tx + bx * radius, ty + by * radius
+	local own = { x = ox, y = oy, kind = "own" }
+	local back = { x = backX, y = backY, kind = "back" }
+	-- The arc's ends: rotate b by +-GLYPH_EDGE_ARC, the end on the bot's side of the lane line first.
+	local ux, uy = s.x - tx, s.y - ty
+	local botSide = (bx * uy - by * ux) >= 0 and 1 or -1
+	local sides = {}
+	for _, sign in ipairs({ botSide, -botSide }) do
+		local cosA, sinA = math.cos(PushRules.GLYPH_EDGE_ARC), math.sin(PushRules.GLYPH_EDGE_ARC) * sign
+		sides[#sides + 1] =
+			{ x = tx + (bx * cosA - by * sinA) * radius, y = ty + (bx * sinA + by * cosA) * radius, kind = "side" }
+	end
+	local order
+	if s.towerHit then
+		order = { back, s.lane, own, sides[1], sides[2] }
+	else
+		order = { own, back, s.lane, sides[1], sides[2] }
+	end
+	local points = {}
+	for i = 1, 5 do
+		local point = order[i]
+		if point ~= nil then
+			if point == s.lane then
+				points[#points + 1] = { x = point.x, y = point.y, kind = "lane" }
+			elseif
+				not (point == own and math.sqrt((ox - backX) ^ 2 + (oy - backY) ^ 2) < 100)
+				and (s.passable == nil or s.passable(point.x, point.y))
+			then
+				points[#points + 1] = point
+			end
+		end
+	end
+	if #points == 0 then
+		points[1] = back
+	end
+	return points
+end
+
+-- Has the walk out stalled? p: the bot's progress on the current candidate ({} at the start; this keeps best =
+-- the farthest distance from the tower so far, bestAt = when it last grew by GLYPH_REPATH_GAIN). distance: now, from
+-- the tower. True when the bot has not gained GLYPH_REPATH_GAIN for GLYPH_REPATH_SECONDS (standing against trees);
+-- the clock then starts again for the next candidate.
+function PushRules.GlyphExitStalled(p, distance, now)
+	if p.best == nil or distance >= p.best + PushRules.GLYPH_REPATH_GAIN then
+		p.best, p.bestAt = math.max(distance, p.best or 0), now
+		return false
+	end
+	if now - p.bestAt >= PushRules.GLYPH_REPATH_SECONDS then
+		p.best, p.bestAt = distance, now
+		return true
+	end
+	return false
+end
+
 -- How much a tower counts in a fight estimate (Fu.WeAreStronger) while it has the Glyph: per target its damage is
 -- unchanged, so a tier 1 tower (no multishot) counts as usual (1). A tier 2+ tower hits up to 6 targets at once, so
 -- against a group it deals its damage to each hero of the group in its range (`heroesInRange`, at least 1, at most 6).

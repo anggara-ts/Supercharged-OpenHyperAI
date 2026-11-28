@@ -646,6 +646,85 @@ T.test("glyph wait: side-steps alternate along the edge and keep 300 from waitin
 	T.ok(x < 0 and side == -1, "around the blocked side: " .. x .. "," .. y)
 end)
 
+T.test("glyph wait: exit points keep to walkable ground near the lane (#12, games 089 and 091)", function()
+	local R = rules()
+	-- Game 091 t=1657 shape: the lane runs back toward +x (b = 1,0), the bot stands north-east of the tower at about
+	-- 268 (45 degrees off the lane), trees north of the lane (y >= 300), the edge at 950.
+	local s = { tx = 0, ty = 0, x = 190, y = 190, bx = 1, by = 0, radius = 950, lane = { x = 1100, y = -40 } }
+	local points = R.GlyphExitPoints(s)
+	local kinds = {}
+	for i, point in ipairs(points) do
+		kinds[i] = point.kind
+	end
+	T.eq(table.concat(kinds, ","), "own,back,lane,side,side", "not hit: own bearing first, then back along the lane")
+	T.near(
+		math.atan2(points[1].y, points[1].x),
+		R.GLYPH_EXIT_ARC,
+		0.001,
+		"own bearing kept within 0.35 rad of the lane"
+	)
+	T.near(math.sqrt(points[1].x ^ 2 + points[1].y ^ 2), 950, 0.01, "on the edge")
+	T.near(points[2].x, 950, 0.01, "back: straight along the lane")
+	T.ok(points[4].y > 0 and points[5].y < 0, "the arc end on the bot's side first")
+	-- The trees beside the lane: the own-bearing point and the arc end there are left out.
+	s.passable = function(_, y)
+		return y < 300
+	end
+	points = R.GlyphExitPoints(s)
+	kinds = {}
+	for i, point in ipairs(points) do
+		kinds[i] = point.kind
+	end
+	T.eq(table.concat(kinds, ","), "back,lane,side", "blocked ground skipped")
+	T.ok(points[3].y < 0, "the walkable arc end")
+	-- The tower hits the bot (multishot): straight back along the lane first.
+	s.passable = nil
+	s.towerHit = true
+	points = R.GlyphExitPoints(s)
+	T.eq(points[1].kind .. "," .. points[2].kind .. "," .. points[3].kind, "back,lane,own", "tower hit: back first")
+	-- A bot already on the lane line: its own bearing is the back point, listed once.
+	points = R.GlyphExitPoints({ tx = 0, ty = 0, x = 300, y = 10, bx = 1, by = 0, radius = 950 })
+	T.eq(points[1].kind, "back", "own = back: no duplicate")
+	-- Nothing walkable and no lane point: still somewhere to go (back), and a lane point is always kept.
+	points = R.GlyphExitPoints({
+		tx = 0,
+		ty = 0,
+		x = 190,
+		y = 190,
+		bx = 1,
+		by = 0,
+		radius = 950,
+		passable = function()
+			return false
+		end,
+	})
+	T.eq(#points, 1, "one fallback")
+	T.eq(points[1].kind, "back", "fallback back")
+	s.passable = function()
+		return false
+	end
+	s.towerHit = false
+	points = R.GlyphExitPoints(s)
+	T.eq(#points, 1, "only the lane point")
+	T.eq(points[1].kind, "lane", "the lane is walkable")
+end)
+
+T.test("glyph wait: re-path when the walk out gains nothing for 1s", function()
+	local R = rules()
+	-- Game 091: Wraith King walked from 268 to about 300 and stood against the trees.
+	local p = {}
+	T.eq(R.GlyphExitStalled(p, 268, 0), false, "start")
+	T.eq(R.GlyphExitStalled(p, 300, 0.5), false, "0.5s: too early to tell")
+	T.eq(R.GlyphExitStalled(p, 310, 1.0), true, "1s and under 50 gained: next exit point")
+	T.eq(R.GlyphExitStalled(p, 320, 1.5), false, "the clock starts again for the next point")
+	-- A bot that walks out keeps its point.
+	local q = {}
+	R.GlyphExitStalled(q, 268, 0)
+	T.eq(R.GlyphExitStalled(q, 400, 0.6), false, "gaining")
+	T.eq(R.GlyphExitStalled(q, 430, 1.4), false, "0.8s since the last 50 gained")
+	T.eq(R.GlyphExitStalled(q, 440, 1.7), true, "stopped gaining for 1.1s")
+end)
+
 T.test("glyph helpers: tower tier, time left, fight factor", function()
 	local R = rules()
 	T.eq(R.TowerTier("npc_dota_badguys_tower1_bot"), 1, "T1")
