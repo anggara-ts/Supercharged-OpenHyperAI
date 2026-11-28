@@ -173,10 +173,13 @@ function X.SkillsComplement()
 		end
 	end
 	botTarget = context.target
-	stolenSpell1 = bot:GetAbilityInSlot(3)
-	stolenSpell2 = bot:GetAbilityInSlot(4)
-	X.ConsiderStolenSpell1()
-	X.ConsiderStolenSpell2()
+	stolenSpell1 = X.StolenSlot(3)
+	stolenSpell2 = X.StolenSlot(4)
+	-- A stolen cast is queued (ActionQueue_*): Spell Steal, Telekinesis and Fade Bolt below use Action_*, which
+	-- clears the queue, so the think ends once a stolen spell has given an order (#271).
+	if X.ConsiderStolenSpell1() or X.ConsiderStolenSpell2() then
+		return
+	end
 	spellStealDesire, spellStealTarget = X.ConsiderSpellSteal()
 	if spellStealDesire > 0 then
 		bot:Action_UseAbilityOnEntity(spellStealAbility, spellStealTarget)
@@ -423,6 +426,16 @@ function X.ConsiderFadeBolt()
 	local castRange = Fu.GetProperCastRange(false, bot, fadeBoltAbility:GetCastRange())
 	local damage = fadeBoltAbility:GetSpecialValueInt("damage")
 	local nRadius = fadeBoltAbility:GetSpecialValueInt("radius")
+	-- Last will (bots/lib/hero/rubick.lua X.IsAboutToDie): about to die, the bolt goes at the weakest enemy in range
+	-- instead of waiting for a kill or a team fight.
+	if Rubick.IsAboutToDie(bot) then
+		local lastWillTarget =
+			Rubick.WeakestCastableEnemy(Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE) or {}, castRange)
+		if lastWillTarget ~= nil then
+			Rubick.LogCast("own-cast", "rubick_fade_bolt", "own", lastWillTarget, "last-will", nil)
+			return BOT_ACTION_DESIRE_VERYHIGH, lastWillTarget
+		end
+	end
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
@@ -609,19 +622,22 @@ function X.ConsiderFadeBolt()
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
 end
-function X.ConsiderStolenSpell1()
-	if stolenSpell1:GetName() == "rubick_empty1" or not stolenSpell1:IsFullyCastable() then
-		return BOT_ACTION_DESIRE_HIGH, 0, ""
+-- The stolen spell in that slot. GetAbilityInSlot can give nil, or a handle the game has already let go while the
+-- slot changes: then the safe proxy (SafeAbility, global_overrides.lua) stands in, which is never castable, so no
+-- method is called on nil (that error ended the whole SkillsComplement under its pcall).
+function X.StolenSlot(slot)
+	local ability = bot:GetAbilityInSlot(slot)
+	if ability == nil or ability:IsNull() then
+		return SafeAbility(nil)
 	end
-	Rubick.ConsiderStolenSpell(stolenSpell1)
-	return BOT_ACTION_DESIRE_HIGH, 0, ""
+	return ability
+end
+-- True when the stolen spell in that slot gave an order this think.
+function X.ConsiderStolenSpell1()
+	return Rubick.ConsiderStolenSpell(stolenSpell1)
 end
 function X.ConsiderStolenSpell2()
-	if stolenSpell2:GetName() == "rubick_empty2" or not stolenSpell2:IsFullyCastable() then
-		return BOT_ACTION_DESIRE_HIGH, 0, ""
-	end
-	Rubick.ConsiderStolenSpell(stolenSpell2)
-	return BOT_ACTION_DESIRE_HIGH, 0, ""
+	return Rubick.ConsiderStolenSpell(stolenSpell2)
 end
 function X.ConsiderSpellSteal()
 	if not spellStealAbility:IsFullyCastable() then
@@ -643,6 +659,9 @@ function X.ConsiderSpellSteal()
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, spellStealAbility:GetCastRange())
 	local nearbyEnemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), castRange + 300)
+	-- The held spells are the same for every enemy: their weights are read once, not per enemy.
+	local heldSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell1:GetName()) * 100
+	local secondSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell2:GetName()) * 100
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
 			Fu.IsValidHero(enemyHero)
@@ -665,11 +684,9 @@ function X.ConsiderSpellSteal()
 					bot._stealRoll = RandomInt(1, 100)
 					bot._stealRoll2 = RandomInt(1, 100)
 				end
-				local heldSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell1:GetName()) * 100
 				local stealRoll = bot._stealRoll
 				local steal = false
 				if bot:HasScepter() then
-					local secondSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell2:GetName()) * 100
 					if heldSpellWeight >= stealRoll and secondSpellWeight >= bot._stealRoll2 then
 						steal = true
 					end
@@ -690,7 +707,7 @@ function X.ConsiderSpellSteal()
 								"[SHy-RUBICK] t=%.0f spell-steal from=%s held=%s w=%.0f roll=%d",
 								DotaTime(),
 								(string.gsub(enemyHero:GetUnitName(), "npc_dota_hero_", "")),
-								stolenSpell1:GetName(),
+								tostring(stolenSpell1:GetName()),
 								heldSpellWeight,
 								stealRoll
 							)

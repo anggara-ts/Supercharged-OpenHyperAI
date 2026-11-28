@@ -1571,10 +1571,12 @@ function ItemPurchaseThink()
 	if bot.needPurchaseRebuild then
 		bot.needPurchaseRebuild = nil
 		local position = Fu.GetPosition(bot)
-		log("[PosSwap] Item purchase rebuild for %s -> pos%s", botName, position)
 		local heroFile = string.gsub(botName, "npc_dota_", "")
 		local loaded, newHeroModule = pcall(dofile, GetScriptDirectory() .. "/heroes/" .. heroFile)
-		if loaded and newHeroModule ~= nil and newHeroModule["sBuyList"] ~= nil then
+		-- [SHy-ROLE] rebuild (#210): the swap path was only in debug logs, so no game had shown it.
+		local buildLoaded = loaded and newHeroModule ~= nil and newHeroModule["sBuyList"] ~= nil
+		local bootsSold = {}
+		if buildLoaded then
 			heroModule = newHeroModule
 			buyList = FixTravelBoots(newHeroModule["sBuyList"])
 			sellList = newHeroModule["sSellList"]
@@ -1606,7 +1608,7 @@ function ItemPurchaseThink()
 					if not kept[boot] then
 						local slot = bot:FindItemSlot(boot)
 						if slot >= 0 and slot <= 8 then
-							log("[PosSwap] Selling %s — %s no longer builds it", boot, botName)
+							bootsSold[#bootsSold + 1] = (string.gsub(boot, "item_", ""))
 							bot:ActionImmediate_SellItem(bot:GetItemInSlot(slot))
 						end
 					end
@@ -1637,7 +1639,19 @@ function ItemPurchaseThink()
 		bot.currBuyingRequiredCounts = nil
 		bot.rebuildCount = 0
 		bot.countInvCheck = 0
-		log("[PosSwap] Purchase list rebuilt with %s items", #bot.purchaseListInReverseOrder)
+		local reverseList = bot.purchaseListInReverseOrder or {}
+		print(
+			string.format(
+				"[SHy-ROLE] t=%.0f %s rebuild pos=%s loaded=%s items=%d boots-sold=%s next=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(position),
+				buildLoaded and "yes" or "no",
+				#reverseList,
+				#bootsSold > 0 and table.concat(bootsSold, ",") or "-",
+				tostring(reverseList[#reverseList] or "-")
+			)
+		)
 	end
 	if bot.lastItemPurchaseFrameProcessTime == nil then
 		bot.lastItemPurchaseFrameProcessTime = now
