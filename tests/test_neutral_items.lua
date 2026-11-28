@@ -304,6 +304,49 @@ T.test("forager mushrooms: a bot without a Forager's Kit never orders an eat, an
 	T.ok(dropLine ~= nil and string.find(dropLine, "how=no-kit", 1, true), "drop line: " .. tostring(dropLine))
 end)
 
+-- Game 091, 25:06: Rubick's no-kit mushroom was still in the bag at the result line and no second order came.
+T.test("forager mushrooms: a mushroom still in the bag after the drop is dropped again, 3 orders at most", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_puck", slot = 2, time = 1506 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	_G.GetDroppedItemList = function()
+		return {}
+	end
+	local nut = Stub.newAbility("item_foragers_stats", bot)
+	bot._items[3] = nut
+	bot.FindItemSlot = function(_, name)
+		return name == "item_foragers_stats" and 3 or -1
+	end
+	local drops, holds = 0, {}
+	bot.Action_DropItem = function(_, item)
+		if item == nut then
+			drops = drops + 1
+			holds[drops] = bot._castHoldUntil
+		end
+	end
+	for step = 0, 11 do
+		Stub.time = 1506 + step
+		Usage.DropForeignItems()
+	end
+	T.eq(drops, 3, "three drop orders")
+	T.eq(holds[1], nil, "the first order holds nothing")
+	T.ok(holds[2] ~= nil and holds[3] ~= nil, "tries 2 and 3 hold the mode Thinks")
+	local function line(text)
+		for _, printed in ipairs(Stub.printed) do
+			if string.find(printed, text, 1, true) then
+				return printed
+			end
+		end
+		return nil
+	end
+	T.ok(line("drop-foreign item=item_foragers_stats") ~= nil, "drop line")
+	T.ok(line("try=1 order=drop ok=yes") ~= nil, "try 1")
+	T.ok(line("try=2 order=drop+hold ok=yes") ~= nil, "try 2")
+	T.ok(line("try=3 order=drop+hold ok=yes") ~= nil, "try 3")
+	T.ok(line("inBag=yes ground=- try=1 next=retry") ~= nil, "result 1: retry")
+	T.ok(line("inBag=yes ground=- try=3 next=give-up") ~= nil, "result 3: give up")
+end)
+
 T.test("neutral items: Witchbane (Heavy Blade) is cast on a location, not a unit (through ItemUsageThink)", function()
 	local Usage = loadUsage({ hero = "npc_dota_hero_dazzle", slot = 5, time = 3100 })
 	local bot = Stub.bot

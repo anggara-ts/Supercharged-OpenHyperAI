@@ -11222,8 +11222,8 @@ function Usage.EatForage()
 				)
 				-- The 60s backoff alone kept the eat orders coming for the rest of the game (game 062: Medusa and
 				-- Nyx Assassin, Nature's Prophet's mushrooms, every 60s from 29:05). Treat the mushroom as another
-				-- player's: no more eats or swaps, and DropForeignItems drops it once. Its result line reads the
-				-- owner off the ground and clears the mark if the mushroom turns out to be this bot's (#141).
+				-- player's: no more eats or swaps, and DropForeignItems drops it (up to 3 orders). Its result line
+				-- reads the owner off the ground and clears the mark if the mushroom turns out to be this bot's (#141).
 				-- Not one from the bot's own Forager's Kit (MarkName refuses it): that one is tried again later.
 				ForeignItems.MarkName(bot, pending.name, "unknown", "not-consumed")
 			end
@@ -11267,6 +11267,12 @@ end
 -- or fighting, no spell going). Game 062: Medusa and Nyx Assassin carried Nature's Prophet's mushrooms for 15+
 -- minutes and stood still at the end (44:57-49:30) while the base was sieged. 1.5s later a result line says
 -- whether it left the bag and whose the ground says it is. Checks once per second.
+-- Up to FOREIGN_DROP_TRIES orders per item name: one still in the bag at the result line is dropped again (game 091,
+-- 25:06: Rubick's mushroom stayed after one order; whether a mode's next order replaced the drop or it was taken
+-- back is unverified). The API has no ActionImmediate drop (docs/BOT_API_RUNTIME.md), so tries 2 and 3 also hold our
+-- mode Thinks for 0.3s (bot._castHoldUntil, OhaCastGuard; never over a hold already running). Valve's own modes are
+-- not held.
+local FOREIGN_DROP_TRIES = 3
 function Usage.DropForeignItems()
 	-- Heroes only: this runs before the item think's hero gate (a bear's player ID against its owner's is unverified).
 	if not bot:IsAlive() or not bot:IsHero() or bot:IsIllusion() then
@@ -11290,15 +11296,29 @@ function Usage.DropForeignItems()
 		if groundOwner == "self" and bot._foreignNames ~= nil then
 			bot._foreignNames[pending.name] = nil
 		end
+		local inBag = bot:FindItemSlot(pending.name) >= 0
+		local after = "-"
+		if inBag and (pending.try or 1) < FOREIGN_DROP_TRIES then
+			after = "retry"
+			if bot._foreignDropped ~= nil then
+				bot._foreignDropped[pending.name] = nil
+			end
+		elseif inBag then
+			after = "give-up"
+		elseif bot._foreignDropTries ~= nil then
+			bot._foreignDropTries[pending.name] = nil
+		end
 		pcall(
 			print,
 			string.format(
-				"[SHy-ITEM] t=%.0f %s drop-foreign-result item=%s inBag=%s ground=%s",
+				"[SHy-ITEM] t=%.0f %s drop-foreign-result item=%s inBag=%s ground=%s try=%d next=%s",
 				now,
 				heroName,
 				pending.name,
-				bot:FindItemSlot(pending.name) >= 0 and "yes" or "no",
-				groundOwner
+				inBag and "yes" or "no",
+				groundOwner,
+				pending.try or 1,
+				after
 			)
 		)
 	end
@@ -11335,22 +11355,33 @@ function Usage.DropForeignItems()
 					return false
 				end
 				local name = item:GetName()
+				bot._foreignDropTries = bot._foreignDropTries or {}
+				local try = (bot._foreignDropTries[name] or 0) + 1
+				bot._foreignDropTries[name] = try
 				bot._foreignDropped[name] = now
-				bot._foreignDropPending = { name = name, at = now }
+				bot._foreignDropPending = { name = name, at = now, try = try }
+				local order = "drop"
+				if try >= 2 and (bot._castHoldUntil == nil or now >= bot._castHoldUntil) then
+					bot._castHoldUntil = now + 0.3
+					order = "drop+hold"
+				end
+				local ordered = pcall(bot.Action_DropItem, bot, item, bot:GetLocation())
 				pcall(
 					print,
 					string.format(
-						"[SHy-ITEM] t=%.0f %s drop-foreign item=%s owner=%s how=%s slot=%d mode=%s",
+						"[SHy-ITEM] t=%.0f %s drop-foreign item=%s owner=%s how=%s slot=%d mode=%s try=%d order=%s ok=%s",
 						now,
 						heroName,
 						name,
 						tostring(owner),
 						tostring(how),
 						slot,
-						StuckModeName(mode)
+						StuckModeName(mode),
+						try,
+						order,
+						ordered and "yes" or "no"
 					)
 				)
-				bot:Action_DropItem(item, bot:GetLocation())
 				return true
 			end
 		end
