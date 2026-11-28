@@ -632,11 +632,14 @@ end
 -- vision) with the keys ability, channel_start, location, player_id, unit; the ability handle's GetLevel() often
 -- reads -1 (the level read at the hero's last sighting is used then, EnemySpells.Record). Lines:
 --   [SHy-ENEMYCD] t= cast-probe installed=yes|no error=
---   [SHy-ENEMYCD] t= cast-callback n= enemyN= arg=<type> keys=<fields> caster= spell= team=ally|enemy|unknown
+--   [SHy-ENEMYCD] t= cast-callback n= enemyN= arg=<type> keys=<fields> caster= spell= team=ally|enemy|unknown|team<N>
 --                                    the first 5 calls, and the first 5 calls for an enemy caster (team=unknown: the
---                                    caster's team could not be read)
+--                                    caster's team could not be read; team<N>: only a listener installed the callback,
+--                                    so no side is "ours" and nothing is recorded)
 -- An enemy hero's cast of a spell in COOLDOWNS or in the caller's `interest` name set is recorded with via=callback.
+-- Listeners (EnemySpells.AddCastListener) get every cast of either team, before that filter.
 local probeInstalled = false
+local castListeners = {}
 local callbackCount = 0
 local enemyCallbackCount = 0
 local probeInterest = {}
@@ -676,7 +679,24 @@ local function OnCast(info)
 		local okName, name = pcall(GetSelectedHeroName, playerId)
 		heroName = okName and name or heroName
 	end
-	local enemy = casterTeam ~= nil and casterTeam ~= probeTeam
+	-- No probeTeam: only listeners installed the callback (no Alchemist), so nothing is recorded as an enemy cast.
+	local enemy = casterTeam ~= nil and probeTeam ~= nil and casterTeam ~= probeTeam
+	if #castListeners > 0 and spell ~= nil then
+		local cast = {
+			spell = spell,
+			caster = caster,
+			heroName = heroName,
+			team = casterTeam,
+			ability = ability,
+			location = type(info) == "table" and info.location or nil,
+		}
+		for _, listener in ipairs(castListeners) do
+			local okListener, errListener = pcall(listener, cast)
+			if not okListener then
+				LogError("callback", "cast-listener", errListener)
+			end
+		end
+	end
 	if enemy then
 		enemyCallbackCount = enemyCallbackCount + 1
 	end
@@ -699,7 +719,10 @@ local function OnCast(info)
 				table.concat(keys, ","),
 				tostring(heroName),
 				tostring(spell),
-				casterTeam == nil and "unknown" or enemy and "enemy" or "ally"
+				casterTeam == nil and "unknown"
+					or probeTeam == nil and ("team" .. tostring(casterTeam))
+					or enemy and "enemy"
+					or "ally"
 			)
 		)
 	end
@@ -718,17 +741,13 @@ local function OnCast(info)
 		end
 	end
 end
-function EnemySpells.InstallCastProbe(interest)
-	for name in pairs(interest or {}) do
-		probeInterest[name] = true
-	end
+local function InstallCallback()
 	if probeInstalled then
 		return
 	end
 	probeInstalled = true
 	local ok, err = false, "no-function"
 	if type(InstallCastCallback) == "function" then
-		probeTeam = GetTeam()
 		ok, err = pcall(InstallCastCallback, -1, function(info)
 			local okCast, errCast = pcall(OnCast, info)
 			if not okCast then
@@ -745,6 +764,24 @@ function EnemySpells.InstallCastProbe(interest)
 			ok and "-" or tostring(err)
 		)
 	)
+end
+function EnemySpells.InstallCastProbe(interest)
+	for name in pairs(interest or {}) do
+		probeInterest[name] = true
+	end
+	-- Our team is the first recorder's (Alchemist's), never a listener's: the callback may already be in.
+	if probeTeam == nil then
+		probeTeam = GetTeam()
+	end
+	InstallCallback()
+end
+
+-- Another system that wants every cast (both teams) adds a listener: fn({ spell, caster, heroName, team, ability,
+-- location }), `team` the caster's team or nil. It shares the one cast callback (installed here if not yet), so
+-- callers never install a second one (planted_trees.lua, #7).
+function EnemySpells.AddCastListener(fn)
+	castListeners[#castListeners + 1] = fn
+	InstallCallback()
 end
 
 return EnemySpells
