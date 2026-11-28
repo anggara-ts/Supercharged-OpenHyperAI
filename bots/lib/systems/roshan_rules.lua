@@ -88,6 +88,38 @@ function RoshanRules.FinishClear(roshRatio, foesNearPit)
 	return type(roshRatio) == "number" and roshRatio < RoshanRules.FINISH_CLEAR_BELOW and (foesNearPit or 0) == 0
 end
 
+-- Seconds to walk `distance` at `moveSpeed` (#12, game 092: kill-window calls used the travel estimate, which can be a
+-- TP, so the call went out and the walk used the window up). Speed under 100 falls back to 300: hero MovementSpeed in
+-- npc_heroes is per hero and commonly 300; 300 is not one game constant (unverified), used only for that fallback.
+function RoshanRules.WalkSeconds(distance, moveSpeed)
+	local speed = moveSpeed or 0
+	if speed < 100 then
+		speed = 300
+	end
+	return math.max(0, distance or 0) / speed
+end
+
+-- Does this hero count in the take's fit? (#12, game 092 36:16: the kill-window fit said n=5 with the human, who had
+-- not pinged and did not come). A human counts only when they pinged or are already on the way (acked). A bot counts
+-- when it acked or the call is still asking it (onTheWay).
+--   s.human, s.pinged, s.acked, s.onTheWay
+function RoshanRules.CountsForTake(s)
+	s = s or {}
+	if s.human and not s.pinged and not s.acked then
+		return false
+	end
+	return s.acked == true or s.onTheWay == true
+end
+
+-- The slowest member's walk plus the kill has to fit in the window the call already uses (kill time left plus the
+-- transit grace; nil: there is no kill window).
+function RoshanRules.WalkFitsWindow(slowestWalk, killTime, windowLeft)
+	if windowLeft == nil then
+		return true
+	end
+	return (slowestWalk or 0) + (killTime or 0) <= windowLeft
+end
+
 -- The tank check alone: does a tanking time of `tank` seconds cover `half` seconds to half HP?
 function RoshanRules.TankCovers(tank, half)
 	return (tank or 0) >= (half or 0) * RoshanRules.HALF_CREDIT

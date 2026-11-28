@@ -230,3 +230,18 @@ T.test("finish clear: under 36% with no foe near the pit", function()
 	-- The stepped-out heroes stood 1618-2014 from the pit in game 088.
 	T.ok(R.FINISH_HITTER_RANGE >= 2014, "hitter range covers them")
 end)
+
+T.test("a human who has not pinged is not in the take, and the walk has to fit the window (game 092)", function()
+	local R = rules()
+	T.ok(not R.CountsForTake({ human = true, pinged = false, acked = false, onTheWay = false }), "human, no ping")
+	T.ok(R.CountsForTake({ human = true, pinged = true, acked = false, onTheWay = false }), "human pinged")
+	T.ok(R.CountsForTake({ human = true, pinged = false, acked = true, onTheWay = false }), "human already coming")
+	T.ok(R.CountsForTake({ human = false, pinged = false, acked = false, onTheWay = true }), "bot the call asks")
+	T.ok(not R.CountsForTake({ human = false, pinged = false, acked = false, onTheWay = false }), "bot not coming")
+	-- Game 092 t=1743: need=30 left=34, then the walk used the window. 20s walk + 16s kill does not fit 34.
+	T.ok(not R.WalkFitsWindow(20, 16, 34), "walk plus kill over the window")
+	T.ok(R.WalkFitsWindow(10, 16, 34), "walk plus kill inside the window")
+	T.ok(R.WalkFitsWindow(40, 20, nil), "no kill window")
+	T.near(R.WalkSeconds(900, 300), 3, 1e-9, "900 at 300")
+	T.near(R.WalkSeconds(900, 0), 3, 1e-9, "missing speed uses 300")
+end)

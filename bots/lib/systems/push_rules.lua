@@ -253,7 +253,14 @@ end
 --   s.responders) are no more than our heroes on the chase (s.chasers; game 069 33:30: 3 alive, all near, against 3
 --   of ours, in a dead2 window: the deep chase killed two and the T3 and barracks fell);
 --   the target dies before the tower kills us (s.killTime <= 5s and under s.surviveTime).
+-- An advantage window or even numbers also need the target to die before the tower kills us
+-- (s.killTime < s.surviveTime): game 092, Rubick chased with survive under kill (`why=advantage survive=4.7 kill=4.9`,
+-- `why=numbers survive=3.6 kill=4.1`) and died within 8s. That refusal is `slow-kill`.
 -- Returns skip, why.
+function PushRules.KillBeforeTower(killTime, surviveTime)
+	return type(killTime) == "number" and type(surviveTime) == "number" and killTime < surviveTime
+end
+
 function PushRules.HitHeroBehindTower(s)
 	local reach = (s.towerRange or 700) + 150
 	if (s.targetToTower or math.huge) > reach and (s.pathToTower or math.huge) > reach then
@@ -269,15 +276,35 @@ function PushRules.HitHeroBehindTower(s)
 		return false, "creeps-tank"
 	end
 	if s.advantage then
-		return false, "advantage"
+		if PushRules.KillBeforeTower(s.killTime, s.surviveTime) then
+			return false, "advantage"
+		end
+		return true, "slow-kill"
 	end
 	if s.responders ~= nil and s.chasers ~= nil and s.responders <= s.chasers then
-		return false, "numbers"
+		if PushRules.KillBeforeTower(s.killTime, s.surviveTime) then
+			return false, "numbers"
+		end
+		return true, "slow-kill"
 	end
-	if s.killTime ~= nil and s.killTime <= 5 and s.killTime < (s.surviveTime or 0) then
+	if s.killTime ~= nil and s.killTime <= 5 and PushRules.KillBeforeTower(s.killTime, s.surviveTime) then
 		return false, "kill-first"
 	end
 	return true, "behind-tower"
+end
+
+-- Radians off the lane, one per team slot 1..5, so five bots waiting out a Glyph do not share one edge point
+-- (game 092 t=1324: spread=54 for all five). Slots 1..5 are -0.8, -0.4, 0, 0.4, 0.8. At an edge of about 970 that is
+-- about 380 between neighbours, past GLYPH_SPREAD (300).
+PushRules.GLYPH_SLOT_STEP = 0.4
+function PushRules.GlyphSlotAngle(slot)
+	local index = math.floor(slot or 3)
+	if index < 1 then
+		index = 1
+	elseif index > 5 then
+		index = 5
+	end
+	return (index - 3) * PushRules.GLYPH_SLOT_STEP
 end
 
 -- PushThink's walk to the lane front (#12, game 071 47:20-47:41): a bot 2000+ from its lane's front walks there,

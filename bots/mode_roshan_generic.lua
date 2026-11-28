@@ -220,6 +220,13 @@ end
 -- declined: names of allies who did not switch after that, so the call does not wait for them
 -- (a core busy defending or farming used to hold the whole group).
 local ACK_GRACE = 4
+-- Allies in Roshan mode this close to the pit count in the commit fit (#12, game 092: the fit used 1800, so a fifth
+-- hero 2150-2240 away was left out and the take dropped tank-short).
+local COMMIT_RANGE = 2500
+-- A gather nobody has reached yet waits here: outside the 1600 pit ring, still within the 1800 grouped ring, so
+-- arriving counts toward the group (game 092 36:16: Puck waited in the pit with grouped=0/5 and 4 enemies alive).
+-- Further than 1800 would leave every bot outside the ring and the group would never form.
+local GATHER_OUTSIDE = 1700
 -- ackSet: allies who acked inside the grace. A late joiner (decliner whose own mode ended) is
 -- welcome but not waited for: it is neither required nor counted as still walking, so the group
 -- that already gathered does not hold for it (it used to, up to the 40s cap).
@@ -460,29 +467,84 @@ local function RoshanDpsOn(ally)
 	end
 	return states.roshDpsSeen or RoshanRules.FALLBACK_DPS
 end
+-- Current move speed, or 300 when the engine gives none (RoshanRules.WalkSeconds).
+local function MoveSpeed(unit)
+	local ok, speed = pcall(function()
+		return unit:GetCurrentMovementSpeed()
+	end)
+	if ok and type(speed) == "number" then
+		return speed
+	end
+	return 0
+end
+-- A human hero (IsBot false). A missing IsBot reads as a bot, so a stub or a unit that cannot answer is still counted.
+local function IsHumanUnit(unit)
+	if unit == nil or unit.IsBot == nil then
+		return false
+	end
+	local ok, isBot = pcall(function()
+		return unit:IsBot()
+	end)
+	return ok and isBot == false
+end
+-- The human pinged Roshan or said !rosh: HumanOrders.RoshCalled is that order on this bot.
+local function HumanAskedRoshan()
+	local kind = HumanOrders.RoshCalled(bot)
+	return kind == "ping" or kind == "order"
+end
+-- The living bot with the lowest player id says the team's one reply. A human is not the speaker.
+local function TeamSpeaker()
+	local myId = bot:GetPlayerID()
+	local players = GetTeamPlayers(GetTeam())
+	for i = 1, #players do
+		local ally = GetTeamMember(i)
+		if ally ~= nil and ally ~= bot and ally:IsAlive() and not IsHumanUnit(ally) and ally:GetPlayerID() < myId then
+			return false
+		end
+	end
+	return true
+end
 -- Time the group needs: the GatherMinimum-th closest joiner walks to the rally, then the
 -- group kills Roshan. Everyone computes the same number, so the team goes or stays together.
+-- Only heroes that ack or are on the way (RoshanRules.CountsForTake). A human who has not pinged is not on the way.
 local function TakeTimeNeeded(roshanLocation)
 	local rally = Fu.AdjustLocationWithOffsetTowardsFountain(roshanLocation, 900)
 	local etas = {}
 	local dps = {}
 	local players = GetTeamPlayers(GetTeam())
+	local asked = HumanAskedRoshan()
 	for wasRoshanAlive = 1, #players do
 		local ally = GetTeamMember(wasRoshanAlive)
 		if AllyShouldJoin(ally) then
-			-- Fastest way there: walk, TP to our tower nearest the pit, or a Twin Gate. Walking
-			-- only made an ally across the map look too slow for every kill window.
-			local eta = ObjectiveTravel.Eta(ally, rally)
-			local secondsPerAttack = ally:GetSecondsPerAttack()
-			local hit = (secondsPerAttack ~= nil and secondsPerAttack > 0) and ally:GetAttackDamage() / secondsPerAttack
-				or 0
-			etas[#etas + 1] = {
-				eta = eta,
-				dps = hit,
-				hp = ally:GetHealth(),
-				maxHp = ally:GetMaxHealth(),
-				roshDps = RoshanDpsOn(ally),
-			}
+			local human = IsHumanUnit(ally)
+			local acked = AllyActiveMode(ally) == BOT_MODE_ROSHAN
+			-- A fresh call still asks every bot that can join. A human counts only after a ping or once they are in
+			-- the mode (game 092 36:16: Axe had not pinged, the fit still said n=5).
+			local coming = RoshanRules.CountsForTake({
+				human = human,
+				pinged = human and asked,
+				acked = acked,
+				onTheWay = not human,
+			})
+			if coming then
+				-- Fastest way there: walk, TP to our tower nearest the pit, or a Twin Gate. Walking
+				-- only made an ally across the map look too slow for every kill window. The call also
+				-- stores the plain walk (distance / move speed): the travel estimate can be a TP, and
+				-- the walk then used the window up (game 092, need=30 left=34, dropped 6s later).
+				local eta = ObjectiveTravel.Eta(ally, rally)
+				local secondsPerAttack = ally:GetSecondsPerAttack()
+				local hit = (secondsPerAttack ~= nil and secondsPerAttack > 0)
+						and ally:GetAttackDamage() / secondsPerAttack
+					or 0
+				etas[#etas + 1] = {
+					eta = eta,
+					walk = RoshanRules.WalkSeconds(GetUnitToLocationDistance(ally, rally), MoveSpeed(ally)),
+					dps = hit,
+					hp = ally:GetHealth(),
+					maxHp = ally:GetMaxHealth(),
+					roshDps = RoshanDpsOn(ally),
+				}
+			end
 		end
 	end
 	if #etas == 0 then
@@ -522,14 +584,16 @@ local function GroupFitsTake(roshanLocation)
 	local ok, why = RoshanRules.GroupFit({ members = members, groupDps = groupDps, roshHp = roshHp, roshMax = roshMax })
 	return ok, why, #members
 end
--- The same fit with the allies who are at the pit (within 1800) at the commit (#12, game 069 20:17-21:14: the call fit
--- with five, the commit went with 3/5 and they left one by one, Roshan never under 56%). Returns ok, why, count.
+-- The same fit with the allies in Roshan mode within COMMIT_RANGE at the commit (#12, game 069 20:17-21:14: the call
+-- fit with five, the commit went with 3/5 and they left one by one, Roshan never under 56%. Game 092: within 1800
+-- left out a fifth hero 2150-2240 away, so the tank read 15-16 against a half of 25-29). Returns ok, why, count.
 local function GroupFitAt(roshanLocation)
 	local members, groupDps, names = {}, 0, {}
 	local players = GetTeamPlayers(GetTeam())
 	for i = 1, #players do
 		local ally = GetTeamMember(i)
-		if AllyShouldJoin(ally) and GetUnitToLocationDistance(ally, roshanLocation) <= 1800 then
+		local inMode = ally == bot or AllyActiveMode(ally) == BOT_MODE_ROSHAN
+		if AllyShouldJoin(ally) and inMode and GetUnitToLocationDistance(ally, roshanLocation) <= COMMIT_RANGE then
 			local secondsPerAttack = ally:GetSecondsPerAttack()
 			local hit = (secondsPerAttack ~= nil and secondsPerAttack > 0) and ally:GetAttackDamage() / secondsPerAttack
 				or 0
@@ -631,7 +695,20 @@ local function TakeFitsWindow(roshanLocation)
 		return false, "window-closed"
 	end
 	local window = left + KillWindow.TransitGrace(roshanLocation)
-	local need, eta, kill = TakeTimeNeeded(roshanLocation)
+	local need, eta, kill, members = TakeTimeNeeded(roshanLocation)
+	if #members == 0 then
+		return false, "no-members"
+	end
+	-- The slowest counted hero's walk, not the travel estimate (RoshanRules.WalkFitsWindow).
+	local slowest = 0
+	for _, member in ipairs(members) do
+		if (member.walk or 0) > slowest then
+			slowest = member.walk
+		end
+	end
+	if not RoshanRules.WalkFitsWindow(slowest, kill, window) then
+		return false, string.format("walk-long(walk=%.0f kill=%.0f left=%.0f n=%d)", slowest, kill, window, #members)
+	end
 	if need + 3 > window then
 		return false, string.format("window-short(need=%.0f eta=%.0f kill=%.0f left=%.0f)", need, eta, kill, window)
 	end
@@ -861,6 +938,14 @@ function GetDesireHelper()
 			local fits, fitWhy = TakeFitsWindow(roshanLocation)
 			bot._roshFitWhy = fitWhy
 			if not fits then
+				if
+					string.find(fitWhy, "walk-long", 1, true)
+					and DotaTime() >= (bot._roshWalkLogAt or -999)
+					and not Fu.IsMeepoClone(bot)
+				then
+					bot._roshWalkLogAt = DotaTime() + 10
+					RoshLog("call-skip %s", fitWhy)
+				end
 				bot._roshFitFailUntil = DotaTime() + 15
 				return Ret(BOT_MODE_DESIRE_NONE, fitWhy)
 			end
@@ -1066,19 +1151,22 @@ function Think()
 	local humanOrder = bot._roshWhy == "order" or bot._roshWhy == "ping"
 	local dropped = now < (bot._roshNoAckUntil or -999)
 	local answeredZero = now - (bot._roshFinalAt or -999) <= 2 and (bot._roshFinal or 0) <= 0
-	if not humanOrder and (dropped or answeredZero) then
+	-- A commit-fit drop under a human order used to skip this hold (why stays "order"), so the drop line repeated
+	-- (game 092: 119 times, 12 in one second) and the bots stood at the pit. The hold walks them out either way.
+	local commitFitHold = now < (bot._roshCommitFitHold or -999)
+	if commitFitHold or (not humanOrder and (dropped or answeredZero)) then
 		-- A 0 answer can be short (a 3s step-out while Roshan hits this bot): the take's commit stays, so the gather
 		-- does not restart into the fresh-take numbers when the bot comes back. Only its own drop ends the commit.
-		if dropped then
+		if dropped or commitFitHold then
 			bot._roshCommitUntil = nil
 		end
 		if now >= (bot._roshHoldLogAt or -999) then
 			bot._roshHoldLogAt = now + 10
 			RoshLog(
 				"think-hold why=%s last=%s left=%.0f",
-				dropped and "dropped" or "desire0",
+				commitFitHold and "commit-fit" or (dropped and "dropped" or "desire0"),
 				tostring(bot._roshWhy),
-				dropped and bot._roshNoAckUntil - now or 0
+				(commitFitHold and bot._roshCommitFitHold or bot._roshNoAckUntil or now) - now
 			)
 		end
 		bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
@@ -1190,6 +1278,7 @@ function Think()
 		bot._roshGatherAt = now
 		bot._roshCommitUntil = nil
 		bot._roshAckSet = {}
+		bot._roshArmorPending = false
 	end
 	bot._roshThinkAt = now
 	bot._roshAckSet = bot._roshAckSet or {}
@@ -1247,26 +1336,41 @@ function Think()
 		windowTight = window < pending / 320 + killTime + 3
 	end
 	local capped = elapsed >= 40 and grouped >= math.min(minimumCap, math.max(required, 1))
-	-- The group at the pit has to tank Roshan to half HP (GroupFitAt, #12 game 069 20:17-21:14). While others still
-	-- walk in it waits for them; with nobody left to come (or the window or the 40s cap forcing it) the call drops.
-	-- The fit's numbers go on the commit line (#12, game 087: 3 of 4 committed takes left Roshan at 61-92%), with each
-	-- member's HP (members=name:hp) and Roshan's armor (armor=): games 088-091's commits set RoshanRules.HALF_CREDIT and
-	-- HIT_SHARE, and the members list is the data a per-member model (who Roshan hits first, how long each lasts) would
-	-- need.
+	-- The group at the pit has to tank Roshan to half HP (GroupFitAt: Roshan-mode allies within COMMIT_RANGE).
+	-- While a Roshan-mode ally is still beyond that range the take waits; otherwise the call drops, once per bot
+	-- per gather (game 092: a human insist printed drop why=commit-fit 119 times and stood at the pit).
 	local commitFit = finishing and "finishing" or "-"
 	if safe and not committed and not finishing and (full or arrived or windowTight or capped) then
 		local fitOk, fitWhy, atPit = GroupFitAt(roshanLocation)
 		commitFit = fitWhy
 		if not fitOk then
-			if othersWalking and not (windowTight or capped) then
+			local beyond = pending > COMMIT_RANGE
+			if beyond and not windowTight and not capped then
 				full, arrived = false, false
 				if now >= (bot._roshCommitWaitLogAt or -999) then
 					bot._roshCommitWaitLogAt = now + 5
 					RoshLog("commit-wait why=%s atPit=%d grouped=%d/%d", fitWhy, atPit, grouped, required)
 				end
 			else
-				RoshLog("drop why=commit-fit %s atPit=%d grouped=%d/%d", fitWhy, atPit, grouped, required)
+				local key = bot._roshGatherAt or now
+				if bot._roshDropKey ~= key then
+					bot._roshDropKey = key
+					RoshLog("drop why=commit-fit %s atPit=%d grouped=%d/%d", fitWhy, atPit, grouped, required)
+					-- The human's order bypasses the think-hold, so clear it and say so once (a reply to their ping).
+					if humanOrder then
+						pcall(HumanOrders.EndOrder, "too-weak")
+						if TeamSpeaker() and bot._roshTooWeakKey ~= key then
+							bot._roshTooWeakKey = key
+							pcall(function()
+								bot:ActionImmediate_Chat("too weak for Roshan", false)
+							end)
+							RoshLog("too-weak")
+						end
+					end
+				end
 				bot._roshNoAckUntil = now + 20
+				bot._roshCommitFitHold = now + 20
+				bot._roshArmorPending = false
 				bot:Action_MoveToLocation(Fu.AdjustLocationWithOffsetTowardsFountain(bot:GetLocation(), 400))
 				return
 			end
@@ -1277,6 +1381,7 @@ function Think()
 		bot._roshCommitUntil = now + 25
 		committed = true
 		if fresh then
+			bot._roshArmorPending = true
 			RoshLog(
 				"commit grouped=%d/%d min=%d pending=%d elapsed=%.0f by=%s fit=%s",
 				grouped,
@@ -1287,6 +1392,17 @@ function Think()
 				full and "full" or (arrived and "arrived" or (windowTight and "window" or "cap")),
 				tostring(commitFit)
 			)
+		end
+	end
+	-- The fit often runs before anyone sees Roshan, so its armor= is "-". Log the engine armor once, the first
+	-- think after the commit that can see him (game 092: all 123 armor= values were "-").
+	if committed and bot._roshArmorPending and Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
+		local okArmor, value = pcall(function()
+			return roshan:GetArmor()
+		end)
+		if okArmor and type(value) == "number" then
+			bot._roshArmorPending = false
+			RoshLog("armor-seen armor=%.1f", value)
 		end
 	end
 	local ready = safe and (committed or full or arrived or windowTight or capped)
@@ -1307,9 +1423,19 @@ function Think()
 	end
 	if not ready then
 		bot._roshCommitUntil = nil
-		if GetUnitToLocationDistance(bot, rally) > 50 then
-			if not ObjectiveTravel.Go(bot, rally, "roshan") then
-				bot:Action_MoveToLocation(rally + RandomVector(80))
+		bot._roshArmorPending = false
+		-- Nobody is at the pit yet: wait outside it. The 900 rally can sit inside the pit (game 092, grouped=0).
+		local waitAt = rally
+		if grouped == 0 then
+			waitAt = Fu.AdjustLocationWithOffsetTowardsFountain(roshanLocation, GATHER_OUTSIDE)
+			if now >= (bot._roshOutLogAt or -999) then
+				bot._roshOutLogAt = now + 5
+				RoshLog("gather-out grouped=0 dist=%d", math.floor(GetUnitToLocationDistance(bot, roshanLocation)))
+			end
+		end
+		if GetUnitToLocationDistance(bot, waitAt) > 50 then
+			if not ObjectiveTravel.Go(bot, waitAt, "roshan") then
+				bot:Action_MoveToLocation(waitAt + RandomVector(80))
 			end
 		end
 		if elapsed < 2 then

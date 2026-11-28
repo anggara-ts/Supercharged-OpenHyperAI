@@ -460,9 +460,15 @@ T.test(
 		T.eq(why, "behind-tower", "why")
 		-- Game 069 t=2013-2022: a dead2 window, 3 Dire alive and near against 3 of ours: the chase that paid off.
 		s.advantage = true
-		T.eq(select(2, R.HitHeroBehindTower(s)), "advantage", "33:30: an open window")
+		s.killTime, s.surviveTime = 4.9, 4.7
+		T.eq(select(2, R.HitHeroBehindTower(s)), "slow-kill", "game 092: a window, but the tower kills us first")
+		s.killTime, s.surviveTime = 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "advantage", "33:30: an open window and the target dies first")
 		s.advantage, s.responders, s.chasers = nil, 3, 3
-		T.eq(select(2, R.HitHeroBehindTower(s)), "numbers", "33:30: 3 against 3")
+		s.killTime, s.surviveTime = 4.1, 3.6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "slow-kill", "game 092: even numbers, but the tower kills us first")
+		s.killTime, s.surviveTime = 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "numbers", "33:30: 3 against 3 and the target dies first")
 		s.responders, s.chasers, s.killTime, s.surviveTime = 4, 2, 3, 6
 		T.eq(select(2, R.HitHeroBehindTower(s)), "kill-first", "the target dies first")
 		s.killTime, s.surviveTime = 3, 2
@@ -740,4 +746,14 @@ T.test("glyph helpers: tower tier, time left, fight factor", function()
 	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower3_top", true, 3), 3, "T3, three heroes: each hit")
 	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 9), 6, "at most 6 targets")
 	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 0), 1, "at least 1")
+end)
+
+T.test("glyph edge: each team slot stands on its own angle (game 092 spread=54)", function()
+	local R = rules()
+	T.near(R.GlyphSlotAngle(1), -0.8, 1e-9, "slot 1")
+	T.near(R.GlyphSlotAngle(3), 0, 1e-9, "slot 3, the lane")
+	T.near(R.GlyphSlotAngle(5), 0.8, 1e-9, "slot 5")
+	T.near(R.GlyphSlotAngle(2) - R.GlyphSlotAngle(1), 0.4, 1e-9, "neighbours differ")
+	-- At an edge of about 970, 0.4 rad is about 380, past the 300 spread.
+	T.ok(970 * (R.GlyphSlotAngle(2) - R.GlyphSlotAngle(1)) > R.GLYPH_SPREAD, "further apart than the spread")
 end)

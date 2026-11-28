@@ -1145,10 +1145,51 @@ function Push.GetPushDesireHelper(bot, lane)
 	if hasHumanEnemy then
 		-- The lane's building has to exist, not be seen or attackable (#12, game 087: Fu.IsValidBuilding rejects a
 		-- tower in fog, under the Glyph or still protected, and dropped Radiant's 0.90 pushes at 708-870 while the
-		-- towers stood; the Glyph has its own wait, GlyphWaitThink).
+		-- towers stood; the Glyph has its own wait, GlyphWaitThink). A lane-done push uses that building when this
+		-- lane's own target is gone (game 092 t=2615). For 2s after a building on the lane falls, the empty target
+		-- does not drop the push (game 092 t=713, the second the top T1 fell).
 		local laneTarget = getLaneTargetBuilding(lane)
-		if laneTarget == nil or laneTarget:IsNull() or not laneTarget:IsAlive() then
-			return NoPush(bot, "no-lane-target")
+		local function targetAlive(unit)
+			return unit ~= nil and not unit:IsNull() and unit:IsAlive()
+		end
+		local whyHold = nil
+		local episode = bot._laneDoneEpisode
+		if not targetAlive(laneTarget) and episode ~= nil and targetAlive(episode.target) then
+			laneTarget = episode.target
+			whyHold = "lane-done"
+		end
+		bot._laneFellGrace = bot._laneFellGrace or {}
+		bot._laneTargetWas = bot._laneTargetWas or {}
+		if not targetAlive(laneTarget) then
+			local nowLane = DotaTime()
+			if bot._laneTargetWas[lane] and bot._laneFellGrace[lane] == nil then
+				bot._laneFellGrace[lane] = nowLane + 2
+				whyHold = "fell"
+			end
+			bot._laneTargetWas[lane] = nil
+			if bot._laneFellGrace[lane] == nil or nowLane > bot._laneFellGrace[lane] then
+				return NoPush(bot, "no-lane-target")
+			end
+			whyHold = whyHold or "fell"
+		else
+			bot._laneTargetWas[lane] = true
+			bot._laneFellGrace[lane] = nil
+		end
+		if whyHold ~= nil and not Fu.IsMeepoClone(bot) then
+			bot._laneHoldLogAt = bot._laneHoldLogAt or {}
+			if DotaTime() >= (bot._laneHoldLogAt[whyHold] or -999) then
+				bot._laneHoldLogAt[whyHold] = DotaTime() + 5
+				pcall(
+					print,
+					string.format(
+						"[SHy-PUSH] t=%.0f %s no-lane-hold why=%s lane=%s",
+						DotaTime(),
+						ShortHeroName(bot),
+						whyHold,
+						tostring(lane)
+					)
+				)
+			end
 		end
 	else
 		local distanceToEnemyFountain = getLocationToLocationDistance(bot:GetLocation(), enemyFountainTpPoint)
@@ -1611,7 +1652,12 @@ function getLaneTargetBuilding(lane)
 	local tick = math.floor(GameTime() * 10)
 	local cached = laneTargetCache[lane]
 	if cached and cached.tick == tick then
-		return cached.result
+		local result = cached.result
+		-- A building that died this tenth of a second must not stay the cached target (game 092 t=713: no-lane-target
+		-- the second the top T1 fell, while the next tower was already standing).
+		if result == nil or result:IsNull() or result:IsAlive() then
+			return result
+		end
 	end
 	local enemyTeam = GetOpposingTeam()
 	local target = nil
@@ -2135,7 +2181,7 @@ local function GlyphWaitEnd(bot, why)
 	pcall(
 		print,
 		string.format(
-			"[SHy-PUSH] t=%.0f %s glyph-end why=%s lane=%s tower=%s held=%.1f mode=%s allies=%d enemies=%d creeps=%d maxDist=%d holdMaxDist=%d moves=%d backs=%d spread=%d reach=%d repaths=%d",
+			"[SHy-PUSH] t=%.0f %s glyph-end why=%s lane=%s tower=%s held=%.1f mode=%s allies=%d enemies=%d creeps=%d maxDist=%d holdMaxDist=%d moves=%d backs=%d spread=%d reach=%d repaths=%d edge=%d",
 			DotaTime(),
 			ShortHeroName(bot),
 			why,
@@ -2152,7 +2198,8 @@ local function GlyphWaitEnd(bot, why)
 			wait.backs or 0,
 			wait.spread ~= nil and math.floor(wait.spread) or -1,
 			math.floor(wait.reach or 0),
-			wait.repaths or 0
+			wait.repaths or 0,
+			wait.edgeSlot or 0
 		)
 	)
 end
@@ -2177,10 +2224,17 @@ local function GlyphWaitTick(bot)
 	end
 end
 -- The centre of the edge arc: the unit vector from the tower back along the lane toward our side (the lane point 4% of
--- the lane either way that is nearer our fountain), so bots coming up a side lane wait on their own bearing instead of
--- all at the arc's end (the line to our fountain is 60-70 degrees off the lane at the bottom and top T1s). Falls back
--- to the direction of our fountain.
-local function GlyphEdgeDirection(tower, lane)
+-- the lane either way that is nearer our fountain), turned by this bot's slot (PushRules.GlyphSlotAngle) so five bots
+-- do not share one edge point (game 092 t=1324: spread=54). Falls back to the direction of our fountain.
+local function GlyphBotSlot(bot)
+	for i = 1, 5 do
+		if GetTeamMember(i) == bot then
+			return i
+		end
+	end
+	return 3
+end
+local function GlyphEdgeDirection(tower, lane, bot)
 	local towerLocation = tower:GetLocation()
 	local fountain = Fu.GetTeamFountain()
 	local point = fountain
@@ -2203,7 +2257,11 @@ local function GlyphEdgeDirection(tower, lane)
 		x, y = fountain.x - towerLocation.x, fountain.y - towerLocation.y
 		length = math.max(1, math.sqrt(x * x + y * y))
 	end
-	return x / length, y / length
+	x, y = x / length, y / length
+	local slot = GlyphBotSlot(bot)
+	local angle = PushRules.GlyphSlotAngle(slot)
+	local cosine, sine = math.cos(angle), math.sin(angle)
+	return x * cosine - y * sine, x * sine + y * cosine, slot
 end
 -- A point on the lane path toward our side at least `radius` from the tower (the lane itself is walkable: an exit the
 -- trees beside the lane can't block), or nil. Steps 1% of the lane at a time, up to 25%. The push can be on another
@@ -2270,19 +2328,59 @@ local function GlyphWaitThink(bot, lane)
 	-- radius) or holds a finish on, and then follows that tower while it is within 1600.
 	local tower = nil
 	local wait = bot._glyphWait
-	local hold = bot._finishHold
-	for _, nearbyTower in ipairs(bot:GetNearbyTowers(1600, true) or {}) do
-		if
-			IsStandingTower(nearbyTower)
-			and nearbyTower:HasModifier(GLYPH_MODIFIER)
-			and (
-				wait ~= nil and wait.tower == nearbyTower
-				or hold ~= nil and hold.tower == nearbyTower
-				or GetUnitToUnitDistance(bot, nearbyTower) <= 1200
-			)
-		then
-			tower = nearbyTower
-			break
+	-- Stay on the tower this Glyph wait already chose. One Glyph covers every building, and the nearby-tower list
+	-- order changed the wait six times for one T4 Glyph (game 092: glyph-end why=retarget six times).
+	if
+		wait ~= nil
+		and IsStandingTower(wait.tower)
+		and wait.tower:HasModifier(GLYPH_MODIFIER)
+		and GetUnitToUnitDistance(bot, wait.tower) <= 1600
+	then
+		tower = wait.tower
+		if not wait.stayLogged then
+			local other = nil
+			for _, nearbyTower in ipairs(bot:GetNearbyTowers(1600, true) or {}) do
+				if
+					nearbyTower ~= wait.tower
+					and IsStandingTower(nearbyTower)
+					and nearbyTower:HasModifier(GLYPH_MODIFIER)
+				then
+					other = nearbyTower
+					break
+				end
+			end
+			if other ~= nil then
+				wait.stayLogged = true
+				if not Fu.IsMeepoClone(bot) then
+					pcall(
+						print,
+						string.format(
+							"[SHy-PUSH] t=%.0f %s glyph-stay tower=%s ignored=%s",
+							DotaTime(),
+							ShortHeroName(bot),
+							wait.name,
+							string.gsub(other:GetUnitName(), "npc_dota_", "")
+						)
+					)
+				end
+			end
+		end
+	end
+	if tower == nil then
+		local hold = bot._finishHold
+		for _, nearbyTower in ipairs(bot:GetNearbyTowers(1600, true) or {}) do
+			if
+				IsStandingTower(nearbyTower)
+				and nearbyTower:HasModifier(GLYPH_MODIFIER)
+				and (
+					wait ~= nil and wait.tower == nearbyTower
+					or hold ~= nil and hold.tower == nearbyTower
+					or GetUnitToUnitDistance(bot, nearbyTower) <= 1200
+				)
+			then
+				tower = nearbyTower
+				break
+			end
 		end
 	end
 	if tower == nil then
@@ -2333,6 +2431,7 @@ local function GlyphWaitThink(bot, lane)
 			moves = 0,
 			backs = 0,
 			repaths = 0,
+			edgeSlot = GlyphBotSlot(bot),
 		}
 		bot._glyphWait = wait
 	end
@@ -2374,7 +2473,7 @@ local function GlyphWaitThink(bot, lane)
 		return false
 	end
 	if wait.baseX == nil then
-		wait.baseX, wait.baseY = GlyphEdgeDirection(tower, lane)
+		wait.baseX, wait.baseY, wait.edgeSlot = GlyphEdgeDirection(tower, lane, bot)
 	end
 	local baseX, baseY = wait.baseX, wait.baseY
 	local botLocation = bot:GetLocation()
