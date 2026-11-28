@@ -259,10 +259,24 @@ end
 -- such as item_bfury calls item_quelling_blade's rule through the same table).
 local detailRunning = false
 
+-- A watcher of the timed calls (#268): bots/dev/perf_ab.lua sets one while a PR's A/B measurement runs. nil
+-- otherwise, and then a timed call pays the two tests below and nothing else.
+local watchBefore, watchAfter = nil, nil
+
 local function Finish(name, startedAt, kbBefore, ...)
 	local seconds = RealTime() - startedAt
-	Record(name, seconds, kbBefore ~= nil and (memoryKb() - kbBefore) or nil)
+	local kbDelta = kbBefore ~= nil and (memoryKb() - kbBefore) or nil
+	if watchAfter ~= nil then
+		watchAfter(seconds, kbDelta)
+	end
+	Record(name, seconds, kbDelta)
 	return ...
+end
+
+-- before() runs ahead of every timed call and of its clock; after(seconds, kbDelta) gets what the totals get (kbDelta
+-- is nil when Lua memory cannot be read). Both must not raise an error: they run inside every think. nil, nil ends it.
+function Perf.Watch(before, after)
+	watchBefore, watchAfter = before, after
 end
 
 -- Time spent in one part of a wrapped function (e.g. ItemUsageThink's item checks vs the hero's ability code).
@@ -338,6 +352,9 @@ function Perf.Wrap(name, fn)
 		return fn
 	end
 	return function(...)
+		if watchBefore ~= nil then
+			watchBefore()
+		end
 		return Finish(name, RealTime(), memoryKb ~= nil and memoryKb() or nil, fn(...))
 	end
 end

@@ -20,4 +20,16 @@ function ChatGuard.Allow(state, key, now, window)
 	return true, nil
 end
 
+-- A line that answers a player's own command (#211: the moved bot's "I will play position N" after a swap, the swap
+-- reply). It skips the repeat filter: game 088's swap-backs repeat a line said seconds before ("I will play position
+-- 1 (Safelane)" 7s after the same bot left pos 1), and the filter dropped 7 of them, so the maintainer saw no answer.
+-- The time is still recorded, so an ordinary repeat of the same text right after it is filtered as before.
+function ChatGuard.SayDirect(unit, text, allChat)
+	if ChatGuard.said ~= nil then
+		ChatGuard.said[tostring(unit:GetTeam()) .. (allChat and "a:" or "t:") .. tostring(text)] = DotaTime()
+	end
+	local say = ChatGuard.originalChat or unit.ActionImmediate_Chat
+	return say(unit, text, allChat)
+end
+
 return ChatGuard

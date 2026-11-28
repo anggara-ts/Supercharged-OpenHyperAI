@@ -662,6 +662,7 @@ function Ward.AllyGoingTo(loc, gap)
 			Fu.IsValidHero(ally)
 			and ally ~= me
 			and ally:GetActiveMode() == BOT_MODE_WARD
+			and ally._stack == nil -- stacking a camp in the ward mode (#229), not walking to a ward spot
 			and Fu.GetDistance(ally:GetExtrapolatedLocation(3), loc) <= gap
 		then
 			return true

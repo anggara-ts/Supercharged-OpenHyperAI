@@ -67,7 +67,7 @@ SpellList["spells"] = {
 		["bounty_hunter_shuriken_toss"] = { weight = 0.7 },
 		["bounty_hunter_jinada"] = { weight = 1 },
 		["bounty_hunter_wind_walk"] = { weight = 0.5 },
-		["bounty_hunter_wind_walk_ally"] = { weight = 6 },
+		["bounty_hunter_wind_walk_ally"] = { weight = 0.6 },
 		["bounty_hunter_track"] = { weight = 1 },
 	},
 	["npc_dota_hero_brewmaster"] = {
@@ -374,7 +374,7 @@ SpellList["spells"] = {
 		["lycan_shapeshift"] = { weight = 1 },
 	},
 	["npc_dota_hero_magnataur"] = {
-		["magnataur_shockwave"] = { weight = 8 },
+		["magnataur_shockwave"] = { weight = 0.8 },
 		["magnataur_empower"] = { weight = 0.8 },
 		["magnataur_skewer"] = { weight = 0.3 },
 		["magnataur_horn_toss"] = { weight = 0.5 },
@@ -880,20 +880,26 @@ SpellList["spells"] = {
 		["zuus_thundergods_wrath"] = { weight = 0.4 },
 	},
 }
-function SpellList.GetSpellReplaceWeight(abilityName)
-	for heroName, _ in pairs(SpellList["spells"]) do
-		if SpellList["spells"][heroName] and SpellList["spells"][heroName][abilityName] then
-			return SpellList["spells"][heroName][abilityName].weight
+-- Spell name -> { weight, hero }, built on the first lookup. Rubick's steal rule asks for a weight on every think
+-- (bots/heroes/hero_rubick.lua), and a scan of every hero's list per call was the cost (#271).
+local byName = nil
+local function Entry(abilityName)
+	if byName == nil then
+		byName = {}
+		for heroName, spells in pairs(SpellList["spells"]) do
+			for spellName, data in pairs(spells) do
+				byName[spellName] = { weight = data.weight, hero = heroName }
+			end
 		end
 	end
-	return 1
+	return byName[abilityName]
+end
+function SpellList.GetSpellReplaceWeight(abilityName)
+	local entry = Entry(abilityName)
+	return entry ~= nil and entry.weight or 1
 end
 function SpellList.GetSpellHeroName(abilityName)
-	for heroName, _ in pairs(SpellList["spells"]) do
-		if SpellList["spells"][heroName] and SpellList["spells"][heroName][abilityName] then
-			return heroName
-		end
-	end
-	return nil
+	local entry = Entry(abilityName)
+	return entry ~= nil and entry.hero or nil
 end
 return SpellList
