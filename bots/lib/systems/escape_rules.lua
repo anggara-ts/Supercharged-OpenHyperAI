@@ -452,11 +452,9 @@ function EscapeRules.IsEscapeShift(why, retreating, hp)
 end
 -- A Phase Shift taken while her own Orb is already flying, her HP is falling and the enemies are at
 -- least one more than the allies (allies includes her) is an escape shift too, so the phase-end Jaunt
--- is checked, including when=orb-end. Game 092, 10:39: phase at 60% HP why=hero escape=false while a
--- damage Orb was in flight, and the Jaunt never ran, so the Orb ended inside the 1s shift. The Orb
--- flies max_distance / orb_speed = 1950 / 750 = 2.6s (datafeed hero 13, fetched 2026-11-28: orb_speed
--- 750, max_distance 1950, cast range 1950). hpLoss: the drop over the last second, a share of max HP;
--- falling means at least LOW_HP_LOSS.
+-- is checked, including when=orb-end. The Orb flies max_distance / orb_speed = 1950 / 750 = 2.6s
+-- (datafeed hero 13, fetched 2026-11-28: orb_speed 750, max_distance 1950, cast range 1950). hpLoss:
+-- the drop over the last second, a share of max HP; falling means at least LOW_HP_LOSS.
 function EscapeRules.OrbFlightEscapeShift(orbInFlight, hpLoss, enemies, allies)
 	if orbInFlight ~= true or (hpLoss or 0) < EscapeRules.LOW_HP_LOSS then
 		return false

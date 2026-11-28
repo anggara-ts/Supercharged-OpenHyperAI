@@ -342,10 +342,9 @@ T.test("escape rules: the escape-low Rift waits for the hold, then holds its cas
 	T.eq(R.LowRiftIssueFromTick("lapsed", true), false, "already given up")
 end)
 
-T.test("escape rules: an Orb in flight makes the shift an escape, and one escape is kept (game 092)", function()
+T.test("escape rules: an Orb in flight makes the shift an escape, and one escape is kept", function()
 	local R = load()
-	-- 10:39: 60% HP, her Orb flying, enemies one ahead of her side. allies includes her.
-	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 1), true, "game 092 10:39: orb out, HP falling, 2 vs her")
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 1), true, "orb out, HP falling, 2 vs her")
 	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 1), true, "3 enemies, alone")
 	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 2), true, "3 enemies, her and one ally: still one ahead")
 	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 2), false, "an ally there and not one ahead")

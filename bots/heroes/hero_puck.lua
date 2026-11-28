@@ -1217,11 +1217,12 @@ function X.MarkLowRiftOrdered(state)
 	bot._phaseHoldAskUntil = state.askUntil
 end
 -- Every think (SkillsComplement) and inside the cast hold (X.CastHoldTick): ends an escape once the Rift is out, the
--- wait ran out or the Rift is no longer wanted, and issues the Rift once the step says order (the hold is up, or
--- the 0.4s wait ran out) and nothing has been ordered yet. The want used to be refreshed only in
+-- wait ran out or the Rift is no longer wanted, and issues the Rift when the step says order and she still wants it.
+-- A later think may order again; there is no orders == 0 check. The want used to be refreshed only in
 -- ConsiderWaningRift, which SkillsComplement reaches last, so a Phase Shift wait returned first and the escape
--- lapsed at 0.5s with orders=0 (game 092, after=0.60). why=stale: left open (she died; the think may not run
--- while dead), with no skip after it. Returns true when this think ordered the Rift (the caller stops).
+-- lapsed. why=stale: left open (she died; the think may not run while dead), with no skip after it. Returns true
+-- when this think ordered the Rift (the caller stops). The tick runs at the top of SkillsComplement, before the
+-- dodge Phase Shift.
 function X.LowRiftTick()
 	local state = bot._lowRift
 	if state == nil then
@@ -1258,21 +1259,21 @@ function X.LowRiftTick()
 	if okCast and castable == true then
 		canCast = true
 	end
-	if EscapeRules.LowRiftIssueFromTick(step, canCast) then
+	if still and EscapeRules.LowRiftIssueFromTick(step, canCast) then
 		local point = X.LowRiftPoint()
+		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
 		X.MarkLowRiftOrdered(state)
 		X.riftWhy = "escape-low"
 		pcall(
 			print,
 			string.format(
-				"[SHy-PUCK] t=%.0f rift why=%s via=tick heroes=%d dist=%d",
+				"[SHy-PUCK] t=%.0f puck rift why=%s via=tick heroes=%d dist=%d",
 				now,
 				"escape-low",
 				#Fu.GetEnemiesNearLoc(point, waningRiftAbility:GetSpecialValueInt("radius")),
 				GetUnitToLocationDistance(bot, point)
 			)
 		)
-		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
 		return true
 	end
 	if state.orders == 0 and (step == "wait" or step == "order") then
@@ -2135,8 +2136,8 @@ function X.SkillsComplement()
 		)
 		-- An escape shift (EscapeRules.IsEscapeShift) ends with a Jaunt to the Orb (X.ShiftExit) and blocks the
 		-- offensive Rift for 2s after it (X.OffensiveRiftBlocked). Her own Orb already flying, HP falling and
-		-- enemies at least allies + 1 is an escape shift too (EscapeRules.OrbFlightEscapeShift, game 092 10:39:
-		-- the damage Orb ended inside a non-escape shift, so the phase-end Jaunt, when=orb-end, never ran).
+		-- enemies at least allies + 1 is an escape shift too (EscapeRules.OrbFlightEscapeShift). The rule
+		-- stays. A reading that the Orb was still in flight at the shift was the Orb already gone.
 		local baseEscape = wantFresh and bot._phaseWantEscape == true
 			or EscapeRules.IsEscapeShift(
 				X.phaseWhy,
@@ -2284,7 +2285,7 @@ function X.NoteOrbFlightEscape()
 	pcall(
 		print,
 		string.format(
-			"[SHy-PUCK] t=%.0f phase escape why=orb-flight hp=%.2f loss=%.2f enemies=%d allies=%d",
+			"[SHy-PUCK] t=%.0f puck phase escape why=orb-flight hp=%.2f loss=%.2f enemies=%d allies=%d",
 			DotaTime(),
 			Fu.GetHP(bot),
 			X.HpLoss(),
@@ -2325,7 +2326,7 @@ function X.LogEscapeSave(spell, enemies, allies)
 	pcall(
 		print,
 		string.format(
-			"[SHy-PUCK] t=%.0f escape-save spell=%s why=alone enemies=%d allies=%d hp=%.2f",
+			"[SHy-PUCK] t=%.0f puck escape-save spell=%s why=alone enemies=%d allies=%d hp=%.2f",
 			now,
 			spell,
 			enemies or -1,
