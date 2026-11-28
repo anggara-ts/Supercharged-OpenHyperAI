@@ -10793,7 +10793,10 @@ end
 -- DOTA_Tooltip_ability_fountain_glyph, cited in glyph_rules.lua) adds 5 targets; it does not add extra hits on the
 -- same unit. Whether a multishot shot equals the primary hit is unverified, so this counts one full stream: the bot
 -- is treated as taking the shot, and leaves unless the target dies even sooner. nil when the attack cannot be read.
-local function GlyphTowerDamagePerSecond(tower)
+-- One table, not six top-level locals: this file's main chunk is near Lua's limit of 200 locals (game 093:
+-- "main function has more than 200 local variables", every bot lost its ability script).
+local GlyphLeave = { KILL_WINDOW = 2 }
+function GlyphLeave.TowerDamagePerSecond(tower)
 	local okDamage, attackDamage = pcall(function()
 		return tower:GetAttackDamage()
 	end)
@@ -10830,17 +10833,16 @@ local function GlyphTowerDamagePerSecond(tower)
 	return incoming - regen
 end
 -- GetEstimatedDamageToTarget's contents are not documented (same note as rubick.lua). Two seconds, then per second.
-local GLYPH_KILL_WINDOW = 2
-local function GlyphDamagePerSecond(attacker, victim)
+function GlyphLeave.DamagePerSecond(attacker, victim)
 	local ok, dealt = pcall(function()
-		return attacker:GetEstimatedDamageToTarget(true, victim, GLYPH_KILL_WINDOW, DAMAGE_TYPE_ALL)
+		return attacker:GetEstimatedDamageToTarget(true, victim, GlyphLeave.KILL_WINDOW, DAMAGE_TYPE_ALL)
 	end)
 	if not ok or type(dealt) ~= "number" or dealt <= 0 then
 		return 0
 	end
-	return dealt / GLYPH_KILL_WINDOW
+	return dealt / GlyphLeave.KILL_WINDOW
 end
-local function GlyphUnitHealth(unit)
+function GlyphLeave.UnitHealth(unit)
 	local ok, health = pcall(function()
 		return unit:GetHealth()
 	end)
@@ -10850,17 +10852,19 @@ local function GlyphUnitHealth(unit)
 	return health
 end
 -- A unit that itself has the Glyph is invulnerable (tooltip: structures 7s, lane creeps 3s): it does not die first.
-local function GlyphTargetDiesFirst(tower, target)
+function GlyphLeave.TargetDiesFirst(tower, target)
 	if target:HasModifier("modifier_fountain_glyph") then
 		return false
 	end
-	local targetSeconds = LaneTowerRules.SecondsUntilDead(GlyphUnitHealth(target), GlyphDamagePerSecond(bot, target))
-	local botSeconds = LaneTowerRules.SecondsUntilDead(GlyphUnitHealth(bot), GlyphTowerDamagePerSecond(tower))
+	local targetSeconds =
+		LaneTowerRules.SecondsUntilDead(GlyphLeave.UnitHealth(target), GlyphLeave.DamagePerSecond(bot, target))
+	local botSeconds =
+		LaneTowerRules.SecondsUntilDead(GlyphLeave.UnitHealth(bot), GlyphLeave.TowerDamagePerSecond(tower))
 	return LaneTowerRules.DiesFirst(targetSeconds, botSeconds)
 end
 -- A spot at least reach + margin + step from the tower, along "away from the tower" blended toward our fountain,
 -- and never closer than the bot already is. The same blend as the laning tower-exit.
-local function GlyphStandOff(tower, reach, dist)
+function GlyphLeave.StandOff(tower, reach, dist)
 	local towerLoc = tower:GetLocation()
 	local away = bot:GetLocation() - towerLoc
 	local home = Fu.GetTeamFountain() - towerLoc
@@ -10943,7 +10947,7 @@ function Usage.LeaveGlyphedTower()
 		botInZone = true
 		if target ~= nil and GetUnitToUnitDistance(target, deepest.tower) <= deepest.reach then
 			targetInReach = true
-			diesFirst = GlyphTargetDiesFirst(deepest.tower, target)
+			diesFirst = GlyphLeave.TargetDiesFirst(deepest.tower, target)
 		end
 	elseif target ~= nil then
 		for i = 1, #towers do
@@ -10951,7 +10955,7 @@ function Usage.LeaveGlyphedTower()
 			if GetUnitToUnitDistance(target, info.tower) <= info.reach then
 				focus = info
 				targetInReach = true
-				diesFirst = GlyphTargetDiesFirst(info.tower, target)
+				diesFirst = GlyphLeave.TargetDiesFirst(info.tower, target)
 				break
 			end
 		end
@@ -10980,7 +10984,7 @@ function Usage.LeaveGlyphedTower()
 	else
 		bot._glyphLeaveOn = nil
 	end
-	bot:Action_MoveToLocation(GlyphStandOff(focus.tower, focus.reach, focus.dist))
+	bot:Action_MoveToLocation(GlyphLeave.StandOff(focus.tower, focus.reach, focus.dist))
 	return true
 end
 function Usage.DeflectTowerAggro()
