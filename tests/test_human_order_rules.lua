@@ -45,7 +45,6 @@ T.test("human orders: chat commands parse, other commands do not", function()
 		"!ban axe",
 		"!sp en",
 		"!speak ru",
-		"!lang ru",
 		"!debug",
 		"!verbose",
 		"!chatty",

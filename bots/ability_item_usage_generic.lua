@@ -1113,7 +1113,7 @@ do
 		)
 	end
 end
--- The team's reply bot says the `!lang` result. Queued by Localization.TakeLanguageCommand, because a chat
+-- The team's reply bot says the `!sp` result. Queued by Localization.TakeLanguageCommand, because a chat
 -- callback cannot speak (game 078). One line, then the note is cleared, so the other bots stay quiet.
 function Usage.SayLanguageReply()
 	if bot.isBear ~= nil or bot:IsIllusion() or Fu.IsMeepoClone(bot) then
@@ -1168,8 +1168,8 @@ function Usage.SetReplyHumanTime(chatEvent)
 	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
 		return
 	end
-	-- `!lang ru`, and the older `!sp` / `!speak`. One bot confirms in team chat (Usage.SayLanguageReply). A code
-	-- this script has no lines for is refused out loud, so a mistype is not silent.
+	-- `!sp ru` and `!speak ru`. One bot confirms in team chat (Usage.SayLanguageReply). A code this script
+	-- has no lines for is refused out loud, so a mistype is not silent. `!sp jp` is Japanese.
 	if Localization.TakeLanguageCommand(chatText, GetTeam()) then
 		return
 	end

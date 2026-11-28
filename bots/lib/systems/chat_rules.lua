@@ -52,13 +52,14 @@ end
 
 -- Fallback welcome clock when no position line was said (1v1 mid, or the lines never went out): -1:00.
 -- Maintainer 2026-11-24: welcome after the position lines, at -1:00. Maintainer 2026-11-28: 30 seconds after the
--- position lines, then the version, the update date, a 5 second pause, then the two Workshop lines.
+-- position lines, then how to switch language, the version, the update date, a 5 second pause, and the two
+-- Workshop lines.
 ChatRules.WELCOME_START = -60
--- Seconds after the team's first "I play position N" line before the version line.
+-- Seconds after the team's first "I play position N" line before the first welcome line.
 ChatRules.WELCOME_AFTER_POS = 30
 -- Seconds to wait after the previous welcome line before saying this one. Line 1 waits WELCOME_AFTER_POS instead.
 -- 2 seconds keeps two lines from landing in the same breath; the 5 is the pause before the Workshop pair.
-ChatRules.WELCOME_GAPS = { 0, 2, 5, 2 }
+ChatRules.WELCOME_GAPS = { 0, 2, 2, 2, 5, 2 }
 
 function ChatRules.WelcomeGap(lineIndex)
 	local gap = ChatRules.WELCOME_GAPS[lineIndex]

@@ -1608,8 +1608,9 @@ function PickOneAnnouncer()
 end
 -- One bot per team (the announcer) posts the welcome in team chat. The position lines go first. The version line
 -- waits ChatRules.WELCOME_AFTER_POS seconds after the team's first one (or WELCOME_START when none was said). Then
--- the update date, a longer pause, and the two Workshop lines (ChatRules.WELCOME_GAPS). No command hints (maintainer
--- 2026-11-23). No URL: chat links are not clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team,
+-- the update date, a longer pause, and the two Workshop lines (ChatRules.WELCOME_GAPS). The first two lines say
+-- how to switch language with !sp (maintainer 2026-11-28). No !pos hint (2026-11-23). No URL: chat links are not
+-- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team,
 -- so Meepo clones (same player ID as the announcer) don't repeat it; welcomeNext > 1 means the version line was said.
 local WELCOME_START = ChatRules.WELCOME_START
 local function SayWelcome()

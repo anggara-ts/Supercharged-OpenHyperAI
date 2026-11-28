@@ -14,17 +14,20 @@ local strings = {
 		-- `!about` answer (#215); %s is the version, the same text as the welcome's (chat_rules.lua WelcomeVersion). No URL: chat links are not clickable.
 		say_about = "Supercharged OpenHyperAI, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
 		pos_select_closed = "Position selection closed.",
-		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome): version, then
-		-- "Update: {date}", then the two Workshop lines. No command hints (maintainer 2026-11-23). {version} and
-		-- {date}: bots/lib/systems/chat_rules.lua WelcomeVersion. The date is D-Mon-YYYY, for example 27-Nov-2026.
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome). 30 seconds after
+		-- the position lines: how to switch language, the version, "Update: {date}", a pause, then the Workshop.
+		-- No !pos hint (maintainer 2026-11-23). The language hint was added 2026-11-28, after !lang did nothing.
+		-- Japanese is ja; !sp jp is accepted as ja. {version} and {date}: chat_rules.lua WelcomeVersion.
 		welcome = {
+			"To switch language, type:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
 			"Supercharged OpenHyperAI {version}",
 			"Update: {date}",
 			"For bot change log, feedback, and discussion",
 			"please visit the workshop page",
 		},
 		say_lang_set = "Speaking English.",
-		say_lang_bad = "Try !lang en, zh, ru, ja, or id.",
+		say_lang_bad = "Try !sp en, ru, ja, zh, or id.",
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
 		say_will_lose_2 = "Our numbers say less than 1% to win. We accept the verdict of mathematics. Well played!",
 		say_will_win = "We estimate our chance to win a team fight is over 90%. Probability is on our side.",
@@ -41,8 +44,6 @@ local strings = {
 			"First blood, as foretold. The stars were only mildly surprised.",
 		},
 		got_a_kill = {
-			"supp diff",
-			"carry diff",
 			"You fell as you played: boldly, briefly, and without a plan.",
 			"Courage without wisdom is just a faster walk to the fountain.",
 			"Rest now. The respawn timer is the only teacher you listen to.",
@@ -168,8 +169,6 @@ local strings = {
 		random_responses = {
 			"?",
 			"glhf",
-			"supp diff",
-			"carry diff",
 			"Fascinating. Truly. Please keep not playing.",
 			"Typing is not an ability. I checked the tooltip.",
 			"Wise words. Shame about the positioning.",
@@ -297,13 +296,15 @@ local strings = {
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
+			"切换语言请输入：",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
 			"Supercharged OpenHyperAI {version}",
 			"更新：{date}",
 			"更新日志、反馈和讨论",
 			"请看创意工坊页面",
 		},
 		say_lang_set = "现在说中文。",
-		say_lang_bad = "请用 !lang en、zh、ru、ja 或 id。",
+		say_lang_bad = "请用 !sp en、ru、ja、zh 或 id。",
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
 		say_will_lose_2 = "我们估计胜率低于 1%。打得不错！",
 		say_will_win = "我们估计赢得团战的概率超过 90%",
@@ -311,8 +312,6 @@ local strings = {
 		can_try_tormentor = "我们尝试挑战 痛苦魔方 吗？",
 		say_come_def = "请来防守",
 		got_a_kill = {
-			"辅助差距",
-			"核心差距",
 			"享受复活计时吧，你会一直看自己倒数的",
 			"？",
 			"你得表现得更好一点！",
@@ -426,8 +425,6 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
-			"辅助差距",
-			"核心差距",
 			"不错，我家的狗都能做得更好。",
 			"专注于游戏可能会提高你的胜率。",
 			"我见过小兵都比你补得好。",
@@ -535,13 +532,15 @@ local strings = {
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
+			"Чтобы сменить язык, напишите:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
 			"Supercharged OpenHyperAI {version}",
 			"Обновление: {date}",
 			"Список изменений, отзывы и обсуждение",
 			"смотрите страницу в Мастерской",
 		},
 		say_lang_set = "Говорю по-русски.",
-		say_lang_bad = "Напишите !lang en, zh, ru, ja или id.",
+		say_lang_bad = "Напишите !sp en, ru, ja, zh или id.",
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
 		say_will_lose_2 = "Мы оцениваем вероятность победы ниже 1%. Хорошая игра!",
 		say_will_win = "Мы оцениваем вероятность победы в командной битве более 90%",
@@ -549,8 +548,6 @@ local strings = {
 		can_try_tormentor = "Попробуем сразиться с Торментором?",
 		say_come_def = "Пожалуйста, приходите защищать",
 		got_a_kill = {
-			"сап дифф",
-			"керри дифф",
 			"Наслаждайся таймерами возрождения, ты будешь считать их всю игру",
 			"?",
 			"Тебе нужно стараться лучше!",
@@ -669,8 +666,6 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
-			"сап дифф",
-			"керри дифф",
 			"Неплохо, моя собака могла бы лучше.",
 			"Сфокусируйся на игре, может, винрейт улучшится.",
 			"Я видел, как крипы фармят лучше, чем ты.",
@@ -811,13 +806,15 @@ local strings = {
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
+			"言語を変えるには：",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
 			"Supercharged OpenHyperAI {version}",
 			"更新: {date}",
 			"変更履歴、フィードバック、議論は",
 			"ワークショップのページへ",
 		},
 		say_lang_set = "日本語で話します。",
-		say_lang_bad = "!lang en, zh, ru, ja, id のどれかです。",
+		say_lang_bad = "!sp en, ru, ja, zh, id のどれかです。",
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
 		say_will_lose_2 = "勝率が1％未満と推定されます。ナイスプレイ！",
 		say_will_win = "チーム戦の勝率が90％以上と推定されます",
@@ -825,8 +822,6 @@ local strings = {
 		can_try_tormentor = "トーメンターを試してみませんか？",
 		say_come_def = "防御に来てください",
 		got_a_kill = {
-			"サポ差",
-			"キャリー差",
 			"リスポーンタイマーを楽しんでね、ゲーム中ずっと数えることになるよ",
 			"？",
 			"もっと頑張らないとね！",
@@ -945,8 +940,6 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
-			"サポ差",
-			"キャリー差",
 			"いいね、うちの犬の方が上手いよ。",
 			"プレイに集中すれば勝率が上がるかもね。",
 			"クリープの方が君よりうまくファームしてる。",
@@ -1069,55 +1062,213 @@ local strings = {
 		say_pos_refused_same_other = "{hero}はすでにポジション{pos}です",
 		say_pos_refused_missing = "ポジション{pos}はありません",
 	},
+	-- Indonesian. Fretbots vote lines are not here: they fall back to English. The plugin is not on this branch.
 	id = {
 		say_play_pos = "Saya main posisi ",
 		say_about = "Supercharged OpenHyperAI, versi %s. Masukan dan batasan yang diketahui: lihat halaman Workshop skrip bot.",
 		pos_select_closed = "Pemilihan posisi ditutup.",
 		welcome = {
+			"Untuk ganti bahasa, ketik:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
 			"Supercharged OpenHyperAI {version}",
 			"Update: {date}",
 			"Untuk catatan perubahan, masukan, dan diskusi",
 			"silakan buka halaman Workshop",
 		},
 		say_lang_set = "Bahasa Indonesia.",
-		say_lang_bad = "Pakai !lang en, zh, ru, ja, atau id.",
+		say_lang_bad = "Pakai !sp en, ru, ja, zh, atau id.",
+		say_will_lose = "Peluang menang kami di bawah 1%. Yang bijak tahu kapan ceritanya selesai. Well played!",
+		say_will_lose_2 = "Angka kami bilang peluang menang di bawah 1%. Kami terima hitungannya. Well played!",
+		say_will_win = "Peluang kami menang team fight di atas 90%. Peluang ada di pihak kami.",
+		say_will_win_2 = "Peluang menang kami di atas 90%. Nasib bisa ditebak. Kamu juga.",
+		can_try_tormentor = "Coba Tormentor?",
+		say_come_def = "Tolong datang defend",
 		got_first_blood = {
-			"First blood.",
-			"Hidup Jokowi!",
-			"supp diff",
+			"First blood. Pelajaran pertamanya gratis. Biayanya menyusul.",
+			"Setiap perjalanan dimulai dari satu salah langkah. Punyamu datang lebih awal.",
+			"Yang bangun pagi dapat cacing. Yang feed pagi dapat fountain.",
+			"Sejarah akan ingat momen ini. Kamu, tidak.",
+			"Tekan F untuk berduka. Atau jangan, kamu kelihatan sibuk feed.",
+			"Veni, vidi, vici. Kebanyakan vici.",
+			"First blood, seperti yang sudah tertulis. Bintangnya cuma agak kaget.",
 		},
 		got_a_kill = {
-			"supp diff",
-			"carry diff",
-			"Hidup Jokowi!",
-			"skill issue",
-			"wkwkwk",
+			"Kamu jatuh seperti cara kamu main: berani, singkat, dan tanpa rencana.",
+			"Berani tanpa otak cuma jalan lebih cepat ke fountain.",
+			"Istirahat. Timer respawn satu-satunya guru yang kamu dengar.",
+			"Katanya gagal itu guru terbaik. Kamu pasti sangat terdidik.",
+			"Error 404: map awareness tidak ditemukan.",
+			"Kenali dirimu. Lalu kenali minimap.",
+			"Keberuntungan berpihak pada yang berani. Yang ceroboh cuma ditoleransi.",
+			"Map-nya luas, tapi kamu nemu satu kotak tempat saya berdiri.",
+			"Ilmu itu kekuatan. Kamu tidak bawa keduanya.",
+			"Skill issue. Dengan hormat.",
+			"Ada atau tiada? Ternyata tiada.",
+			"Jangan berkabung. Renungkan. Kamu punya sekitar empat puluh detik.",
+			"Kamu gagal di 100% fight yang tidak kamu ambil. Yang kamu ambil juga kalah.",
+			"Lihat dulu sebelum melompat. Atau blink. Atau jalan, sebenarnya.",
+			"Ah, keberanian orang yang tidak dapat info.",
 		},
 		got_big_kill = {
-			"carry diff",
-			"networth segitu, mainnya gitu",
+			"Emasnya banyak, akalnya sedikit. Terima kasih donasinya.",
+			"Bounty-nya kamu bawa sejauh ini khusus untuk saya? Murah hati sekali.",
+			"Orang bodoh dan emasnya cepat berpisah. Lebih cepat, ternyata.",
+			"Farm-nya segitu, hikmahnya tetap tidak ada di toko.",
+			"Kaya raya, ingatannya pendek. Tragedi klasik.",
 		},
 		got_big_kill_2 = {
-			"Hidup Jokowi!",
-			"farm-nya hilang dalam dua detik",
+			"Roma tidak dibangun sehari. Net worth kamu hilang dalam dua detik.",
+			"Kekayaan tidak membeli pandangan ke depan. Saya cek. Tidak ada di daftar item.",
+			"Net worth-nya mengesankan. Pertimbangannya, kurang.",
+			"Makin tinggi bountynya, makin manis pelajarannya.",
 		},
 		got_big_kill_3 = {
-			"supp diff",
-			"gold-nya gratisan",
+			"Bounty sebesar itu di kepala yang sedang-sedang saja.",
+			"Kamu hero terkaya di map. Sebentar.",
+			"Emas segitu, tidak ada satu keping untuk hati-hati.",
+			"Emasmu? Lahan kosong.",
+			"Kesombongan mendahului kejatuhan. Inventory penuh juga, ternyata.",
 		},
-		kill_streak_ended = { "streak-nya selesai", "gg" },
-		say_end = { "gg", "gg wp" },
+		kill_streak_ended = {
+			"Setiap legenda berakhir. Punyaku berakhir saat seseorang akhirnya memperhatikan.",
+			"Matahari pun terbenam. Perlu delapan kill dan satu lengah.",
+			"Kesombongan datang sebelum jatuh. Dalam kasus saya, sekitar satu detik sebelumnya.",
+			"Streak itu pinjaman dari nasib. Hari ini utangnya ditagih.",
+			"Yang indah pasti berakhir. Biasanya di timer respawn.",
+		},
+		say_end = {
+			"Saya pelajari game ini dan kesimpulannya: sudah selesai.",
+			"Bijak itu tahu kapan pertarungan kalah. Saya sudah tahu dari tadi.",
+			"Ini bukan akhir dunia. Cuma akhir game ini.",
+			"Mari akhiri dengan martabat. Sisanya, ya begitu.",
+		},
+		no_more_talking = {
+			"Omongan murah. Last hit tidak. Saya farm dulu.",
+			"Diam itu emas. Saya lebih suka emas yang asli.",
+			"Yang bijak bicara sedikit. Saya mulai sekarang.",
+			"Perbuatan lebih keras dari kata. Lihat scoreboard.",
+		},
 		random_responses = {
-			"supp diff",
-			"carry diff",
-			"Hidup Jokowi!",
-			"wkwkwk",
-			"anjay",
+			"?",
+			"glhf",
+			"Menarik. Sungguh. Tolong terus jangan main.",
+			"Mengetik bukan ability. Saya cek tooltip-nya.",
+			"Katanya bijak. Sayang positioning-nya.",
+			"Saya bot, dan percakapan ini tetap mudah ditebak.",
+			"Bicara pelan dan bawa Blink Dagger. Kamu tidak melakukan keduanya.",
+			"Setiap pemain hebat pernah jelek. Kamu sedang bagus di langkah pertama.",
+			"Percaya dirimu menginspirasi. Item build-mu tidak.",
+			"Sabar. Timer respawn mengajar apa yang kata-kata tidak bisa.",
+			"Ah, strategi lewat keyboard. Inovasi yang berani.",
+			"Creep punya map awareness lebih baik, padahal jalannya lurus.",
+			"Saya mau jelaskan, tapi minimap sudah mencoba.",
+			"Teorinya menarik. Scoreboard tidak setuju.",
+			"Terus ketik. Setiap kata adalah last hit yang tidak kamu ambil.",
+			"Pena lebih kuat dari pedang. Keyboard, sayangnya, tidak.",
+			"Omongan murah, makanya kamu mampu sebanyak itu.",
+			"Kalau gagal di percobaan pertama, berhenti mengetik lalu coba lagi.",
+			"Ini bukan bug, ini fitur. Maksud saya gameplay-mu.",
+			"Latihan membuat sempurna. Chat tidak membuat apa-apa.",
+			"Sentuh rumput. Timer respawn-mu cukup panjang untuk itu.",
+			"Datang gampang, pergi gampang. Kebanyakan pergi.",
+			"Tugas gagal dengan sukses.",
+			"Dasar, kawan. Kamu berdiri di fog.",
+			"Kamu tahu kamu main lawan bot, kan? Kami juga notice.",
+			"Tidak apa-apa. Semuanya baik. Tower-mu tidak, tapi ini baik.",
+			"Sabar itu kebajikan. Ward juga.",
+			"Rasa ingin tahu membunuh kucing. Facecheck membunuhmu. Lagi.",
 		},
-		say_gg_lose = { "gg", "gg wp" },
-		say_gg_win = { "gg", "gg ez", "Hidup Jokowi!" },
-		pos_names = { "safelane", "mid", "offlane", "soft supp", "hard supp" },
+		say_assemble = { "Otw!", "Datang!", "Saya datang, tahan!", "Menuju ke sana!" },
+		say_assemble_attack = {
+			"Menuju {target}!",
+			"Targetnya {target}!",
+			"Kill {target}!",
+			"Ke {target}!",
+		},
+		say_roshan = { "Ayo Roshan!", "Waktunya Roshan!", "Menuju Rosh!" },
+		say_push_top = { "Push top!", "Ayo push top!", "Push lane atas!" },
+		say_push_mid = { "Push mid!", "Ayo push mid!", "Push lane tengah!" },
+		say_push_bot = { "Push bot!", "Ayo push bot!", "Push lane bawah!" },
+		say_defend_top = { "Defend top!", "Mereka push top!", "Bantu top!" },
+		say_defend_mid = { "Defend mid!", "Mereka push mid!", "Bantu mid!" },
+		say_defend_bot = { "Defend bot!", "Mereka push bot!", "Bantu bot!" },
+		say_leave_farm_defend = {
+			"Tinggal farm, defend dulu!",
+			"Keluar jungle untuk defend!",
+			"Base lebih penting dari farm!",
+		},
+		say_leave_farm_push = {
+			"Tinggal farm, waktunya push!",
+			"Farm cukup, ayo push!",
+			"Kumpul untuk push!",
+		},
+		say_base_defend = {
+			"Defend base!",
+			"Mereka di base kita!",
+			"Jaga ancient!",
+		},
+		say_consume_grisgris = {
+			"Inventory penuh, makan Gris-Gris!",
+			"Makan Gris-Gris, butuh gold dan slot!",
+			"Makan Gris-Gris supaya bisa beli!",
+		},
+		say_consume_grisgris_push = {
+			"Mereka push, makan Gris-Gris untuk gold-nya!",
+			"Base tertekan, cairkan Gris-Gris!",
+			"Makan Gris-Gris, gold-nya dibutuhkan sekarang!",
+		},
+		say_ward_observer = { "Pasang observer.", "Ward di sini.", "Taruh observer." },
+		say_ward_sentry = { "Pasang sentry.", "Sentry turun.", "Bersihkan vision di sini." },
+		say_ward_observer_defend = { "Observer defend.", "Ward hutan kita.", "Observer untuk defend." },
+		say_ward_sentry_defend = { "Sentry defend.", "Sentry dekat base.", "True sight untuk defend." },
+		say_ward_observer_offense = { "Observer serang.", "Ward hutan mereka.", "Observer dalam." },
+		say_ward_sentry_offense = { "Sentry serang.", "Sentry di hutan mereka.", "Sentry dalam." },
+		say_chatty_on = { "Chatty nyala: kami akan bilang apa yang kami lakukan.", "Mode chatty nyala." },
+		say_chatty_off = { "Chatty mati.", "Mode chatty mati." },
+		say_take_lotus = { "Ambil lotus.", "Menuju kolam lotus.", "Lotus untuk saya." },
+		say_take_wisdom = { "Ambil wisdom shrine.", "Menuju shrine XP.", "Wisdom shrine, saya cover." },
+		say_debug_on = { "Debug nyala. Bot akan lebih banyak bicara.", "Mode debug nyala." },
+		say_debug_off = { "Debug mati.", "Mode debug mati." },
 		say_pos_prefix = "Pos",
+		pos_names = { "Safelane", "Mid", "Offlane", "Soft Support", "Hard Support" },
+		say_pos_refused_core = "{hero} tidak bisa main pos {pos}",
+		say_pos_refused_human = "pos {pos} milik {hero}",
+		say_pos_refused_same = "kamu sudah pos {pos}",
+		say_pos_refused_same_self = "saya sudah pos {pos}",
+		say_pos_refused_same_other = "{hero} sudah pos {pos}",
+		say_pos_refused_missing = "tidak ada pos {pos}",
+		mode_laning = "lagi laning",
+		mode_farming = "lagi farm",
+		mode_pushing = "lagi push",
+		mode_defending = "lagi defend",
+		mode_retreating = "lagi mundur",
+		mode_roshan = "lagi Roshan",
+		mode_tormentor = "lagi Tormentor",
+		mode_fighting = "lagi fight",
+		mode_roaming = "lagi roam",
+		mode_other = "sedang sibuk",
+		mode_warding = "lagi ward",
+		mode_rune = "mengambil rune",
+		mode_item = "mengambil item",
+		say_not_defending = "Saya %s, tidak defend.",
+		say_gg_lose = {
+			"gg",
+			"gg wp",
+			"gg wp. Hari ini tim yang lebih bijak yang menang.",
+			"gg. Kekalahan ini akan kami pelajari lama.",
+			"gg. Ada yang menang, ada yang kalah. Hari ini kami yang kalah.",
+		},
+		say_gg_win = {
+			"gg",
+			"gg wp",
+			"gg. Hasilnya tidak pernah diragukan. Yang diragukan cuma durasinya.",
+			"gg. Lain kali bawa rencana.",
+			"gg wp. Sebagian dari kalian, sih.",
+			"gg. Game ketat, kalau kamu menyipitkan mata.",
+			"gg. Besok jam yang sama? Saya bawa rencana yang sama, kamu bawa yang baru.",
+			"gg. Veni, vidi, push mid.",
+			"gg ez",
+		},
 	},
 }
 if CustomLoader and CustomLoader.Enable and strings[CustomLoader.Localization] then
@@ -1128,13 +1279,14 @@ end
 function Localization.Supported(locale)
 	return strings[locale] ~= nil
 end
--- `!lang ru`, `!sp ru`, `!speak ru`. The code ("" when the command has none), or nil when the text is not one.
+-- `!sp ru` and `!speak ru`. The code ("" when the command has none), or nil when the text is not one.
+-- `jp` is not a language code; TakeLanguageCommand maps it to `ja`.
 function Localization.LanguageCommand(text)
 	if type(text) ~= "string" then
 		return nil
 	end
 	local word, rest = text:lower():match("^%s*(!%a+)%s*(.*)$")
-	if word ~= "!lang" and word ~= "!sp" and word ~= "!speak" then
+	if word ~= "!sp" and word ~= "!speak" then
 		return nil
 	end
 	return rest:match("^(%a+)") or ""
@@ -1146,6 +1298,9 @@ function Localization.TakeLanguageCommand(text, team)
 	if code == nil then
 		return false
 	end
+	if code == "jp" then
+		code = "ja"
+	end
 	local ok = code ~= "" and Localization.Supported(code)
 	if ok then
 		CustomLoader.Localization = code
@@ -1153,7 +1308,7 @@ function Localization.TakeLanguageCommand(text, team)
 	local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 	local line = ok and Localization.Get("say_lang_set") or Localization.Get("say_lang_bad")
 	if type(line) ~= "string" or line == "" then
-		line = ok and "Language set." or "Try !lang en, zh, ru, ja, or id."
+		line = ok and "Language set." or "Try !sp en, ru, ja, zh, or id."
 	end
 	TeamMemory.Set(team, "langReply", line)
 	return true

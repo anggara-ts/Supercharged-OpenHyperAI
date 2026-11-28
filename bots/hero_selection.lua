@@ -940,7 +940,7 @@ local function handleChatCommand(text, senderId, teamOnly)
 					"Hero name not found or not supported! See: https://github.com/anggara-ts/Supercharged-OpenHyperAI/blob/main/bots/lib/data/hero_names.lua"
 				)
 			end
-		elseif action == "!sp" or action == "!speak" or action == "!lang" then
+		elseif action == "!sp" or action == "!speak" then
 			HandleLocaleSetting(argument)
 		else
 			log("Unknown action: %s, command text: %s", action, text)
@@ -948,9 +948,9 @@ local function handleChatCommand(text, senderId, teamOnly)
 	end
 end
 function HandleLocaleSetting(locale)
-	-- Same path as the in-game `!lang` (localization.lua): sets the language, or queues a refusal when the code
-	-- is not one this script speaks. The reply is said from the next level-up think.
-	Localization.TakeLanguageCommand("!lang " .. tostring(locale or ""), GetTeam())
+	-- Same path as the in-game `!sp` (localization.lua): sets the language, or queues a refusal when the code
+	-- is not one this script speaks. `jp` counts as Japanese. The reply is said from the next level-up think.
+	Localization.TakeLanguageCommand("!sp " .. tostring(locale or ""), GetTeam())
 	log("Set to speak: %s", tostring(locale))
 end
 local function initPickTimes()
