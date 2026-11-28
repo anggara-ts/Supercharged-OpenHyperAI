@@ -161,6 +161,9 @@ T.test("dark willow: an escape realm starts the TP at once (game 067, 17:06)", f
 	T.eq(bot._dwRealm.tp, "now", "the channel started")
 	T.stub.time = 105.3
 	X.ShadowRealmTick()
+	T.ok(bot._dwRealm ~= nil, "the last tick stays open, in case she dies on it")
+	T.stub.time = 105.4
+	X.ShadowRealmTick()
 	local line = T.stub.printed[#T.stub.printed] or ""
 	T.ok(string.find(line, "why=retreat", 1, true) ~= nil and string.find(line, "tp=now", 1, true) ~= nil, line)
 end)
@@ -192,6 +195,28 @@ T.test("dark willow: a realm she dies in ends as release=died at her last tick",
 	line = T.stub.printed[#T.stub.printed] or ""
 	T.ok(string.find(line, "t=152 dark_willow shadow-realm why=retreat held=1.00", 1, true) ~= nil, line)
 	T.ok(string.find(line, "release=died", 1, true) ~= nil, line)
+end)
+
+-- Game 092 t=2074: the duration elapsed (held=5.23) on the tick she died, and the line said release=-
+-- because she still read as alive. The death shows on the next think.
+T.test("dark willow: dying on the realm's last tick says release=died (#203, game 092)", function()
+	local bot, X = realmBot()
+	X.StartShadowRealm("retreat", nil, "cornered")
+	T.stub.time = 105.23
+	X.ShadowRealmTick()
+	T.ok(bot._dwRealm ~= nil, "the ran-out tick does not close the record")
+	for _, earlier in ipairs(T.stub.printed) do
+		T.ok(string.find(earlier, "shadow-realm why=", 1, true) == nil, "no end line yet: " .. earlier)
+	end
+	bot._alive = false
+	T.stub.time = 105.3
+	X.ShadowRealmTick()
+	T.eq(bot._dwRealm, nil, "ended once the death is visible")
+	local line = T.stub.printed[#T.stub.printed] or ""
+	T.ok(string.find(line, "t=105 dark_willow shadow-realm why=retreat", 1, true) ~= nil, line)
+	T.ok(string.find(line, "held=5.23", 1, true) ~= nil, line)
+	T.ok(string.find(line, "release=died", 1, true) ~= nil, line)
+	T.ok(string.find(line, "release=-", 1, true) == nil, line)
 end)
 
 T.test("shadow realm: when to cast (game 069, #48)", function()
@@ -429,6 +454,9 @@ T.test("dark willow: an escape realm holds the modes and walks her home (#203 it
 	T.eq(orders[before + 1], "move", "still walking home")
 	T.stub.time = 105.5
 	X.ShadowRealmTick()
+	T.ok(bot._dwRealm ~= nil, "the last tick stays open")
+	T.stub.time = 105.6
+	X.ShadowRealmTick()
 	T.eq(bot._dwRealm, nil, "the realm is over")
 	T.eq(bot._dwEscapeHoldUntil, nil, "outpost hold cleared")
 	T.eq(bot._castHoldUntil, nil, "item-think hold cleared")
@@ -477,6 +505,16 @@ T.test("shadow realm: the cornered realm (#203, game 083 47:06)", function()
 	T.eq(R.Jump(nil, nil, 300, 2.0), nil, "her own think had a gap: no read")
 	T.eq(R.Jump(nil, nil, 300, nil), nil, "her first sample")
 	T.eq(R.Jump(1300, 1.0, 300, 0.1), "appear", "last seen 1s ago")
+	-- Game 092: her own Blink. The gap to him closed; he did not move.
+	T.eq(R.Jump(714, 0.03, 121, 0.03, 0), nil, "her blink: the enemy did not move")
+	T.eq(R.Jump(1109, 0.03, 155, 0.03, 40), nil, "the enemy only walked a step")
+	T.eq(R.Jump(1162, 0.1, 200, 0.1, 1000), "jump", "the enemy's own blink")
+	T.eq(R.Jump(714, 0.03, 121, 0.03, nil), "jump", "no position sample: the distance read stays")
+	T.eq(R.HoldRanOut(nil, false, true, false), true, "time is up and she still reads alive: wait")
+	T.eq(R.HoldRanOut(nil, true, true, false), false, "the wait already happened: end")
+	T.eq(R.HoldRanOut("max", false, true, false), false, "the hit already released it")
+	T.eq(R.HoldRanOut(nil, false, true, true), false, "an early drop ends now")
+	T.eq(R.HoldRanOut(nil, false, false, false), false, "not the duration end")
 end)
 
 T.test("dark willow: a cornered realm at full HP, before Bramble Maze (game 083 47:06)", function()
@@ -499,6 +537,27 @@ T.test("dark willow: a cornered realm at full HP, before Bramble Maze (game 083 
 	line = printedWith("realm-cornered trigger=crowd")
 	T.ok(line ~= nil and string.find(line, "near=3 allies=0", 1, true) ~= nil, tostring(line))
 	T.eq(bot._dwRealm ~= nil and bot._dwRealm.hold, true, "an escape realm: the hold walks her home")
+end)
+
+T.test("dark willow: her own blink is not an enemy jump (#203, game 092)", function()
+	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 0.9, false)
+	local enemy = nil
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team then
+			enemy = hero
+			break
+		end
+	end
+	enemy._loc = bot._loc + Vector(0, 1100, 0)
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm before she moves")
+	T.eq(printedWith("jump-seen"), nil, "no jump-seen yet")
+	T.stub.time = T.stub.time + 0.1
+	-- She blinks to 120 from him. He stays where he was.
+	bot._loc = enemy._loc + Vector(0, -120, 0)
+	X.SkillsComplement()
+	T.eq(printedWith("jump-seen"), nil, "her blink is not via=tracked")
+	T.eq(#used, 0, "no realm from her own blink")
 end)
 
 T.test("dark willow: a jump-in with a second enemy near casts the realm", function()

@@ -554,8 +554,15 @@ function X.TrackEnemyJumps()
 	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
 		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
 			local dist = GetUnitToUnitDistance(bot, enemy)
+			local loc = enemy:GetLocation()
 			local last = enemySeen[enemy]
-			local kind = ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo)
+			-- His own move, not the change in her distance to him: her Blink closes that gap (game 092 via=tracked).
+			local moved = nil
+			if last ~= nil and last.loc ~= nil and loc ~= nil then
+				moved = (loc - last.loc):Length2D()
+			end
+			local kind =
+				ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo, moved)
 			local why, info = nil, nil
 			if kind == "appear" then
 				local accepted
@@ -585,6 +592,9 @@ function X.TrackEnemyJumps()
 				enemySeen[enemy] = last
 			end
 			last.dist, last.at = dist, now
+			if loc ~= nil then
+				last.loc = Vector(loc.x, loc.y, loc.z or 0)
+			end
 		end
 	end
 	X.SampleEnemyLastSeen(now)
@@ -960,7 +970,8 @@ function X.ShadowRealmTick()
 	local since = DotaTime() - realm.at
 	-- Dead, a death since the cast, or the realm older than its duration + 1s (the tick missed its end: her think
 	-- does not run while dead): end it at the last tick she was alive, release=died (release=stale when no death
-	-- was counted, e.g. the think stopped for another reason).
+	-- was counted, e.g. the think stopped for another reason). A death on the tick the duration elapses is not
+	-- visible yet (game 092 t=2074): that tick waits (ShadowRealmRules.HoldRanOut) so this check still runs.
 	local deaths = GetHeroDeaths(bot:GetPlayerID()) or 0
 	local died = not bot:IsAlive() or deaths > (realm.deaths or deaths)
 	if died or since > realm.duration + 1 then
@@ -1008,12 +1019,11 @@ function X.ShadowRealmTick()
 		end
 		return true
 	end
-	if since > realm.duration + 0.2 or realm.modSeen ~= nil and not inRealm then
-		if
-			realm.modSeen ~= nil
-			and not inRealm
-			and ShadowRealmRules.EarlyDrop(realm.released, since, realm.duration)
-		then
+	local ranOut = since > realm.duration + 0.2
+	local modifierGone = realm.modSeen ~= nil and not inRealm
+	if ranOut or modifierGone then
+		local early = modifierGone and ShadowRealmRules.EarlyDrop(realm.released, since, realm.duration)
+		if early then
 			realm.drop = string.format(
 				" drop-mode=%d>%d drop-act=%d>%d attacked=%s",
 				realm.tickMode or -1,
@@ -1022,6 +1032,13 @@ function X.ShadowRealmTick()
 				bot:GetCurrentActionType() or -1,
 				bot:GetLastAttackTime() ~= realm.lastAttack and "yes" or "no"
 			)
+		end
+		-- The duration elapsed while she still reads as alive. Hold this think: a death on it is
+		-- counted after the think (game 092 t=2074, held=5.23 release=-). The next think, or the
+		-- respawn, says release=died. One line, the existing shadow-realm end line.
+		if ShadowRealmRules.HoldRanOut(realm.released, realm.ranOut == true, ranOut, early) then
+			realm.ranOut = true
+			return false
 		end
 		X.EndShadowRealm(realm, since)
 		return false

@@ -4,6 +4,10 @@
 -- max_damage_duration 3s; that attack ends the realm. Cooldown 21/19/17/15. (Re-read 2026-11-22 from
 -- https://www.dota2.com/datafeed/herodata?language=english&hero_id=119: duration 5, fade_time 0.3,
 -- attack_range_bonus 600, max_damage_duration 3, "becoming untargetable", "Her next attack ... will end Shadow Realm".)
+-- Area stuns and nets (Earth Spike, Bushwhack) while she is in the realm are unverified (same datafeed, re-read
+-- 2026-11-28). The notes say "Disjoints projectiles upon cast", "Grants phased movement" and "Spells which require
+-- vision cannot affect Dark Willow in the Shadow Realm." They do not say whether a point-targeted area hits her.
+-- No rule here treats the realm as safe from that, and none was added.
 local ShadowRealmRules = {}
 
 ShadowRealmRules.DURATION = 5
@@ -137,12 +141,15 @@ end
 -- An enemy hero that jumped next to her (no modifier shows a blink or a jaunt): within JUMP_NEAR now, and either
 -- seen JUMP_CLOSED or more farther away within the last JUMP_WINDOW, or not seen at all in that window (blinked in
 -- out of the fog). prevDist / prevAgo: the last sighting (nil: none); trackedAgo: since her own last sample, so a
--- gap in her think (death, a long stun) does not read every enemy as new. Returns "jump" | "appear" | nil.
+-- gap in her think (death, a long stun) does not read every enemy as new. enemyMoved: how far HE moved since that
+-- sample (his position now against his last position; nil: not measured). Returns "jump" | "appear" | nil.
 -- An "appear" counts only after ShadowRealmRules.AppearIsJump (his last-seen spot, or a Blink or jump spell).
+-- A tracked "jump" needs his own move of JUMP_CLOSED or more (#203, game 092 t=1008: her Blink closed the distance
+-- from 714 to 121 and the line said via=tracked, while he had not moved).
 ShadowRealmRules.JUMP_NEAR = 450
 ShadowRealmRules.JUMP_CLOSED = 500
 ShadowRealmRules.JUMP_WINDOW = 0.6
-function ShadowRealmRules.Jump(prevDist, prevAgo, nowDist, trackedAgo)
+function ShadowRealmRules.Jump(prevDist, prevAgo, nowDist, trackedAgo, enemyMoved)
 	if nowDist > ShadowRealmRules.JUMP_NEAR or trackedAgo == nil or trackedAgo > ShadowRealmRules.JUMP_WINDOW then
 		return nil
 	end
@@ -150,6 +157,9 @@ function ShadowRealmRules.Jump(prevDist, prevAgo, nowDist, trackedAgo)
 		return "appear"
 	end
 	if prevDist - nowDist >= ShadowRealmRules.JUMP_CLOSED then
+		if enemyMoved ~= nil and enemyMoved < ShadowRealmRules.JUMP_CLOSED then
+			return nil
+		end
 		return "jump"
 	end
 	return nil
@@ -255,6 +265,18 @@ end
 -- 9:40, 45:55: ended after 0.67-1.17s with release=-). Margin: the end check runs 0.2s after the duration.
 function ShadowRealmRules.EarlyDrop(released, since, duration)
 	return released == nil and since < (duration or ShadowRealmRules.DURATION) - 0.3
+end
+
+-- The realm's time is up (since past the duration) and she still reads as alive. Hold this one think before
+-- printing release=- (#203, game 092 t=2074: held=5.23 release=- on the tick she died; the death count moves
+-- after the think, and her think does not run while dead, so the next think says release=died). An earlier
+-- reason (the hit, a mode change) or an early modifier drop ends now. alreadyHeld: this wait already happened.
+-- Returns true to keep the record open.
+function ShadowRealmRules.HoldRanOut(released, alreadyHeld, ranOut, earlyDrop)
+	if earlyDrop or not ranOut or released ~= nil or alreadyHeld then
+		return false
+	end
+	return true
 end
 
 -- The cast order (#203, game 079 t=356: the cast line and order 14 times in one second, then release=stale; game
