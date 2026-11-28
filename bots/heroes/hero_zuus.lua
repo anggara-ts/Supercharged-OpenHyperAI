@@ -173,12 +173,42 @@ local arcLightningDesire, arcLightningTarget
 local lightningBoltDesire, lightningBoltTarget
 local lightningBoltAoeDesire, lightningBoltLocation
 local nimbusDesire, nimbusLocation
+-- Nimbus help, Valve datafeed hero_id=22 (zuus_cloud): cloud_radius 450, cloud_bolt_interval 2.5, AbilityCastPoint
+-- 0.2. Fallbacks for when the API reads 0.
+local NIMBUS_RADIUS_FALLBACK = 450
+-- The chaser must stay inside the cloud this long after it forms (cast point 0.2 plus a margin). Not a full 2.5s
+-- bolt interval: whether the cloud strikes as soon as it forms is not in the game data, and a full interval
+-- skipped every chaser over 360 speed (game 064: Abaddon at 380). nimbus-result stunnedAfter= shows when a bolt
+-- really lands.
+local NIMBUS_MIN_STAY = 1.0
+-- A fleeing ally is helped while the chaser is at most this many seconds from reaching him (or already hitting
+-- him), and not once he is this low: bolts come every 2.5s, too late then (game 064: Alchemist at 1% HP died 4s
+-- after the cast, Puck 1s after one).
+local NIMBUS_HELP_CATCH_TIME = 4
+local NIMBUS_HELP_MIN_HP = 0.15
+-- How far from a fleeing ally a chaser is looked for.
+local NIMBUS_HELP_CHASER_RANGE = 1200
+local nimbusHelpCast = nil -- { why, ally, allyHp, deaths, chaser, chaserHp, at, castAt, stunnedAfter, stuns, wasStunned }
+-- Finish (#47, game 068 t=2785 and t=2899): Clinkz with 2-3 Radiant heroes hitting him got the cloud and died the
+-- same second (t=2899 at 9-10% HP; t=2785 somewhere from 33% one second before to 12% at his death), so the 45 s
+-- cooldown went for nothing. A target this low with an allied hero this close hitting it is left to the allies.
+local NIMBUS_ALLY_FINISH_HP = 0.15
+local NIMBUS_ALLY_FINISH_RANGE = 600
+-- The finish result line comes this long after the cast: the first bolt struck 2.5 s after a cast in game 068
+-- (t=2388, nimbus-result stunnedAfter=2.5; cloud_bolt_interval 2.5, datafeed hero_id=22), so 2 s would see none.
+local NIMBUS_FINISH_RESULT_AFTER = 3
+local nimbusFinishCast = nil -- { target, targetName, pid, deaths, hp, allies, at, castAt, stuns, stunnedAfter, diedAfter }
+local nextNimbusHelpCheckAt = -100
+local fleeingAllyCache = { at = -100, list = {} }
 local wrathDesire
 local heavenlyJumpDesire, heavenlyJumpTarget
 local keepMana, mpRatio
 local staticFieldPct = 0
 local unusedTarget
 function X.SkillsComplement()
+	-- The nimbus-result line comes before every gate, so it prints while Zeus is busy too.
+	pcall(X.ThinkNimbusResult)
+	pcall(X.ThinkNimbusFinishResult)
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
 		return
 	end
@@ -222,8 +252,24 @@ function X.SkillsComplement()
 		bot:ActionQueue_UseAbilityOnEntity(arcLightningAbility, arcLightningTarget)
 		return
 	end
-	nimbusDesire, nimbusLocation = X.ConsiderD()
+	local nimbusWhy, nimbusTarget, nimbusNote
+	nimbusDesire, nimbusLocation, nimbusWhy, nimbusTarget, nimbusNote = X.ConsiderD()
 	if nimbusDesire > 0 then
+		-- One line per cast (45 s cooldown; the 3 s gate only stops repeats when an order doesn't go through).
+		if DotaTime() >= (bot._zeusNimbusLogAt or -999) then
+			bot._zeusNimbusLogAt = DotaTime() + 3
+			pcall(
+				print,
+				string.format(
+					"[SHy-ZEUS] t=%.0f nimbus why=%s target=%s dist=%d%s",
+					DotaTime(),
+					tostring(nimbusWhy),
+					nimbusTarget ~= nil and nimbusTarget:GetUnitName() or "none",
+					nimbusTarget ~= nil and math.floor(GetUnitToUnitDistance(bot, nimbusTarget)) or 0,
+					nimbusNote or ""
+				)
+			)
+		end
 		Fu.SetQueuePtToINT(bot, true)
 		bot:ActionQueue_UseAbilityOnLocation(nimbusAbility, nimbusLocation)
 		return
@@ -357,6 +403,31 @@ function X.ConsiderW()
 			return BOT_ACTION_DESIRE_HIGH, target
 		end
 	end
+	-- A fleeing ally whose chaser Zeus's own bolt reaches (no walk): the bolt is a sure hit with a mini-stun
+	-- (ministun_duration 0.35, datafeed hero_id=22), cheaper than Nimbus, whose bolt may go to another unit.
+	for _, flee in ipairs(X.FleeingAllyChasers()) do
+		if
+			(flee.hitting or flee.catchTime <= NIMBUS_HELP_CATCH_TIME)
+			and GetUnitToUnitDistance(bot, flee.chaser) <= castRange
+			and Fu.CanCastOnTargetAdvanced(flee.chaser)
+		then
+			if DotaTime() >= (bot._zeusBoltHelpLogAt or -999) then
+				bot._zeusBoltHelpLogAt = DotaTime() + 3
+				print(
+					string.format(
+						"[SHy-ZEUS] t=%.0f zuus bolt-help ally=%s allyHp=%.2f chaser=%s dist=%d catch=%.1f",
+						DotaTime(),
+						flee.ally:GetUnitName(),
+						Fu.GetHP(flee.ally),
+						flee.chaser:GetUnitName(),
+						math.floor(GetUnitToUnitDistance(bot, flee.chaser)),
+						flee.catchTime
+					)
+				)
+			end
+			return BOT_ACTION_DESIRE_HIGH, flee.chaser
+		end
+	end
 	if Fu.IsGoingOnSomeone(bot) then
 		local target = Fu.GetProperTarget(bot)
 		if
@@ -451,33 +522,572 @@ function X.ConsiderW2()
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
 end
+-- Pure: seconds until a chaser reaches attack range of the unit he chases. gap: the distance less his attack range;
+-- awaySpeed: how fast the chased unit moves straight away from him (negative: toward him). 0 when in range now,
+-- 99 when he does not gain.
+function X.CatchTime(gap, chaserSpeed, awaySpeed)
+	if gap <= 0 then
+		return 0
+	end
+	local closing = chaserSpeed - math.max(0, awaySpeed)
+	if closing <= 10 then
+		return 99
+	end
+	return gap / closing
+end
+-- Pure: where Nimbus goes to slow a chaser, or nil and why not. c holds plain numbers and points ({x, y}):
+--   chaser, ally: positions; chaserSpeed; allyHp; allyFleeing (the ally moves away from the chaser); catchTime
+--   (seconds until the chaser reaches the ally); hitting (he hit the ally lately); inBoltRange, boltReady (Zeus's own Lightning Bolt
+--   reaches him now); units: the other enemy units that a bolt could hit instead (creeps, summons, illusions; no
+--   heroes, wards or buildings); radius, castPoint (Nimbus); minStay (seconds he must stay inside).
+-- The cloud goes on the chaser's path toward the ally, at the point he reaches having walked one radius past where
+-- he stands when the cloud forms, so he crosses all of it while he follows a fleeing ally: inside for 2 x radius /
+-- speed seconds. An ally who is not moving away is where the chaser stops to fight: the cloud goes on the ally's
+-- spot then (or the chaser's, if nearer), and the chaser stays in it. He must stay in for minStay. The Dota 2 wiki (not the game files) says a Nimbus bolt strikes the closest enemy unit,
+-- creeps and summons included, with no hero priority, so any other enemy unit inside the cloud (nearer the centre
+-- than the chaser for most of his walk) can take the bolt: then no cast.
+-- Returns plan { aim = {x, y}, crowd, stay }, or nil, why, plan.
+function X.NimbusHelpPlan(c)
+	if c.allyHp < NIMBUS_HELP_MIN_HP then
+		return nil, "too-late"
+	end
+	if not c.hitting and c.catchTime > NIMBUS_HELP_CATCH_TIME then
+		return nil, "not-yet"
+	end
+	if c.inBoltRange and c.boltReady then
+		return nil, "bolt-range"
+	end
+	local dx, dy = c.ally.x - c.chaser.x, c.ally.y - c.chaser.y
+	local gap = math.sqrt(dx * dx + dy * dy)
+	local plan = { aim = { x = c.chaser.x, y = c.chaser.y }, crowd = 0, stay = math.huge }
+	if c.chaserSpeed >= 50 and gap >= 1 then
+		local formWalk = c.chaserSpeed * c.castPoint
+		local along = formWalk + c.radius
+		if not c.allyFleeing then
+			along = math.min(along, gap)
+		end
+		plan.aim = { x = c.chaser.x + dx / gap * along, y = c.chaser.y + dy / gap * along }
+		plan.stay = c.allyFleeing and (along + c.radius - formWalk) / c.chaserSpeed or math.huge
+	end
+	for _, unit in ipairs(c.units or {}) do
+		local ux, uy = unit.x - plan.aim.x, unit.y - plan.aim.y
+		if ux * ux + uy * uy <= c.radius * c.radius then
+			plan.crowd = plan.crowd + 1
+		end
+	end
+	if plan.stay < c.minStay then
+		return nil, "too-fast", plan
+	end
+	if plan.crowd > 0 then
+		return nil, "crowded", plan
+	end
+	return plan
+end
+-- Allied heroes (not Zeus) fleeing from an enemy hero: retreating, or under 50% HP and hit by a hero in the last 2s,
+-- with a chaser within NIMBUS_HELP_CHASER_RANGE that runs after him or hit him. { ally, chaser, catchTime,
+-- hitting } each; read once per think (ConsiderW and ConsiderD both use it).
+function X.FleeingAllyChasers()
+	if fleeingAllyCache.at == DotaTime() then
+		return fleeingAllyCache.list
+	end
+	local list = {}
+	-- Slot loop (GetTeamMember takes a slot 1..5, not a player ID).
+	for i = 1, 5 do
+		local ally = GetTeamMember(i)
+		if
+			ally ~= bot
+			and Fu.IsValidHero(ally)
+			and (Fu.IsRetreating(ally) or Fu.GetHP(ally) < 0.5 and ally:WasRecentlyDamagedByAnyHero(2.0))
+		then
+			local allyLocation = ally:GetLocation()
+			for _, chaser in pairs(Fu.GetEnemiesNearLoc(allyLocation, NIMBUS_HELP_CHASER_RANGE) or {}) do
+				local hitting = Fu.IsValidHero(chaser) and ally:WasRecentlyDamagedByHero(chaser, 2.0)
+				if
+					Fu.IsValidHero(chaser)
+					and not Fu.IsSuspiciousIllusion(chaser)
+					and Fu.CanCastOnNonMagicImmune(chaser)
+					and (hitting or Fu.IsChasingTarget(chaser, ally))
+				then
+					local chaserLocation = chaser:GetLocation()
+					local dx, dy = allyLocation.x - chaserLocation.x, allyLocation.y - chaserLocation.y
+					local gap = math.sqrt(dx * dx + dy * dy)
+					local velocity = ally:GetVelocity()
+					local awaySpeed = gap >= 1 and (velocity.x * dx + velocity.y * dy) / gap or 0
+					table.insert(list, {
+						ally = ally,
+						chaser = chaser,
+						hitting = hitting,
+						fleeing = awaySpeed > 50,
+						catchTime = X.CatchTime(
+							gap - chaser:GetAttackRange(),
+							chaser:GetCurrentMovementSpeed(),
+							awaySpeed
+						),
+					})
+				end
+			end
+		end
+	end
+	fleeingAllyCache = { at = DotaTime(), list = list }
+	return list
+end
+-- Other enemy units a Nimbus bolt near location could strike: creeps and summons and illusions, not heroes, wards
+-- or buildings. Only what Zeus's team sees is listed, so an unseen creep can still take a bolt.
+local function NimbusCrowdUnits(location, radius)
+	local units = {}
+	for _, unit in pairs(GetUnitList(UNIT_LIST_ENEMIES) or {}) do
+		if
+			Fu.IsValid(unit)
+			and GetUnitToLocationDistance(unit, location) <= radius + 600
+			and not unit:IsBuilding()
+			and (not unit:IsHero() or unit:IsIllusion())
+			and not string.find(unit:GetUnitName(), "ward", 1, true)
+		then
+			local unitLocation = unit:GetLocation()
+			table.insert(units, { x = unitLocation.x, y = unitLocation.y })
+		end
+	end
+	return units
+end
+-- The NimbusHelpPlan input for a fleeing ally's chaser.
+local function NimbusHelpInput(chased, chaser, catchTime, hitting, fleeing)
+	local radius = nimbusAbility:GetSpecialValueInt("cloud_radius")
+	radius = radius > 0 and radius or NIMBUS_RADIUS_FALLBACK
+	local chaserLocation, chasedLocation = chaser:GetLocation(), chased:GetLocation()
+	return {
+		chaser = { x = chaserLocation.x, y = chaserLocation.y },
+		ally = { x = chasedLocation.x, y = chasedLocation.y },
+		chaserSpeed = chaser:GetCurrentMovementSpeed(),
+		allyHp = Fu.GetHP(chased),
+		allyFleeing = fleeing,
+		catchTime = catchTime,
+		hitting = hitting,
+		inBoltRange = GetUnitToUnitDistance(bot, chaser) <= lightningBoltAbility:GetCastRange(),
+		boltReady = lightningBoltAbility:IsFullyCastable(),
+		units = NimbusCrowdUnits(chaserLocation, radius),
+		radius = radius,
+		minStay = NIMBUS_MIN_STAY,
+		castPoint = nimbusAbility:GetCastPoint(),
+	}
+end
+local function LogNimbusSkip(why, chased, chaser, plan)
+	if why == "not-yet" or DotaTime() < (bot._zeusNimbusSkipLogAt or -999) then
+		return
+	end
+	bot._zeusNimbusSkipLogAt = DotaTime() + 5
+	print(
+		string.format(
+			"[SHy-ZEUS] t=%.0f zuus nimbus-skip why=%s ally=%s allyHp=%.2f chaser=%s units=%d stay=%.1f",
+			DotaTime(),
+			why,
+			chased:GetUnitName(),
+			Fu.GetHP(chased),
+			chaser:GetUnitName(),
+			plan ~= nil and plan.crowd or 0,
+			plan ~= nil and math.min(plan.stay, 99) or 0
+		)
+	)
+end
+-- Remembers a help cast for the nimbus-result line 5s later (kept while an earlier order has not gone through).
+local function RecordNimbusHelp(why, chased, chaser)
+	if nimbusHelpCast ~= nil and not nimbusAbility:IsCooldownReady() then
+		return
+	end
+	local allyPid = chased:GetPlayerID()
+	nimbusHelpCast = {
+		why = why,
+		ally = chased,
+		-- The ally's player ID and name: a dead ally's handle is not valid, so the result line read alive=true
+		-- for a dead ally (game 065, t=2987: Primal Beast died at t=2984).
+		allyPid = allyPid,
+		allyName = chased:GetUnitName(),
+		allyHp = Fu.GetHP(chased),
+		deaths = GetHeroDeaths(allyPid),
+		chaser = chaser,
+		chaserName = chaser:GetUnitName(),
+		chaserHp = Fu.GetHP(chaser),
+		at = DotaTime(),
+		stuns = 0,
+	}
+end
+-- Pure: did the ally die after the cast? Its death count rose, or it is dead now (nil: unknown).
+function X.NimbusAllyDied(deathsAtCast, deathsNow, aliveNow)
+	if deathsAtCast ~= nil and deathsNow ~= nil and deathsNow > deathsAtCast then
+		return true
+	end
+	return aliveNow == false
+end
+-- Five seconds after a help cast: is the ally alive (his death count, so it holds while Zeus is dead too)?
+-- Until then, every think: when the chaser is stunned after the cloud formed (its bolt mini-stuns for 0.35s,
+-- datafeed; another ally's stun would count too), to learn whether the cloud strikes at once.
+function X.ThinkNimbusResult()
+	local cast = nimbusHelpCast
+	if cast == nil then
+		return
+	end
+	if cast.castAt == nil and not nimbusAbility:IsCooldownReady() then
+		cast.castAt = DotaTime()
+	end
+	if cast.castAt ~= nil and Fu.IsValid(cast.chaser) then
+		local stunned = cast.chaser:IsStunned()
+		if stunned and not cast.wasStunned then
+			cast.stuns = cast.stuns + 1
+			cast.stunnedAfter = cast.stunnedAfter or DotaTime() - cast.castAt
+		end
+		cast.wasStunned = stunned
+	end
+	if DotaTime() < cast.at + 5 then
+		return
+	end
+	nimbusHelpCast = nil
+	-- By player ID, not the handle: Fu.IsValid is false for a dead ally, so the old check never saw a death.
+	local deathsNow, aliveNow = nil, nil
+	if cast.allyPid ~= nil then
+		local okDeaths, deaths = pcall(GetHeroDeaths, cast.allyPid)
+		if okDeaths then
+			deathsNow = deaths
+		end
+		local okAlive, alive = pcall(IsHeroAlive, cast.allyPid)
+		if okAlive then
+			aliveNow = alive
+		end
+	end
+	local died = X.NimbusAllyDied(cast.deaths, deathsNow, aliveNow)
+	print(
+		string.format(
+			"[SHy-ZEUS] t=%.0f zuus nimbus-result why=%s ally=%s alive=%s allyHp=%.2f->%.2f chaser=%s chaserHp=%.2f->%.2f stuns=%d stunnedAfter=%.1f cast=%s late=%.0f",
+			DotaTime(),
+			cast.why,
+			cast.allyName or "none",
+			tostring(not died),
+			cast.allyHp,
+			Fu.IsValid(cast.ally) and Fu.GetHP(cast.ally) or 0,
+			cast.chaserName or "none",
+			cast.chaserHp,
+			Fu.IsValid(cast.chaser) and Fu.GetHP(cast.chaser) or 0,
+			cast.stuns,
+			cast.stunnedAfter or -1,
+			tostring(cast.castAt ~= nil),
+			DotaTime() - cast.at - 5
+		)
+	)
+end
+-- Nimbus (zuus_cloud, Scepter-granted), npc_abilities 7.42: AbilityCastRange 0 (global), AbilityCastPoint 0.2,
+-- cloud_radius 450, cloud_bolt_interval 2.5, cloud_duration 30, cooldown 45, mana 275. The file has no
+-- separate cloud-forming delay. The ally-flee case aims with NimbusHelpPlan; Zeus's own retreat, the finish and the
+-- fight lead the target by 1 s (cast point plus the first bolt's wait).
+-- Returns desire, location, why, target, note (extra log fields).
 function X.ConsiderD()
 	if not bot:HasScepter() or not nimbusAbility:IsFullyCastable() or bot:IsInvisible() then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
-	local teamPlayers = GetTeamPlayers(GetTeam())
-	for i = 1, #teamPlayers do
+	-- Order: the flee cases first, then the finish, then an ally's fight. An ally going on someone matches in
+	-- almost any fight, so checked first it left no 45 s cooldown for the flee cases. The ally-flee case reads every
+	-- enemy unit near the chaser, so it runs a few times a second, not every think.
+	local fleeCheck = DotaTime() >= nextNimbusHelpCheckAt
+	if fleeCheck then
+		nextNimbusHelpCheckAt = DotaTime() + 0.3
+	end
+	if Fu.IsRetreating(bot) then
+		local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)
+		for _, enemy in pairs(nearbyEnemies) do
+			if Fu.IsValid(enemy) and bot:WasRecentlyDamagedByHero(enemy, 1.0) and Fu.CanCastOnNonMagicImmune(enemy) then
+				-- The bolt strikes an enemy within cloud_radius (450) of the cloud and mini-stuns it. On Zeus's
+				-- own spot it misses a chaser more than 450 away, so the cloud goes where the chaser will be.
+				return BOT_ACTION_DESIRE_HIGH, enemy:GetExtrapolatedLocation(1.0), "retreat", enemy
+			end
+		end
+	end
+	-- Ally flee (maintainer, 2026-11-20 and after game 064): an allied hero fleeing from an enemy hero gets the cloud
+	-- on the chaser's path while the chaser is still a few seconds from him, not when he is nearly dead; Zeus's own
+	-- bolt goes first when it reaches the chaser (ConsiderW).
+	if fleeCheck then
+		for _, flee in ipairs(X.FleeingAllyChasers()) do
+			local plan, why, skipped =
+				X.NimbusHelpPlan(NimbusHelpInput(flee.ally, flee.chaser, flee.catchTime, flee.hitting, flee.fleeing))
+			if plan ~= nil then
+				RecordNimbusHelp("ally-flee", flee.ally, flee.chaser)
+				if DotaTime() >= (bot._zeusNimbusHelpLogAt or -999) then
+					bot._zeusNimbusHelpLogAt = DotaTime() + 3
+					print(
+						string.format(
+							"[SHy-ZEUS] t=%.0f zuus nimbus-help ally=%s allyHp=%.2f chaser=%s crowd=%d stay=%.1f catch=%.1f hitting=%s",
+							DotaTime(),
+							flee.ally:GetUnitName(),
+							Fu.GetHP(flee.ally),
+							flee.chaser:GetUnitName(),
+							plan.crowd,
+							math.min(plan.stay, 99),
+							flee.catchTime,
+							tostring(flee.hitting)
+						)
+					)
+				end
+				return BOT_ACTION_DESIRE_HIGH,
+					Vector(plan.aim.x, plan.aim.y, flee.chaser:GetLocation().z),
+					"ally-flee",
+					flee.chaser,
+					string.format(" ally=%s allyHp=%.2f", flee.ally:GetUnitName(), Fu.GetHP(flee.ally))
+			end
+			LogNimbusSkip(why, flee.ally, flee.chaser, skipped)
+		end
+	end
+	-- Finish (#47): the range is global, so also a low or fleeing enemy hero anywhere on the map, while Zeus is
+	-- not in danger himself.
+	local zeusInDanger = bot:WasRecentlyDamagedByAnyHero(2.0)
+		or #(Fu.GetNearbyHeroes(bot, 900, true, BOT_MODE_NONE) or {}) >= 1
+	if not zeusInDanger and not Fu.IsRetreating(bot) then
+		local finishTarget, finishAllies = X.NimbusFinishTarget()
+		if finishTarget ~= nil then
+			X.RecordNimbusFinish(finishTarget, finishAllies)
+			return BOT_ACTION_DESIRE_HIGH,
+				finishTarget:GetExtrapolatedLocation(1.0),
+				"finish",
+				finishTarget,
+				string.format(" targetHp=%.2f allies=%d", Fu.GetHP(finishTarget), finishAllies)
+		end
+	end
+	-- An ally's fight last, and held while Zeus or a hurt ally there may soon need it to flee (NimbusFightHold).
+	for _, target in ipairs(X.AllyFightTargets()) do
+		local targetLoc = target:GetLocation()
+		local lowestAllyHp = 1
+		for _, ally in pairs(Fu.GetAlliesNearLoc(targetLoc, 1200) or {}) do
+			if ally ~= bot and Fu.IsValidHero(ally) then
+				lowestAllyHp = math.min(lowestAllyHp, Fu.GetHP(ally))
+			end
+		end
+		local zeusDist = GetUnitToLocationDistance(bot, targetLoc)
+		local targetHp = Fu.GetHP(target)
+		local hold = X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
+		-- The allies are killing it (#47, game 068): no cast here either, or the finish skip falls through.
+		-- Counted for every cast, not only under 15%: the cast line printed allies=0 for all 9 ally-fight
+		-- casts of game 083 because the count was skipped above 15%.
+		local alliesHitting = 0
+		if hold == nil then
+			alliesHitting = X.NimbusAlliesHitting(target, NIMBUS_ALLY_FINISH_RANGE)
+			if X.NimbusAllyFinishing(targetHp, alliesHitting) then
+				X.LogNimbusAllyFinishing("ally-fight", target, targetHp, alliesHitting)
+				hold = "ally-finishing"
+			end
+		end
+		if hold == nil then
+			X.RecordNimbusFinish(target, alliesHitting, "ally-fight")
+			return BOT_ACTION_DESIRE_HIGH,
+				target:GetExtrapolatedLocation(1.0),
+				"ally-fight",
+				target,
+				string.format(" targetHp=%.2f allies=%d", targetHp, alliesHitting)
+		end
+		if hold ~= "ally-finishing" and DotaTime() >= (bot._zeusNimbusHoldLogAt or -999) then
+			bot._zeusNimbusHoldLogAt = DotaTime() + 10
+			pcall(
+				print,
+				string.format(
+					"[SHy-ZEUS] t=%.0f nimbus-hold why=%s target=%s targetHp=%.2f zeusDist=%d allyHp=%.2f",
+					DotaTime(),
+					hold,
+					target:GetUnitName(),
+					Fu.GetHP(target),
+					math.floor(zeusDist),
+					lowestAllyHp
+				)
+			)
+		end
+	end
+	return BOT_ACTION_DESIRE_NONE, nil
+end
+-- The enemy heroes an allied hero is going on, within 1200 of him, in slot order. Zeus himself is skipped (#47,
+-- game 087 at 34:27): his own fight on Puck, 11 s after his own jump, cast the 45 s cloud as "ally-fight" with
+-- allies=0. His own fight is his Q, W and R.
+function X.AllyFightTargets()
+	local targets = {}
+	-- Slot loop (GetTeamMember takes a slot 1..5, not a player ID).
+	for i = 1, 5 do
 		local teamMember = GetTeamMember(i)
-		if Fu.IsValid(teamMember) and Fu.IsGoingOnSomeone(teamMember) then
+		if teamMember ~= bot and Fu.IsValid(teamMember) and Fu.IsGoingOnSomeone(teamMember) then
 			local target = Fu.GetProperTarget(teamMember)
 			if
 				Fu.IsValidHero(target)
 				and Fu.IsInRange(teamMember, target, 1200)
 				and Fu.CanCastOnNonMagicImmune(target)
 			then
-				return BOT_ACTION_DESIRE_HIGH, target:GetExtrapolatedLocation(1.0)
+				table.insert(targets, target)
 			end
 		end
 	end
-	if Fu.IsRetreating(bot) then
-		local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)
-		for _, enemy in pairs(nearbyEnemies) do
-			if Fu.IsValid(enemy) and bot:WasRecentlyDamagedByHero(enemy, 1.0) and Fu.CanCastOnNonMagicImmune(enemy) then
-				return BOT_ACTION_DESIRE_HIGH, bot:GetLocation()
+	return targets
+end
+-- Pure: why Nimbus is kept for later in an ally's fight, or nil to cast it now. Game 063: 15 of 18 casts were
+-- ally-fight, and every Zeus death after the Scepter came 7-14 s after one, with Nimbus on cooldown as he fled.
+-- So with Zeus himself within 1200 of the fight, or an ally there under 50% HP (both may need the cloud on a
+-- chaser soon), it waits, unless the target is already under 50% (then the bolts may finish it).
+function X.NimbusFightHold(zeusDist, lowestAllyHp, targetHp)
+	if targetHp < 0.5 then
+		return nil
+	end
+	if zeusDist <= 1200 then
+		return "zeus-near"
+	end
+	if lowestAllyHp < 0.5 then
+		return "ally-low"
+	end
+	return nil
+end
+-- Pure: allied heroes are finishing the target (it is under NIMBUS_ALLY_FINISH_HP and at least one allied hero
+-- within NIMBUS_ALLY_FINISH_RANGE hits it), so the cloud is not needed.
+function X.NimbusAllyFinishing(targetHp, alliesHitting)
+	return targetHp < NIMBUS_ALLY_FINISH_HP and (alliesHitting or 0) >= 1
+end
+-- Allied heroes within range of the enemy that attack it or hit it in the last second (Zeus not counted).
+function X.NimbusAlliesHitting(enemy, range)
+	local count = 0
+	for _, ally in pairs(Fu.GetAlliesNearLoc(enemy:GetLocation(), range) or {}) do
+		if
+			ally ~= bot
+			and Fu.IsValidHero(ally)
+			and (ally:GetAttackTarget() == enemy or enemy:WasRecentlyDamagedByHero(ally, 1.0))
+		then
+			count = count + 1
+		end
+	end
+	return count
+end
+-- nimbus-skip why=ally-finishing, at most every 5 s; rule: the cast it replaced (finish / ally-fight).
+function X.LogNimbusAllyFinishing(rule, enemy, hp, allies)
+	if DotaTime() < (bot._zeusNimbusFinishSkipLogAt or -999) then
+		return
+	end
+	bot._zeusNimbusFinishSkipLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[SHy-ZEUS] t=%.0f zuus nimbus-skip why=ally-finishing rule=%s target=%s targetHp=%.2f allies=%d dist=%d",
+			DotaTime(),
+			rule,
+			enemy:GetUnitName(),
+			hp,
+			allies,
+			math.floor(GetUnitToUnitDistance(bot, enemy))
+		)
+	)
+end
+-- A visible enemy hero under 25% HP, or under 50% and fleeing from an allied hero that chases it (a walking
+-- enemy alone is not worth a 275-mana, 45 s spell); not one the allies are finishing (NimbusAllyFinishing).
+-- Returns the target and how many allied heroes near it hit it.
+function X.NimbusFinishTarget()
+	local best, bestHp, bestAllies = nil, math.huge, 0
+	for _, enemy in pairs(GetUnitList(UNIT_LIST_ENEMY_HEROES) or {}) do
+		if
+			Fu.IsValidHero(enemy)
+			and enemy:CanBeSeen()
+			and not enemy:HasModifier("modifier_fountain_aura_buff")
+			and not Fu.IsSuspiciousIllusion(enemy)
+			and Fu.CanCastOnNonMagicImmune(enemy)
+		then
+			local hp = Fu.GetHP(enemy)
+			local fleeing = false
+			if hp < 0.5 then
+				for _, ally in pairs(Fu.GetAlliesNearLoc(enemy:GetLocation(), 1200) or {}) do
+					if
+						Fu.IsValidHero(ally)
+						and (Fu.IsChasingTarget(ally, enemy) or enemy:WasRecentlyDamagedByHero(ally, 2.0))
+					then
+						fleeing = true
+						break
+					end
+				end
+			end
+			if (hp < 0.25 or fleeing) and hp < bestHp then
+				local allies = X.NimbusAlliesHitting(enemy, NIMBUS_ALLY_FINISH_RANGE)
+				if X.NimbusAllyFinishing(hp, allies) then
+					X.LogNimbusAllyFinishing("finish", enemy, hp, allies)
+				else
+					best, bestHp, bestAllies = enemy, hp, allies
+				end
 			end
 		end
 	end
-	return BOT_ACTION_DESIRE_NONE, nil
+	return best, bestAllies
+end
+-- Remembers a finish or ally-fight cast for the nimbus-result why=finish|ally-fight line (kept while an earlier
+-- order has not gone through). why: "finish" (default) or "ally-fight".
+function X.RecordNimbusFinish(target, allies, why)
+	if nimbusFinishCast ~= nil and not nimbusAbility:IsCooldownReady() then
+		return
+	end
+	local pid = target:GetPlayerID()
+	local okDeaths, deaths = pcall(GetHeroDeaths, pid)
+	nimbusFinishCast = {
+		why = why or "finish",
+		target = target,
+		targetName = target:GetUnitName(),
+		pid = pid,
+		deaths = okDeaths and deaths or nil,
+		hp = Fu.GetHP(target),
+		allies = allies or 0,
+		at = DotaTime(),
+		stuns = 0,
+	}
+end
+-- NIMBUS_FINISH_RESULT_AFTER seconds after a finish or ally-fight cast: did the target die, when (diedAfter, seconds
+-- after the cast; under the first bolt's 2.5 s means the allies killed it), and how often it was stunned after the
+-- cast (a bolt mini-stuns for 0.35 s, datafeed; another stun would count too). cast=false: the order never went out.
+-- Ally-fight casts get the line too (#47, game 083): 10 of the 14 casts of games 071, 073 and 083 on a target at
+-- 50% HP or less were followed by its death within 2 s, and whether a bolt struck first is not in the log yet.
+function X.ThinkNimbusFinishResult()
+	local cast = nimbusFinishCast
+	if cast == nil then
+		return
+	end
+	if cast.castAt == nil and not nimbusAbility:IsCooldownReady() then
+		cast.castAt = DotaTime()
+	end
+	local dead = false
+	if cast.pid ~= nil then
+		local okAlive, alive = pcall(IsHeroAlive, cast.pid)
+		dead = okAlive and alive == false
+	end
+	if cast.castAt ~= nil then
+		if dead and cast.diedAfter == nil then
+			cast.diedAfter = DotaTime() - cast.castAt
+		end
+		if not dead and Fu.IsValid(cast.target) then
+			local stunned = cast.target:IsStunned()
+			if stunned and not cast.wasStunned then
+				cast.stuns = cast.stuns + 1
+				cast.stunnedAfter = cast.stunnedAfter or DotaTime() - cast.castAt
+			end
+			cast.wasStunned = stunned
+		end
+	end
+	if DotaTime() < (cast.castAt or cast.at) + NIMBUS_FINISH_RESULT_AFTER then
+		return
+	end
+	nimbusFinishCast = nil
+	local deathsNow = nil
+	if cast.pid ~= nil then
+		local okDeaths, deaths = pcall(GetHeroDeaths, cast.pid)
+		if okDeaths then
+			deathsNow = deaths
+		end
+	end
+	local died = X.NimbusAllyDied(cast.deaths, deathsNow, not dead)
+	print(
+		string.format(
+			"[SHy-ZEUS] t=%.0f zuus nimbus-result why=%s target=%s alive=%s targetHp=%.2f->%.2f allies=%d stuns=%d stunnedAfter=%.1f diedAfter=%.1f cast=%s",
+			DotaTime(),
+			cast.why or "finish",
+			cast.targetName or "none",
+			tostring(not died),
+			cast.hp,
+			(not died and Fu.IsValid(cast.target)) and Fu.GetHP(cast.target) or 0,
+			cast.allies,
+			cast.stuns,
+			cast.stunnedAfter or -1,
+			cast.diedAfter or -1,
+			tostring(cast.castAt ~= nil)
+		)
+	)
 end
 function X.ConsiderR()
 	if not wrathAbility:IsFullyCastable() then
@@ -582,15 +1192,71 @@ function X.GetRanged(bot, castRange)
 	end
 	return nil
 end
+-- Heavenly Jump, datafeed hero 22 (7.42): Zeus hops hop_distance 375/450/525/600 forward (the way he faces) and
+-- shocks the closest visible enemy within range 700/800/900/1000 (80% move slow, 1.4 s).
+-- How far around the landing spot heroes count for "outnumbered", and for "next to" the landing spot.
+local JUMP_AREA_RADIUS = 1200
+local JUMP_NEXT_TO_RADIUS = 500
+-- Pure: why an engage jump would be wrong, or nil. Ally counts include Zeus. Game 063, 15:38: he jumped into
+-- four enemies with no ally near and died.
+function X.JumpEngageProblem(targetAhead, enemiesArea, alliesArea, enemiesNextTo, alliesNextTo)
+	if not targetAhead then
+		return "not-ahead"
+	end
+	if enemiesArea > alliesArea then
+		return "outnumbered"
+	end
+	-- Maintainer, game 071: no jump into several enemies when our side is only even with them (2v2, 3v3 ...); a 1v1
+	-- jump with an ally or alone on one target stays allowed.
+	if enemiesArea >= 2 and enemiesArea >= alliesArea then
+		return "even"
+	end
+	if enemiesNextTo > alliesNextTo then
+		return "landing-crowded"
+	end
+	return nil
+end
+local function CountAlliesNear(location, radius)
+	local count = 1 -- Zeus lands there
+	for _, ally in pairs(Fu.GetAlliesNearLoc(location, radius) or {}) do
+		if ally ~= bot and Fu.IsValidHero(ally) then
+			count = count + 1
+		end
+	end
+	return count
+end
+local function LogJump(kind, why, target, enemies, allies)
+	local key = kind == "jump" and "_zeusJumpLogAt" or "_zeusJumpSkipLogAt"
+	if DotaTime() < (bot[key] or -999) then
+		return
+	end
+	bot[key] = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[SHy-ZEUS] t=%.0f %s why=%s target=%s enemies=%d allies=%d",
+			DotaTime(),
+			kind,
+			why,
+			target ~= nil and target:GetUnitName() or "none",
+			enemies,
+			allies
+		)
+	)
+end
 function X.ConsiderE()
 	if not heavenlyJumpAbility:IsFullyCastable() or bot:IsRooted() then
 		return BOT_ACTION_DESIRE_NONE
 	end
-	local jumpRadius = 450
 	local abilityLevel = heavenlyJumpAbility:GetLevel()
-	local castRange = 600 + abilityLevel * 100
-	local castPoint = heavenlyJumpAbility:GetCastPoint()
-	local manaCost = heavenlyJumpAbility:GetManaCost()
+	local castRange = heavenlyJumpAbility:GetSpecialValueInt("range")
+	if castRange <= 0 then
+		castRange = 600 + abilityLevel * 100
+	end
+	local hopDistance = heavenlyJumpAbility:GetSpecialValueInt("hop_distance")
+	if hopDistance <= 0 then
+		hopDistance = 300 + abilityLevel * 75
+	end
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	if Fu.IsRetreating(bot) then
 		if Fu.IsRunning(bot) then
@@ -600,6 +1266,7 @@ function X.ConsiderE()
 				and Fu.CanCastOnNonMagicImmune(enemy)
 				and not bot:IsFacingLocation(enemy:GetLocation(), 120)
 			then
+				LogJump("jump", "retreat", enemy, #nearbyEnemies, CountAlliesNear(bot:GetLocation(), JUMP_AREA_RADIUS))
 				return BOT_ACTION_DESIRE_HIGH
 			end
 		end
@@ -607,7 +1274,21 @@ function X.ConsiderE()
 	if Fu.IsGoingOnSomeone(bot) then
 		local target = Fu.GetProperTarget(bot)
 		if Fu.IsValidHero(target) and Fu.IsInRange(bot, target, castRange) and Fu.CanCastOnNonMagicImmune(target) then
-			return BOT_ACTION_DESIRE_HIGH
+			local landing = Fu.GetFaceTowardDistanceLocation(bot, hopDistance)
+			local enemiesArea = #(Fu.GetEnemiesNearLoc(landing, JUMP_AREA_RADIUS) or {})
+			local alliesArea = CountAlliesNear(landing, JUMP_AREA_RADIUS)
+			local problem = X.JumpEngageProblem(
+				bot:IsFacingLocation(target:GetLocation(), 45),
+				enemiesArea,
+				alliesArea,
+				#(Fu.GetEnemiesNearLoc(landing, JUMP_NEXT_TO_RADIUS) or {}),
+				CountAlliesNear(landing, JUMP_NEXT_TO_RADIUS)
+			)
+			if problem == nil then
+				LogJump("jump", "engage", target, enemiesArea, alliesArea)
+				return BOT_ACTION_DESIRE_HIGH
+			end
+			LogJump("jump-skip", problem, target, enemiesArea, alliesArea)
 		end
 	end
 	return BOT_ACTION_DESIRE_NONE

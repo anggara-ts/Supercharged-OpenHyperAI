@@ -1,0 +1,240 @@
+-- bots/heroes/hero_zuus.lua: Nimbus for a fleeing ally (#47, game 064): when, where, and when the cloud's bolt would go
+-- to another unit.
+local T = ...
+local Stub = T.stub
+
+local function zeus()
+	Stub.reset({ hero = "npc_dota_hero_zuus", slot = 2 })
+	local ok, result = Stub.load("bots/heroes/hero_zuus")
+	if not ok then
+		error(tostring(result), 0)
+	end
+	return result
+end
+
+T.test("zeus: chaser catch time", function()
+	local X = zeus()
+	T.eq(X.CatchTime(0, 350, 300), 0, "in attack range now")
+	T.near(X.CatchTime(500, 350, 300), 10, 1e-6, "gains 50 a second on 500")
+	T.near(X.CatchTime(600, 350, 0), 600 / 350, 1e-6, "ally standing")
+	T.near(X.CatchTime(600, 350, -100), 600 / 350, 1e-6, "ally walking toward him counts as standing")
+	T.eq(X.CatchTime(500, 300, 320), 99, "ally faster: never")
+end)
+
+-- Datafeed hero_id=22 (zuus_cloud): radius 450, cast point 0.2; the chaser must stay inside 1s.
+local function input(overrides)
+	local c = {
+		chaser = { x = 0, y = 0 },
+		ally = { x = 1000, y = 0 },
+		chaserSpeed = 330,
+		allyHp = 0.45,
+		allyFleeing = true,
+		catchTime = 3,
+		hitting = false,
+		inBoltRange = false,
+		boltReady = true,
+		units = {},
+		radius = 450,
+		minStay = 1.0,
+		castPoint = 0.2,
+	}
+	for key, value in pairs(overrides or {}) do
+		c[key] = value
+	end
+	return c
+end
+
+T.test("zeus: Nimbus help plan", function()
+	local X = zeus()
+	local plan, why = X.NimbusHelpPlan(input())
+	T.ok(plan ~= nil, "cast: " .. tostring(why))
+	-- 330 speed: 66 walked in the cast point, then one radius more: the aim is 516 along the way to the ally.
+	T.near(plan.aim.x, 516, 1e-6, "aim on the chaser's path")
+	T.near(plan.aim.y, 0, 1e-6, "on the line to the ally")
+	T.near(plan.stay, 900 / 330, 1e-6, "inside for 2 radius / speed")
+	T.eq(plan.crowd, 0, "nobody else there")
+
+	plan, why = X.NimbusHelpPlan(input({ allyHp = 0.1 }))
+	T.eq(why, "too-late", "ally nearly dead (game 064 Alchemist at 1%)")
+	plan, why = X.NimbusHelpPlan(input({ catchTime = 8 }))
+	T.eq(why, "not-yet", "chaser far from catching him")
+	plan, why = X.NimbusHelpPlan(input({ catchTime = 8, hitting = true }))
+	T.ok(plan ~= nil, "already hitting him")
+	plan, why = X.NimbusHelpPlan(input({ inBoltRange = true }))
+	T.eq(why, "bolt-range", "Zeus's own bolt reaches the chaser")
+	plan, why = X.NimbusHelpPlan(input({ inBoltRange = true, boltReady = false }))
+	T.ok(plan ~= nil, "bolt on cooldown: Nimbus")
+
+	local skipped
+	plan, why, skipped = X.NimbusHelpPlan(input({ units = { { x = 600, y = 100 } } }))
+	T.eq(why, "crowded", "a creep inside the cloud takes the bolt")
+	T.eq(skipped.crowd, 1, "one unit counted")
+	plan, why = X.NimbusHelpPlan(input({ units = { { x = 1200, y = 0 } } }))
+	T.ok(plan ~= nil, "a creep 684 from the centre is outside")
+
+	plan, why = X.NimbusHelpPlan(input({ chaserSpeed = 450 }))
+	T.ok(plan ~= nil, "450 speed crosses 900 in 2s: over the 1s minimum")
+	plan, why = X.NimbusHelpPlan(input({ chaserSpeed = 380, minStay = 2.5 }))
+	T.eq(why, "too-fast", "with a 2.5s minimum, 380 speed (2.4s inside) is skipped")
+	plan, why = X.NimbusHelpPlan(input({ chaserSpeed = 1000 }))
+	T.eq(why, "too-fast", "1000 speed (a blink or a dash) crosses it in 0.9s")
+	-- Derived from one geometry (game 064 numbers): chaser 350, ally fleeing at 300, melee reach 150, gap 350 so
+	-- catch = (350 - 150) / 50 = 4s. The chaser follows the ally through the cloud: 900 / 350 = 2.57s inside.
+	local gap, reach = 350, 150
+	plan, why = X.NimbusHelpPlan(input({
+		ally = { x = gap, y = 0 },
+		chaserSpeed = 350,
+		catchTime = X.CatchTime(gap - reach, 350, 300),
+	}))
+	T.ok(plan ~= nil, "fleeing ally 350 ahead of a 350-speed chaser: " .. tostring(why))
+	T.near(plan.stay, 900 / 350, 1e-6, "he crosses the whole cloud behind the ally")
+	plan, why = X.NimbusHelpPlan(input({ ally = { x = 200, y = 0 }, chaserSpeed = 350, hitting = true }))
+	T.ok(plan ~= nil, "melee chaser already hitting a fleeing ally: " .. tostring(why))
+	plan, why = X.NimbusHelpPlan(input({ ally = { x = 300, y = 0 }, chaserSpeed = 420, allyFleeing = false }))
+	T.ok(plan ~= nil, "ally standing: the chaser stops at him inside the cloud")
+	T.near(plan.aim.x, 300, 1e-6, "aim at the ally")
+	T.eq(plan.stay, math.huge, "stays while he fights there")
+	plan, why = X.NimbusHelpPlan(input({ chaserSpeed = 0 }))
+	T.ok(plan ~= nil, "standing chaser")
+	T.near(plan.aim.x, 0, 1e-6, "aim on him")
+end)
+
+T.test("zeus: fleeing-ally scan and result line run against the stub API", function()
+	local X = zeus()
+	T.eq(type(X.FleeingAllyChasers()), "table", "a list")
+	X.ThinkNimbusResult()
+	T.ok(true, "no stub missing call")
+end)
+
+T.test("zeus: nimbus-result reads the ally's death from the player ID", function()
+	local X = zeus()
+	-- Game 065, t=2987: Primal Beast died at t=2984 and the line said alive=true (dead handle not valid).
+	T.eq(X.NimbusAllyDied(3, 4, false), true, "death count rose")
+	T.eq(X.NimbusAllyDied(3, 4, true), true, "died and respawned within the 5 s")
+	T.eq(X.NimbusAllyDied(3, 3, false), true, "dead now")
+	T.eq(X.NimbusAllyDied(3, 3, true), false, "alive, no new death")
+	T.eq(X.NimbusAllyDied(3, nil, nil), false, "unknown: alive")
+end)
+
+T.test("zeus: no finishing Nimbus on a target the allies are killing (game 068)", function()
+	local X = zeus()
+	-- Game 068 t=2785 and t=2899: Clinkz at 8-12% HP with 2-3 Radiant heroes hitting him died the same second.
+	T.eq(X.NimbusAllyFinishing(0.10, 2), true, "10% HP, two allies hitting: leave it to them")
+	T.eq(X.NimbusAllyFinishing(0.14, 1), true, "one ally is enough")
+	T.eq(X.NimbusAllyFinishing(0.10, 0), false, "nobody near hitting it: Nimbus may finish it")
+	T.eq(X.NimbusAllyFinishing(0.20, 3), false, "20% HP: the allies may not finish it, cast")
+	T.eq(X.NimbusAllyFinishing(0.15, 2), false, "the edge (15%) casts")
+end)
+
+T.test("zeus: finish target and its result line run against the stub API", function()
+	local X = zeus()
+	local target, allies = X.NimbusFinishTarget()
+	T.eq(target, nil, "no enemy hero in the stub")
+	T.eq(allies, 0, "no allies counted")
+	X.ThinkNimbusFinishResult()
+	T.ok(true, "no stub missing call")
+end)
+
+T.test("zeus: nimbus-result why=finish reads the target's death from its player ID", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	enemy._hp = 100
+	X.RecordNimbusFinish(enemy, 0)
+	Stub.time = 1
+	X.ThinkNimbusFinishResult()
+	local function resultLine()
+		for _, line in ipairs(Stub.printed) do
+			if string.find(line, "nimbus-result why=finish", 1, true) then
+				return line
+			end
+		end
+		return nil
+	end
+	T.eq(resultLine(), nil, "no line before 3 s")
+	enemy._alive = false
+	Stub.time = 3.5
+	X.ThinkNimbusFinishResult()
+	local line = resultLine()
+	T.ok(line ~= nil, "the line prints 3 s after")
+	T.ok(line ~= nil and string.find(line, "alive=false", 1, true) ~= nil, "the death is seen: " .. tostring(line))
+	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
+	T.ok(line ~= nil and string.find(line, "cast=false", 1, true) ~= nil, "the stub never puts Nimbus on cooldown")
+end)
+
+-- PR #136 verify item 7 (game 083): the "no cast on a target the allies are finishing" half is checked here, not
+-- by a log rule (a cast line can't say both targetHp and allies break it at once).
+T.test("zeus: the finish pick leaves a target under 15% to an ally hitting it", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	enemy._hp = 100 -- 10% of 1000
+	local ally = Stub.teams[TEAM_RADIANT][1]
+	ally._loc = enemy._loc + Vector(300, 0, 0)
+	ally.GetAttackTarget = function()
+		return enemy
+	end
+	Stub.time = 100
+	local target, allies = X.NimbusFinishTarget()
+	T.eq(target, nil, "an ally within 600 attacks it: no finish cast")
+	T.eq(allies, 0, "no target, no count")
+	local skipped = false
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "nimbus-skip why=ally-finishing rule=finish", 1, true) then
+			skipped = string.find(line, "allies=1", 1, true) ~= nil
+				and string.find(line, "targetHp=0.10", 1, true) ~= nil
+		end
+	end
+	T.ok(skipped, "the skip line names the target's HP and one ally")
+	-- The ally walks off: nobody finishes it, the cloud goes.
+	ally.GetAttackTarget = function()
+		return nil
+	end
+	ally._loc = enemy._loc + Vector(9000, 0, 0)
+	Stub.time = 110
+	target, allies = X.NimbusFinishTarget()
+	T.eq(target, enemy, "nobody on it: finish cast")
+	T.eq(allies, 0, "no ally hitting")
+end)
+
+-- Game 083: ally-fight casts get the result line too (target, death time, stuns after the cast).
+T.test("zeus: nimbus-result why=ally-fight prints 3 s after an ally-fight cast", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][2]
+	enemy._hp = 400
+	X.RecordNimbusFinish(enemy, 2, "ally-fight")
+	Stub.time = 3.5
+	X.ThinkNimbusFinishResult()
+	local line = nil
+	for _, printed in ipairs(Stub.printed) do
+		if string.find(printed, "nimbus-result why=ally-fight", 1, true) then
+			line = printed
+		end
+	end
+	T.ok(line ~= nil, "the line prints with why=ally-fight")
+	T.ok(
+		line ~= nil and string.find(line, "allies=2", 1, true) ~= nil,
+		"the allies count at the cast: " .. tostring(line)
+	)
+	T.ok(line ~= nil and string.find(line, "target=" .. enemy:GetUnitName(), 1, true) ~= nil, "names the target")
+end)
+
+-- Game 087, 34:27: Zeus's own fight on Puck cast Nimbus as "ally-fight" with allies=0 (#47). Only another allied
+-- hero's fight counts.
+T.test("zeus: an ally-fight Nimbus needs another hero's fight, not Zeus's own", function()
+	local X = zeus()
+	local enemy = Stub.teams[TEAM_DIRE][1]
+	local function fight(unit)
+		unit._loc = enemy._loc + Vector(500, 0, 0)
+		function unit:GetActiveMode()
+			return BOT_MODE_ATTACK
+		end
+		function unit:GetAttackTarget()
+			return enemy
+		end
+	end
+	fight(Stub.bot)
+	T.eq(#X.AllyFightTargets(), 0, "Zeus alone on the enemy: no ally fight")
+	fight(Stub.teams[TEAM_RADIANT][1])
+	local targets = X.AllyFightTargets()
+	T.eq(#targets, 1, "an ally going on him counts once")
+	T.eq(targets[1], enemy, "his target")
+end)
