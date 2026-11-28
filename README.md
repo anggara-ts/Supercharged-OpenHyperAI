@@ -45,7 +45,7 @@ example).
 | Command | What it does |
 |---|---|
 | `!pos X` | Swap your role with a bot (e.g. `!pos 2` for mid); before the horn |
-| `!Xpos Y` | Move bot X to position Y (e.g. `!3pos 5`); before the horn |
+| `!Xpos Y` | Swap the players on positions X and Y (e.g. `!3pos 5`; the same command again swaps them back); before the horn |
 | `!pick HERO` | Force a bot pick |
 | `!ban HERO` | Ban a hero from bot picks; during the draft |
 | `!sp XX` | Bot language: `en`, `zh`, `ru`, `ja` |

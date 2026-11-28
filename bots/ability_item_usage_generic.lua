@@ -225,6 +225,15 @@ local function CheckArdmHeroSwap()
 	end
 	return false
 end
+-- "I will play position 1 (Safelane)": the position name from the `!pos` list (#210, maintainer 2026-11-23).
+local function PlayPosLine(position)
+	local PosRules = require(GetScriptDirectory() .. "/lib/systems/pos_command_rules")
+	return Localization.Get("say_play_pos")
+		.. tostring(position)
+		.. " ("
+		.. PosRules.Name(position, Localization.Get("pos_names"))
+		.. ")"
+end
 local function LevelUpAbilities()
 	if GetGameState() ~= GAME_STATE_PRE_GAME and GetGameState() ~= GAME_STATE_GAME_IN_PROGRESS then
 		return
@@ -276,18 +285,28 @@ local function LevelUpAbilities()
 			and bot.announcedRole ~= position
 		then
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				bot:ActionImmediate_Chat(PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
 	elseif position ~= lastPosition then
-		log("[PosSwap] %s position changed: pos%s -> pos%s", botName, lastPosition, position)
+		print(
+			string.format(
+				"[SHy-ROLE] t=%.0f %s position-change pos=%s->%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(lastPosition),
+				tostring(position)
+			)
+		)
 		lastPosition = position
 		ReloadBotBuild("Position swap to pos" .. position)
 		bot.needPurchaseRebuild = true
 		if bot.isBear == nil and bot.announcedRole ~= position then
+			-- After a swap the line answers the player's command: not filtered as a repeat (game 088, #211).
+			local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				ChatGuard.SayDirect(bot, PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
@@ -992,6 +1011,105 @@ function Usage.SetTalkMessage()
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
 end
+-- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Safelane" ... "Pos 5 Hard Support".
+-- hero_selection.lua (draft and pre-game) and the reply member's chat callback (in game) put the request on the
+-- shared Role table; each bot answers it from its own think, pos 1 first (bots/lib/systems/pos_command_rules.lua).
+do
+	local PosRules = require(GetScriptDirectory() .. "/lib/systems/pos_command_rules")
+	function Usage.NotePosRequest(chatText, senderPlayerId)
+		local posCommand = PosRules.Parse(chatText)
+		if posCommand == nil then
+			return false
+		end
+		if posCommand.kind == "list" and not IsPlayerBot(senderPlayerId) and Fu.Role.IsAllyMemberID(senderPlayerId) then
+			Fu.Role.PosListRequest = { at = GameTime(), sender = senderPlayerId }
+			print(
+				string.format(
+					'[SHy-ROLE] t=%.0f %s cmd="%s" result=list-request via=bot-chat',
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					chatText
+				)
+			)
+		end
+		return true
+	end
+	function Usage.AnswerPosRequest()
+		local request = Fu.Role.PosListRequest
+		if
+			request == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local position = Fu.GetPosition(bot)
+		local now = GameTime()
+		local state = PosRules.AnswerState(request.at, bot.posRequestHandledAt, bot.posAnsweredAt, now, position)
+		if state == "none" or state == "wait" then
+			return
+		end
+		bot.posRequestHandledAt = request.at
+		if state == "drop" then
+			return
+		end
+		bot.posAnsweredAt = now
+		local line = PosRules.Line(position, Localization.Get("pos_names"), Localization.Get("say_pos_prefix"))
+		local said = pcall(function()
+			bot:ActionImmediate_Chat(line, false)
+		end)
+		print(
+			string.format(
+				'[SHy-ROLE] t=%.0f %s pos-say pos=%s said=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(position),
+				said and "yes" or "no",
+				line
+			)
+		)
+	end
+	-- A refused `!pos Y` / `!Xpos Y` (hero_selection.lua QueueSwapReply): the chosen bot says the reason in team chat,
+	-- once. Any bot drops a reply nobody said within PosRules.ReplyMaxAge, so a lost reply still leaves a log line.
+	local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
+	function Usage.AnswerPosSwapReply()
+		local reply = Fu.Role.PosSwapReply
+		if
+			reply == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local stale = GameTime() - reply.at > PosRules.ReplyMaxAge
+		if not stale and bot:GetPlayerID() ~= reply.speaker then
+			return
+		end
+		Fu.Role.PosSwapReply = nil
+		local said = "stale"
+		if not stale then
+			-- A reply to a typed command skips the repeat guard (game 088: the same command typed twice must be answered
+			-- twice), see ChatGuard.SayDirect.
+			said = pcall(function()
+				ChatGuard.SayDirect(bot, reply.line, false)
+			end) and "yes" or "error"
+		end
+		print(
+			string.format(
+				'[SHy-ROLE] t=%.0f %s swap-reply result=%s said=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(reply.result),
+				said,
+				reply.line
+			)
+		)
+	end
+end
 function Usage.SetReplyHumanTime(chatEvent)
 	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
@@ -1024,6 +1142,10 @@ function Usage.SetReplyHumanTime(chatEvent)
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
 		Fu.Customize.Localization = language
+		return
+	end
+	-- Position commands (#210): `!pos` asks the bots for their positions; none of them gets a chat reply.
+	if Usage.NotePosRequest(chatText, senderPlayerId) then
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
@@ -11932,6 +12054,8 @@ function AbilityLevelUpThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.AnswerPosRequest()
+	Usage.AnswerPosSwapReply()
 	if bot.lastLevelUpFrameProcessTime == nil then
 		bot.lastLevelUpFrameProcessTime = DotaTime()
 	end
