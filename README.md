@@ -92,7 +92,8 @@ The helper scripts in [`install/`](install/README.md) do step 2 for the Workshop
 | `install/` | Link helpers for the Workshop folder |
 | `workshop/` | Workshop page cover images |
 
-More on the libraries: [`bots/lib/README.md`](bots/lib/README.md).
+More on the libraries: [`bots/lib/README.md`](bots/lib/README.md). The optional Fretbots / Buff plugin (extra gold,
+XP and neutral items for bots) lives on the [`plugin-fretbots`](../../tree/plugin-fretbots) branch.
 
 ## Contributing
 

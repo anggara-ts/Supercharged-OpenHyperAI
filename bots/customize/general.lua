@@ -150,6 +150,8 @@ Customize.Dire_Team_Name = ""
 -- 1 is default, bot may choose to farm more in game. 2 is balanced for push vs farm. 3 is almost no farm, all push.
 Customize.Push_Frequency = 1
 
+-- Fretbots settings moved to the optional Fretbots plugin (branch plugin-fretbots, bots/customize/fretbots.lua).
+
 -- Make bots think less, 0: fully think through every tick, 1 to 10: sample heavy item/ability
 -- rescans less often when already attacking a valid target (safe: ~every 3 frames * ThinkLess).
 -- Urgent cases (no target, low HP, recently damaged, tower hits, 3+ nearby enemies) still run every tick.

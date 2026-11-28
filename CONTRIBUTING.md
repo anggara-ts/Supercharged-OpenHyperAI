@@ -161,6 +161,8 @@ Match logs go to `local/match-logs/` (git-ignored). They contain your Steam acco
 | `local/` | git-ignored local data: match logs, the verify tracker, generated reports and caches |
 | `.claude/skills/` | step-by-step playbooks for AI agents (Claude Code) |
 
+The optional Fretbots / Buff plugin (extra gold, XP and neutral items for bots) lives on the `plugin-fretbots` branch, with its own README and installer.
+
 ## Reporting bugs and ideas
 
 Open a GitHub issue. Include:

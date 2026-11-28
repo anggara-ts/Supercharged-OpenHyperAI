@@ -7,8 +7,8 @@ test game and the release. This page lists the sources it uses and how far to tr
 Adapted from the upstream OpenHyperAI docs (forest0xia/dota2bot-OpenHyperAI, `docs/PATCH_UPDATE_GUIDE.md`,
 [branch `pr-140-refactor`](https://github.com/forest0xia/dota2bot-OpenHyperAI/blob/pr-140-refactor/docs/PATCH_UPDATE_GUIDE.md),
 written for 7.41a). Its paths map to ours: `BotsLib/hero_*.lua` is `bots/heroes/`, `FuncLib/` is `bots/lib/`.
-Its TypeScript sources and the Buff / Fretbots neutral tables have no counterpart on `main`. Fretbots is not
-used. Its mechanic examples are claims from 7.41, not facts: check each against the
+Its TypeScript sources and the Buff / Fretbots neutral tables have no counterpart on `main` (the Fretbots plugin is
+on the `plugin-fretbots` branch). Its mechanic examples are claims from 7.41, not facts: check each against the
 game files.
 
 ## Sources, most trusted first

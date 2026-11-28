@@ -68,7 +68,7 @@ active was changed, another that it was removed. The game file settles such a qu
   A new active neutral needs a use rule (pure numbers in `bots/lib/systems/neutral_rules.lua`, tested by
   `tests/test_neutral_items.lua`; the cast in `ConsiderItemDesire`). There is no tier table to update here: the
   `Item.IsNeutralItem` / `GetNeutralItemLevel` helpers in `item.lua` read a `tNeutralItemLevelList` that nothing
-  defines (unused). Fretbots is not used; do not update that branch for a patch.
+  defines (unused). The Fretbots / Buff neutral tables live on the `plugin-fretbots` branch.
 - In the first game, `[SHy-API] item <name> cost= parts=` shows what the engine knows. In 7.42 removed items
   still answered with a cost, so a cost is no proof an item can be bought.
 
