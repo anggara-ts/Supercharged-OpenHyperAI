@@ -348,6 +348,13 @@ function Think()
 	if bot._outpostHoldUntil ~= nil and DotaTime() < bot._outpostHoldUntil then
 		return
 	end
+	-- Puck's hold ask (hero_puck.lua bot._phaseHoldAskUntil: a tower walk, a tower Rift / Orb in its cast point, a
+	-- dodge hold), read live: the hero's desire hold sets _outpostHoldUntil only 0.15s ahead and desires are read about
+	-- 3 times a second, so between two reads this Think could give an order that cut her cast (#36, game 088 t=1227:
+	-- the tower Orb was ordered with this mode active and never went out).
+	if DotaTime() < (bot._phaseHoldAskUntil or -1) then
+		return
+	end
 	if Fu.CanNotUseAction(bot) then
 		return
 	end
@@ -2262,7 +2269,10 @@ heroSpecificDesire["npc_dota_hero_puck"] = function()
 			and bot:WasRecentlyDamagedByAnyHero(DotaTime() - orderAt - 0.1)
 		-- hero_puck.lua asks for the hold before it casts (bot._phaseWantAt): the cast goes out once this mode is
 		-- active, so Valve's retreat / attack Think can no longer replace the order (game 055).
+		-- Also while a dodge hold is asked for (bot._phaseHoldAskUntil: a linear stun is being cast at her or flying at
+		-- her, hero_puck.lua X.AskDodgeHold), so the hold is up when the dodge casts (#36, game 069 t=761 / 830).
 		local wanted = bot._phaseWantAt ~= nil and DotaTime() - bot._phaseWantAt < 0.5
+			or DotaTime() < (bot._phaseHoldAskUntil or -1)
 		if
 			wanted
 			or not hurt and orderAt ~= nil and DotaTime() - orderAt < holdFor
