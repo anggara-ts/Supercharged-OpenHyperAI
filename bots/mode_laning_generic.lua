@@ -8,6 +8,7 @@ local LastHitRules = require(GetScriptDirectory() .. "/lib/systems/last_hit_rule
 local LastHitTiming = require(GetScriptDirectory() .. "/lib/systems/last_hit_timing")
 local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+local HeroDisplayNames = require(GetScriptDirectory() .. "/lib/data/hero_display_names")
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if
@@ -748,7 +749,13 @@ local function AnnounceOffsideHarass(target)
 		return
 	end
 	bot.sOffsideHarassChatTime = now
-	ChatRules.SayDecision(bot, "Harassing " .. PrettyHeroName(target), "harass")
+	local names = HeroDisplayNames[Localization.GetLocale()] or HeroDisplayNames.en
+	local name = names[target:GetUnitName()] or HeroDisplayNames.en[target:GetUnitName()] or PrettyHeroName(target)
+	local line = Localization.Get("say_harass")
+	if type(line) ~= "string" or line == "" then
+		line = "Harassing {target}"
+	end
+	ChatRules.SayDecision(bot, (string.gsub(line, "{target}", name)), "harass")
 end
 -- Right-clicking a hero pulls every enemy lane creep within 500 that is not already on us.
 local function CreepAggroCounts(hero)
