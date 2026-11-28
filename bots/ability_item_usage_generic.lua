@@ -8519,7 +8519,25 @@ local function SmokeDesireRaw(item)
 		if pushLane ~= nil and #allyHeroes >= 3 and not waveAhead then
 			local tower = SmokeNextEnemyTower(pushLane)
 			local dist = tower ~= nil and GetUnitToUnitDistance(bot, tower) or 0
-			if dist > 2500 then
+			-- Only for a rotation to a lane the group is not on yet (#12, game 091; SmokeRules.PushSmokeOk).
+			local okAlong, along = pcall(GetAmountAlongLane, pushLane, bot:GetLocation())
+			local laneDist = okAlong and type(along) == "table" and along.distance or nil
+			local rotationOk = require(GetScriptDirectory() .. "/lib/systems/smoke_rules").PushSmokeOk(laneDist)
+			if dist > 2500 and not rotationOk and DotaTime() >= (bot._smokeSameLaneLogAt or -999) then
+				bot._smokeSameLaneLogAt = DotaTime() + 10
+				pcall(
+					print,
+					string.format(
+						"[SHy-ITEM] t=%.0f %s smoke-skip why=same-lane lane=%d dist=%d tower-dist=%d",
+						DotaTime(),
+						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+						pushLane,
+						math.floor(laneDist or -1),
+						math.floor(dist)
+					)
+				)
+			end
+			if dist > 2500 and rotationOk then
 				SmokeLog(string.format("push-group lane=%d tower-dist=%d", pushLane, math.floor(dist)), #allyHeroes)
 				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 			end
