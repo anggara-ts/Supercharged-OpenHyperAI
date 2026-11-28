@@ -58,8 +58,10 @@ ChatRules.WELCOME_START = -60
 -- Seconds after the team's first "I play position N" line before the first welcome line.
 ChatRules.WELCOME_AFTER_POS = 30
 -- Seconds to wait after the previous welcome line before saying this one. Line 1 waits WELCOME_AFTER_POS instead.
--- 2 seconds keeps two lines from landing in the same breath; the 5 is the pause before the Workshop pair.
-ChatRules.WELCOME_GAPS = { 0, 2, 2, 2, 5, 2 }
+-- A pair waits 0.5s: the language hint and the !sp line, the version and the date, the changelog and the
+-- Workshop page (maintainer 2026-11-28). The !sp line and the version stay 2s apart. The 5 is the pause
+-- before the Workshop pair.
+ChatRules.WELCOME_GAPS = { 0, 0.5, 2, 0.5, 5, 0.5 }
 
 function ChatRules.WelcomeGap(lineIndex)
 	local gap = ChatRules.WELCOME_GAPS[lineIndex]
