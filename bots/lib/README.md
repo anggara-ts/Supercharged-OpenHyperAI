@@ -32,7 +32,6 @@ bots/lib/
 │   ├── matchups.lua            Hero matchup data
 │   ├── site.lua                Map locations, ward spots, tower data
 │   ├── spell_list.lua          Spell/ability data tables
-│   ├── spell_prob_list.lua     Spell probability data
 │   └── team_names.lua          Bot team name lists
 │
 ├── systems/                    Core bot systems — game logic modules
@@ -47,6 +46,7 @@ bots/lib/
 │   ├── push.lua                Tower push logic
 │   ├── role.lua                Role/position assignment
 │   ├── skill.lua               Skill/ability build system
+│   ├── spell_steal_rules.lua   Rubick's Spell Steal choice: what a spell is worth, steal or keep
 │   ├── utils.lua               Shared utility functions
 │   ├── version.lua             Version info
 │   ├── ward.lua                Ward placement logic

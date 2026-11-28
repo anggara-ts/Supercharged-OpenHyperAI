@@ -77,7 +77,7 @@ active was changed, another that it was removed. The game file settles such a qu
   `tests/data/hero_abilities.lua`. CI's `tests/test_skill_builds.lua` then fails every hero whose level-up list no
   longer fits (an ability now innate, a new slot, another max level, the ultimate's levels).
 - **Renames and removals:** grep the old name in `bots/heroes/hero_<name>.lua`, `bots/lib/data/spell_list.lua`,
-  `bots/lib/data/spell_prob_list.lua`, `bots/lib/hero/rubick_hero/<hero>.lua` (Rubick's stolen spells), modifier
+  `bots/lib/systems/spell_steal_rules.lua` (Rubick's steal table, `KIND`; check new disables in the patch notes too), `bots/lib/hero/rubick_hero/<hero>.lua` (Rubick's stolen spells), modifier
   lists (`bots/lib/data/buff.lua`) and the spell-name lists in `bots/lib/systems/`. Add removed names to
   `tests/test_removed_abilities.lua`.
 - **Innates:** a spell that became innate leaves the learnable slots. Fix `tAllAbilityBuildList` (its numbers are

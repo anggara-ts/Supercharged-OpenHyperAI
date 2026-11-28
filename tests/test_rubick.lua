@@ -334,24 +334,27 @@ T.test("rubick: a stolen order ends the think, so Telekinesis does not clear it"
 	T.eq(#orders, 1, "and nothing after it in the same think")
 end)
 
-T.test("rubick: steal weights cover heroes with no custom file, and Morphling's hero lookup is unchanged", function()
+T.test("rubick: steal scores cover heroes with no custom file, and Morphling's hero lookup is unchanged", function()
+	-- #290 replaced the replace weights (spell_prob_list.lua, which #272 extended to Lone Druid, Morphling and
+	-- Rubick) with bots/lib/systems/spell_steal_rules.lua: their disables are in its hand table, the rest is scored
+	-- from the handle and never as a disable.
 	Stub.reset({ hero = "npc_dota_hero_rubick" })
-	local ok, list = Stub.load("bots/lib/data/spell_prob_list")
+	local ok, rules = Stub.load("bots/lib/systems/spell_steal_rules")
 	if not ok then
-		error(tostring(list), 0)
+		error(tostring(rules), 0)
 	end
-	T.eq(list.GetSpellReplaceWeight("bane_nightmare"), 0.2, "a weight in the short list stays")
-	T.eq(list.GetSpellReplaceWeight("lone_druid_savage_roar"), 0.3, "lone druid was missing")
-	T.eq(list.GetSpellReplaceWeight("morphling_waveform"), 0.4, "morphling was missing")
-	T.eq(list.GetSpellReplaceWeight("rubick_telekinesis"), 0.2, "rubick was missing")
-	T.eq(list.GetSpellReplaceWeight("lone_druid_spirit_link"), 1, "a passive stays replaceable")
-	T.eq(list.GetSpellReplaceWeight("pudge_meat_hook"), 0, "an uncovered hero uses the full table")
-	T.eq(list.GetSpellReplaceWeight("not_a_real_spell"), 1, "an unknown spell stays replaceable")
+	T.eq(select(2, rules.Value("bane_nightmare")), "single_disable", "a listed disable")
+	T.eq(select(2, rules.Value("lone_druid_savage_roar")), "area_disable", "lone druid's fear")
+	T.eq(select(2, rules.Value("morphling_adaptive_strike_agi")), "single_disable", "morphling's stun")
+	T.eq(select(2, rules.Value("rubick_telekinesis")), "single_disable", "an enemy rubick's lift")
+	T.eq(select(2, rules.Value("morphling_waveform", { damage = 0 })), "utility", "an unlisted spell: not a disable")
+	T.eq(select(2, rules.Value("lone_druid_spirit_link", { isPassive = true })), "weak", "a passive stays low")
+	T.eq(select(2, rules.Value("not_a_real_spell")), "utility", "an unknown spell")
 	local okFull, full = Stub.load("bots/lib/data/spell_list")
 	if not okFull then
 		error(tostring(full), 0)
 	end
-	-- hero_morphling.lua finds a replicated spell's hero here: the three new heroes must not be in it.
+	-- hero_morphling.lua finds a replicated spell's hero here: the three heroes must not be in it.
 	T.eq(full.GetSpellHeroName("lone_druid_savage_roar"), nil, "lone druid is not in the full table")
 	T.eq(full.GetSpellHeroName("morphling_waveform"), nil, "nor morphling")
 	T.eq(full.GetSpellHeroName("rubick_telekinesis"), nil, "nor rubick")
