@@ -100,8 +100,33 @@ local spellReplaceWeights = {
 	tinker_deploy_turrets = 0.8,
 	venomancer_snakebite = 0.3,
 	monkey_king_transfiguration = 0.9,
+	-- Heroes missing from spell_list.lua too, on the same 0 keep .. 1 replace scale (#271). They are here and not
+	-- there: spell_list.lua also tells Morphling which hero a replicated spell belongs to (hero_morphling.lua).
+	-- Valve datafeed hero_id=80. Spirit Link is passive and Spirit Bear innate: neither is listed, so both stay 1.
+	lone_druid_savage_roar = 0.3,
+	lone_druid_entangle = 0.4,
+	lone_druid_true_form = 0.5,
+	-- Valve datafeed hero_id=10. Ebb and Flow is innate. Morph Replicate is from the 7.42 slot data
+	-- (tests/data/hero_abilities.lua), not the datafeed.
+	morphling_waveform = 0.4,
+	morphling_adaptive_strike_agi = 0.3,
+	morphling_morph_agi = 0.9,
+	morphling_morph_str = 0.9,
+	morphling_replicate = 0.4,
+	morphling_morph_replicate = 0.7,
+	-- Valve datafeed hero_id=86: an enemy Rubick's spells. Arcane Supremacy is passive, Curiosity innate.
+	rubick_telekinesis = 0.2,
+	rubick_fade_bolt = 0.4,
 }
+-- A name missing here used to weigh 1 (always worth replacing). Now it falls through to spell_list.lua, which
+-- covers the heroes with no rubick_hero file. A name listed in both is read from here: an edit to spell_list.lua
+-- for it changes nothing for Rubick.
+local SpellList = require(GetScriptDirectory() .. "/lib/data/spell_list")
 function SpellProbList.GetSpellReplaceWeight(abilityName)
-	return spellReplaceWeights[abilityName] or 1
+	local weight = spellReplaceWeights[abilityName]
+	if weight ~= nil then
+		return weight
+	end
+	return SpellList.GetSpellReplaceWeight(abilityName)
 end
 return SpellProbList
