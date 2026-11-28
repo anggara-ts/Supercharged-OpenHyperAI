@@ -2206,8 +2206,10 @@ local function GlyphEdgeDirection(tower, lane)
 	return x / length, y / length
 end
 -- A point on the lane path toward our side at least `radius` from the tower (the lane itself is walkable: an exit the
--- trees beside the lane can't block), or nil. Steps 1% of the lane at a time, up to 25%.
-local function GlyphLanePoint(tower, lane, radius)
+-- trees beside the lane can't block), or nil. Steps 1% of the lane at a time, up to 25%. The push can be on another
+-- lane than the tower's (a lane-done push on another lane's building): a first point farther than radius + 500, or not
+-- on our side of the tower (bx, by: GlyphEdgeDirection), is no lane point for this tower.
+local function GlyphLanePoint(tower, lane, radius, bx, by)
 	local towerLocation = tower:GetLocation()
 	local ok, amount = pcall(function()
 		return GetAmountAlongLane(lane, towerLocation).amount
@@ -2230,8 +2232,13 @@ local function GlyphLanePoint(tower, lane, radius)
 			return nil
 		end
 		local point = GetLocationAlongLane(lane, along)
-		if point ~= nil and GetUnitToLocationDistance(tower, point) >= radius then
-			return { x = point.x, y = point.y }
+		local distance = point ~= nil and GetUnitToLocationDistance(tower, point) or 0
+		if distance >= radius then
+			local ourSide = (point.x - towerLocation.x) * bx + (point.y - towerLocation.y) * by > 0
+			if distance <= radius + 500 and ourSide then
+				return { x = point.x, y = point.y }
+			end
+			return nil
 		end
 	end
 	return nil
@@ -2411,7 +2418,7 @@ local function GlyphWaitThink(bot, lane)
 				bx = baseX,
 				by = baseY,
 				radius = reach + 100,
-				lane = GlyphLanePoint(tower, lane, reach + 100),
+				lane = GlyphLanePoint(tower, lane, reach + 100, baseX, baseY),
 				towerHit = towerHit,
 				passable = function(x, y)
 					return IsLocationPassable(Vector(x, y, botLocation.z))
@@ -2518,8 +2525,16 @@ local function GlyphWaitThink(bot, lane)
 	end
 	if now < (wait.backUntil or -999) then
 		radius = wait.backRadius or radius
+		-- On walkable ground (#12): the bot's own bearing, else straight back along the lane, else the side-step below
+		-- (it checks passability too).
 		if distance < radius - 100 then
-			return moveTo(edgeAt(radius))
+			local goal = edgeAt(radius)
+			if not IsLocationPassable(goal) then
+				goal = Vector(towerLocation.x + baseX * radius, towerLocation.y + baseY * radius, botLocation.z)
+			end
+			if IsLocationPassable(goal) then
+				return moveTo(goal)
+			end
 		end
 	end
 	-- Side-step along the edge (at the step-back distance while backing): a new step every 0.5-1s or on arrival,
