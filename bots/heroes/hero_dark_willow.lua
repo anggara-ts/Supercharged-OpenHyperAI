@@ -1036,7 +1036,10 @@ function X.ShadowRealmTick()
 		-- The duration elapsed while she still reads as alive. Hold this think: a death on it is
 		-- counted after the think (game 092 t=2074, held=5.23 release=-). The next think, or the
 		-- respawn, says release=died. One line, the existing shadow-realm end line.
-		if ShadowRealmRules.HoldRanOut(realm.released, realm.ranOut == true, ranOut, early) then
+		-- An attack realm runs this tick twice in one frame. The hold counts only on a later frame.
+		local heldAlready = realm.ranOutAt ~= nil and DotaTime() > realm.ranOutAt
+		if ShadowRealmRules.HoldRanOut(realm.released, heldAlready, ranOut, early) then
+			realm.ranOutAt = DotaTime()
 			realm.ranOut = true
 			return false
 		end

@@ -4,10 +4,10 @@
 -- max_damage_duration 3s; that attack ends the realm. Cooldown 21/19/17/15. (Re-read 2026-11-22 from
 -- https://www.dota2.com/datafeed/herodata?language=english&hero_id=119: duration 5, fade_time 0.3,
 -- attack_range_bonus 600, max_damage_duration 3, "becoming untargetable", "Her next attack ... will end Shadow Realm".)
--- Area stuns and nets (Earth Spike, Bushwhack) while she is in the realm are unverified (same datafeed, re-read
--- 2026-11-28). The notes say "Disjoints projectiles upon cast", "Grants phased movement" and "Spells which require
--- vision cannot affect Dark Willow in the Shadow Realm." They do not say whether a point-targeted area hits her.
--- No rule here treats the realm as safe from that, and none was added.
+-- A net or stun area still hits her in the realm. Game 092: Bushwhack netted her while the realm was up
+-- and her HP fell during it. The datafeed notes say she disjoints projectiles, is phased, and spells that
+-- need vision cannot affect her. They do not say a point-targeted area misses. A realm is not safe against
+-- a net or stun area. No rule here treats it as safe.
 local ShadowRealmRules = {}
 
 ShadowRealmRules.DURATION = 5
