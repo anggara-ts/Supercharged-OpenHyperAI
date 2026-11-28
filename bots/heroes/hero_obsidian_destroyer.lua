@@ -552,7 +552,12 @@ function X.ConsiderAstralImprisonment()
 					or allyHero:HasModifier("modifier_legion_commander_duel") and Fu.GetHP(allyHero) < 0.1
 					or Fu.GetHP(allyHero) < 0.33 and Fu.IsRetreating(allyHero)
 				then
-					return BOT_ACTION_DESIRE_HIGH, allyHero
+					-- The prison hides the ally ("invulnerable and disabled", datafeed hero 76), which ends a channel
+					-- such as a Town Portal (#47, Cold Embrace in game 077): on a channelling ally only when the enemies
+					-- attacking it are expected to kill it first. [SHy-OD] prison-save / prison-skip why=channel.
+					if Fu.ChannelSaveGate(allyHero, astralImprisonmentAbility:GetCastPoint(), "OD", "prison") then
+						return BOT_ACTION_DESIRE_HIGH, allyHero
+					end
 				end
 			end
 		end

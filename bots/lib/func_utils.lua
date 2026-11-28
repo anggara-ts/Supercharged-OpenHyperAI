@@ -23,5 +23,6 @@ require(GetScriptDirectory() .. "/lib/general_utils/lane_strategy")(Fu)
 require(GetScriptDirectory() .. "/lib/general_utils/projectile")(Fu)
 require(GetScriptDirectory() .. "/lib/general_utils/hero_info")(Fu)
 require(GetScriptDirectory() .. "/lib/general_utils/special_units")(Fu)
+require(GetScriptDirectory() .. "/lib/general_utils/channel_save")(Fu)
 require(GetScriptDirectory() .. "/lib/general_utils/init_debug")(Fu)
 return Fu
