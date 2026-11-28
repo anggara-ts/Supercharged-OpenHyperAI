@@ -1,8 +1,6 @@
 -- Outpost capture mode.
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local CustomLoader = require(GetScriptDirectory() .. "/lib/systems/custom_loader")
-local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
-local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local bot = GetBot()
 local botName = bot:GetUnitName()
@@ -1516,19 +1514,6 @@ function CheckLaneToGank(position)
 	if bestLane then
 		gankLane = bestLane
 		gankLaneStartTime = DotaTime()
-		local gankKey = "say_gank_bot"
-		if bestLane == LANE_TOP then
-			gankKey = "say_gank_top"
-		elseif bestLane == LANE_MID then
-			gankKey = "say_gank_mid"
-		end
-		local line = Localization.Get(gankKey)
-		if type(line) == "table" and #line > 0 then
-			line = line[RandomInt(1, #line)]
-		end
-		if type(line) == "string" and line ~= "" then
-			ChatRules.SayDecision(bot, line, gankKey)
-		end
 		return Clamp(bestDesire, 0, BOT_ACTION_DESIRE_VERYHIGH)
 	end
 	return BOT_MODE_DESIRE_NONE
