@@ -12061,6 +12061,7 @@ function ItemUsageThink()
 		end
 	end
 	-- A Glyphed tower outside push mode: walk out before a last hit or a deflect attack sticks under it.
+	-- The last-hit return stays above the deflect. Putting the deflect first replaced last hits for every hero.
 	local okGlyph, leaving = pcall(Usage.LeaveGlyphedTower)
 	if okGlyph and leaving then
 		_perfDone()
@@ -12068,8 +12069,7 @@ function ItemUsageThink()
 	end
 	-- Laning last hits every frame (#71): the attack on the right frame, the wind-up release / cancel. While it owns
 	-- the hit, no kiting step, item or spell order replaces it. It lets go while an enemy tower hits the bot, so the
-	-- tower-aggro step below still runs. The return stays above the deflect: putting the deflect first replaced
-	-- last hits for every hero.
+	-- tower-aggro step below still runs.
 	local okLastHit, timingLastHit = pcall(LastHitTiming.Tick, bot)
 	if not okLastHit and not bot._lhTimingErr then
 		-- Once per bot: a broken hook would silently drop every timed last hit.
