@@ -1,4 +1,4 @@
--- Lookup table: hero display names per language (from Fretbots; also used by the Fretbots plugin).
+-- Lookup table: hero display names per language. The draft and chat use this table.
 local HeroDisplayNames = {
 	en = {
 		npc_dota_hero_abaddon = "Abaddon",

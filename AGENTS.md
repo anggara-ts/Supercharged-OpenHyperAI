@@ -37,7 +37,7 @@ The layout came from one codemod, `tools/restructure.js` (#221): a branch from b
 `node tools/restructure.js --migrate-branch` (a branch without the file runs main's copy:
 `git show origin/main:tools/restructure.js > ../restructure.js && node ../restructure.js --migrate-branch`), and
 `--check` lists old paths or log tags left in a branch.
-The optional Fretbots / Buff plugin lives on the orphan branch `plugin-fretbots`, not here.
+Fretbots is not used (maintainer, 2026-11-28). The old plugin stays on the orphan branch `plugin-fretbots`; do not delete that branch, and do not add its chat lines or settings back here.
 
 ### Files the engine loads from the root
 
