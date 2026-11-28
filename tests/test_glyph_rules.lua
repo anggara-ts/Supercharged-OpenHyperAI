@@ -52,6 +52,8 @@ T.test("glyph rules: fight under a tower", function()
 	T.eq(R.ShouldFight(fight({ tier = 4 })), true, "T4")
 	local _, reserve = R.ShouldFight(fight({ charges = 1 }))
 	T.eq(reserve, "reserve", "the last charge stays for a save")
+	local _, noCharge = R.ShouldFight(fight({ charges = 0 }))
+	T.eq(noCharge, "no-charge", "none left: why=no-charge, not reserve")
 	local _, fortified = R.ShouldFight(fight({ fortified = true }))
 	T.eq(fortified, "fortified", "already fortified")
 end)
@@ -117,6 +119,41 @@ T.test("glyph rules: second save Glyph needs help", function()
 	T.eq(R.ShouldSpendSave(save({ kind = "barracks", charges = 1 })), false, "barracks: same rule")
 	-- The Ancient: always (7s can bring a respawn or a buyback; nothing to keep the charge for).
 	T.eq(R.ShouldSpendSave(save({ kind = "ancient", charges = 1, sinceSame = 8 })), true, "Ancient, repeat, alone")
+end)
+
+-- A save on a tier 1 tower keeps the last charge (#12, game 088 t=1327/1335; maintainer decision 2026-11-28).
+T.test("glyph rules: a T1 save never spends the last charge", function()
+	local R = load()
+	-- Game 088 t=1327: the first save on the mid T1 with both charges, as before.
+	local ok, why = R.ShouldSpendSave(save({ tier = 1 }))
+	T.eq(ok, true, "T1, two charges: save")
+	T.eq(why, "save", "why=save")
+	-- Game 088 t=1335: the second save 8s later on the same T1 spent the last charge.
+	ok, why = R.ShouldSpendSave(save({ tier = 1, charges = 1, sinceSame = 8 }))
+	T.eq(ok, false, "T1 repeat on the last charge")
+	T.eq(why, "t1-last-charge", "why=t1-last-charge")
+	-- Allies fighting there or walking in do not change it on a T1.
+	ok, why = R.ShouldSpendSave(save({ tier = 1, charges = 1, allies = 2, coming = 3 }))
+	T.eq(ok, false, "T1, last charge, allies there and coming")
+	T.eq(why, "t1-last-charge", "help does not unlock a T1's last charge")
+	-- A repeat on the same T1 with both charges (one came back in between).
+	ok, why = R.ShouldSpendSave(save({ tier = 1, charges = 2, sinceSame = 12, allies = 1 }))
+	T.eq(ok, false, "T1 repeat with two charges")
+	T.eq(why, "t1-repeat", "why=t1-repeat")
+	T.eq(R.ShouldSpendSave(save({ tier = 1, sinceSame = R.REPEAT_WINDOW })), true, "T1, 20s after: a new fight")
+	-- T2 and deeper keep the help rule (game 085 t=2760/2770, mid T3: the second Glyph with defenders walking in).
+	T.eq(R.ShouldSpendSave(save({ tier = 2, charges = 1, coming = 1 })), true, "T2, last charge, help coming")
+	T.eq(R.ShouldSpendSave(save({ tier = 3, charges = 1, sinceSame = 10, allies = 1 })), true, "T3 repeat, ally there")
+	local _, t2why = R.ShouldSpendSave(save({ tier = 2, charges = 1 }))
+	T.eq(t2why, "no-help", "T2, last charge, nobody: why=no-help as before")
+	-- The barracks and the Ancient pass no tier.
+	T.eq(R.ShouldSpendSave(save({ kind = "ancient", charges = 1, sinceSame = 8 })), true, "Ancient unchanged")
+	-- No charge at all.
+	ok, why = R.ShouldSpendSave(save({ tier = 2, charges = 0, allies = 1 }))
+	T.eq(ok, false, "no charge")
+	T.eq(why, "no-charge", "why=no-charge")
+	T.eq(R.TierOneBlock(nil, 1, nil), nil, "no tier: no T1 rule")
+	T.eq(R.TierOneBlock(1, 1, nil), "t1-last-charge", "T1 at one charge")
 end)
 
 T.test("glyph rules: charge count follows GetGlyphCooldown", function()

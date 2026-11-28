@@ -10215,7 +10215,7 @@ end
 -- (values, 7.42 sources) are in bots/lib/systems/glyph_rules.lua. Our own charge count is only valid because of this
 -- guard (no one else on the team casts).
 -- lastAt: our last Glyph per building name; allyLoc: our heroes' locations at the last tick (walking in or not);
--- lastHelpLog: the last glyph-skip why=no-help line per building.
+-- lastHelpLog: the last save glyph-skip line (no-help, t1-last-charge, ...) per building.
 local GlyphState =
 	{ charges = nil, towerHp = {}, pending = nil, lastWaitLog = -100, lastAt = {}, allyLoc = {}, lastHelpLog = {} }
 local GLYPH_TOWERS = {
@@ -10340,9 +10340,10 @@ local function GlyphCast(why, building, name, enemies, allies, help, tp, rule)
 	)
 end
 -- Save a dying building (#12). A repeat on the same building within 20s, or our last charge, needs one of our heroes
--- there or walking in (GlyphRules.ShouldSpendSave); else keep the charge and say so (at most every 10s per building).
+-- there or walking in (GlyphRules.ShouldSpendSave); a T1 tower never gets our last charge or a repeat; else keep the
+-- charge and say so (at most every 10s per building). tier: the tower's tier, nil for the barracks and the Ancient.
 -- true when the Glyph was cast.
-local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
+local function GlyphTrySave(kind, building, name, radius, prevLoc, now, tier)
 	local enemies = GlyphEnemiesNear(building, radius)
 	local allies = GlyphAlliesFighting(building, enemies)
 	local help, tp = GlyphHelpComing(building, prevLoc)
@@ -10350,6 +10351,7 @@ local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
 	local sinceSame = last ~= nil and now - last or nil
 	local ok, why, rule = GlyphRules.ShouldSpendSave({
 		kind = kind,
+		tier = tier,
 		charges = GlyphState.charges.charges,
 		sinceSame = sinceSame,
 		allies = allies,
@@ -10363,12 +10365,13 @@ local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
 		GlyphState.lastHelpLog[name] = now
 		print(
 			string.format(
-				"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s rule=%s tower=%s enemies=%d allies=%d help=%d tp=%d hp=%.2f team=%d charges=%d since=%s",
+				"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s rule=%s tower=%s tier=%s enemies=%d allies=%d help=%d tp=%d hp=%.2f team=%d charges=%d since=%s",
 				now,
 				string.gsub(botName, "npc_dota_hero_", ""),
 				why,
 				rule or "none",
 				name,
+				tier ~= nil and tostring(tier) or "-",
 				#enemies,
 				allies,
 				help,
@@ -10472,7 +10475,7 @@ local function UseGlyphIfNeeded()
 			)
 		then
 			local radius = (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN
-			if GlyphTrySave("tower", tower, info.name, radius, prevLoc, now) then
+			if GlyphTrySave("tower", tower, info.name, radius, prevLoc, now, info.tier) then
 				return
 			end
 		end
@@ -10785,6 +10788,27 @@ function Usage.DeflectTowerAggro()
 	end
 	for _, tower in pairs(bot:GetNearbyTowers(1000, true) or {}) do
 		if Fu.IsValidBuilding(tower) and tower:GetAttackTarget() == bot then
+			-- A Glyphed tower (#12, game 091 t=1657: Wraith King's deflect inside the bottom T2's multishot ended
+			-- still-on-me): the multishot hits 5 more targets, so moving its aggro to a creep does not take it off the
+			-- bot; the push's Glyph wait walks out instead. At most one line per 3s.
+			if tower:HasModifier("modifier_fountain_glyph") then
+				if now - (bot._deaggroGlyphLogAt or -99) >= 3 then
+					bot._deaggroGlyphLogAt = now
+					pcall(
+						print,
+						string.format(
+							"[SHy-AGGRO] t=%.0f %s tower-deflect-skip why=glyph tower=%s dist=%d hp=%.2f mode=%s",
+							now,
+							(string.gsub(botName, "npc_dota_hero_", "")),
+							(string.gsub(tower:GetUnitName(), "npc_dota_", "")),
+							GetUnitToUnitDistance(bot, tower),
+							Fu.GetHP(bot),
+							StuckModeName(bot:GetActiveMode())
+						)
+					)
+				end
+				return false
+			end
 			local reach = bot:GetAttackRange() + 50
 			local towerReach = tower:GetAttackRange() or 700
 			local best, bestScore = nil, math.huge

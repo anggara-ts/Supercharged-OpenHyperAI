@@ -70,7 +70,11 @@ function GlyphRules.ShouldFight(f)
 	if not f.hit then
 		return false, "not-hit"
 	end
-	-- Keep one charge for a save: a fight Glyph only spends the first of the two charges.
+	-- Keep one charge for a save: a fight Glyph only spends the first of the two charges. With none left the skip says
+	-- so (#12: both cases printed why=reserve).
+	if f.charges < 1 then
+		return false, "no-charge"
+	end
 	if f.charges < GlyphRules.CHARGES then
 		return false, "reserve"
 	end
@@ -138,10 +142,38 @@ function GlyphRules.SaveNeedsHelp(kind, charges, sinceSame)
 	return nil
 end
 
--- Spend a save Glyph? s = { kind, charges, sinceSame, allies, coming }: allies = our heroes fighting at the building
--- (GlyphAlliesFighting), coming = our heroes walking in from within HELP_RADIUS or teleporting in (GlyphHelpComing).
--- Returns ok, why ("save" or "no-help"), rule (what asked for help, or nil).
+-- A save on a tier 1 tower (#12, game 088 t=1327/1335: Radiant spent both charges on the mid T1 8s apart and had none
+-- left for the mid T2 at 18% HP at t=1534 or the mid T3 at t=1556). On a T1 the Glyph is only the 7s of
+-- invulnerability (the tooltip's multishot excludes tier 1 towers, see the top of this file), so a T1 save spends only
+-- the first of the two charges: never the last one and never a repeat on the same T1, even with allies there or on
+-- the way, at any game time (maintainer decision, 2026-11-28). T2 and deeper keep the help rule below.
+-- nil (allowed), "t1-last-charge" or "t1-repeat".
+function GlyphRules.TierOneBlock(tier, charges, sinceSame)
+	if tier ~= 1 then
+		return nil
+	end
+	if charges <= 1 then
+		return "t1-last-charge"
+	end
+	if sinceSame ~= nil and sinceSame < GlyphRules.REPEAT_WINDOW then
+		return "t1-repeat"
+	end
+	return nil
+end
+
+-- Spend a save Glyph? s = { kind, tier, charges, sinceSame, allies, coming }: tier = 1..4 for a tower (nil for the
+-- barracks and the Ancient); allies = our heroes fighting at the building (GlyphAlliesFighting); coming = our heroes
+-- walking in from within HELP_RADIUS or teleporting in (GlyphHelpComing).
+-- Returns ok, why ("save", "no-charge", "t1-last-charge", "t1-repeat" or "no-help"), rule (what asked for help, or
+-- nil).
 function GlyphRules.ShouldSpendSave(s)
+	if s.charges < 1 then
+		return false, "no-charge", nil
+	end
+	local tierOne = GlyphRules.TierOneBlock(s.tier, s.charges, s.sinceSame)
+	if tierOne ~= nil then
+		return false, tierOne, GlyphRules.SaveNeedsHelp(s.kind, s.charges, s.sinceSame)
+	end
 	local rule = GlyphRules.SaveNeedsHelp(s.kind, s.charges, s.sinceSame)
 	if rule ~= nil and s.allies < 1 and s.coming < 1 then
 		return false, "no-help", rule
