@@ -37,3 +37,21 @@ T.test("orb path: the record keeps the largest offset and the last one", functio
 	T.eq(R.Add(flat, 50, 50), false, "no direction: not counted")
 	T.eq(flat.n, 0, "still empty")
 end)
+
+T.test("orb path: the Jaunt is seen from her position (game 091: the Jaunt has no cooldown)", function()
+	local R = load()
+	-- Samples 0.1s apart, move speed 300. An exit Jaunt of 440 onto the Orb, still listed in the same sample.
+	T.eq(R.JauntSeen(0, 0, 440, 0, 445, 10, 370, 0, 0.1, 300), true, "jump onto the listed Orb")
+	-- The Orb gone in the same sample: she stands near where it was last seen (+ its flight in dt).
+	T.eq(R.JauntSeen(0, 0, 440, 0, nil, nil, 400, 0, 0.1, 300), true, "Orb gone: near its last position")
+	-- An urgent tower Jaunt of 200 (TOWER_JAUNT_MIN).
+	T.eq(R.JauntSeen(0, 0, 200, 0, nil, nil, 190, 0, 0.1, 300), true, "a 200 Jaunt")
+	-- A Rift of 340 away from the Orb is no Jaunt.
+	T.eq(R.JauntSeen(0, 0, -340, 0, 800, 0, 725, 0, 0.1, 300), false, "a Rift away from the Orb")
+	-- A walk across a long gap between samples (0.8s at 350 = 280) toward the Orb is no Jaunt.
+	T.eq(R.JauntSeen(0, 0, 280, 0, 300, 0, 0, 0, 0.8, 350), false, "a walk over a long gap")
+	-- A short step next to the Orb is no Jaunt either.
+	T.eq(R.JauntSeen(0, 0, 30, 0, 40, 0, 0, 0, 0.1, 300), false, "a step")
+	T.eq(R.JauntSeen(nil, nil, 440, 0, 445, 0, 370, 0, 0.1, 300), false, "no earlier sample")
+	T.eq(R.JauntSeen(0, 0, 440, 0, nil, nil, nil, nil, 0.1, 300), false, "no Orb position known")
+end)

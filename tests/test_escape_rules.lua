@@ -317,6 +317,21 @@ T.test("escape rules: escape Rift and moving out of a wave (game 071, 34:04-34:1
 	T.eq(R.MoveOutInsteadOfShift("low-hp-hit", false, false, true), false, "low-hp-hit stays a shift")
 end)
 
+T.test("escape rules: the escape-low Rift waits for the hold, then holds its cast point (game 091, t=1594)", function()
+	local R = load()
+	local holdFor = 0.1 + R.CAST_ORDER_SLACK + 0.2
+	-- Game 091: ordered every think in Valve's retreat mode, every order cut. Now: wait for the outpost hold.
+	T.eq(R.EscapeRiftStep(0, 0, false, nil, holdFor, false), "wait", "first think in retreat mode: ask for the hold")
+	T.eq(R.EscapeRiftStep(0.13, 0, true, nil, holdFor, false), "order", "the hold is the active mode: order")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_WAIT, 0, false, nil, holdFor, false), "order", "the wait ran out: order anyway")
+	T.eq(R.EscapeRiftStep(0.2, 0, true, 0.05, holdFor, false), "hold", "in its cast point: no new order")
+	T.eq(R.EscapeRiftStep(0.3, 0, true, 0.15, holdFor, true), "cast", "its cooldown started: the Rift went out")
+	T.eq(R.EscapeRiftStep(0.8, 0, true, holdFor + 0.01, holdFor, false), "order", "cut anyway: one more order")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_GIVEUP, 0, true, holdFor + 0.1, holdFor, false), "timeout", "give up")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_GIVEUP + 1, 0, true, 0.1, holdFor, false), "hold", "a held order ends first")
+	T.eq(R.EscapeRiftStep(0.7, R.LOW_RIFT_LAPSE + 0.1, false, nil, holdFor, false), "lapsed", "no longer wanted")
+end)
+
 T.test("escape rules: out of an enemy tower's range, hop over it on the way home (game 072, 19:56-20:05)", function()
 	local R = load()
 	-- t=1196: the Dire mid T2 (attack range 700 from the handle) hit her alone at 320, HP 0.49, out = 700 + 150 - 320.
@@ -393,6 +408,10 @@ T.test("puck: the escape helpers run on the stub", function()
 		"TowerOrbJaunt",
 		"HoldTowerCast",
 		"LogTowerJauntSkip",
+		"LowRiftHoldFor",
+		"RiftHoldOn",
+		"LowRiftTick",
+		"FinishLowRift",
 		"HeroOnHer",
 		"ExitJauntReady",
 		"EscapeRiftWanted",
@@ -415,4 +434,10 @@ T.test("puck: the escape helpers run on the stub", function()
 	T.ok(point ~= nil and point.x ~= nil, "escape point")
 	local okLog, errLog = pcall(X.LogEscapeAction, "blink", "test", point)
 	T.ok(okLog, "LogEscapeAction: " .. tostring(errLog))
+	local okLow, errLow = pcall(X.LowRiftStep, point)
+	T.ok(okLow, "LowRiftStep: " .. tostring(errLow))
+	local okTick, errTick = pcall(X.LowRiftTick)
+	T.ok(okTick, "LowRiftTick: " .. tostring(errTick))
+	local okEnd, errEnd = pcall(X.FinishLowRift, "no-cast", "test")
+	T.ok(okEnd, "FinishLowRift: " .. tostring(errEnd))
 end)

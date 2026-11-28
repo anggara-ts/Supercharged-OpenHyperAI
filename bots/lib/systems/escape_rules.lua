@@ -133,6 +133,37 @@ function EscapeRules.EscapeRiftNow(hp, heroOnHer, unitAttackers, exitJauntReady)
 	return heroOnHer == true or (unitAttackers or 0) >= EscapeRules.RIFT_ESCAPE_UNITS
 end
 
+-- One escape-low Rift, step by step (#191, game 091 t=1594-1595: the Rift was ordered about 36 times in 1.5s in
+-- Valve's retreat mode, whose Think moves her every think and so cut every order inside the 0.1s cast point; she
+-- never Rifted and died at 2% HP). Like the Phase Shift: the outpost mode's hold is asked for first, the Rift is
+-- ordered once that hold is the active mode or after LOW_RIFT_WAIT, and then no other order for holdFor (the cast
+-- point + CAST_ORDER_SLACK + a turn). age: seconds since the escape started; sinceWanted: since the escape Rift was
+-- last wanted; orderedAgo: since the last Rift order (nil: none yet). Returns "cast" (its cooldown started),
+-- "hold" (an order in its cast point), "timeout" / "lapsed" (no Rift: give up / no longer wanted), "order" or "wait".
+EscapeRules.LOW_RIFT_WAIT = 0.4
+EscapeRules.LOW_RIFT_GIVEUP = 1.2
+EscapeRules.LOW_RIFT_LAPSE = 0.5
+-- After a give-up the escape-low Rift is skipped this long, so the walk or a Phase Shift goes out instead.
+EscapeRules.LOW_RIFT_SKIP = 1.0
+function EscapeRules.EscapeRiftStep(age, sinceWanted, holdUp, orderedAgo, holdFor, onCooldown)
+	if onCooldown == true then
+		return "cast"
+	end
+	if orderedAgo ~= nil and orderedAgo < (holdFor or 0) then
+		return "hold"
+	end
+	if (age or 0) >= EscapeRules.LOW_RIFT_GIVEUP then
+		return "timeout"
+	end
+	if (sinceWanted or 0) > EscapeRules.LOW_RIFT_LAPSE then
+		return "lapsed"
+	end
+	if holdUp == true or (age or 0) >= EscapeRules.LOW_RIFT_WAIT then
+		return "order"
+	end
+	return "wait"
+end
+
 -- A low-HP shift against units only (no hero hit in the last 1.5s, no stun or projectile due) only delays the death
 -- inside a creep wave or among zombies (game 071, t=2051: a second shift in place at 5% HP among 14-17 creeps, dead
 -- at 2055). When she can move out (a Rift, or a Jaunt to an Orb that gets her out), she does that instead; a shift is

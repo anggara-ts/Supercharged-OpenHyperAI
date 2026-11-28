@@ -209,7 +209,8 @@ end
 -- (GetLinearProjectiles, every 0.1s) are compared with the straight line she aimed along (OrbPath.Offset).
 -- [SHy-PUCK] orb-altcast before= after= behavior=: once, when the Orb is learned.
 -- [SHy-PUCK] orb-path alt= why= n= aim= dev= devAt= end= endAt= jaunt= land= how=: once per Orb, when it is gone.
--- dev / end: largest and last offset from the aimed line (left +, right -); land: where a Jaunt in the flight put her.
+-- dev / end: largest and last offset from the aimed line (left +, right -); land: where a Jaunt in the flight put her;
+-- jauntBy: pos (her position jumped onto the Orb) or cd (the old cooldown test), - without a Jaunt.
 -- [SHy-PUCK] orb-unseen why= launched= how=: an Orb order with no Orb seen (never launched, or not in the list).
 -- Temporary: remove the switch flip and these lines once a game has answered #36.
 local orbAltProbed = false
@@ -237,7 +238,7 @@ function X.FinishOrbPath(how)
 	orbAltFlipWanted = true
 	print(
 		string.format(
-			"[SHy-PUCK] t=%.0f puck orb-path alt=%s why=%s n=%d aim=%d dev=%d devAt=%d end=%d endAt=%d jaunt=%s land=%s from=%d,%d to=%d,%d how=%s",
+			"[SHy-PUCK] t=%.0f puck orb-path alt=%s why=%s n=%d aim=%d dev=%d devAt=%d end=%d endAt=%d jaunt=%s land=%s from=%d,%d to=%d,%d how=%s jauntBy=%s",
 			DotaTime(),
 			tostring(path.alt),
 			path.why,
@@ -253,7 +254,8 @@ function X.FinishOrbPath(how)
 			path.sy,
 			path.ax,
 			path.ay,
-			how
+			how,
+			path.jauntBy or "-"
 		)
 	)
 end
@@ -340,13 +342,43 @@ function X.TrackOrbPath()
 	if orbAt ~= nil then
 		OrbPath.Add(path, orbAt.x, orbAt.y)
 	end
+	-- The Jaunt: her position jumped onto the Orb since the last sample (OrbPath.JauntSeen; the Jaunt has no
+	-- cooldown in the 7.42 game files, so the cooldown jump below never fired in game 091). The cooldown test stays as
+	-- a fallback. jauntBy= in the orb-path line says which one saw it.
+	local here = bot:GetLocation()
 	local jauntCd = etherealJauntAbility:GetCooldownTimeRemaining()
-	if not path.jaunted and jauntCd > path.jauntCd + 0.5 then
-		path.jaunted = true
-		local here = bot:GetLocation()
-		path.land = OrbPath.Offset(path.sx, path.sy, path.ax, path.ay, here.x, here.y)
+	if not path.jaunted then
+		local by = nil
+		if
+			path.px ~= nil
+			and OrbPath.JauntSeen(
+				path.px,
+				path.py,
+				here.x,
+				here.y,
+				orbAt ~= nil and orbAt.x or nil,
+				orbAt ~= nil and orbAt.y or nil,
+				path.ox,
+				path.oy,
+				now - path.pAt,
+				bot:GetCurrentMovementSpeed()
+			)
+		then
+			by = "pos"
+		elseif jauntCd > path.jauntCd + 0.5 then
+			by = "cd"
+		end
+		if by ~= nil then
+			path.jaunted = true
+			path.jauntBy = by
+			path.land = OrbPath.Offset(path.sx, path.sy, path.ax, path.ay, here.x, here.y)
+		end
 	end
 	path.jauntCd = jauntCd
+	path.px, path.py, path.pAt = here.x, here.y, now
+	if orbAt ~= nil then
+		path.ox, path.oy = orbAt.x, orbAt.y
+	end
 	-- The Orb flies 1950 / 750 = 2.6s (datafeed hero 13); an order that never went out shows no Orb at all.
 	if orbAt == nil and path.n > 0 then
 		X.FinishOrbPath("gone")
@@ -943,7 +975,10 @@ function X.CastHoldTick()
 	end
 	pcall(X.TrackPhaseShift)
 	pcall(X.ShiftExit)
-	if bot._castHoldUntil ~= nil and X.HurtSincePhaseOrder() then
+	pcall(X.LowRiftTick)
+	-- An escape-low Rift's hold is not released by hits: she is being hit, that is why she Rifts (an old Phase Shift
+	-- order made HurtSincePhaseOrder true at every hit).
+	if bot._castHoldUntil ~= nil and not X.RiftHoldOn() and X.HurtSincePhaseOrder() then
 		bot._castHoldUntil = nil
 	end
 end
@@ -1069,9 +1104,140 @@ function X.ExitJauntReady()
 	local orbAt = X.OrbInFlight()
 	return orbAt ~= nil and X.ExitJauntCheck(orbAt).ok == true
 end
--- An escape Rift is wanted now (EscapeRules.EscapeRiftNow): low, a hero or 2+ units on her, no Jaunt out.
+-- An escape Rift is wanted now (EscapeRules.EscapeRiftNow): low, a hero or 2+ units on her, no Jaunt out. Not for
+-- EscapeRules.LOW_RIFT_SKIP after an escape-low Rift that never went out (X.FinishLowRift), so the low-HP Phase
+-- Shift is not declined for it (phase skip=move-out) and the walk goes out.
 function X.EscapeRiftWanted()
+	if DotaTime() < (bot._lowRiftSkipUntil or -1) then
+		return false
+	end
 	return EscapeRules.EscapeRiftNow(Fu.GetHP(bot), X.HeroOnHer(), X.UnitAttackers(), X.ExitJauntReady())
+end
+-- The escape-low Rift with a cast hold (EscapeRules.EscapeRiftStep, #191 game 091 t=1594-1595: about 36 orders in
+-- 1.5s, each cut by Valve's retreat Think inside the 0.1s cast point; no Rift, dead at 2% HP). One escape is
+-- bot._lowRift = { at, wantAt, orders, held, orderAt, holdFor, from, askUntil, castHoldUntil }: the outpost mode's
+-- hold is asked for (bot._phaseHoldAskUntil; its desire 1.5 is above retreat's), the Rift is ordered once that hold
+-- is the active mode (or after LOW_RIFT_WAIT), and the cast hold (bot._castHoldUntil: no item order, no spell
+-- order) lasts the cast point (0.1s, datafeed hero 13, 7.42) + CAST_ORDER_SLACK + 0.2s for a turn.
+-- [SHy-PUCK] escape-action spell=rift why=escape-low: once per escape; [SHy-PUCK] rift-low result=: its end.
+function X.LowRiftHoldFor()
+	return (waningRiftAbility:GetCastPoint() or 0.1) + EscapeRules.CAST_ORDER_SLACK + 0.2
+end
+-- True while an escape-low Rift order is in its cast hold: hits do not release that hold (X.CastHoldTick).
+function X.RiftHoldOn()
+	local state = bot._lowRift
+	return state ~= nil and state.orderAt ~= nil and DotaTime() - state.orderAt < state.holdFor
+end
+function X.FinishLowRift(result, why)
+	local state = bot._lowRift
+	bot._lowRift = nil
+	if state == nil then
+		return
+	end
+	local now = DotaTime()
+	-- Free the holds this Rift set (a Phase Shift or a dodge may have asked for its own since).
+	if bot._castHoldUntil ~= nil and bot._castHoldUntil == state.castHoldUntil then
+		bot._castHoldUntil = nil
+	end
+	if bot._phaseHoldAskUntil ~= nil and bot._phaseHoldAskUntil == state.askUntil then
+		bot._phaseHoldAskUntil = now
+	end
+	if why == "timeout" then
+		bot._lowRiftSkipUntil = now + EscapeRules.LOW_RIFT_SKIP
+	end
+	local here = bot:GetLocation()
+	pcall(
+		print,
+		string.format(
+			"[SHy-PUCK] t=%.0f puck rift-low result=%s why=%s after=%.2f orders=%d held=%d mode=%d moved=%d hp=%.2f",
+			now,
+			result,
+			why,
+			now - state.at,
+			state.orders,
+			state.held,
+			bot:GetActiveMode(),
+			math.sqrt((here.x - state.from.x) ^ 2 + (here.y - state.from.y) ^ 2),
+			Fu.GetHP(bot)
+		)
+	)
+end
+-- Every think (SkillsComplement) and inside the cast hold (X.CastHoldTick): ends an escape once the Rift is out, the
+-- wait ran out or the Rift is no longer wanted.
+function X.LowRiftTick()
+	local state = bot._lowRift
+	if state == nil then
+		return
+	end
+	if not bot:IsAlive() then
+		X.FinishLowRift("no-cast", "dead")
+		return
+	end
+	local now = DotaTime()
+	-- The want is not read inside the cast hold (SkillsComplement does not run): count from the hold's end.
+	local wantRef = math.max(state.wantAt, state.orderAt ~= nil and state.orderAt + state.holdFor or -999)
+	local step = EscapeRules.EscapeRiftStep(
+		now - state.at,
+		now - wantRef,
+		false,
+		state.orderAt ~= nil and now - state.orderAt or nil,
+		state.holdFor,
+		waningRiftAbility:GetCooldownTimeRemaining() > 0
+	)
+	if step == "cast" then
+		-- other-order: the Rift went out from another order (a tower-escape Rift) before this one's.
+		X.FinishLowRift("cast", state.orders > 0 and "cast" or "other-order")
+	elseif step == "timeout" or step == "lapsed" then
+		X.FinishLowRift("no-cast", step)
+	end
+end
+-- The escape-low Rift wanted this think: true when the Rift order goes out now, false while it waits for the hold.
+function X.LowRiftStep(point)
+	local now = DotaTime()
+	local state = bot._lowRift
+	if state == nil then
+		local here = bot:GetLocation()
+		state = {
+			at = now,
+			wantAt = now,
+			orders = 0,
+			held = 0,
+			holdFor = X.LowRiftHoldFor(),
+			from = { x = here.x, y = here.y },
+		}
+		bot._lowRift = state
+		X.LogEscapeAction("rift", "escape-low", point)
+	end
+	state.wantAt = now
+	local holdUp = bot:GetActiveMode() == (BOT_MODE_OUTPOST or 26)
+	local step = EscapeRules.EscapeRiftStep(
+		now - state.at,
+		0,
+		holdUp,
+		state.orderAt ~= nil and now - state.orderAt or nil,
+		state.holdFor,
+		waningRiftAbility:GetCooldownTimeRemaining() > 0
+	)
+	if step == "order" then
+		state.orders = state.orders + 1
+		if holdUp then
+			state.held = state.held + 1
+		end
+		state.orderAt = now
+		state.castHoldUntil = math.max(bot._castHoldUntil or -1, now + state.holdFor)
+		bot._castHoldUntil = state.castHoldUntil
+		state.askUntil = math.max(bot._phaseHoldAskUntil or -1, now + state.holdFor + 0.1)
+		bot._phaseHoldAskUntil = state.askUntil
+		return true
+	end
+	if step == "wait" or step == "hold" then
+		state.askUntil = math.max(bot._phaseHoldAskUntil or -1, now + 0.3)
+		bot._phaseHoldAskUntil = state.askUntil
+		return false
+	end
+	-- cast / timeout / lapsed: the escape ends here.
+	X.LowRiftTick()
+	return false
 end
 -- Enemy non-hero units (creeps, zombies, summons) within 700 attacking her.
 function X.UnitAttackers()
@@ -1726,6 +1892,7 @@ end
 function X.SkillsComplement()
 	pcall(X.SampleHp)
 	pcall(X.TrackOrbPath)
+	pcall(X.LowRiftTick)
 	local okHold, errHold = pcall(X.HoldTpInDanger)
 	if not okHold then
 		X.LogStepError("HoldTpInDanger", errHold)
@@ -1735,8 +1902,8 @@ function X.SkillsComplement()
 	if okExit and exited then
 		return
 	end
-	-- Hit after the order: the shift is not on, so nothing is held any more.
-	if bot._castHoldUntil ~= nil and X.HurtSincePhaseOrder() then
+	-- Hit after the order: the shift is not on, so nothing is held any more (an escape-low Rift's hold stays).
+	if bot._castHoldUntil ~= nil and not X.RiftHoldOn() and X.HurtSincePhaseOrder() then
 		bot._castHoldUntil = nil
 	end
 	-- Hold every other cast while Phase Shift starts and lasts (#15, game 046: 15 orders, never channelling 0.3s later;
@@ -1973,6 +2140,8 @@ function X.SkillsComplement()
 	end
 	waningRiftDesire, waningRiftLocation = X.ConsiderWaningRift()
 	if waningRiftDesire > 0 then
+		-- heroes=: enemy heroes within the radius of the landing point, so an escape Rift (landing away from them)
+		-- shows 0. An escape-low Rift prints once per order, at most once per cast hold (X.LowRiftStep).
 		pcall(
 			print,
 			string.format(
@@ -2252,13 +2421,23 @@ function X.ConsiderWaningRift()
 		end
 	end
 	-- Low and being hit, with no Jaunt out right now: Rift toward safety for its move (EscapeRules.EscapeRiftNow, game
-	-- 071 34:04-34:15). Its silence still hits heroes near where she lands.
+	-- 071 34:04-34:15). It is a jump: the silence (radius 400 around the landing point, datafeed hero 13) seldom hits
+	-- the heroes she jumps 340 away from (game 091 t=1594: rift heroes=0, Wraith King 415 -> 754 from her).
 	X.riftWhy = "escape-low"
+	-- Ordered once the outpost hold is up, then held through its cast point (X.LowRiftStep, game 091 t=1594).
 	local okLow, lowRift = pcall(X.EscapeRiftWanted)
 	if okLow and lowRift then
 		local escapePoint = X.EscapePoint(moveDistance - 10)
-		X.LogEscapeAction("rift", "escape-low", escapePoint)
-		return BOT_ACTION_DESIRE_HIGH, escapePoint
+		local okStep, orderNow = pcall(X.LowRiftStep, escapePoint)
+		if not okStep then
+			X.LogStepError("LowRiftStep", orderNow)
+			return BOT_ACTION_DESIRE_HIGH, escapePoint
+		end
+		if orderNow then
+			return BOT_ACTION_DESIRE_HIGH, escapePoint
+		end
+		-- Waiting for the hold: no other Rift this think.
+		return BOT_ACTION_DESIRE_NONE, 0
 	end
 	X.riftWhy = "stuck"
 	if Fu.IsStuck(bot) then

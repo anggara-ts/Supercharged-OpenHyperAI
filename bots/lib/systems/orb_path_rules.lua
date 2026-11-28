@@ -41,4 +41,34 @@ function OrbPath.Add(path, px, py)
 	return true
 end
 
+-- Ethereal Jaunt seen from her position (#191, game 091: all 92 orb-path lines said jaunt=no, also right after a
+-- Jaunt). The old test read a jump in the Jaunt's cooldown, but puck_ethereal_jaunt has no AbilityCooldown at all
+-- (game files, scripts/npc/heroes/npc_dota_hero_puck.txt, 7.42 VPK; the datafeed does not list the Jaunt), so it
+-- never fired. The Jaunt puts her on the Orb: she moved farther since the last sample (dt seconds ago) than a walk at
+-- moveSpeed allows (+ JAUNT_WALK_MARGIN, at least JAUNT_MIN_JUMP), and she now stands near the Orb: within
+-- JAUNT_LAND_TOL + the Orb's flight in dt (orb_speed 750, datafeed hero 13) of its current position (orbX, orbY) or
+-- of where it was last seen (lastX, lastY; it may be gone in the same sample). A Rift or a Blink away from the Orb
+-- is no Jaunt.
+OrbPath.JAUNT_WALK_MARGIN = 100
+OrbPath.JAUNT_MIN_JUMP = 150
+OrbPath.JAUNT_LAND_TOL = 150
+OrbPath.ORB_SPEED = 750
+function OrbPath.JauntSeen(px, py, nx, ny, orbX, orbY, lastX, lastY, dt, moveSpeed)
+	if px == nil or nx == nil or dt == nil or dt < 0 then
+		return false
+	end
+	local jump = math.sqrt((nx - px) ^ 2 + (ny - py) ^ 2)
+	local walk = (moveSpeed or 550) * dt + OrbPath.JAUNT_WALK_MARGIN
+	if jump <= math.max(walk, OrbPath.JAUNT_MIN_JUMP) then
+		return false
+	end
+	local tol = OrbPath.JAUNT_LAND_TOL + OrbPath.ORB_SPEED * dt
+	for _, orb in ipairs({ { orbX, orbY }, { lastX, lastY } }) do
+		if orb[1] ~= nil and orb[2] ~= nil and math.sqrt((nx - orb[1]) ^ 2 + (ny - orb[2]) ^ 2) <= tol then
+			return true
+		end
+	end
+	return false
+end
+
 return OrbPath
