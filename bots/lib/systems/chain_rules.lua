@@ -23,7 +23,7 @@
 -- nearby units; Fu.IsDisabled pays one compare (Chain.live) while no bot holds.
 --
 -- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= dist= far= atk= src=" (throttled), "... cast hero=
--- spell= left= need= gap= dist= far= atk= held= real= why=" (far= the hold's distance limit, - for none; atk= the
+-- spell= left= need= gap= dist= far= atk= held= real= why= mod=" (far= the hold's distance limit, - for none; atk= the
 -- attack range read that set it; a cast line is a disable cast into a running disable, once per bot, spell and hero
 -- every 3s; why=held after a hold, chain without one, blocked / far / cap when the rule did not wait),
 -- "... unknown hero= spell= n= mods=" (stunned or hexed but no listed modifier: the list misses a name; n= counts
@@ -548,7 +548,7 @@ function Chain.OnCast(bot, ability, target, kind)
 		end
 		print(
 			string.format(
-				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f far=%s atk=%s held=%s real=%s src=%s why=%s",
+				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f far=%s atk=%s held=%s real=%s src=%s why=%s mod=%s",
 				now,
 				short(botName),
 				short(heroName),
@@ -562,7 +562,8 @@ function Chain.OnCast(bot, ability, target, kind)
 				Fmt(heldFor),
 				stamp and stamp.checked or "?",
 				tostring(src),
-				why
+				why,
+				tostring(modName or "-")
 			)
 		)
 	end

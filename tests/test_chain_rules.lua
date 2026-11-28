@@ -436,7 +436,13 @@ T.test("chain: a hold on Cold Embrace is not released as far (game 091 t=1666)",
 	T.eq(#lines("hold hero=winter_wyvern spell=lion_impale"), 1, "hold line")
 	T.eq(#lines("far=- atk=-"), 1, "the hold line prints no limit")
 	T.eq(#lines("why=far"), 0, "no far release")
+	-- 1.5s later the cocoon has 1.5s left, about what the Spike needs: it goes, as a held cast that names the cocoon.
+	Stub.time = 601.5
+	stun(wyvern, 1.5, "modifier_winter_wyvern_cold_embrace")
+	T.eq(Chain.OnCast(lion, spike, Vector(801, 0, 0), "location"), false, "cast as the cocoon ends")
+	T.eq(#lines("why=held mod=modifier_winter_wyvern_cold_embrace"), 1, "cast line: held, names the cocoon")
 	-- A plain stun at the same distance still releases: the attack order would walk Lion in.
+	Stub.time = 600
 	Chain.Reset()
 	stun(wyvern, 3.0)
 	T.eq(Chain.OnCast(lion, spike, Vector(801, 0, 0), "location"), false, "a plain stun goes through")
