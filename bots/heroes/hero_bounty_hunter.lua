@@ -157,13 +157,11 @@ local shadowWalkAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sA
 local friendlyShadowAbility =
 	SafeAbility(bot:GetAbilityByName("bounty_hunter_wind_walk_ally"), "bounty_hunter_wind_walk_ally", "bounty_hunter")
 local trackAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "bounty_hunter")
-local talent3 = SafeAbility(bot:GetAbilityByName(sTalentList[3]), "sTalentList[3]", "bounty_hunter")
 local shurikenTossDesire, shurikenTossTarget
 local shadowWalkDesire
 local friendlyShadowDesire, friendlyShadowTarget
 local trackDesire, trackTarget
 local aetherRange = 0
-local bonusShurikenDamage = 0
 local botLevel, mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
 	if Fu.CanNotUseAbility(bot) then
@@ -177,9 +175,6 @@ function X.SkillsComplement()
 	botTarget = abilityContext.target
 	nearbyEnemies = abilityContext.enemies
 	nearbyAllies = abilityContext.allies
-	if talent3:IsTrained() then
-		bonusShurikenDamage = talent3:GetSpecialValueInt("value")
-	end
 	shadowWalkDesire = X.ConsiderE()
 	if shadowWalkDesire > 0 then
 		Fu.SetQueuePtToINT(bot, false)
@@ -213,7 +208,10 @@ function X.ConsiderQ()
 	local castRange = shurikenTossAbility:GetCastRange() + aetherRange
 	local castPoint = shurikenTossAbility:GetCastPoint()
 	local manaCost = shurikenTossAbility:GetManaCost()
-	local damage = shurikenTossAbility:GetSpecialValueInt("bonus_damage") + bonusShurikenDamage
+	-- "bonus_damage" includes the Shuriken talent once learned: special_bonus_unique_bounty_hunter_2 "+160" is
+	-- linked into it (7.42 npc_dota_hero_bounty_hunter.txt). The old read added talent 3 (Shadow Walk damage
+	-- reduction) by its "value", which read 0 (#46).
+	local damage = shurikenTossAbility:GetSpecialValueInt("bonus_damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local castTarget = nil
 	local bounceRadius = shurikenTossAbility:GetSpecialValueInt("bounce_aoe")

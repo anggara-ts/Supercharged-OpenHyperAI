@@ -145,13 +145,11 @@ local netherBlastAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[1]), "s
 local decrepifyAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[2]), "sAbilityList[2]", "pugna")
 local netherWardAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAbilityList[3]", "pugna")
 local lifeDrainAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "pugna")
-local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "pugna")
 local netherBlastDesire, netherBlastLocation
 local decrepifyDesire, decrepifyTarget
 local netherWardDesire, netherWardLocation
 local lifeDrainDesire, lifeDrainTarget
 local aetherRange = 0
-local bonusBlastDamage = 0
 local botLevel, mpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
@@ -159,15 +157,11 @@ function X.SkillsComplement()
 	end
 	local context = AbilityContext.Build(bot)
 	aetherRange = context.aetherRange
-	bonusBlastDamage = 0
 	botLevel = context.level
 	mpRatio = context.mp
 	botTarget = context.target
 	nearbyEnemies = context.enemies
 	nearbyAllies = context.allies
-	if talent7:IsTrained() then
-		bonusBlastDamage = talent7:GetSpecialValueInt("value")
-	end
 	netherBlastDesire, netherBlastLocation = X.ConsiderQ()
 	if netherBlastDesire > 0 then
 		Fu.SetQueuePtToINT(bot, true)
@@ -203,7 +197,9 @@ function X.ConsiderQ()
 	-- datafeed: Nether Blast delay is 0.8s; GetSpecialValueInt truncated it to 0.
 	local castDelay = netherBlastAbility:GetCastPoint() + netherBlastAbility:GetSpecialValueFloat("delay")
 	local manaCost = netherBlastAbility:GetManaCost()
-	local damage = netherBlastAbility:GetSpecialValueInt("blast_damage") + bonusBlastDamage
+	-- Includes the talent once learned: special_bonus_unique_pugna_2 "+200" is linked into "blast_damage"
+	-- (7.42 npc_dota_hero_pugna.txt); the talent's own "value" read 0 (#46).
+	local damage = netherBlastAbility:GetSpecialValueInt("blast_damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetNearbyHeroes(bot, castRange + radius * 0.8, true, BOT_MODE_NONE)
 	local castLocation = nil

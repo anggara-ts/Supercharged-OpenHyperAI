@@ -135,7 +135,6 @@ local hexAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[2]), "sAbilityL
 local manaDrainAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAbilityList[3]", "lion")
 local fingerOfDeathAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "lion")
 local talent4 = SafeAbility(bot:GetAbilityByName(sTalentList[4]), "sTalentList[4]", "lion")
-local talent5 = SafeAbility(bot:GetAbilityByName(sTalentList[5]), "sTalentList[5]", "lion")
 -- Hex AoE talent is special_bonus_unique_lion_4 = sTalentList[7] (Valve data: Ability16; it adds
 -- "radius" 250 to Voodoo). sTalentList[8] is lion_2, the Earth Spike +600 range talent.
 local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "lion")
@@ -810,8 +809,9 @@ function X.ConsiderR()
 	return BOT_ACTION_DESIRE_NONE
 end
 function X.GetAbilityRDamageBonus()
-	local talentBonus = talent5:IsTrained() and talent5:GetSpecialValueInt("value") or 0
-	local damagePerKill = fingerOfDeathAbility:GetSpecialValueInt("damage_per_kill") + talentBonus
+	-- Includes the talent once learned: special_bonus_unique_lion_8 "+20" is linked into "damage_per_kill"
+	-- (7.42 npc_dota_hero_lion.txt); the talent's own "value" read 0 (#46).
+	local damagePerKill = fingerOfDeathAbility:GetSpecialValueInt("damage_per_kill")
 	local killCounterModifier = "modifier_lion_finger_of_death_kill_counter"
 	local killCount = Fu.GetModifierCount(bot, killCounterModifier)
 	return killCount * damagePerKill

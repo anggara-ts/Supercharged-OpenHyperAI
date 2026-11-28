@@ -147,7 +147,6 @@ local anchorSmashAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "s
 local ravageAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "tidehunter")
 local deadInTheWaterAbility =
 	SafeAbility(bot:GetAbilityByName("tidehunter_dead_in_the_water"), "tidehunter_dead_in_the_water", "tidehunter")
-local talent3 = SafeAbility(bot:GetAbilityByName(sTalentList[3]), "sTalentList[3]", "tidehunter")
 local gushDesire, gushTarget
 local krakenShellDesire, krakenShellTarget
 local anchorSmashDesire, anchorSmashTarget
@@ -251,10 +250,9 @@ function X.ConsiderQ()
 	local radius = 600
 	local castPoint = gushAbility:GetCastPoint()
 	local manaCost = gushAbility:GetManaCost()
+	-- Includes the talent once learned: special_bonus_unique_tidehunter_2 "+90" is linked into "gush_damage"
+	-- (7.42 npc_dota_hero_tidehunter.txt); the talent's own "value" read 0 (#46).
 	local damage = gushAbility:GetSpecialValueInt("gush_damage")
-	if talent3:IsTrained() then
-		damage = damage + talent3:GetSpecialValueInt("value")
-	end
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
 	local enemiesInWideRange = Fu.GetAroundEnemyHeroList(castRange + 200)

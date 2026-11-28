@@ -134,7 +134,6 @@ local nothlProjectionAbility =
 	SafeAbility(bot:GetAbilityByName("dazzle_nothl_projection"), "dazzle_nothl_projection", "dazzle")
 local nothlProjectionEndAbility =
 	SafeAbility(bot:GetAbilityByName("dazzle_nothl_projection_end"), "dazzle_nothl_projection_end", "dazzle")
-local talent3 = SafeAbility(bot:GetAbilityByName(sTalentList[3]), "sTalentList[3]", "dazzle")
 local talent4 = SafeAbility(bot:GetAbilityByName(sTalentList[4]), "sTalentList[4]", "dazzle")
 local talent6 = SafeAbility(bot:GetAbilityByName(sTalentList[6]), "sTalentList[6]", "dazzle")
 local poisonTouchDesire, poisonTouchTarget
@@ -311,11 +310,9 @@ function X.ConsiderQ()
 	local searchRadius = 600
 	local castPoint = poisonTouchAbility:GetCastPoint()
 	local manaCost = poisonTouchAbility:GetManaCost()
+	-- "damage" includes the level 15 talent once learned: special_bonus_unique_dazzle_3 "+50" is linked into it
+	-- (7.42 npc_dota_hero_dazzle.txt); the talent's own "value" read 0 (#46).
 	local damagePerSecond = poisonTouchAbility:GetSpecialValueInt("damage")
-	-- Level 15 talent T3 "+50 Poison Touch DPS" (7.42; the old DPS talent was T6, now -15s Nothl Projection cooldown).
-	if talent3:IsTrained() then
-		damagePerSecond = damagePerSecond + talent3:GetSpecialValueInt("value")
-	end
 	local duration = poisonTouchAbility:GetSpecialValueInt("duration")
 	local nDamage = damagePerSecond * duration
 	local damageType = DAMAGE_TYPE_PHYSICAL

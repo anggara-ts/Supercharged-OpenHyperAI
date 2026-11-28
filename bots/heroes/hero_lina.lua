@@ -185,14 +185,12 @@ local fierySoulAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[3]), "sAb
 local lagunaBladeAbility = SafeAbility(bot:GetAbilityByName(sAbilityList[6]), "sAbilityList[6]", "lina")
 local flameCloakAbility = SafeAbility(bot:GetAbilityByName("lina_flame_cloak"), "lina_flame_cloak", "lina")
 local talent2 = SafeAbility(bot:GetAbilityByName(sTalentList[2]), "sTalentList[2]", "lina")
-local talent4 = SafeAbility(bot:GetAbilityByName(sTalentList[4]), "sTalentList[4]", "lina")
 local talent7 = SafeAbility(bot:GetAbilityByName(sTalentList[7]), "sTalentList[7]", "lina")
 local dragonSlaveDesire, dragonSlaveLocation
 local lightStrikeArrayDesire, lightStrikeArrayLocation
 local lagunaBladeDesire, lagunaBladeTarget
 local flameCloakDesire
 local aetherRange = 0
-local lsaBonusDamage = 0
 local botLevel, mpRatio, hpRatio, nearbyEnemies, nearbyAllies
 function X.SkillsComplement()
 	if Fu.CanNotUseAbility(bot) or bot:IsInvisible() then
@@ -200,16 +198,12 @@ function X.SkillsComplement()
 	end
 	local context = AbilityContext.Build(bot)
 	aetherRange = context.aetherRange
-	lsaBonusDamage = 0
 	botLevel = context.level
 	mpRatio = context.mp
 	hpRatio = context.hp
 	botTarget = context.target
 	nearbyEnemies = context.enemies
 	nearbyAllies = context.allies
-	if talent4:IsTrained() then
-		lsaBonusDamage = lsaBonusDamage + talent4:GetSpecialValueInt("value")
-	end
 	flameCloakDesire = X.ConsiderFlameCloak()
 	if flameCloakDesire > 0 then
 		bot:Action_UseAbility(flameCloakAbility)
@@ -407,7 +401,9 @@ function X.ConsiderW()
 	local castRange = lightStrikeArrayAbility:GetCastRange() + aetherRange
 	local castPoint = lightStrikeArrayAbility:GetCastPoint() + 0.5
 	local manaCost = lightStrikeArrayAbility:GetManaCost()
-	local damage = lightStrikeArrayAbility:GetSpecialValueInt("light_strike_array_damage") + lsaBonusDamage
+	-- Includes the talent once learned: special_bonus_unique_lina_3 "+110" is linked into
+	-- "light_strike_array_damage" (7.42 npc_dota_hero_lina.txt); the talent's own "value" read 0 (#46).
+	local damage = lightStrikeArrayAbility:GetSpecialValueInt("light_strike_array_damage")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local radius = lightStrikeArrayAbility:GetSpecialValueInt("light_strike_array_aoe")
 	local enemyHeroes = Fu.GetNearbyHeroes(bot, castRange + radius * 0.5, true, BOT_MODE_NONE)
