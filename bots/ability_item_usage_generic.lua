@@ -39,37 +39,37 @@ local GlyphRules = require(GetScriptDirectory() .. "/lib/systems/glyph_rules")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/lib/systems/foreign_items")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
-local lastHumanPingTime = -1
+-- One table, not three chunk locals: this file's main chunk has to stay under Lua's 200-local limit.
+local Ping = { lastHumanPingTime = -1, pingLoggerId = nil, pingLoggerAt = -999 }
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
-local pingLoggerId, pingLoggerAt = nil, -999
 local function LogHumanPing()
 	local myId = bot:GetPlayerID()
-	if DotaTime() >= pingLoggerAt or DotaTime() < pingLoggerAt - 1 then
-		pingLoggerAt = DotaTime() + 1
-		pingLoggerId = nil
+	if DotaTime() >= Ping.pingLoggerAt or DotaTime() < Ping.pingLoggerAt - 1 then
+		Ping.pingLoggerAt = DotaTime() + 1
+		Ping.pingLoggerId = nil
 		-- GetTeamMember takes a team slot (1-5), not a player ID (game 037 review).
 		for slot = 1, #GetTeamPlayers(GetTeam()) do
 			local member = GetTeamMember(slot)
 			if member ~= nil and member:IsBot() and not member:IsIllusion() and member:IsAlive() then
 				local id = member:GetPlayerID()
-				if pingLoggerId == nil or id < pingLoggerId then
-					pingLoggerId = id
+				if Ping.pingLoggerId == nil or id < Ping.pingLoggerId then
+					Ping.pingLoggerId = id
 				end
 			end
 		end
 	end
-	if pingLoggerId ~= myId then
+	if Ping.pingLoggerId ~= myId then
 		return
 	end
 	local human, ping = Utils.GetHumanPing()
 	if human == nil or ping == nil or ping.location == nil or ping.time == nil or ping.time == 0 then
 		return
 	end
-	if ping.time == lastHumanPingTime or GameTime() - ping.time > 1.5 then
-		lastHumanPingTime = ping.time
+	if ping.time == Ping.lastHumanPingTime or GameTime() - ping.time > 1.5 then
+		Ping.lastHumanPingTime = ping.time
 		return
 	end
-	lastHumanPingTime = ping.time
+	Ping.lastHumanPingTime = ping.time
 	local loc = ping.location
 	print(
 		string.format(
@@ -84,7 +84,6 @@ local function LogHumanPing()
 end
 -- When already attacking a valid target and not in danger, skip heavy item/ability
 -- rescans for ~3 engine frames * ThinkLess (DotaTime-based, not wall clock).
-local THINK_SAMPLE_FRAME = 0.033
 local function ShouldThrottleHeavyThink()
 	local thinkLess = tonumber(CustomLoader.ThinkLess) or 1
 	if thinkLess <= 0 then
@@ -103,7 +102,7 @@ local function ShouldThrottleHeavyThink()
 		or bot:WasRecentlyDamagedByTower(1.2)
 		or bot:WasRecentlyDamagedByCreep(1.0)
 	-- Urgent / no target: every tick. Locked & safe: every ~3 ticks * ThinkLess.
-	local interval = urgent and 0 or (THINK_SAMPLE_FRAME * 3 * math.max(1, thinkLess))
+	local interval = urgent and 0 or (0.033 * 3 * math.max(1, thinkLess))
 	local last = bot._ohaHeavyThinkAt or -100
 	if now - last < interval then
 		return true
@@ -791,17 +790,20 @@ function Usage.GetRemainingRespawnTime()
 		return bot:GetRespawnTime() - (DotaTime() - deathTime)
 	end
 end
-local sayEndDeathThreshold = RandomInt(14, 20)
-local chatReplyDelay = RandomInt(19, 56) / 10
-local killStreakEndedTime = -999
-local lastGold = 9999
-local lastKills = 999
-local saidFirstBloodAt = nil
-local lastDeaths = 0
-local killStreak = 0
-local replyCount = 0
-local maxReplies = RandomInt(5, 9)
-local chatCallbackInstalled = false
+-- Kill and chat state for SetTalkMessage. One chunk local (the 200-local limit).
+local Talk = {
+	sayEndDeathThreshold = RandomInt(14, 20),
+	chatReplyDelay = RandomInt(19, 56) / 10,
+	killStreakEndedTime = -999,
+	lastGold = 9999,
+	lastKills = 999,
+	saidFirstBloodAt = nil,
+	lastDeaths = 0,
+	killStreak = 0,
+	replyCount = 0,
+	maxReplies = RandomInt(5, 9),
+	chatCallbackInstalled = false,
+}
 local humanChatTime = nil
 local humanChatString = nil
 local replyToAllChat = false
@@ -889,15 +891,15 @@ function Usage.SetTalkMessage()
 		)
 	end
 	-- The chat callback carries every chat command (!push, !chatty, ...), so it does not depend on the reply count;
-	-- only the small-talk replies below stop after maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
+	-- only the small-talk replies below stop after Talk.maxReplies (#222). One per team (Fu.Role.chatListenerId): a later
 	-- re-pick of the reply member (Role.GetReplyMemberID) must not install a second one.
 	if playerId == Fu.Role.GetReplyMemberID() then
 		if
-			not chatCallbackInstalled
+			not Talk.chatCallbackInstalled
 			and Fu.Role.chatListenerId == nil
 			and GetGameState() == GAME_STATE_GAME_IN_PROGRESS
 		then
-			chatCallbackInstalled = true
+			Talk.chatCallbackInstalled = true
 			Fu.Role.chatListenerId = playerId
 			InstallChatCallback(function(chatEvent)
 				Usage.SetReplyHumanTime(chatEvent)
@@ -913,21 +915,21 @@ function Usage.SetTalkMessage()
 			)
 		end
 		if
-			replyCount <= maxReplies
+			Talk.replyCount <= Talk.maxReplies
 			and humanChatString ~= nil
 			and humanChatTime ~= nil
-			and DotaTime() > humanChatTime + chatReplyDelay
+			and DotaTime() > humanChatTime + Talk.chatReplyDelay
 		then
 			local replyString = Fu.Chat.GetReplyString(humanChatString, replyToAllChat)
 			if replyString ~= nil then
-				if replyCount == maxReplies then
+				if Talk.replyCount == Talk.maxReplies then
 					replyString = Fu.Chat.GetStopReplyString()
 				end
 				bot:ActionImmediate_Chat(replyString, replyToAllChat)
-				replyCount = replyCount + 1
-				chatReplyDelay = RandomInt(6, 30) / 10
-				if chatReplyDelay > 2.0 then
-					chatReplyDelay = RandomInt(6, 30) / 10
+				Talk.replyCount = Talk.replyCount + 1
+				Talk.chatReplyDelay = RandomInt(6, 30) / 10
+				if Talk.chatReplyDelay > 2.0 then
+					Talk.chatReplyDelay = RandomInt(6, 30) / 10
 				end
 			end
 			humanChatString = nil
@@ -944,22 +946,22 @@ function Usage.SetTalkMessage()
 		if
 			DotaTime() < 600
 			and bot:IsAlive()
-			and kills > lastKills
+			and kills > Talk.lastKills
 			and Fu.GetNumOfTeamTotalKills(false) == 1
 			and Fu.GetNumOfTeamTotalKills(true) == 0
 			and RandomInt(1, 9) > 4
 		then
 			local chatLine = Localization.Get("got_first_blood")[RandomInt(1, #Localization.Get("got_first_blood"))]
 			bot:ActionImmediate_Chat(chatLine, true)
-			saidFirstBloodAt = kills
+			Talk.saidFirstBloodAt = kills
 		end
 		-- One chat line per kill: first blood's bonus gold also passed the kill-gold check below, so the first blood got
 		-- two lines (maintainer, 2026-11-23).
 		if
 			bot:IsAlive()
-			and gold > lastGold + 300 * turboGoldScale
-			and kills > lastKills
-			and saidFirstBloodAt ~= kills
+			and gold > Talk.lastGold + 300 * turboGoldScale
+			and kills > Talk.lastKills
+			and Talk.saidFirstBloodAt ~= kills
 		then
 			local chatLine = "?"
 			if Fu.Customize.Trash_Talk_Level and Fu.Customize.Trash_Talk_Level >= 2 then
@@ -967,13 +969,13 @@ function Usage.SetTalkMessage()
 				if RandomInt(1, 4) > 1 then
 					chatLine = Localization.Get("got_a_kill")[RandomInt(1, #Localization.Get("got_a_kill"))]
 				end
-				if gold > lastGold + 800 * turboGoldScale and RandomInt(1, 9) > 4 then
+				if gold > Talk.lastGold + 800 * turboGoldScale and RandomInt(1, 9) > 4 then
 					chatLine = Localization.Get("got_big_kill")[RandomInt(1, #Localization.Get("got_big_kill"))]
 				end
-				if gold > lastGold + 1000 * turboGoldScale and RandomInt(1, 9) > 3 then
+				if gold > Talk.lastGold + 1000 * turboGoldScale and RandomInt(1, 9) > 3 then
 					chatLine = Localization.Get("got_big_kill_2")[RandomInt(1, #Localization.Get("got_big_kill_2"))]
 				end
-				if gold > lastGold + 1500 * turboGoldScale then
+				if gold > Talk.lastGold + 1500 * turboGoldScale then
 					chatLine = Localization.Get("got_big_kill_3")[RandomInt(1, #Localization.Get("got_big_kill_3"))]
 				end
 			end
@@ -982,34 +984,34 @@ function Usage.SetTalkMessage()
 			end
 		end
 		if not bot:IsAlive() then
-			if killStreak >= 8 and killStreakEndedTime == -999 then
-				killStreakEndedTime = DotaTime()
-				killStreak = 0
+			if Talk.killStreak >= 8 and Talk.killStreakEndedTime == -999 then
+				Talk.killStreakEndedTime = DotaTime()
+				Talk.killStreak = 0
 			end
-			if killStreakEndedTime ~= -999 and killStreakEndedTime < DotaTime() - chatReplyDelay then
+			if Talk.killStreakEndedTime ~= -999 and Talk.killStreakEndedTime < DotaTime() - Talk.chatReplyDelay then
 				bot:ActionImmediate_Chat(
 					Localization.Get("kill_streak_ended")[RandomInt(1, #Localization.Get("kill_streak_ended"))],
 					true
 				)
-				killStreakEndedTime = -999
-				chatReplyDelay = RandomInt(36, 49) / 10
+				Talk.killStreakEndedTime = -999
+				Talk.chatReplyDelay = RandomInt(36, 49) / 10
 			end
 		end
-		if kills == 0 and deaths >= sayEndDeathThreshold and Fu.Role.NotSayJiDi() then
+		if kills == 0 and deaths >= Talk.sayEndDeathThreshold and Fu.Role.NotSayJiDi() then
 			bot:ActionImmediate_Chat(Localization.Get("say_end")[RandomInt(1, #Localization.Get("say_end"))], true)
 			Fu.Role["sayJiDi"] = true
 		end
 	end
-	if lastDeaths == deaths then
-		if kills >= lastKills + 1 then
-			killStreak = killStreak + 1
+	if Talk.lastDeaths == deaths then
+		if kills >= Talk.lastKills + 1 then
+			Talk.killStreak = Talk.killStreak + 1
 		end
 	else
-		killStreak = 0
+		Talk.killStreak = 0
 	end
-	lastKills = GetHeroKills(playerId)
-	lastDeaths = GetHeroDeaths(playerId)
-	lastGold = bot:GetGold()
+	Talk.lastKills = GetHeroKills(playerId)
+	Talk.lastDeaths = GetHeroDeaths(playerId)
+	Talk.lastGold = bot:GetGold()
 end
 -- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Safelane" ... "Pos 5 Hard Support".
 -- hero_selection.lua (draft and pre-game) and the reply member's chat callback (in game) put the request on the
@@ -1215,7 +1217,9 @@ function Usage.SetReplyHumanTime(chatEvent)
 	end
 end
 -- [SHy-BUYBACK]: every buyback with its reason, and a support's skipped one (once per 10s).
-local function BuybackLog(what, why, ancientHp, remaining)
+-- Buyback helpers share one chunk local (the 200-local limit).
+local Buyback = {}
+function Buyback.BuybackLog(what, why, ancientHp, remaining)
 	pcall(
 		print,
 		string.format(
@@ -1231,17 +1235,17 @@ local function BuybackLog(what, why, ancientHp, remaining)
 		)
 	)
 end
-local function BuybackNow(why, ancientHp, remaining)
+function Buyback.BuybackNow(why, ancientHp, remaining)
 	Fu.Role["lastbbtime"] = DotaTime()
-	BuybackLog("buyback", why, ancientHp, remaining)
+	Buyback.BuybackLog("buyback", why, ancientHp, remaining)
 	bot:ActionImmediate_Buyback()
 end
-local function BuybackSkipLog(why, ancientHp, remaining)
+function Buyback.BuybackSkipLog(why, ancientHp, remaining)
 	if DotaTime() < (bot._buybackSkipLogAt or -99) + 10 then
 		return
 	end
 	bot._buybackSkipLogAt = DotaTime()
-	BuybackLog("skip", why, ancientHp, remaining)
+	Buyback.BuybackLog("skip", why, ancientHp, remaining)
 end
 -- `!about` (#215): the team's first bot (GetTeamPlayers order) says the script name, the version (the welcome's
 -- text: AboutRules.VersionOf, from bots/customize/version.lua) and where to send feedback, in the chat the command came from. Called from the buyback
@@ -1461,7 +1465,7 @@ local function ConsiderBuyback()
 		local enemiesNearAncient = Fu.GetEnemiesAroundLoc(ancient:GetLocation(), 1500)
 		local alliesNearAncient = Fu.GetAlliesNearLoc(ancient:GetLocation(), 1500)
 		if enemiesNearAncient > 1 and #alliesNearAncient == 0 and remainingRespawnTime > 20 then
-			BuybackNow("ancient-hp", ancientHp, remainingRespawnTime)
+			Buyback.BuybackNow("ancient-hp", ancientHp, remainingRespawnTime)
 			return
 		end
 	end
@@ -1499,23 +1503,22 @@ local function ConsiderBuyback()
 			end
 		end
 		if supportWhy == nil then
-			BuybackSkipLog("support-" .. wantWhy, ancientHp, remainingRespawnTime)
+			Buyback.BuybackSkipLog("support-" .. wantWhy, ancientHp, remainingRespawnTime)
 			return
 		end
 		wantWhy = wantWhy .. "+" .. supportWhy
 	end
-	BuybackNow(wantWhy, ancientHp, remainingRespawnTime)
+	Buyback.BuybackNow(wantWhy, ancientHp, remainingRespawnTime)
 end
-local lastCourierActionTime = -90
-local courierState = -1
 bot.SShopUser = false
-local lastCourierReturnTime = -90
-local lastCourierBurstTime = -90
+-- Courier timing shares one chunk local (the 200-local limit).
+local Courier =
+	{ lastCourierActionTime = -90, courierState = -1, lastCourierReturnTime = -90, lastCourierBurstTime = -90 }
 local function ManageCourier()
 	if
 		DotaTime() < -56
 		or bot:HasModifier("modifier_arc_warden_tempest_double")
-		or lastCourierReturnTime + 5.0 > DotaTime()
+		or Courier.lastCourierReturnTime + 5.0 > DotaTime()
 	then
 		return
 	end
@@ -1525,19 +1528,19 @@ local function ManageCourier()
 	end
 	local reportEnabled = 10 == 10
 	local courier = bot.theCourier
-	courierState = GetCourierState(courier)
+	Courier.courierState = GetCourierState(courier)
 	local courierHpRatio = courier:GetHealth() / courier:GetMaxHealth()
 	local now = DotaTime()
 	local isAlive = bot:IsAlive()
 	local botLevel = bot:GetLevel()
 	local deliverCooldown = 2.3
 	local returnCooldown = 5.0
-	if courierState == COURIER_STATE_DEAD then
+	if Courier.courierState == COURIER_STATE_DEAD then
 		return
 	end
 	if Usage.IsCourierTargetedByUnit(courier) then
-		if now > lastCourierReturnTime + returnCooldown then
-			lastCourierReturnTime = now
+		if now > Courier.lastCourierReturnTime + returnCooldown then
+			Courier.lastCourierReturnTime = now
 			Fu.SetReportMotive(reportEnabled, "信使可能会被攻击")
 			bot:ActionImmediate_Courier(courier, COURIER_ACTION_RETURN_STASH_ITEMS)
 			local courierBurst = courier:GetAbilityByName("courier_burst")
@@ -1555,15 +1558,15 @@ local function ManageCourier()
 	end
 	if
 		(
-			courierState == COURIER_STATE_RETURNING_TO_BASE
-			or courierState == COURIER_STATE_AT_BASE
-			or courierState == COURIER_STATE_IDLE
-		) and now > lastCourierReturnTime + returnCooldown
+			Courier.courierState == COURIER_STATE_RETURNING_TO_BASE
+			or Courier.courierState == COURIER_STATE_AT_BASE
+			or Courier.courierState == COURIER_STATE_IDLE
+		) and now > Courier.lastCourierReturnTime + returnCooldown
 	then
-		if courierState == COURIER_STATE_AT_BASE and courierHpRatio < 0.8 then
+		if Courier.courierState == COURIER_STATE_AT_BASE and courierHpRatio < 0.8 then
 			return
 		end
-		if courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() > 800 then
+		if Courier.courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() > 800 then
 			Fu.SetReportMotive(reportEnabled, "让空闲的信使返回")
 			bot:ActionImmediate_Courier(courier, COURIER_ACTION_RETURN_STASH_ITEMS)
 			return
@@ -1574,8 +1577,8 @@ local function ManageCourier()
 			isAlive
 			and now < 20
 			and (
-				courierState == COURIER_STATE_AT_BASE
-				or courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() < 800
+				Courier.courierState == COURIER_STATE_AT_BASE
+				or Courier.courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() < 800
 			)
 		then
 			local wardInStash = false
@@ -1594,13 +1597,13 @@ local function ManageCourier()
 			if wardInStash then
 				pcall(Usage.LogCourier, "take")
 				bot:ActionImmediate_Courier(courier, COURIER_ACTION_TAKE_STASH_ITEMS)
-				lastCourierActionTime = now
+				Courier.lastCourierActionTime = now
 				return
 			end
-			if bot:GetCourierValue() > 0 and now > lastCourierActionTime + deliverCooldown then
+			if bot:GetCourierValue() > 0 and now > Courier.lastCourierActionTime + deliverCooldown then
 				pcall(Usage.LogCourier, "deliver")
 				bot:ActionImmediate_Courier(courier, COURIER_ACTION_TRANSFER_ITEMS)
-				lastCourierActionTime = now
+				Courier.lastCourierActionTime = now
 				return
 			end
 		end
@@ -1608,8 +1611,8 @@ local function ManageCourier()
 			isAlive
 			and (not Usage.IsInvFull(bot) or now <= 5 * 60 or bot.currBuyingBasicItemList ~= nil and #bot.currBuyingBasicItemList == 0 and bot.currBuyingItemInPurchaseList ~= "item_travel_boots")
 			and (
-				courierState == COURIER_STATE_AT_BASE
-				or courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() < 800
+				Courier.courierState == COURIER_STATE_AT_BASE
+				or Courier.courierState == COURIER_STATE_IDLE and courier:DistanceFromFountain() < 800
 			)
 		then
 			local stashItemCount = Usage.GetNumStashItem(bot)
@@ -1624,9 +1627,9 @@ local function ManageCourier()
 					Fu.SetReportMotive(reportEnabled, "信使取出物品并开始运输")
 					pcall(Usage.LogCourier, "take")
 					bot:ActionImmediate_Courier(courier, COURIER_ACTION_TAKE_STASH_ITEMS)
-					lastCourierActionTime = now
-					if now > lastCourierBurstTime + returnCooldown then
-						lastCourierBurstTime = now
+					Courier.lastCourierActionTime = now
+					if now > Courier.lastCourierBurstTime + returnCooldown then
+						Courier.lastCourierBurstTime = now
 						local courierBurst = courier:GetAbilityByName("courier_burst")
 						if courierBurst and courierBurst:IsFullyCastable() then
 							Fu.SetReportMotive(reportEnabled, "信使加速配送")
@@ -1642,12 +1645,12 @@ local function ManageCourier()
 			and courier:DistanceFromFountain() < 7000
 			and Fu.Item.GetEmptyInventoryAmount(courier) >= 2
 			and not Usage.IsEnemyHeroAroundSecretShop()
-			and now > lastCourierActionTime + deliverCooldown
+			and now > Courier.lastCourierActionTime + deliverCooldown
 		then
 			Fu.SetReportMotive(reportEnabled, "信使前往神秘商店购物")
 			bot:ActionImmediate_Courier(courier, COURIER_ACTION_SECRET_SHOP)
 			bot.SShopUser = true
-			lastCourierActionTime = now
+			Courier.lastCourierActionTime = now
 			return
 		end
 		if
@@ -1657,12 +1660,12 @@ local function ManageCourier()
 			and bot:GetStashValue() < 100
 			and (not Usage.IsInvFull(bot) or Usage.GetNumStashItem(bot) == 0 and bot.currBuyingBasicItemList ~= nil and #bot.currBuyingBasicItemList == 0)
 			and (courier:DistanceFromFountain() < 4000 + botLevel * 200 or GetUnitToUnitDistance(bot, courier) < 1800)
-			and now > lastCourierActionTime + deliverCooldown
+			and now > Courier.lastCourierActionTime + deliverCooldown
 		then
 			Fu.SetReportMotive(reportEnabled, "信使运输背包中的东西")
 			pcall(Usage.LogCourier, "deliver")
 			bot:ActionImmediate_Courier(courier, COURIER_ACTION_TRANSFER_ITEMS)
-			lastCourierActionTime = now
+			Courier.lastCourierActionTime = now
 			return
 		end
 	end
@@ -1842,26 +1845,29 @@ function Usage.IsDoomMuted(unit)
 end
 -- Only healing is blocked; mana still pays for item actives (BKB, Force Staff, Shiva's...).
 -- Pure heals are skipped; HP+mana items only when mana is not low; mana items are not touched.
-local DOOM_HEAL_ONLY = {
-	item_flask = true,
-	item_tango = true,
-	item_tango_single = true,
-	item_faerie_fire = true,
-	item_greater_faerie_fire = true,
-	item_satanic = true,
-}
-local DOOM_HEAL_AND_MANA = {
-	item_magic_stick = true,
-	item_magic_wand = true,
-	item_holy_locket = true,
-	item_bottle = true,
-	item_cheese = true,
+-- Doom item groups share one chunk local (the 200-local limit).
+local Doom = {
+	healOnly = {
+		item_flask = true,
+		item_tango = true,
+		item_tango_single = true,
+		item_faerie_fire = true,
+		item_greater_faerie_fire = true,
+		item_satanic = true,
+	},
+	healAndMana = {
+		item_magic_stick = true,
+		item_magic_wand = true,
+		item_holy_locket = true,
+		item_bottle = true,
+		item_cheese = true,
+	},
 }
 local function DoomWastes(name)
-	if DOOM_HEAL_ONLY[name] then
+	if Doom.healOnly[name] then
 		return true
 	end
-	return DOOM_HEAL_AND_MANA[name] == true and bot:GetMana() / math.max(1, bot:GetMaxMana()) >= 0.3
+	return Doom.healAndMana[name] == true and bot:GetMana() / math.max(1, bot:GetMaxMana()) >= 0.3
 end
 -- The slots ConsiderItems reads: main, backpack (Smoke only), TP scroll, neutral. Built once instead of on every
 -- item think (#52: one table less per bot per think); same slots in the same order.
@@ -4176,19 +4182,20 @@ end
 -- bots/lib/systems/edda_rules.lua. The order is Action_UseAbility on the item from whatever slot it is in (it is
 -- UNSWAPPABLE: every swap of it was reverted in game 070). Whether that order consumes a passive item, and what
 -- the engine does with the basic-ability choice, is what [SHy-ITEM] edda-result shows.
-local EddaRules = require(GetScriptDirectory() .. "/lib/systems/edda_rules")
-local function EddaSlot()
+-- Edda helpers share one chunk local (the 200-local limit).
+local Edda = { Rules = require(GetScriptDirectory() .. "/lib/systems/edda_rules") }
+function Edda.Slot()
 	for slot = 0, 16 do
 		local item = bot:GetItemInSlot(slot)
-		if item ~= nil and not item:IsNull() and item:GetName() == EddaRules.ITEM then
+		if item ~= nil and not item:IsNull() and item:GetName() == Edda.Rules.ITEM then
 			return slot, item
 		end
 	end
 	return -1, nil
 end
-local function EddaSnapshot()
+function Edda.Snapshot()
 	local levels = {}
-	for _, name in ipairs(EddaRules.BASIC_ABILITIES) do
+	for _, name in ipairs(Edda.Rules.BASIC_ABILITIES) do
 		local ability = bot:GetAbilityByName(name)
 		local level, max, up = -1, -1, "-"
 		if ability ~= nil and not ability:IsNull() then
@@ -4198,7 +4205,7 @@ local function EddaSnapshot()
 		end
 		levels[#levels + 1] = { name = name, level = level, max = max, up = up }
 	end
-	local slot = EddaSlot()
+	local slot = Edda.Slot()
 	return {
 		at = DotaTime(),
 		levels = levels,
@@ -4209,23 +4216,23 @@ local function EddaSnapshot()
 		slot = slot,
 	}
 end
-local function EddaUpgradeText(levels)
+function Edda.UpgradeText(levels)
 	local parts = {}
 	for _, entry in ipairs(levels) do
 		parts[#parts + 1] = entry.up
 	end
 	return table.concat(parts, "/")
 end
-local function EddaHeroName()
+function Edda.HeroName()
 	return (string.gsub(botName, "npc_dota_hero_", ""))
 end
-local function LogEddaState(when, slot, item)
+function Edda.LogEddaState(when, slot, item)
 	pcall(
 		print,
 		string.format(
 			"[SHy-ITEM] t=%.0f %s edda-state when=%s slot=%d passive=%s castable=%s ready=%s cd=%.0f cdLeft=%.0f",
 			DotaTime(),
-			EddaHeroName(),
+			Edda.HeroName(),
 			when,
 			slot,
 			tostring(item:IsPassive()),
@@ -4237,12 +4244,12 @@ local function LogEddaState(when, slot, item)
 	)
 end
 -- The probe after a consume order: levels, max levels, ability points, int and the item at +1s and +5s.
-local function EddaFollowUp(state)
+function Edda.FollowUp(state)
 	local probe = state.probe
 	if probe == nil then
 		return
 	end
-	local step = EddaRules.RESULT_AFTER[probe.step]
+	local step = Edda.Rules.RESULT_AFTER[probe.step]
 	if step == nil then
 		state.probe = nil
 		return
@@ -4251,8 +4258,8 @@ local function EddaFollowUp(state)
 		return
 	end
 	probe.step = probe.step + 1
-	local after = EddaSnapshot()
-	local outcome, changed = EddaRules.Outcome(probe.before, after)
+	local after = Edda.Snapshot()
+	local outcome, changed = Edda.Rules.Outcome(probe.before, after)
 	if outcome ~= "not-consumed" then
 		state.consumed = true
 	end
@@ -4261,15 +4268,15 @@ local function EddaFollowUp(state)
 		string.format(
 			"[SHy-ITEM] t=%.0f %s edda-result after=%.1f try=%d outcome=%s changed=%s consumed=%d levels=%s was=%s up=%s points=%d->%d int=%.0f->%.0f slot=%d",
 			DotaTime(),
-			EddaHeroName(),
+			Edda.HeroName(),
 			DotaTime() - probe.before.at,
 			state.tries,
 			outcome,
 			changed ~= nil and (string.gsub(changed, "^winter_wyvern_", "")) or "-",
 			outcome ~= "not-consumed" and 1 or 0,
-			EddaRules.LevelsText(after.levels),
-			EddaRules.LevelsText(probe.before.levels),
-			EddaUpgradeText(after.levels),
+			Edda.Rules.LevelsText(after.levels),
+			Edda.Rules.LevelsText(probe.before.levels),
+			Edda.UpgradeText(after.levels),
 			probe.before.points,
 			after.points,
 			probe.before.int,
@@ -4278,16 +4285,16 @@ local function EddaFollowUp(state)
 		)
 	)
 	-- The only API call that could answer the ability choice: tried once per game, logged, nothing further.
-	if not state.choiceTried and EddaRules.ShouldTryChoice(after, outcome) then
+	if not state.choiceTried and Edda.Rules.ShouldTryChoice(after, outcome) then
 		state.choiceTried = true
-		bot:ActionImmediate_LevelAbility(EddaRules.KEY_ABILITY)
+		bot:ActionImmediate_LevelAbility(Edda.Rules.KEY_ABILITY)
 		pcall(
 			print,
 			string.format(
 				"[SHy-ITEM] t=%.0f %s edda-choice try=LevelAbility ability=%s outcome=%s points=%d",
 				DotaTime(),
-				EddaHeroName(),
-				(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+				Edda.HeroName(),
+				(string.gsub(Edda.Rules.KEY_ABILITY, "^winter_wyvern_", "")),
 				outcome,
 				after.points
 			)
@@ -4303,25 +4310,25 @@ function Usage.TryConsumeEdda()
 		state = { tries = 0 }
 		bot._edda = state
 	end
-	EddaFollowUp(state)
+	Edda.FollowUp(state)
 	if state.consumed then
 		return false
 	end
-	local slot, item = EddaSlot()
+	local slot, item = Edda.Slot()
 	if item == nil then
 		return false
 	end
 	if state.loggedSlot ~= slot then
 		state.loggedSlot = slot
-		LogEddaState(state.loggedFirst and "slot" or "first", slot, item)
+		Edda.LogEddaState(state.loggedFirst and "slot" or "first", slot, item)
 		state.loggedFirst = true
 	end
 	local cooldown = item:GetCooldownTimeRemaining() or 0
 	if cooldown <= 0 and not state.loggedReady then
 		state.loggedReady = true
-		LogEddaState("ready", slot, item)
+		Edda.LogEddaState("ready", slot, item)
 	end
-	local why = EddaRules.ConsumeWhy({
+	local why = Edda.Rules.ConsumeWhy({
 		cooldown = cooldown,
 		tries = state.tries,
 		sinceTry = state.lastTryAt ~= nil and DotaTime() - state.lastTryAt or nil,
@@ -4335,25 +4342,25 @@ function Usage.TryConsumeEdda()
 	if why == nil then
 		return false
 	end
-	local before = EddaSnapshot()
+	local before = Edda.Snapshot()
 	state.tries = state.tries + 1
 	state.lastTryAt = DotaTime()
 	state.probe = { before = before, step = 1 }
-	local key = bot:GetAbilityByName(EddaRules.KEY_ABILITY)
+	local key = bot:GetAbilityByName(Edda.Rules.KEY_ABILITY)
 	pcall(
 		print,
 		string.format(
 			"[SHy-ITEM] t=%.0f %s edda-consume why=%s try=%d ability=%s level=%s heroLevel=%d int=%.0f slot=%d levels=%s points=%d",
 			DotaTime(),
-			EddaHeroName(),
+			Edda.HeroName(),
 			why,
 			state.tries,
-			(string.gsub(EddaRules.KEY_ABILITY, "^winter_wyvern_", "")),
+			(string.gsub(Edda.Rules.KEY_ABILITY, "^winter_wyvern_", "")),
 			key ~= nil and string.format("%d/%d", key:GetLevel() or -1, key:GetMaxLevel() or -1) or "-",
 			before.heroLevel,
 			before.int,
 			slot,
-			EddaRules.LevelsText(before.levels),
+			Edda.Rules.LevelsText(before.levels),
 			before.points
 		)
 	)
@@ -5873,7 +5880,9 @@ end
 -- Enemy heroes seen turning invisible, kept 4s (Dust keeps its own copy with its own logs). The
 -- reveal order is Dust, then a Sentry (plain or from a dispenser), then the Distiller: each one
 -- holds back while one earlier in the order is ready.
-local function TrackFaders()
+-- Sentry and distiller reveal helpers share one chunk local (the 200-local limit).
+local Reveal = {}
+function Reveal.TrackFaders()
 	local now = DotaTime()
 	bot._faders = bot._faders or {}
 	for _, enemy in pairs(Fu.GetEnemiesNearLoc(bot:GetLocation(), 1600) or {}) do
@@ -5892,7 +5901,7 @@ local function TrackFaders()
 		end
 	end
 end
-local function ReadyMainItem(name)
+function Reveal.ReadyMainItem(name)
 	local slot = bot:FindItemSlot(name)
 	if slot < 0 or slot > 5 then
 		return nil
@@ -5903,17 +5912,17 @@ local function ReadyMainItem(name)
 	end
 	return nil
 end
-local function SentryReady()
-	if ReadyMainItem("item_ward_sentry") ~= nil then
+function Reveal.SentryReady()
+	if Reveal.ReadyMainItem("item_ward_sentry") ~= nil then
 		return true
 	end
-	local dispenser = ReadyMainItem("item_ward_dispenser")
+	local dispenser = Reveal.ReadyMainItem("item_ward_dispenser")
 	return dispenser ~= nil and (dispenser:GetSecondaryCharges() or 0) > 0
 end
 -- A fader out of sight whose last spot is within maxDist and still in our vision. Faders in skip
 -- (playerId -> DotaTime until which he is passed over) are passed over.
-local function FaderSpot(maxDist, skip)
-	TrackFaders()
+function Reveal.FaderSpot(maxDist, skip)
+	Reveal.TrackFaders()
 	local now = DotaTime()
 	for playerId, fader in pairs(bot._faders) do
 		local info = GetHeroLastSeenInfo(playerId)
@@ -5927,7 +5936,7 @@ local function FaderSpot(maxDist, skip)
 	end
 	return nil
 end
-local function RevealLog(item, who, dist)
+function Reveal.Log(item, who, dist)
 	pcall(
 		print,
 		string.format(
@@ -5942,7 +5951,7 @@ local function RevealLog(item, who, dist)
 end
 -- Sentry spot for a fader: cast range 500, True Sight 1050 (game files). The ward goes on his
 -- last spot when that is within 500, else 480 toward it.
-local function SentrySpotFor(loc)
+function Reveal.SentrySpotFor(loc)
 	local botLocation = bot:GetLocation()
 	local dx, dy = loc.x - botLocation.x, loc.y - botLocation.y
 	local len = math.sqrt(dx * dx + dy * dy)
@@ -5954,8 +5963,8 @@ end
 -- No sentry where True Sight already is (our towers, an allied sentry or Gem: Site.IsLocationHaveTrueSight),
 -- and none closer than 1050 (sentry True Sight radius, game files) to an allied sentry, so the circles
 -- do not overlap. User rule.
-local SENTRY_SIGHT = 1050
 local function SentrySpotUseless(spot)
+	local SENTRY_SIGHT = 1050
 	if Fu.Site.IsLocationHaveTrueSight(spot) then
 		return "true-sight"
 	end
@@ -5972,18 +5981,18 @@ local function SentrySpotUseless(spot)
 end
 Usage.SentrySpotUseless = SentrySpotUseless
 function Usage.ConsiderSentryReveal(item, isDispenser)
-	if ReadyMainItem("item_dust") ~= nil then
+	if Reveal.ReadyMainItem("item_dust") ~= nil then
 		return BOT_ACTION_DESIRE_NONE
 	end
 	-- Game 037: a skip cleared the fader and the next think re-added him (up to 30 lines/s). A skipped
 	-- fader is now passed over for 5s, so the skip is logged once per fader per 5s.
 	bot._sentrySkipUntil = bot._sentrySkipUntil or {}
-	local pid, loc, who = FaderSpot(500 + 1000, bot._sentrySkipUntil)
+	local pid, loc, who = Reveal.FaderSpot(500 + 1000, bot._sentrySkipUntil)
 	if pid == nil then
 		return BOT_ACTION_DESIRE_NONE
 	end
 	do
-		local why = SentrySpotUseless(loc) or SentrySpotUseless(SentrySpotFor(loc))
+		local why = SentrySpotUseless(loc) or SentrySpotUseless(Reveal.SentrySpotFor(loc))
 		if why ~= nil then
 			bot._sentrySkipUntil[pid] = DotaTime() + 5
 			pcall(
@@ -6018,17 +6027,17 @@ function Usage.ConsiderSentryReveal(item, isDispenser)
 		end
 	end
 	bot._faders[pid] = nil
-	RevealLog(isDispenser and "dispenser-sentry" or "sentry", who, GetUnitToLocationDistance(bot, loc))
-	return BOT_ACTION_DESIRE_HIGH, SentrySpotFor(loc), "ground", "sentry-reveal"
+	Reveal.Log(isDispenser and "dispenser-sentry" or "sentry", who, GetUnitToLocationDistance(bot, loc))
+	return BOT_ACTION_DESIRE_HIGH, Reveal.SentrySpotFor(loc), "ground", "sentry-reveal"
 end
 Usage.ConsiderItemDesire["item_ward_dispenser"] = function(item)
 	return Usage.ConsiderSentryReveal(item, true)
 end
 local function DistillerGroundSpot()
-	if ReadyMainItem("item_dust") ~= nil or SentryReady() then
+	if Reveal.ReadyMainItem("item_dust") ~= nil or Reveal.SentryReady() then
 		return nil
 	end
-	local pid, loc, who = FaderSpot(1000 + castRangeBonus)
+	local pid, loc, who = Reveal.FaderSpot(1000 + castRangeBonus)
 	if pid ~= nil then
 		bot._faders[pid] = nil
 		return loc, who

@@ -563,6 +563,7 @@ function main(args) {
 					: `\n(a runtime file outside ${BOTS_DIR}? the game only gets ${BOTS_DIR})`)
 		);
 	}
+	if (args.testGame) require("./lua_locals").checkMap(files);
 	const steps = plan(dest, files, manifest.get(dest), args.force);
 	if (path.basename(dest) !== "bots") notes.push(`the game only loads a folder named "bots" (this is ${path.basename(dest)})`);
 
