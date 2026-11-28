@@ -17,16 +17,18 @@ function X.ConsiderStolenSpell(ability)
 		local AphoticShieldDesire, AphoticShieldTarget = X.ConsiderAphoticShield()
 		if AphoticShieldDesire > 0 then
 			bot:Action_UseAbilityOnEntity(aphoticShieldAbility, AphoticShieldTarget)
-			return
+			return "cast", AphoticShieldTarget
 		end
+		return true
 	end
 	if abilityName == "abaddon_death_coil" then
 		mistCoilAbility = ability
 		local MistCoilDesire, MistCoilTarget = X.ConsiderMistCoil()
 		if MistCoilDesire > 0 then
 			bot:Action_UseAbilityOnEntity(mistCoilAbility, MistCoilTarget)
-			return
+			return "cast", MistCoilTarget
 		end
+		return true
 	end
 end
 function X.ConsiderMistCoil()
@@ -34,7 +36,9 @@ function X.ConsiderMistCoil()
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
 	local castRange = Fu.GetProperCastRange(false, bot, mistCoilAbility:GetCastRange())
-	local damage = mistCoilAbility:GetSpecialValueInt("target_damage")
+	-- Valve datafeed hero_id=102: the value is "damage_heal" (95/170/245/320); "target_damage" no longer exists and
+	-- read 0, so the kill check never fired (hero_abaddon.lua has the same fix).
+	local damage = mistCoilAbility:GetSpecialValueInt("damage_heal")
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	for _, enemyHero in pairs(nearbyEnemies) do

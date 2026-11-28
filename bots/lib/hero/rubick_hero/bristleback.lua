@@ -25,39 +25,48 @@ function X.ConsiderStolenSpell(ability)
 		HairBallDesire, HairBallLocation = X.ConsiderHairBall()
 		if HairBallDesire > 0 then
 			bot:Action_UseAbilityOnLocation(hairballAbility, HairBallLocation)
-			return
+			return "cast", HairBallLocation
 		end
+		return true
 	end
 	if abilityName == "bristleback_bristleback" then
 		bristlebackAbility = ability
 		BristlebackDesire, BristlebackLocation = X.ConsiderBristleback()
 		if BristlebackDesire > 0 then
 			bot:Action_UseAbilityOnLocation(bristlebackAbility, BristlebackLocation)
-			return
+			return "cast", BristlebackLocation
 		end
+		return true
 	end
 	if abilityName == "bristleback_viscous_nasal_goo" then
 		viscousNasalGooAbility = ability
 		ViscousNasalGooDesire, ViscousNasalGooTarget = X.ConsiderViscousNasalGoo()
 		if ViscousNasalGooDesire > 0 then
 			bot:Action_UseAbilityOnEntity(viscousNasalGooAbility, ViscousNasalGooTarget)
-			return
+			return "cast", ViscousNasalGooTarget
 		end
+		return true
 	end
 	if abilityName == "bristleback_quill_spray" then
 		quillSprayAbility = ability
 		QuillSprayDesire = X.ConsiderQuillSpray()
 		if QuillSprayDesire > 0 then
 			bot:Action_UseAbility(quillSprayAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderViscousNasalGoo()
 	if not viscousNasalGooAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE, 0
 	end
+	-- "radius_scepter" is not in the Valve datafeed (hero_id=99); whether the game still has it is unverified. Read 0,
+	-- every enemy list below was empty. The cast range stands in for it, as in hero_bristleback.lua.
 	local scepterRadius = viscousNasalGooAbility:GetSpecialValueInt("radius_scepter")
+	if scepterRadius <= 0 then
+		scepterRadius = Fu.GetProperCastRange(false, bot, viscousNasalGooAbility:GetCastRange())
+	end
 	local castRange = Fu.GetProperCastRange(false, bot, viscousNasalGooAbility:GetCastRange())
 	local manaCost = viscousNasalGooAbility:GetManaCost()
 	local enemiesInScepterRadius = Fu.GetNearbyHeroes(bot, scepterRadius, true, BOT_MODE_NONE)

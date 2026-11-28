@@ -32,32 +32,36 @@ function X.ConsiderStolenSpell(ability)
 		CrystalCloneDesire = X.ConsiderCrystalClone()
 		if CrystalCloneDesire > 0 then
 			bot:Action_UseAbility(crystalCloneAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_crystal_nova" then
 		crystalNovaAbility = ability
 		CrystalNovaDesire, CrystalNovaLocation = X.ConsiderCrystalNova()
 		if CrystalNovaDesire > 0 then
 			bot:Action_UseAbilityOnLocation(crystalNovaAbility, CrystalNovaLocation)
-			return
+			return "cast", CrystalNovaLocation
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_frostbite" then
 		frostbiteAbility = ability
 		FrostbiteDesire, FrostbiteTarget = X.ConsiderFrostbite()
 		if FrostbiteDesire > 0 then
 			bot:Action_UseAbilityOnEntity(frostbiteAbility, FrostbiteTarget)
-			return
+			return "cast", FrostbiteTarget
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_freezing_field" then
 		freezingFieldAbility = ability
 		FreezingFieldDesire = X.ConsiderFreezingField()
 		if FreezingFieldDesire > 0 then
 			bot:Action_UseAbility(freezingFieldAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderCombo()
