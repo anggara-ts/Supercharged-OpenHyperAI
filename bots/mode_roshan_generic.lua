@@ -510,7 +510,9 @@ local function TakeTimeNeeded(roshanLocation)
 		roshHp = roshan:GetHealth()
 		roshMax = roshan:GetMaxHealth()
 	end
-	-- Roshan's armor takes roughly half of right-click damage.
+	-- Roshan's armor takes roughly half of right-click damage. This kill time sets the call window only; the tank check
+	-- (RoshanRules.GroupFit) uses RoshanRules.HitDps, which game 091 measured at about a quarter (#12): left as it is
+	-- until a game shows the call windows with the fit's new numbers.
 	local killTime = math.max(8, math.min(60, roshHp / math.max(1, groupDps * 0.5)))
 	return etas[gatherCount].eta + killTime, etas[gatherCount].eta, killTime, members, groupDps, roshHp, roshMax
 end
@@ -542,11 +544,18 @@ local function GroupFitAt(roshanLocation)
 	end
 	local roshMax = 6000 + 130 * math.max(0, DotaTime() / 60)
 	local roshHp = roshMax * (roshRatioNow or 1)
+	-- armor=: Roshan's armor as the engine reads it (#12 game 091: his growth per minute is not in the game files, the
+	-- fit uses the base 30; this measures it), - when he is not seen.
+	local armor = "-"
 	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
 		roshHp, roshMax = roshan:GetHealth(), roshan:GetMaxHealth()
+		local okArmor, value = pcall(roshan.GetArmor, roshan)
+		if okArmor and type(value) == "number" then
+			armor = string.format("%.1f", value)
+		end
 	end
 	local ok, why = RoshanRules.GroupFit({ members = members, groupDps = groupDps, roshHp = roshHp, roshMax = roshMax })
-	return ok, why .. " members=" .. (#names > 0 and table.concat(names, ",") or "-"), #members
+	return ok, why .. " armor=" .. armor .. " members=" .. (#names > 0 and table.concat(names, ",") or "-"), #members
 end
 -- Roshan's HP ratio: seen now (remembered per team), or last seen within 10s while he is alive (#12, game 069 24:18:
 -- every Dire bot stepped out at 28-36%, Roshan dropped out of sight, and the finishing check fell back to the
@@ -1239,8 +1248,9 @@ function Think()
 	-- The group at the pit has to tank Roshan to half HP (GroupFitAt, #12 game 069 20:17-21:14). While others still
 	-- walk in it waits for them; with nobody left to come (or the window or the 40s cap forcing it) the call drops.
 	-- The fit's numbers go on the commit line (#12, game 087: 3 of 4 committed takes left Roshan at 61-92%), with each
-	-- member's HP (members=name:hp): game 088's two commits set RoshanRules.HALF_CREDIT to 1.0, and the members list
-	-- is the data a per-member model (who Roshan hits first, how long each lasts) would need.
+	-- member's HP (members=name:hp) and Roshan's armor (armor=): games 088-091's commits set RoshanRules.HALF_CREDIT and
+	-- HIT_SHARE, and the members list is the data a per-member model (who Roshan hits first, how long each lasts) would
+	-- need.
 	local commitFit = finishing and "finishing" or "-"
 	if safe and not committed and not finishing and (full or arrived or windowTight or capped) then
 		local fitOk, fitWhy, atPit = GroupFitAt(roshanLocation)

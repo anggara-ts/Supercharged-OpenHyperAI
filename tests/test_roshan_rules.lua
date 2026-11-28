@@ -23,7 +23,9 @@ T.test("game 068 Dire 41:24 (5/5, killed in 20s): fits", function()
 			member(1.00, 1800), -- dark_willow
 			member(0.90, 2800), -- undying
 		},
-		groupDps = 5 * 170,
+		-- He died in 20s: 11330 HP in 20s needs 566 off his HP per second, about 2350 right-click through the model
+		-- (the old 5 x 170 here was a guess; no model kills him in 20s with it).
+		groupDps = 5 * 470,
 		roshHp = 6000 + 130 * 41,
 		roshMax = 6000 + 130 * 41,
 	})
@@ -88,9 +90,21 @@ T.test("a hurt group is not sent (average under 70%)", function()
 	T.ok(not R.GroupFit({ members = {} }), "nobody coming")
 end)
 
-T.test("full-HP groups at HALF_CREDIT 1.0: 5 at 20:00 fit; 4 at 25:00, 3 at 40:00 and 2 at 45:00 do not", function()
+T.test("time to half: right-click through armor 30, 70% of it lands, minus his regeneration", function()
 	local R = rules()
-	T.eq(R.HALF_CREDIT, 1.0, "credit (game 088 retune)")
+	T.eq(R.HALF_CREDIT, 0.75, "credit (game 091 retune)")
+	T.near(R.ArmorThrough(30), 1 / 2.8, 1e-9, "armor 30 lets 35.7% through")
+	T.near(R.ArmorThrough(0), 1, 1e-9, "no armor")
+	-- 1000 right-click: 1000 / 2.8 * 0.7 = 250 lands, 20 regenerates.
+	T.near(R.HitDps(1000), 230, 1e-6, "1000 right-click")
+	T.eq(R.HitDps(50), 0, "his regeneration outheals 50")
+	T.near(R.HalfTime(10000, 10000, 1000), 5000 / 230, 1e-6, "full Roshan")
+	T.eq(R.HalfTime(4000, 10000, 1000), 0, "already under half")
+	T.near(R.HalfTime(10000, 10000, 0), 5000, 1e-9, "no damage: never")
+end)
+
+T.test("full-HP groups at 31:00: 5 carries' worth of right-click fit, 4 supports do not", function()
+	local R = rules()
 	local function group(n, maxHp, dps, minute)
 		local members = {}
 		for i = 1, n do
@@ -99,70 +113,94 @@ T.test("full-HP groups at HALF_CREDIT 1.0: 5 at 20:00 fit; 4 at 25:00, 3 at 40:0
 		local roshHp = 6000 + 130 * minute
 		return R.GroupFit({ members = members, groupDps = n * dps, roshHp = roshHp, roshMax = roshHp })
 	end
-	-- 5 x 1300 HP: pool 5 * 715 = 3575, drain 170 + 7 * 5 = 205 -> tank 17.4s; half 4300 / 250 = 17.2s.
-	local ok, why, numbers = group(5, 1300, 100, 20)
-	T.ok(ok, "5 at 20:00 " .. why)
-	T.near(numbers.tank, 3575 / 205, 1e-9, "tank")
-	T.near(numbers.half, 4300 / 250, 1e-9, "half")
-	-- 4 x 1500 HP (game 088 Radiant's shape, 4/4 at 21:37, left Roshan at 34%): tank 3300 / 198 = 16.7s, half
-	-- 4625 / 260 = 17.8s. It passed at the old 0.75.
-	ok, why = group(4, 1500, 130, 25)
-	T.ok(not ok, "4 at 25:00 " .. why)
+	-- 5 x 2000 HP, 5 x 160 right-click: tank 5500 / 205 = 26.8s; half 5015 / (800 / 2.8 * 0.7 - 20) = 27.9s.
+	local ok, why, numbers = group(5, 2000, 160, 31)
+	T.ok(ok, "5 at 31:00 " .. why)
+	T.near(numbers.tank, 5500 / 205, 1e-9, "tank")
+	T.near(numbers.half, 5015 / (800 / 2.8 * 0.7 - 20), 1e-6, "half")
+	T.ok(string.find(why, "dps=800,hit=180)", 1, true) ~= nil, "the line names the right-click and what lands: " .. why)
+	-- 4 x 1500 HP, 4 x 130: tank 3300 / 198 = 16.7s; half 5015 / (520 / 2.8 * 0.7 - 20) = 45.6s.
+	ok, why = group(4, 1500, 130, 31)
+	T.ok(not ok, "4 at 31:00 " .. why)
 	T.ok(string.find(why, "tank-short", 1, true) ~= nil, why)
-	-- 3 x 2200 HP: tank 3630 / 191 = 19.0s, half 5600 / 255 = 22.0s.
-	ok, why = group(3, 2200, 170, 40)
-	T.ok(not ok, "3 at 40:00 " .. why)
-	ok, why = group(2, 2400, 200, 45)
-	T.ok(not ok, "2 at 45:00 " .. why)
 end)
 
--- Every committed take with recorded fit numbers (#12, retune after game 088, maintainer decision D7 2026-11-27).
--- tank / half are the group(tank=,half=) seconds of the log: the commit line's fit= for game 088 (the first game that
--- printed it), else the last call line's fit before the commit (the call counts everyone coming, the commit only the
--- heroes at the pit, so those are an approximation). The logs round to whole seconds.
+-- Every committed take with recorded fit numbers (#12). { name, game second, tank, half }: tank / half are the
+-- group(tank=,half=) seconds of the log, from the old model (half = Roshan's HP above half / half the right-click).
+-- Games 088-091 print them on the commit line; older games only on the call lines before it (the call counts everyone
+-- coming, often a minute or more before the commit), so those are an approximation. The logs round to whole seconds.
+-- Logged(...) rebuilds the GroupFit input: Roshan's HP at that minute (6000 + 130 per minute, full), the right-click that
+-- gave the logged half (roshMax / half), and five full-HP members whose pool gives the logged tank.
+local function Logged(R, take)
+	local minute, tank, half = take[2] / 60, take[3], take[4]
+	local roshMax = 6000 + 130 * minute
+	local pool = tank * (170 + R.SLAM_DPS * 5)
+	local members = {}
+	for i = 1, 5 do
+		members[i] = member(1.0, pool / 5 / (1 - R.LEAVE_HP))
+	end
+	return R.GroupFit({ members = members, groupDps = roshMax / half, roshHp = roshMax, roshMax = roshMax })
+end
+-- Commits that passed the old check and failed (games 088-091: every commit with fit= on its commit line).
+local FAILED = {
+	{ "091 dire 5/5 (Roshan 76% after 16s, four left under 45%, Radiant took him)", 1885, 21, 14 },
+	{ "091 dire 4/5 (the same take, the first commit line)", 1885, 17, 17 },
+	{ "088 radiant 4/4 (left Roshan at 34%)", 1297, 16, 19 },
+	{ "088 dire 4/4 (left him at 18%)", 1681, 14, 18 },
+	{ "089 dire 5/5 (left at 82% after 19s)", 1594, 17, 17 },
+	{ "089 dire 5/5 (left at 94% after 15s)", 2069, 18, 14 },
+	{ "089 dire 4/5 (left at 75% after 20s)", 2199, 18, 17 },
+	{ "087 radiant 4/4 (left at 90%)", 1048, 11, 12 },
+	{ "083 dire 4/5 (left at 51%)", 1963, 13, 16 },
+	{ "083 dire 4/4 (left at 51%)", 2034, 12, 16 },
+	{ "081 dire 5/5 (left at 83%)", 1572, 13, 15 },
+	{ "069 radiant 3/5 (left at 66%)", 1116, 14, 16 },
+	{ "069 dire 3/4 (left at 28%)", 1403, 14, 15 },
+}
+-- Kills (games 074-087, call-line fits) that still pass: a fast group.
 local KILLED = {
-	{ "074 t=2455 radiant (Roshan died t=2486)", 26, 16 },
-	{ "074 t=4216 dire (died t=4252)", 37, 10 },
-	{ "078 t=1457 radiant (died t=1497)", 17, 13 },
-	{ "081 t=1981 dire (died t=2011)", 14, 11 },
-	{ "082 t=809 radiant (died t=851)", 18, 16 },
-	{ "082 t=1917 radiant (died t=1952)", 12, 12 },
-	{ "083 t=3246 radiant (Aegis t=3275)", 34, 8 },
-	{ "084 t=3742 radiant (died t=3793)", 38, 8 },
-	{ "085 t=1963 dire (Aegis t=2001)", 24, 10 },
-	{ "085 t=2637 dire (Aegis t=2677)", 30, 9 },
-	{ "085 t=3488 dire (Aegis t=3569)", 24, 12 },
+	{ "074 dire (died t=4252)", 4216, 37, 10 },
+	{ "083 radiant (Aegis t=3275)", 3246, 34, 8 },
+	{ "084 radiant (died t=3793)", 3742, 38, 8 },
+	{ "085 dire (Aegis t=2001)", 1963, 24, 10 },
+	{ "085 dire (Aegis t=2677)", 2637, 30, 9 },
+	{ "085 dire (Aegis t=3569)", 3488, 24, 12 },
+	{ "087 dire (died t=1647)", 1622, 17, 10 },
 }
--- Takes that failed and that the tank check now drops (they passed at 0.75).
-local DROPPED_NOW = {
-	{ "088 t=1297 radiant commit 4/4 (left Roshan at 34%)", 16, 19 },
-	{ "088 t=1681 dire commit 4/4 (left Roshan at 18%)", 14, 18 },
-	{ "087 t=1048 radiant 4/4 (left at 90%)", 11, 12 },
-	{ "083 t=1963 dire 4/5 (left at 51%)", 13, 16 },
-	{ "083 t=2034 dire 4/4 (left at 51%)", 12, 16 },
-	{ "081 t=1572 dire 5/5 (left at 83%)", 13, 15 },
-	{ "069 t=1116 radiant 3/5 (left at 66%)", 14, 16 },
-	{ "069 t=1403 dire 3/4 (left at 28%)", 14, 15 },
+-- Kills that the new check drops (the cost of the retune; a slower group, call-line fits only).
+local KILLED_DROPPED = {
+	{ "074 radiant (died t=2486)", 2455, 26, 16 },
+	{ "078 radiant (died t=1497)", 1457, 17, 13 },
+	{ "081 dire (died t=2011)", 1981, 14, 11 },
+	{ "082 radiant (died t=851)", 809, 18, 16 },
+	{ "082 radiant (died t=1952)", 1917, 12, 12 },
+	{ "084 dire (died t=3018)", 2964, 16, 12 },
+	{ "085 radiant (died t=1261)", 1240, 14, 14 },
 }
--- Takes that failed with the tank check passing: the cause was not the tank model (enemies came, the group split, or
--- the finish dropped), so no credit drops them without dropping the kills above (082 t=1917 sits at 12/12).
+-- Takes that failed with the check passing: the cause was not the tank model (enemies came, the group split).
 local FAILED_BUT_FIT = {
-	{ "087 t=1337 radiant 3/5 by=window (left at 60%)", 22, 10 },
-	{ "087 t=1535 dire 4/4 (left at 48%; the next take killed him)", 17, 10 },
+	{ "087 radiant 3/5 by=window (left at 60%)", 1337, 22, 10 },
+	{ "087 dire 4/4 (left at 48%; the next take killed him)", 1535, 17, 10 },
 }
 
-T.test("recorded takes: the kills still pass the tank check, game 088's two commits drop", function()
+T.test("recorded takes: every failed commit of games 088-091 drops, the fast kills still pass", function()
 	local R = rules()
-	for _, take in ipairs(KILLED) do
-		T.ok(R.TankCovers(take[2], take[3]), "killed: " .. take[1])
+	for _, take in ipairs(FAILED) do
+		local ok, why, numbers = Logged(R, take)
+		T.near(numbers.tank, take[3], 1e-6, "rebuilt tank: " .. take[1])
+		T.ok(not ok, "failed, dropped now: " .. take[1] .. " " .. why)
 	end
-	for _, take in ipairs(DROPPED_NOW) do
-		T.ok(not R.TankCovers(take[2], take[3]), "dropped now: " .. take[1])
-		local old = take[2] >= take[3] * 0.75
-		T.ok(old, "passed at the old 0.75: " .. take[1])
+	for _, take in ipairs(KILLED) do
+		local ok, why = Logged(R, take)
+		T.ok(ok, "killed, still passes: " .. take[1] .. " " .. why)
+	end
+	for _, take in ipairs(KILLED_DROPPED) do
+		local ok, why = Logged(R, take)
+		T.ok(not ok, "killed, dropped now: " .. take[1] .. " " .. why)
 	end
 	for _, take in ipairs(FAILED_BUT_FIT) do
-		T.ok(R.TankCovers(take[2], take[3]), "still passes (not a tank-model failure): " .. take[1])
+		local ok, why = Logged(R, take)
+		T.ok(ok, "still passes (not a tank-model failure): " .. take[1] .. " " .. why)
 	end
 end)
 
@@ -178,7 +216,7 @@ T.test("the fit line names the weakest member's seconds to the leave line (low=)
 	})
 	T.ok(ok, why)
 	T.near(numbers.low, 100 / 177, 1e-9, "low")
-	T.ok(string.find(why, "low=1)", 1, true) ~= nil, why)
+	T.ok(string.find(why, "low=1,", 1, true) ~= nil, why)
 end)
 
 T.test("finish clear: under 36% with no foe near the pit", function()
