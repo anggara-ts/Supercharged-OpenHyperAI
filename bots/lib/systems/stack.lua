@@ -209,6 +209,22 @@ local function Finish(bot, stacked, why, before, after, visible, sightDist)
 		why,
 		sightDist ~= nil and tostring(math.floor(sightDist)) or "-"
 	)
+	-- A stacked camp gets one normal (not danger) ping on the camp centre, as a human does after a stack, so the
+	-- team sees where it is (maintainer, 2026-11-28). A human's ping on a camp makes the game tell how many stacks
+	-- it has; whether a bot's location ping does the same is UNVERIFIED (the [SHy-STACK] ping line gives the time
+	-- to check in game).
+	if stacked == "yes" and s.loc ~= nil then
+		bot:ActionImmediate_Ping(s.loc.x, s.loc.y, true)
+		Log(
+			"[SHy-STACK] t=%.0f %s ping camp=%s type=%s creeps=%d before=%d",
+			DotaTime(),
+			HeroName(bot),
+			s.key,
+			s.type,
+			after or -1,
+			before or s.before or -1
+		)
+	end
 end
 
 -- One line per phase change, so a stack that stands still (waiting at the camp, out at the exit point) is
