@@ -11,14 +11,23 @@ local RuneRules = {}
 RuneRules.PASS_WAIT = 1.0
 -- Seconds a bot that took a rune over stays its picker (renewed every think the passing grab still wants it).
 RuneRules.PASS_TAKE_FOR = 3
-function RuneRules.PassingYield(allyCloser, allyIsHuman, allyInRuneMode, waited)
+-- allyApproaching: the closer ally has walked PASS_APPROACH or more toward the rune since this bot first saw it closer
+-- (game 091, 32:35-32:37: Largo walked from 885 to 407 on the push, not in the rune mode, and Lion from 962 took it
+-- over after 2.4 s; the closer one was going there anyway).
+RuneRules.PASS_APPROACH = 150
+function RuneRules.PassingYield(allyCloser, allyIsHuman, allyInRuneMode, waited, allyApproaching)
 	if not allyCloser then
 		return false
 	end
-	if allyIsHuman or allyInRuneMode then
+	if allyIsHuman or allyInRuneMode or allyApproaching then
 		return true
 	end
 	return waited < RuneRules.PASS_WAIT
+end
+-- Has the closer ally walked toward the rune since this bot first saw it closer? startDist / nowDist: that ally's
+-- distance to the rune then and now.
+function RuneRules.AllyApproaching(startDist, nowDist)
+	return startDist ~= nil and nowDist ~= nil and startDist - nowDist >= RuneRules.PASS_APPROACH
 end
 -- The passing grab's desire with no enemy hero within 1200 (above a walking push or defend at 0.95, #99), and for a
 -- power rune within PASS_POWER_STEP even with enemy heroes near, unless one hit the bot in the last 1.5s.
@@ -239,6 +248,17 @@ end
 -- Another bot's live claim on the rune: true when this bot should leave it.
 function RuneRules.ClaimedByOther(claim, holder, now)
 	return claim ~= nil and claim.holder ~= holder and now < claim.untilAt
+end
+-- A claim passes to a bot that is now much closer than its holder (game 091, 32:37: Lion claimed the top jungle
+-- bounty from 962, and Largo, by then 407 from it, left it: `passing-take-skip ... dist=407 why=claimed:lion`).
+-- myDist / holderDist: this bot's and the holder's distance to the rune.
+RuneRules.CLAIM_TAKE_NEAR = 500
+RuneRules.CLAIM_TAKE_GAP = 300
+function RuneRules.ClaimTakeover(myDist, holderDist)
+	return myDist ~= nil
+		and holderDist ~= nil
+		and myDist <= RuneRules.CLAIM_TAKE_NEAR
+		and holderDist - myDist >= RuneRules.CLAIM_TAKE_GAP
 end
 
 -- Wisdom shrine (#32). Game data (7.42 pak01 scripts/npc/npc_units.txt, npc_dota_xp_fountain): RingRadius 100, so a

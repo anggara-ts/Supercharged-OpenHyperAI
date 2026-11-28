@@ -1693,7 +1693,7 @@ function GetDesireRaw()
 					bot._passWait = bot._passWait or {}
 					local wait = bot._passWait[id]
 					if closer == nil or wait == nil or wait.ally ~= closer then
-						wait = closer ~= nil and { ally = closer, since = DotaTime() } or nil
+						wait = closer ~= nil and { ally = closer, since = DotaTime(), startDist = closerDist } or nil
 						bot._passWait[id] = wait
 					end
 					local waited = wait ~= nil and DotaTime() - wait.since or 0
@@ -1701,13 +1701,39 @@ function GetDesireRaw()
 						closer ~= nil,
 						closer ~= nil and not closer:IsBot(),
 						closer ~= nil and closer:GetActiveMode() == BOT_MODE_RUNE,
-						waited
+						waited,
+						closer ~= nil and wait ~= nil and RuneRules.AllyApproaching(wait.startDist, closerDist)
 					)
 					local claimKey = GetTeam() .. ":" .. id
 					local claim = RuneRules.passClaims[claimKey]
 					local skipWhy = nil
 					if RuneRules.ClaimedByOther(claim, bot, DotaTime()) and claim.holder:IsAlive() then
-						skipWhy = "claimed:" .. (string.gsub(claim.holder:GetUnitName(), "npc_dota_hero_", ""))
+						local holderDist = GetUnitToLocationDistance(claim.holder, loc)
+						local holderName = (string.gsub(claim.holder:GetUnitName(), "npc_dota_hero_", ""))
+						if RuneRules.ClaimTakeover(mine, holderDist) then
+							-- Game 091, 32:37: the claim passes to the bot that is now much closer.
+							RuneRules.passClaims[claimKey] =
+								RuneRules.NextClaim(nil, bot, DotaTime(), bot:GetActiveMode() == BOT_MODE_RUNE)
+							claim = RuneRules.passClaims[claimKey]
+							local takeKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+							if bot._passClaimTakeKey ~= takeKey then
+								bot._passClaimTakeKey = takeKey
+								pcall(
+									print,
+									string.format(
+										"[SHy-RUNE] t=%.0f %s passing-take spot=%d dist=%d over=%s holderDist=%d why=closer-than-claim",
+										DotaTime(),
+										(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+										id,
+										mine,
+										holderName,
+										holderDist
+									)
+								)
+							end
+						else
+							skipWhy = "claimed:" .. holderName
+						end
 					elseif closer ~= nil and not yield and bot:GetActiveMode() == BOT_MODE_ROSHAN then
 						-- A takeover loses to a running Roshan call (game 069 40:18-40:22: 0.97 never won over the
 						-- Roshan mode): leave the rune to an ally instead of taking it over.

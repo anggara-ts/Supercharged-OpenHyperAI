@@ -468,3 +468,21 @@ T.test("rune rules: no pick-up order where it never worked; let go at once (game
 	T.eq(gtaken, true, "taken=yes")
 	T.ok(R.RELEASE_STEP_DESIRE < 0.90, "the step stays under Valve's item mode (0.90)")
 end)
+
+T.test(
+	"passing grab (game 091): a closer ally walking to the rune keeps it, a much closer bot takes a claim over",
+	function()
+		local R = load()
+		-- 32:35-32:37: Largo walked from 885 to 407 on the push (not in the rune mode); Lion, 962 away, waited 2.4 s.
+		T.eq(R.AllyApproaching(885, 407), true, "Largo walked 478 toward it")
+		T.eq(R.AllyApproaching(885, 800), false, "85 is not an approach")
+		T.eq(R.AllyApproaching(nil, 407), false, "no start distance")
+		T.eq(R.PassingYield(true, false, false, 2.4, true), true, "Lion leaves it to the approaching Largo")
+		T.eq(R.PassingYield(true, false, false, 2.4, false), false, "a closer bot that stands still gave it up")
+		-- Lion's claim from 962 against Largo at 407: Largo takes it over.
+		T.eq(R.ClaimTakeover(407, 962), true, "407 against 962")
+		T.eq(R.ClaimTakeover(600, 962), false, "not within 500 of the rune")
+		T.eq(R.ClaimTakeover(407, 600), false, "the holder is only 193 farther")
+		T.eq(R.ClaimTakeover(nil, 962), false)
+	end
+)
