@@ -1,4 +1,5 @@
--- Chat text in English, Chinese, Russian, and Japanese.
+-- Chat text in English, Chinese, Russian, Japanese, and Indonesian.
+-- A key missing from a language falls back to English (Localization.Get).
 local Localization = {}
 local CustomLoader
 if GetScriptDirectory() == "bots" then
@@ -9,17 +10,21 @@ end
 local defaultLocale = "en"
 local strings = {
 	en = {
-		say_play_pos = "I will play position ",
+		say_play_pos = "I play position ",
 		-- `!about` answer (#215); %s is the version, the same text as the welcome's (chat_rules.lua WelcomeVersion). No URL: chat links are not clickable.
 		say_about = "Supercharged OpenHyperAI, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
 		pos_select_closed = "Position selection closed.",
-		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome): the version line, then
-		-- the Workshop page. No command hints (!pos, !Xpos Y, !sp, !debug; maintainer 2026-11-23). {version} and {date}:
-		-- bots/lib/systems/chat_rules.lua WelcomeVersion.
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome): version, then
+		-- "Update: {date}", then the two Workshop lines. No command hints (maintainer 2026-11-23). {version} and
+		-- {date}: bots/lib/systems/chat_rules.lua WelcomeVersion. The date is D-Mon-YYYY, for example 27-Nov-2026.
 		welcome = {
-			"Supercharged OpenHyperAI {version} ({date})",
-			"Feedback and known limitations: see the bot script's Workshop page.",
+			"Supercharged OpenHyperAI {version}",
+			"Update: {date}",
+			"For bot change log, feedback, and discussion",
+			"please visit the workshop page",
 		},
+		say_lang_set = "Speaking English.",
+		say_lang_bad = "Try !lang en, zh, ru, ja, or id.",
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
 		say_will_lose_2 = "Our numbers say less than 1% to win. We accept the verdict of mathematics. Well played!",
 		say_will_win = "We estimate our chance to win a team fight is over 90%. Probability is on our side.",
@@ -36,6 +41,8 @@ local strings = {
 			"First blood, as foretold. The stars were only mildly surprised.",
 		},
 		got_a_kill = {
+			"supp diff",
+			"carry diff",
 			"You fell as you played: boldly, briefly, and without a plan.",
 			"Courage without wisdom is just a faster walk to the fountain.",
 			"Rest now. The respawn timer is the only teacher you listen to.",
@@ -161,6 +168,8 @@ local strings = {
 		random_responses = {
 			"?",
 			"glhf",
+			"supp diff",
+			"carry diff",
 			"Fascinating. Truly. Please keep not playing.",
 			"Typing is not an ability. I checked the tooltip.",
 			"Wise words. Shame about the positioning.",
@@ -283,14 +292,18 @@ local strings = {
 		},
 	},
 	zh = {
-		say_play_pos = "我将玩位置 ",
+		say_play_pos = "我打位置 ",
 		say_about = "Supercharged OpenHyperAI，版本 %s。反馈、错误报告和已知限制：请查看脚本的创意工坊页面。",
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（{date}）",
-			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
+			"Supercharged OpenHyperAI {version}",
+			"更新：{date}",
+			"更新日志、反馈和讨论",
+			"请看创意工坊页面",
 		},
+		say_lang_set = "现在说中文。",
+		say_lang_bad = "请用 !lang en、zh、ru、ja 或 id。",
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
 		say_will_lose_2 = "我们估计胜率低于 1%。打得不错！",
 		say_will_win = "我们估计赢得团战的概率超过 90%",
@@ -298,6 +311,8 @@ local strings = {
 		can_try_tormentor = "我们尝试挑战 痛苦魔方 吗？",
 		say_come_def = "请来防守",
 		got_a_kill = {
+			"辅助差距",
+			"核心差距",
 			"享受复活计时吧，你会一直看自己倒数的",
 			"？",
 			"你得表现得更好一点！",
@@ -411,6 +426,8 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
+			"辅助差距",
+			"核心差距",
 			"不错，我家的狗都能做得更好。",
 			"专注于游戏可能会提高你的胜率。",
 			"我见过小兵都比你补得好。",
@@ -477,7 +494,7 @@ local strings = {
 			"吃灰灰，马上需要钱！",
 		},
 		say_ward_observer = { "插真眼。", "这里插个观察者。", "放观察者守卫。" },
-		say_ward_sentry = { "插假眼。", "放守卫图腾。", "这里补个哨兵。" },
+		say_ward_sentry = { "插假眼。", "补个假眼。", "这里补个哨兵。" },
 		say_ward_observer_defend = { "防守真眼。", "家里野区插眼。", "防守观察者。" },
 		say_ward_sentry_defend = { "防守假眼。", "家里补哨兵。", "防守真视。" },
 		say_ward_observer_offense = { "进攻真眼。", "对面野区插眼。", "深插观察者。" },
@@ -488,6 +505,7 @@ local strings = {
 		say_take_wisdom = { "去拿智慧神殿。", "我去收经验神殿。", "智慧神殿我来。" },
 		say_debug_on = { "调试模式已开启，机器人会更啰嗦。", "Verbose debug 已开启。" },
 		say_debug_off = { "调试模式已关闭。", "Verbose debug 已关闭。" },
+		pos_names = { "优势路", "中路", "劣势路", "游走", "硬辅" },
 		say_pos_refused_core = "{hero}不能打{pos}号位",
 		say_pos_refused_human = "{pos}号位是{hero}的",
 		say_pos_refused_same = "你已经是{pos}号位了",
@@ -512,14 +530,18 @@ local strings = {
 		say_gg_win = { "ez", "简单", "太简单了", "下把加油", "gg ez", "轻松", "不过如此" },
 	},
 	ru = {
-		say_play_pos = "Я буду играть на позиции ",
+		say_play_pos = "Играю на позиции ",
 		say_about = "Supercharged OpenHyperAI, версия %s. Отзывы, сообщения об ошибках и известные ограничения: подробнее на странице мастерской скрипта.",
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version} ({date})",
-			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
+			"Supercharged OpenHyperAI {version}",
+			"Обновление: {date}",
+			"Список изменений, отзывы и обсуждение",
+			"смотрите страницу в Мастерской",
 		},
+		say_lang_set = "Говорю по-русски.",
+		say_lang_bad = "Напишите !lang en, zh, ru, ja или id.",
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
 		say_will_lose_2 = "Мы оцениваем вероятность победы ниже 1%. Хорошая игра!",
 		say_will_win = "Мы оцениваем вероятность победы в командной битве более 90%",
@@ -527,6 +549,8 @@ local strings = {
 		can_try_tormentor = "Попробуем сразиться с Торментором?",
 		say_come_def = "Пожалуйста, приходите защищать",
 		got_a_kill = {
+			"сап дифф",
+			"керри дифф",
 			"Наслаждайся таймерами возрождения, ты будешь считать их всю игру",
 			"?",
 			"Тебе нужно стараться лучше!",
@@ -645,6 +669,8 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
+			"сап дифф",
+			"керри дифф",
 			"Неплохо, моя собака могла бы лучше.",
 			"Сфокусируйся на игре, может, винрейт улучшится.",
 			"Я видел, как крипы фармят лучше, чем ты.",
@@ -771,6 +797,7 @@ local strings = {
 		},
 		say_debug_on = { "Verbose debug ВКЛ.", "Режим отладки включён." },
 		say_debug_off = { "Verbose debug ВЫКЛ.", "Режим отладки выключен." },
+		pos_names = { "лёгкая", "мид", "сложная", "саппорт", "хард саппорт" },
 		say_pos_refused_core = "{hero} не может играть на позиции {pos}",
 		say_pos_refused_human = "позиция {pos} занята: {hero}",
 		say_pos_refused_same = "ты уже на позиции {pos}",
@@ -779,14 +806,18 @@ local strings = {
 		say_pos_refused_missing = "нет позиции {pos}",
 	},
 	ja = {
-		say_play_pos = "私はポジション ",
+		say_play_pos = "ポジション",
 		say_about = "Supercharged OpenHyperAI、バージョン %s。フィードバック、バグ報告、既知の制限については、スクリプトのワークショップページをご覧ください。",
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（{date}）",
-			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
+			"Supercharged OpenHyperAI {version}",
+			"更新: {date}",
+			"変更履歴、フィードバック、議論は",
+			"ワークショップのページへ",
 		},
+		say_lang_set = "日本語で話します。",
+		say_lang_bad = "!lang en, zh, ru, ja, id のどれかです。",
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
 		say_will_lose_2 = "勝率が1％未満と推定されます。ナイスプレイ！",
 		say_will_win = "チーム戦の勝率が90％以上と推定されます",
@@ -794,6 +825,8 @@ local strings = {
 		can_try_tormentor = "トーメンターを試してみませんか？",
 		say_come_def = "防御に来てください",
 		got_a_kill = {
+			"サポ差",
+			"キャリー差",
 			"リスポーンタイマーを楽しんでね、ゲーム中ずっと数えることになるよ",
 			"？",
 			"もっと頑張らないとね！",
@@ -912,6 +945,8 @@ local strings = {
 			"?",
 			"glhf",
 			"gg",
+			"サポ差",
+			"キャリー差",
 			"いいね、うちの犬の方が上手いよ。",
 			"プレイに集中すれば勝率が上がるかもね。",
 			"クリープの方が君よりうまくファームしてる。",
@@ -1034,6 +1069,56 @@ local strings = {
 		say_pos_refused_same_other = "{hero}はすでにポジション{pos}です",
 		say_pos_refused_missing = "ポジション{pos}はありません",
 	},
+	id = {
+		say_play_pos = "Saya main posisi ",
+		say_about = "Supercharged OpenHyperAI, versi %s. Masukan dan batasan yang diketahui: lihat halaman Workshop skrip bot.",
+		pos_select_closed = "Pemilihan posisi ditutup.",
+		welcome = {
+			"Supercharged OpenHyperAI {version}",
+			"Update: {date}",
+			"Untuk catatan perubahan, masukan, dan diskusi",
+			"silakan buka halaman Workshop",
+		},
+		say_lang_set = "Bahasa Indonesia.",
+		say_lang_bad = "Pakai !lang en, zh, ru, ja, atau id.",
+		got_first_blood = {
+			"First blood.",
+			"Hidup Jokowi!",
+			"supp diff",
+		},
+		got_a_kill = {
+			"supp diff",
+			"carry diff",
+			"Hidup Jokowi!",
+			"skill issue",
+			"wkwkwk",
+		},
+		got_big_kill = {
+			"carry diff",
+			"networth segitu, mainnya gitu",
+		},
+		got_big_kill_2 = {
+			"Hidup Jokowi!",
+			"farm-nya hilang dalam dua detik",
+		},
+		got_big_kill_3 = {
+			"supp diff",
+			"gold-nya gratisan",
+		},
+		kill_streak_ended = { "streak-nya selesai", "gg" },
+		say_end = { "gg", "gg wp" },
+		random_responses = {
+			"supp diff",
+			"carry diff",
+			"Hidup Jokowi!",
+			"wkwkwk",
+			"anjay",
+		},
+		say_gg_lose = { "gg", "gg wp" },
+		say_gg_win = { "gg", "gg ez", "Hidup Jokowi!" },
+		pos_names = { "safelane", "mid", "offlane", "soft supp", "hard supp" },
+		say_pos_prefix = "Pos",
+	},
 }
 if CustomLoader and CustomLoader.Enable and strings[CustomLoader.Localization] then
 	defaultLocale = CustomLoader.Localization
@@ -1042,6 +1127,36 @@ else
 end
 function Localization.Supported(locale)
 	return strings[locale] ~= nil
+end
+-- `!lang ru`, `!sp ru`, `!speak ru`. The code ("" when the command has none), or nil when the text is not one.
+function Localization.LanguageCommand(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local word, rest = text:lower():match("^%s*(!%a+)%s*(.*)$")
+	if word ~= "!lang" and word ~= "!sp" and word ~= "!speak" then
+		return nil
+	end
+	return rest:match("^(%a+)") or ""
+end
+-- Sets the language when the code is one this script speaks, and queues one team-chat line either way.
+-- Returns true when the text was a language command.
+function Localization.TakeLanguageCommand(text, team)
+	local code = Localization.LanguageCommand(text)
+	if code == nil then
+		return false
+	end
+	local ok = code ~= "" and Localization.Supported(code)
+	if ok then
+		CustomLoader.Localization = code
+	end
+	local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
+	local line = ok and Localization.Get("say_lang_set") or Localization.Get("say_lang_bad")
+	if type(line) ~= "string" or line == "" then
+		line = ok and "Language set." or "Try !lang en, zh, ru, ja, or id."
+	end
+	TeamMemory.Set(team, "langReply", line)
+	return true
 end
 function Localization.GetLocale()
 	return CustomLoader.Localization or defaultLocale

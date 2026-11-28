@@ -225,7 +225,7 @@ local function CheckArdmHeroSwap()
 	end
 	return false
 end
--- "I will play position 1 (Safelane)": the position name from the `!pos` list (#210, maintainer 2026-11-23).
+-- "I play position 1 (Safelane)": the position name from the `!pos` list (#210, maintainer 2026-11-23).
 local function PlayPosLine(position)
 	local PosRules = require(GetScriptDirectory() .. "/lib/systems/pos_command_rules")
 	return Localization.Get("say_play_pos")
@@ -287,6 +287,9 @@ local function LevelUpAbilities()
 			pcall(function()
 				bot:ActionImmediate_Chat(PlayPosLine(position), false)
 				bot.announcedRole = position
+				if TeamMemory.Get(GetTeam(), "posSaidAt") == nil then
+					TeamMemory.Set(GetTeam(), "posSaidAt", DotaTime())
+				end
 			end)
 		end
 	elseif position ~= lastPosition then
@@ -1110,6 +1113,33 @@ do
 		)
 	end
 end
+-- The team's reply bot says the `!lang` result. Queued by Localization.TakeLanguageCommand, because a chat
+-- callback cannot speak (game 078). One line, then the note is cleared, so the other bots stay quiet.
+function Usage.SayLanguageReply()
+	if bot.isBear ~= nil or bot:IsIllusion() or Fu.IsMeepoClone(bot) then
+		return
+	end
+	local line = TeamMemory.Get(GetTeam(), "langReply")
+	if type(line) ~= "string" or line == "" then
+		return
+	end
+	if bot:GetPlayerID() ~= Fu.Role.GetReplyMemberID() then
+		return
+	end
+	TeamMemory.Set(GetTeam(), "langReply", nil)
+	local said = pcall(function()
+		bot:ActionImmediate_Chat(line, false)
+	end) and "yes" or "error"
+	print(
+		string.format(
+			"[SHy-CHAT] t=%.0f %s lang said=%s locale=%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			said,
+			tostring(Localization.GetLocale())
+		)
+	)
+end
 function Usage.SetReplyHumanTime(chatEvent)
 	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
@@ -1138,10 +1168,9 @@ function Usage.SetReplyHumanTime(chatEvent)
 	if require(GetScriptDirectory() .. "/lib/systems/human_orders").OnChat(chatEvent) then
 		return
 	end
-	if string.find(chatText, "!sp") or string.find(chatText, "!speak") then
-		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
-		log("Set to speak: %s", language)
-		Fu.Customize.Localization = language
+	-- `!lang ru`, and the older `!sp` / `!speak`. One bot confirms in team chat (Usage.SayLanguageReply). A code
+	-- this script has no lines for is refused out loud, so a mistype is not silent.
+	if Localization.TakeLanguageCommand(chatText, GetTeam()) then
 		return
 	end
 	-- Position commands (#210): `!pos` asks the bots for their positions; none of them gets a chat reply.
@@ -12080,6 +12109,7 @@ function AbilityLevelUpThink()
 	end
 	Usage.AnswerPosRequest()
 	Usage.AnswerPosSwapReply()
+	Usage.SayLanguageReply()
 	if bot.lastLevelUpFrameProcessTime == nil then
 		bot.lastLevelUpFrameProcessTime = DotaTime()
 	end

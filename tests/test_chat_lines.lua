@@ -49,8 +49,31 @@ T.test("chat: every locale has the welcome lines, short and without links", func
 		lineCount = lineCount or count
 		T.eq(count, lineCount, "every locale has the same number of welcome lines")
 	end
-	T.eq(blocks, 4, "welcome lines in en, zh, ru and ja")
-	T.eq(lineCount, 2, "the welcome is the version line and the Workshop-page line")
+	T.eq(blocks, 5, "welcome lines in en, zh, ru, ja and id")
+	T.eq(lineCount, 4, "version, update date, then the two Workshop lines")
 	T.ok(not src:find("welcome_msgs", 1, true), "the old, never printed welcome_msgs are back")
 	T.ok(not src:find("http", 1, true), "a link in chat text (links in chat are not clickable)")
+end)
+
+T.test("chat: !lang ru is a language command, and a bad code is not silent", function()
+	Stub.reset({ hero = "npc_dota_hero_lich" })
+	local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+	T.eq(Localization.LanguageCommand("!lang ru"), "ru")
+	T.eq(Localization.LanguageCommand("!LANG RU"), "ru")
+	T.eq(Localization.LanguageCommand("!sp zh"), "zh")
+	T.eq(Localization.LanguageCommand("!speak ja"), "ja")
+	T.eq(Localization.LanguageCommand("!lang"), "")
+	T.eq(Localization.LanguageCommand("!pos 2"), nil)
+	T.eq(Localization.Supported("id"), true, "Indonesian")
+	T.eq(Localization.Supported("xx"), false)
+	local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
+	T.eq(Localization.TakeLanguageCommand("!lang ru", 2), true)
+	T.eq(Localization.GetLocale(), "ru")
+	T.ok(
+		type(TeamMemory.Get(2, "langReply")) == "string" and TeamMemory.Get(2, "langReply") ~= "",
+		"a reply was queued"
+	)
+	T.eq(Localization.TakeLanguageCommand("!lang nope", 2), true)
+	T.eq(Localization.GetLocale(), "ru", "a bad code leaves the language")
+	T.eq(Localization.TakeLanguageCommand("hello", 2), false)
 end)
