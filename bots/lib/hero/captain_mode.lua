@@ -2,6 +2,7 @@
 -- Accidental globals made file-local (#13): every bot shares one Lua state, so these were shared.
 local banHero, pickHero, isHumanPicked, isExcludedHero, randomAvailableHero, allHumansSelected, selectHeroes, collectPickedHeroes
 local removeFromPicked
+local TeamOrder = require(GetScriptDirectory() .. "/lib/systems/team_order")
 local function countArgs(...)
 	return select("#", ...)
 end
@@ -263,6 +264,9 @@ function assignLanes()
 		while i < #teamPlayers do
 			local member = GetTeamMember(i + 1)
 			if member ~= nil and member:IsHero() then
+				-- The lane table is keyed by team slot (i + 1); the role goes to the member's GetTeamPlayers index,
+				-- which Role.GetPosition reads (#286). On Dire with a human the two differ (game 087).
+				local roleIdx = TeamOrder.RoleIndex(teamPlayers, member:GetPlayerID(), i + 1)
 				local unitName = member:GetUnitName()
 				local role = X.PairsHeroNameNRole[teamKey][unitName]
 				if role == "support" then
@@ -270,38 +274,38 @@ function assignLanes()
 						if not supportAssigned.TEAM_RADIANT then
 							laneAssignments[teamKey][i + 1] = Lane.Bot
 							supportAssigned.TEAM_RADIANT = true
-							positionAssignments[teamKey][i + 1] = 5
+							positionAssignments[teamKey][roleIdx] = 5
 						else
 							laneAssignments[teamKey][i + 1] = Lane.Top
-							positionAssignments[teamKey][i + 1] = 4
+							positionAssignments[teamKey][roleIdx] = 4
 						end
 					else
 						if not supportAssigned.TEAM_DIRE then
 							laneAssignments[teamKey][i + 1] = Lane.Top
 							supportAssigned.TEAM_DIRE = true
-							positionAssignments[teamKey][i + 1] = 5
+							positionAssignments[teamKey][roleIdx] = 5
 						else
 							laneAssignments[teamKey][i + 1] = Lane.Bot
-							positionAssignments[teamKey][i + 1] = 4
+							positionAssignments[teamKey][roleIdx] = 4
 						end
 					end
 				elseif role == "midlaner" then
 					laneAssignments[teamKey][i + 1] = Lane.Mid
-					positionAssignments[teamKey][i + 1] = 2
+					positionAssignments[teamKey][roleIdx] = 2
 				elseif role == "offlaner" then
 					if GetTeam() == Team.Radiant then
 						laneAssignments[teamKey][i + 1] = Lane.Top
 					else
 						laneAssignments[teamKey][i + 1] = Lane.Bot
 					end
-					positionAssignments[teamKey][i + 1] = 3
+					positionAssignments[teamKey][roleIdx] = 3
 				elseif role == "carry" then
 					if GetTeam() == Team.Radiant then
 						laneAssignments[teamKey][i + 1] = Lane.Bot
 					else
 						laneAssignments[teamKey][i + 1] = Lane.Top
 					end
-					positionAssignments[teamKey][i + 1] = 1
+					positionAssignments[teamKey][roleIdx] = 1
 				end
 			end
 			i = i + 1

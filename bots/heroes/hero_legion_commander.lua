@@ -129,10 +129,9 @@ end
 nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"] =
 	Fu.SetUserHeroInit(nAbilityBuildList, nTalentBuildList, X["sBuyList"], X["sSellList"])
 X["sSkillList"] = Fu.Skill.GetSkillList(sAbilityList, nAbilityBuildList, sTalentList, nTalentBuildList)
-X["bDeafaultAbility"] = false
 -- Cast when cornered (retreating into 3+ enemies with no way out), before running further.
 X["LastStandSpells"] = { { name = "legion_commander_duel", kind = "unit" } }
-X["bDeafaultItem"] = false
+X["bDefaultItem"] = false
 function X.MinionThink(minion)
 	Minion.MinionThink(minion)
 end
@@ -232,7 +231,6 @@ function X.ConsiderQ()
 	local damage = overwhelmingOddsAbility:GetSpecialValueInt("damage") * 2
 	local damageType = DAMAGE_TYPE_MAGICAL
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(castRange)
-	local enemiesInExtendedRange = Fu.GetAroundEnemyHeroList(castRange + 200)
 	local castLocation = nil
 	local castReason = nil
 	for _, enemyHero in pairs(enemiesInRange) do
@@ -409,7 +407,6 @@ function X.ConsiderR()
 	local duelDuration = duelAbility:GetSpecialValueInt("duration") - 0.3
 	local duelDamage = bot:GetAttackDamage() * duelDuration / bot:GetSecondsPerAttack()
 	local damageType = DAMAGE_TYPE_PHYSICAL
-	local closeEnemies = Fu.GetAroundEnemyHeroList(350)
 	local enemiesInRange = Fu.GetAroundEnemyHeroList(650)
 	local castTarget = nil
 	local castReason = nil

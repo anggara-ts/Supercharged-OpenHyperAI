@@ -21,8 +21,9 @@ function X.ConsiderStolenSpell(ability)
 		if CounterSpellDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbility(counterspellAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "antimage_blink" then
 		blinkAbility = ability
@@ -30,8 +31,9 @@ function X.ConsiderStolenSpell(ability)
 		if BlinkDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnLocation(blinkAbility, BlinkLocation)
-			return
+			return "cast", BlinkLocation
 		end
+		return true
 	end
 	if abilityName == "antimage_mana_void" then
 		manaVoidAbility = ability
@@ -39,8 +41,9 @@ function X.ConsiderStolenSpell(ability)
 		if ManaVoidDesire > 0 then
 			Fu.SetQueuePtToINT(bot, false)
 			bot:ActionQueue_UseAbilityOnEntity(manaVoidAbility, ManaVoidTarget)
-			return
+			return "cast", ManaVoidTarget
 		end
+		return true
 	end
 end
 function X.ConsiderBlink()
@@ -163,7 +166,6 @@ function X.ConsiderBlink()
 	if Fu.IsPushing(bot) and bot:GetActiveModeDesire() > BOT_MODE_DESIRE_HIGH then
 		local nearbyAllies = Fu.GetAlliesNearLoc(bot:GetLocation(), 600)
 		local nearbyEnemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), 1200)
-		local nearbyEnemyTowers = bot:GetNearbyTowers(700, true)
 		local nearbyLaneCreeps = bot:GetNearbyLaneCreeps(1200, true)
 		if
 			nearbyLaneCreeps ~= nil

@@ -32,32 +32,36 @@ function X.ConsiderStolenSpell(ability)
 		CrystalCloneDesire = X.ConsiderCrystalClone()
 		if CrystalCloneDesire > 0 then
 			bot:Action_UseAbility(crystalCloneAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_crystal_nova" then
 		crystalNovaAbility = ability
 		CrystalNovaDesire, CrystalNovaLocation = X.ConsiderCrystalNova()
 		if CrystalNovaDesire > 0 then
 			bot:Action_UseAbilityOnLocation(crystalNovaAbility, CrystalNovaLocation)
-			return
+			return "cast", CrystalNovaLocation
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_frostbite" then
 		frostbiteAbility = ability
 		FrostbiteDesire, FrostbiteTarget = X.ConsiderFrostbite()
 		if FrostbiteDesire > 0 then
 			bot:Action_UseAbilityOnEntity(frostbiteAbility, FrostbiteTarget)
-			return
+			return "cast", FrostbiteTarget
 		end
+		return true
 	end
 	if abilityName == "crystal_maiden_freezing_field" then
 		freezingFieldAbility = ability
 		FreezingFieldDesire = X.ConsiderFreezingField()
 		if FreezingFieldDesire > 0 then
 			bot:Action_UseAbility(freezingFieldAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderCombo()
@@ -103,12 +107,12 @@ function X.ConsiderCrystalNova()
 	local enemiesInCastRange = Fu.GetNearbyHeroes(bot, castRange + radius, true, BOT_MODE_NONE)
 	local enemiesNearCastRange = Fu.GetNearbyHeroes(bot, castRange + radius + 150, true, BOT_MODE_NONE)
 	local nearbyEnemies = Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInCastRange)
-	local weakestNearEnemy, weakestNearEnemyHealth = X.cm_GetWeakestUnit(enemiesNearCastRange)
+	local weakestEnemy = X.cm_GetWeakestUnit(enemiesInCastRange)
+	local weakestNearEnemy = X.cm_GetWeakestUnit(enemiesNearCastRange)
 	local laneCreepsInRange = bot:GetNearbyLaneCreeps(castRange + radius, true)
 	local laneCreepsNearRange = bot:GetNearbyLaneCreeps(castRange + radius + 200, true)
-	local weakestCreep, weakestCreepHealth = X.cm_GetWeakestUnit(laneCreepsInRange)
-	local weakestNearCreep, weakestNearCreepHealth = X.cm_GetWeakestUnit(laneCreepsNearRange)
+	local weakestCreep = X.cm_GetWeakestUnit(laneCreepsInRange)
+	local weakestNearCreep = X.cm_GetWeakestUnit(laneCreepsNearRange)
 	local nearbyTowers = bot:GetNearbyTowers(1000, true)
 	local heroKillAoe = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0.8, damage)
 	local heroAoe = bot:FindAoELocation(true, true, bot:GetLocation(), castRange, radius, 0.8, 0)
@@ -294,8 +298,8 @@ function X.ConsiderFrostbite()
 	end
 	local enemiesInCastRange = Fu.GetNearbyHeroes(bot, castRange, true, BOT_MODE_NONE)
 	local enemiesNearCastRange = Fu.GetNearbyHeroes(bot, castRange + 200, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInCastRange)
-	local weakestNearEnemy, weakestNearEnemyHealth = X.cm_GetWeakestUnit(enemiesNearCastRange)
+	local weakestEnemy = X.cm_GetWeakestUnit(enemiesInCastRange)
+	local weakestNearEnemy = X.cm_GetWeakestUnit(enemiesNearCastRange)
 	local creepsInRange = bot:GetNearbyCreeps(castRange + 100, true)
 	local nearbyCreeps = bot:GetNearbyCreeps(1400, true)
 	local strongestCreep, strongestCreepHealth = X.cm_GetStrongestUnit(creepsInRange)
@@ -498,7 +502,6 @@ function X.ConsiderFreezingField()
 	local radius = freezingFieldAbility:GetAOERadius() * 0.88
 	local nearbyAllies = Fu.GetNearbyHeroes(bot, 1200, false, BOT_MODE_NONE)
 	local enemiesInRadius = Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE)
-	local weakestEnemy, weakestEnemyHealth = X.cm_GetWeakestUnit(enemiesInRadius)
 	local enemiesCaught = 0
 	for _, enemyHero in pairs(enemiesInRadius) do
 		if

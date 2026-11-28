@@ -24,8 +24,9 @@ function X.ConsiderStolenSpell(ability)
 		IceBlastReleaseDesire = X.ConsiderIceBlastRelease()
 		if IceBlastReleaseDesire > 0 then
 			bot:Action_UseAbility(iceBlastReleaseAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 	if abilityName == "ancient_apparition_ice_blast" then
 		iceBlastAbility = ability
@@ -33,32 +34,36 @@ function X.ConsiderStolenSpell(ability)
 		if IceBlastDesire > 0 then
 			bot:Action_UseAbilityOnLocation(iceBlastAbility, IceBlastLocation)
 			iceBlastCastLocation = IceBlastLocation
-			return
+			return "cast", IceBlastLocation
 		end
+		return true
 	end
 	if abilityName == "ancient_apparition_ice_vortex" then
 		iceVortexAbility = ability
 		IceVortexDesire, IceVortextLocation = X.ConsiderIceVortex()
 		if IceVortexDesire > 0 then
 			bot:Action_UseAbilityOnLocation(iceVortexAbility, IceVortextLocation)
-			return
+			return "cast", IceVortextLocation
 		end
+		return true
 	end
 	if abilityName == "ancient_apparition_cold_feet" then
 		coldFeetAbility = ability
 		ColdFeetDesire, ColdFeetTarget = X.ConsiderColdFeet()
 		if ColdFeetDesire > 0 then
 			bot:Action_UseAbilityOnEntity(coldFeetAbility, ColdFeetTarget)
-			return
+			return "cast", ColdFeetTarget
 		end
+		return true
 	end
 	if abilityName == "ancient_apparition_chilling_touch" then
 		chillingTouchAbility = ability
 		ChillingTouchDesire, ChillingTouchTarget = X.ConsiderChillingTouch()
 		if ChillingTouchDesire > 0 then
 			bot:Action_UseAbilityOnEntity(chillingTouchAbility, ChillingTouchTarget)
-			return
+			return "cast", ChillingTouchTarget
 		end
+		return true
 	end
 end
 function X.ConsiderColdFeet()
