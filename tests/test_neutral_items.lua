@@ -140,6 +140,14 @@ T.test("neutral items: Brick is thrown at the bot's target in a fight (through I
 	T.eq(orderedItem, brick, "Brick ordered")
 	T.eq(orderedTarget, enemy, "on the bot's target")
 	T.ok(printedUse("item_brick", "fight"), "the use is logged")
+	-- The rule's own line only: the neutral-slot use line (#116) is skipped for it.
+	local brickLines = 0
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "use item=item_brick", 1, true) then
+			brickLines = brickLines + 1
+		end
+	end
+	T.eq(brickLines, 1, "one use line for the Brick")
 end)
 
 T.test("neutral items: Mana Draught give rule (pure numbers)", function()
@@ -197,6 +205,146 @@ T.test("neutral items: Mana Draught is not given to an ally with an enemy hero n
 	enemy._loc = ally:GetLocation() + Vector(500, 0, 0)
 	local draught = Stub.newAbility("item_mana_draught", bot)
 	T.eq(Usage.ConsiderItemDesire["item_mana_draught"](draught), BOT_ACTION_DESIRE_NONE, "kept")
+end)
+
+T.test("neutral items: Mana Draught self rule (pure numbers)", function()
+	local Rules = assert(loadstring(T.read("bots/lib/systems/neutral_rules.lua"), "neutral_rules"))()
+	-- Game 087: Largo at 0.65 of ~800 mana misses 280, more than one 114 restore.
+	T.ok(Rules.ManaDraughtSelfWorth(280, 114, true), "misses a whole restore, calm")
+	T.ok(not Rules.ManaDraughtSelfWorth(100, 114, true), "would waste part of it")
+	T.ok(not Rules.ManaDraughtSelfWorth(500, 114, false), "an enemy hero could hit it: the effect would end")
+	T.ok(not Rules.ManaDraughtSelfWorth(500, 0, true), "no restore read")
+end)
+
+local function farFromEveryone(bot)
+	for _, team in pairs(Stub.teams) do
+		for _, hero in pairs(team) do
+			if hero ~= bot then
+				hero._loc = Vector(7000, 7000, 0)
+			end
+		end
+	end
+end
+
+T.test("neutral items: Mana Draught is drunk at 0.65 MP when nothing can hit the holder (#116, game 087)", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_largo", slot = 5, time = 1700 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	bot._maxMana, bot._mana = 800, 520
+	local draught = Stub.newAbility("item_mana_draught", bot)
+	local rule = Usage.ConsiderItemDesire["item_mana_draught"]
+	local desire, target, castType, why = rule(draught)
+	T.ok(desire > 0, "drunk")
+	T.eq(target, bot, "on self")
+	T.eq(castType, "none", "no-target order")
+	T.eq(why, "self", "reason")
+	T.ok(printedUse("item_mana_draught", "self"), "the use is logged")
+	bot._mana = 760
+	T.eq(rule(draught), BOT_ACTION_DESIRE_NONE, "kept when it would waste most of the restore")
+end)
+
+T.test("neutral items: Mana Draught is kept with an enemy hero close (an enemy hit ends the effect)", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_largo", slot = 5, time = 1700 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	bot._maxMana, bot._mana = 800, 200
+	local enemy = Stub.teams[bot:GetTeam() == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT][1]
+	enemy._loc = bot:GetLocation() + Vector(500, 0, 0)
+	local draught = Stub.newAbility("item_mana_draught", bot)
+	T.eq(Usage.ConsiderItemDesire["item_mana_draught"](draught), BOT_ACTION_DESIRE_NONE, "kept")
+end)
+
+-- #116 (game 087): Sven's mushrooms reached Puck, Largo and Brewmaster, none of whom held the kit. Each one's 14 eat
+-- orders consumed nothing before it was dropped.
+T.test("forager mushrooms: a bot without a Forager's Kit never orders an eat, and drops the mushroom once", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_puck", slot = 2, time = 1630 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	_G.GetDroppedItemList = function()
+		return {}
+	end
+	local nut = Stub.newAbility("item_foragers_stats", bot)
+	nut.IsFullyCastable = function()
+		return true
+	end
+	nut.IsTrained = function()
+		return true
+	end
+	bot._items[5] = nut
+	local eats, drops = 0, 0
+	bot.Action_UseAbility = function()
+		eats = eats + 1
+	end
+	bot.Action_UseAbilityOnEntity = function()
+		eats = eats + 1
+	end
+	bot.Action_DropItem = function(_, item)
+		if item == nut then
+			drops = drops + 1
+		end
+	end
+	for step = 0, 9 do
+		Stub.time = 1630 + step
+		Usage.EatForage()
+		Usage.DropForeignItems()
+	end
+	T.eq(eats, 0, "no eat order")
+	T.eq(drops, 1, "dropped once")
+	local noKit, dropLine = nil, nil
+	for _, line in ipairs(Stub.printed) do
+		if
+			string.find(line, "[SHy-FORAGE]", 1, true) and string.find(line, "no-kit item=item_foragers_stats", 1, true)
+		then
+			noKit = line
+		elseif string.find(line, "drop-foreign item=item_foragers_stats", 1, true) then
+			dropLine = line
+		end
+	end
+	T.ok(noKit ~= nil and string.find(noKit, "slot=5", 1, true), "no-kit line: " .. tostring(noKit))
+	T.ok(dropLine ~= nil and string.find(dropLine, "how=no-kit", 1, true), "drop line: " .. tostring(dropLine))
+end)
+
+-- Game 091, 25:06: Rubick's no-kit mushroom was still in the bag at the result line and no second order came.
+T.test("forager mushrooms: a mushroom still in the bag after the drop is dropped again, 3 orders at most", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_puck", slot = 2, time = 1506 })
+	local bot = Stub.bot
+	farFromEveryone(bot)
+	_G.GetDroppedItemList = function()
+		return {}
+	end
+	local nut = Stub.newAbility("item_foragers_stats", bot)
+	bot._items[3] = nut
+	bot.FindItemSlot = function(_, name)
+		return name == "item_foragers_stats" and 3 or -1
+	end
+	local drops, holds = 0, {}
+	bot.Action_DropItem = function(_, item)
+		if item == nut then
+			drops = drops + 1
+			holds[drops] = bot._castHoldUntil
+		end
+	end
+	for step = 0, 11 do
+		Stub.time = 1506 + step
+		Usage.DropForeignItems()
+	end
+	T.eq(drops, 3, "three drop orders")
+	T.eq(holds[1], nil, "the first order holds nothing")
+	T.ok(holds[2] ~= nil and holds[3] ~= nil, "tries 2 and 3 hold the mode Thinks")
+	local function line(text)
+		for _, printed in ipairs(Stub.printed) do
+			if string.find(printed, text, 1, true) then
+				return printed
+			end
+		end
+		return nil
+	end
+	T.ok(line("drop-foreign item=item_foragers_stats") ~= nil, "drop line")
+	T.ok(line("try=1 order=drop ok=yes") ~= nil, "try 1")
+	T.ok(line("try=2 order=drop+hold ok=yes") ~= nil, "try 2")
+	T.ok(line("try=3 order=drop+hold ok=yes") ~= nil, "try 3")
+	T.ok(line("inBag=yes ground=- try=1 next=retry") ~= nil, "result 1: retry")
+	T.ok(line("inBag=yes ground=- try=3 next=give-up") ~= nil, "result 3: give up")
 end)
 
 T.test("neutral items: Witchbane (Heavy Blade) is cast on a location, not a unit (through ItemUsageThink)", function()
@@ -306,3 +454,106 @@ T.test(
 		T.eq(firstCount, 1, "printed once")
 	end
 )
+
+-- #116 (game 081): a use rule's order on the neutral slot prints one [SHy-NEUTRAL] use line, whatever the target.
+T.test("neutral items: an order from the neutral slot prints a use line (unit, point, no target), throttled", function()
+	local Usage = loadUsage({ hero = "npc_dota_hero_lich", slot = 5, time = 1500 })
+	local bot = Stub.bot
+	local enemy = Stub.teams[bot:GetTeam() == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT][1]
+	local pogo = Stub.newAbility("item_pogo_stick", bot)
+	pogo.IsFullyCastable = function()
+		return true
+	end
+	pogo.IsTrained = function()
+		return true
+	end
+	bot._items[16] = pogo
+	local answer = { BOT_ACTION_DESIRE_HIGH, enemy, "unit", "test reason" }
+	Usage.ConsiderItemDesire["item_pogo_stick"] = function()
+		return answer[1], answer[2], answer[3], answer[4]
+	end
+	local function useLines()
+		local lines = {}
+		for _, line in ipairs(Stub.printed) do
+			if
+				string.find(line, "[SHy-NEUTRAL]", 1, true) and string.find(line, "use item=item_pogo_stick", 1, true)
+			then
+				lines[#lines + 1] = line
+			end
+		end
+		return lines
+	end
+	Usage.ItemUsageThink()
+	local enemyName = string.gsub(enemy:GetUnitName(), "npc_dota_hero_", "")
+	local lines = useLines()
+	T.eq(#lines, 1, "one use line")
+	T.ok(
+		lines[1] ~= nil and string.find(lines[1], "why=test_reason target=" .. enemyName .. " cast=unit", 1, true),
+		"unit target: " .. tostring(lines[1])
+	)
+	Stub.time = 1505
+	Usage.ItemUsageThink()
+	T.eq(#useLines(), 1, "no second line within 10 s")
+	Stub.time = 1516
+	answer = { BOT_ACTION_DESIRE_HIGH, bot:GetLocation() + Vector(300, 0, 0), "ground", nil }
+	Usage.ItemUsageThink()
+	lines = useLines()
+	T.ok(
+		lines[2] ~= nil and string.find(lines[2], "why=- target=loc cast=ground", 1, true),
+		"point target: " .. tostring(lines[2])
+	)
+	Stub.time = 1527
+	answer = { BOT_ACTION_DESIRE_HIGH, nil, "none", "escape" }
+	Usage.ItemUsageThink()
+	lines = useLines()
+	T.ok(
+		lines[3] ~= nil and string.find(lines[3], "why=escape target=- cast=none", 1, true),
+		"no target: " .. tostring(lines[3])
+	)
+end)
+
+-- #116 (game 085): a bot swap of a backpack item with an occupied main slot never moved the mushroom; only an empty
+-- main slot is used, and a bot with six full main slots waits.
+T.test("forager mushrooms: swapped only into an empty main slot, else wait-slot (item_purchase_generic)", function()
+	local bot = Stub.reset({ hero = "npc_dota_hero_venomancer", slot = 4, time = 1300 })
+	for _, team in pairs(Stub.teams) do
+		for _, hero in pairs(team) do
+			if hero ~= bot then
+				hero._loc = Vector(7000, 7000, 0)
+			end
+		end
+	end
+	for slot = 0, 5 do
+		bot._items[slot] = Stub.newAbility(slot == 5 and "item_clarity" or "item_magic_wand", bot)
+	end
+	bot._items[6] = Stub.newAbility("item_foragers_health", bot)
+	bot._items[16] = Stub.newAbility("item_foragers_kit", bot)
+	local swaps = {}
+	local originalSwap = _G.CDOTA_Bot_Script.ActionImmediate_SwapItems
+	_G.CDOTA_Bot_Script.ActionImmediate_SwapItems = function(_, a, b)
+		swaps[#swaps + 1] = { a, b }
+		bot._swapCheck = { a = a, b = b, at = DotaTime() }
+	end
+	local ok, err = Stub.load("item_purchase_generic")
+	T.ok(ok, "item_purchase_generic loads: " .. tostring(err))
+	for step = 1, 4 do
+		Stub.time = 1300 + step * 4
+		pcall(_G.ItemPurchaseThink)
+	end
+	T.eq(#swaps, 0, "no swap with an occupied main slot")
+	local waited = false
+	for _, line in ipairs(Stub.printed) do
+		if string.find(line, "wait-slot item=item_foragers_health slot=6 why=main-full", 1, true) then
+			waited = true
+		end
+	end
+	T.ok(waited, "wait-slot logged")
+	bot._items[3] = nil
+	for step = 5, 6 do
+		Stub.time = 1300 + step * 4
+		pcall(_G.ItemPurchaseThink)
+	end
+	T.ok(#swaps >= 1, "swapped once a main slot is free")
+	T.ok(swaps[1] ~= nil and swaps[1][1] == 6 and swaps[1][2] == 3, "into the empty slot 3")
+	_G.CDOTA_Bot_Script.ActionImmediate_SwapItems = originalSwap
+end)

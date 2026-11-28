@@ -59,10 +59,54 @@ T.test("foreign items: the ground owner carries to the bag, and a marked name st
 	T.eq(how, "drop-list", "how")
 	T.eq(F.Check(bot, salve), false, "own item")
 	local other = T.stub.newAbility("item_foragers_health", bot, false)
-	T.eq(F.Check(bot, other), false, "unknown item")
+	-- #116 (game 087): Medusa holds no Forager's Kit, so a mushroom with no known owner is not hers either.
+	local noKit, _, noKitHow = F.Check(bot, other)
+	T.eq(noKit, true, "a mushroom without a kit")
+	T.eq(noKitHow, "no-kit", "how")
 	F.MarkName(bot, "item_foragers_health", "unknown", "not-consumed")
 	local again, _, why = F.Check(bot, other)
 	T.eq(again, true, "marked by name")
 	T.eq(why, "not-consumed", "how it was marked")
 	T.eq(F.WasDropped(bot, "item_foragers_health"), false, "not dropped yet")
+end)
+
+T.test(
+	"foreign items: a mushroom of the bot's own Forager's Kit is never marked not-consumed (#116, game 077)",
+	function()
+		local bot = T.stub.reset({ hero = "npc_dota_hero_puck" })
+		local F = load("foreign_items")
+		T.eq(F.IsOwnKitForage("item_foragers_mana", "item_foragers_kit"), true, "own kit, own mushroom")
+		T.eq(F.IsOwnKitForage("item_foragers_mana", nil), false, "no kit")
+		T.eq(F.IsOwnKitForage("item_flask", "item_foragers_kit"), false, "not a mushroom")
+		bot._items[16] = T.stub.newAbility("item_foragers_kit", bot, false)
+		T.eq(F.NeutralName(bot), "item_foragers_kit", "slot 16 read")
+		T.eq(F.MarkName(bot, "item_foragers_mana", "unknown", "not-consumed"), false, "refused")
+		local ringcap = T.stub.newAbility("item_foragers_mana", bot, false)
+		T.eq(F.Check(bot, ringcap), false, "still the bot's own")
+		T.eq(
+			F.MarkName(bot, "item_foragers_mana", "nature_prophet", "drop-list"),
+			true,
+			"a drop-list owner still marks it"
+		)
+		bot._items[16] = nil
+		T.eq(F.MarkName(bot, "item_foragers_health", "unknown", "not-consumed"), true, "no kit: marked as before")
+	end
+)
+
+T.test("foreign items: a mushroom is the bot's only while it holds or held a Forager's Kit (#116, game 087)", function()
+	local bot = T.stub.reset({ hero = "npc_dota_hero_puck" })
+	local F = load("foreign_items")
+	T.eq(F.NoKitForage("item_foragers_stats", false), true, "no kit: not edible")
+	T.eq(F.NoKitForage("item_foragers_stats", true), false, "kit: edible")
+	T.eq(F.NoKitForage("item_flask", false), false, "not a mushroom")
+	local nut = T.stub.newAbility("item_foragers_stats", bot, false)
+	local salve = T.stub.newAbility("item_flask", bot, false)
+	local foreign, _, how = F.Check(bot, nut)
+	T.eq(foreign, true, "Sven's mushroom in Puck's bag")
+	T.eq(how, "no-kit", "how")
+	T.eq(F.Check(bot, salve), false, "other items are not touched")
+	bot._items[16] = T.stub.newAbility("item_foragers_kit", bot, false)
+	T.eq(F.Check(bot, nut), false, "with the kit it is his")
+	bot._items[16] = T.stub.newAbility("item_mana_draught", bot, false)
+	T.eq(F.Check(bot, nut), false, "still his after the kit was replaced")
 end)
