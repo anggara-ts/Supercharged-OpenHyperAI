@@ -26,13 +26,14 @@ RoshanRules.MIN_AVG_HP = 0.7
 -- no enemy near: Roshan was at 76% after 16s and 67% after 26s, while four of them left under 45% (t=1901-1916), so his
 -- time to half was about 33s, not 14-17. Game 089's three Dire commits (tank=17,half=17 / 18,14 / 18,17) left him at
 -- 75-94% after 15-20s, and game 088's t=1297 took about 28s to half where the model said 19. Every commit with fit=
--- numbers on its commit line (games 088-091, seven of them) passed the check and failed. Their time to half was 1.8 to
--- 2.4 times the model's; HIT_SHARE is set from them (the right-click they implied against the HP Roshan lost, plus
--- his regeneration: 0.20-0.38 of the raw right-click, about 0.25 = ARMOR_THROUGH x 0.7). With it the seven commits
--- read tank/half 0.33-0.67, and HALF_CREDIT 0.75 drops them all. The older kills (games 074-087) had only call-line
--- fits, often a minute stale or more: seven of them still pass (tank/half 0.78-2.27), seven drop (0.44-0.72: a slower
--- group, 480-1040 right-click per second; tests/test_roshan_rules.lua lists both): a judgement call for the
--- maintainer. The tank side is unchanged: in game 091 the heroes left 16-26s after the commit against tank=21.
+-- numbers on its commit line (games 088-091: seven lines, six takes; 091's two lines are one take) passed the check
+-- and failed. Their time to half was 1.8 to 2.4 times the model's; HIT_SHARE is set from them (the right-click they
+-- implied against the HP Roshan lost, plus his regeneration: 0.20-0.38 of the raw right-click, about 0.25 =
+-- ARMOR_THROUGH x 0.7). With it the seven lines read tank/half 0.33-0.67, and HALF_CREDIT 0.75 drops them all. The
+-- older kills (games 074-087) had only call-line fits, often a minute stale or more: 7 of 13 still pass (tank/half
+-- 0.78-2.27), 6 drop (0.44-0.72: a slower group, 480-940 right-click per second; two of the 13 had a human on the
+-- team; tests/test_roshan_rules.lua lists both): a judgement call for the maintainer. The tank side is unchanged: in
+-- game 091 the heroes left 16-26s after the commit against tank=21.
 -- Before that: 0.75, from one take (game 068 Dire, 5 of 5, killed in about 20s where the model said about 27s). Game 088
 -- (maintainer decision D7, 2026-11-27: one more game of fit= numbers, then retune) committed two takes that passed at
 -- 0.75 and failed: Radiant t=1297 commit fit=group(tank=16,half=19) left Roshan at 34% (he took about 28s to reach

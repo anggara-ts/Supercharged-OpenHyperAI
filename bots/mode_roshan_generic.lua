@@ -549,7 +549,9 @@ local function GroupFitAt(roshanLocation)
 	local armor = "-"
 	if Fu.Utils.IsValidUnit(roshan) and roshan:CanBeSeen() then
 		roshHp, roshMax = roshan:GetHealth(), roshan:GetMaxHealth()
-		local okArmor, value = pcall(roshan.GetArmor, roshan)
+		local okArmor, value = pcall(function()
+			return roshan:GetArmor()
+		end)
 		if okArmor and type(value) == "number" then
 			armor = string.format("%.1f", value)
 		end

@@ -141,7 +141,8 @@ local function Logged(R, take)
 	end
 	return R.GroupFit({ members = members, groupDps = roshMax / half, roshHp = roshMax, roshMax = roshMax })
 end
--- Commits that passed the old check and failed (games 088-091: every commit with fit= on its commit line).
+-- Commits that passed the old check and failed (games 088-091: every commit line with fit=; 091's two lines are one
+-- take, so six takes), then older failed takes from call-line fits.
 local FAILED = {
 	{ "091 dire 5/5 (Roshan 76% after 16s, four left under 45%, Radiant took him)", 1885, 21, 14 },
 	{ "091 dire 4/5 (the same take, the first commit line)", 1885, 17, 17 },
@@ -165,7 +166,7 @@ local KILLED = {
 	{ "085 dire (Aegis t=2001)", 1963, 24, 10 },
 	{ "085 dire (Aegis t=2677)", 2637, 30, 9 },
 	{ "085 dire (Aegis t=3569)", 3488, 24, 12 },
-	{ "087 dire (died t=1647)", 1622, 17, 10 },
+	{ "087 dire (died t=1647; a human on the team took the Aegis)", 1622, 17, 10 },
 }
 -- Kills that the new check drops (the cost of the retune; a slower group, call-line fits only).
 local KILLED_DROPPED = {
@@ -173,8 +174,7 @@ local KILLED_DROPPED = {
 	{ "078 radiant (died t=1497)", 1457, 17, 13 },
 	{ "081 dire (died t=2011)", 1981, 14, 11 },
 	{ "082 radiant (died t=851)", 809, 18, 16 },
-	{ "082 radiant (died t=1952)", 1917, 12, 12 },
-	{ "084 dire (died t=3018)", 2964, 16, 12 },
+	{ "082 radiant (died t=1952; a human took the Aegis)", 1917, 12, 12 },
 	{ "085 radiant (died t=1261)", 1240, 14, 14 },
 }
 -- Takes that failed with the check passing: the cause was not the tank model (enemies came, the group split).
