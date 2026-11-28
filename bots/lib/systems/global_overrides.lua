@@ -732,6 +732,27 @@ local function LogCurseCast(self, ability, target)
 		pcall(CurseLog.OnCast, self, ability, target)
 	end
 end
+-- [SHy-CHAIN] (bots/lib/systems/chain_rules.lua, #228): a listed stun or hex ordered on an enemy hero whose running
+-- stun outlasts the new one's landing is held (refused, the bot attacks him) until the time left is down to what it
+-- needs, so the stuns follow each other instead of overlapping. Loaded on first use.
+local ChainRules = nil
+local function ChainHold(self, ability, target, targetKind)
+	if ChainRules == nil then
+		local ok, chain = pcall(require, GetScriptDirectory() .. "/lib/systems/chain_rules")
+		ChainRules = ok and chain or false
+	end
+	if not ChainRules then
+		return false
+	end
+	local ok, hold = pcall(ChainRules.OnCast, self, ability, target, targetKind)
+	if not ok and not ChainRules.errorPrinted then
+		-- Once per game: a broken hook would silently remove the rule.
+		ChainRules.errorPrinted = true
+		local hero = (string.gsub(tostring(self:GetUnitName()), "npc_dota_hero_", ""))
+		pcall(print, string.format("[SHy-CHAIN] t=%.0f %s error where=cast err=%s", DotaTime(), hero, tostring(hold)))
+	end
+	return ok and hold == true
+end
 local function GuardCast(method, targetKind)
 	local original = CDOTA_Bot_Script[method]
 	if original == nil then
@@ -763,6 +784,9 @@ local function GuardCast(method, targetKind)
 		end
 		if targetKind == "entity" then
 			LogCurseCast(self, ability, target)
+		end
+		if (targetKind == "entity" or targetKind == "location") and ChainHold(self, ability, target, targetKind) then
+			return nil
 		end
 		-- A no-target cast takes only the ability. Do not hand the engine an extra nil.
 		if targetKind == "none" then
