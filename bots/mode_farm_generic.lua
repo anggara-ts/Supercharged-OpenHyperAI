@@ -447,6 +447,28 @@ local function EnemyHalfWithdrawWhy()
 	local enemiesNear = #Fu.GetLastSeenEnemiesNearLoc(bot:GetLocation(), 2500)
 	local alliesNear = #Fu.GetAlliesNearLoc(bot:GetLocation(), 1600)
 	if enemiesNear > alliesNear then
+		-- Not for a bot pushing within 3000 of their Ancient (#12, game 068 50:33-51:01: four Dire at Radiant's open
+		-- Ancient were walked home at 0.5 because the five Radiant last seen at their fountain counted as near).
+		-- Push and retreat keep their own enemy checks there.
+		local enemyAncient = GetAncient(GetOpposingTeam())
+		if
+			DotaTime() - (bot._pushActiveAt or -999) <= 2
+			and enemyAncient ~= nil
+			and GetUnitToUnitDistance(bot, enemyAncient) <= 3000
+		then
+			FarmLog(
+				"[SHy-FARM] t=%.0f %s withdraw-skip why=outnumbered-at-ancient push=%.2f enemies=%d allies=%d dist=%d",
+				DotaTime(),
+				ShortName(bot),
+				bot.pushDesire or 0,
+				enemiesNear,
+				alliesNear,
+				math.floor(GetUnitToUnitDistance(bot, enemyAncient))
+			)
+			-- A walk home already started would go on as why=finish.
+			bot._farmWithdrawTo = nil
+			return nil
+		end
 		return "outnumbered"
 	end
 	return nil
@@ -2006,6 +2028,38 @@ function FarmMode.IsLocCanBeSeen(location)
 end
 -- Hold the desire through short dips while this mode is active (bots/lib/systems/mode_hold.lua).
 GetDesire = require(GetScriptDirectory() .. "/lib/systems/mode_hold").Wrap(GetDesire, "farm", BOT_MODE_FARM)
+-- Group push (#12): push.lua marks a bot it wants in a group push (advantage window, or a joiner of a push with all
+-- enemies alive) with bot._groupPushJoin = { at, desire, why }. Farm (0.6-0.77 in games 066/067) stays under that
+-- push for the second the mark is fresh, so the bot walks to the lane instead of the next camp.
+do
+	local farmGetDesire = GetDesire
+	GetDesire = function(...)
+		local desire = farmGetDesire(...)
+		local join = bot._groupPushJoin
+		if type(desire) ~= "number" or join == nil or DotaTime() - (join.at or -999) > 1.0 then
+			return desire
+		end
+		local under = math.max(0, (join.desire or 0) - 0.1)
+		if desire <= under then
+			return desire
+		end
+		if DotaTime() >= (bot._farmYieldPushLogAt or -999) then
+			bot._farmYieldPushLogAt = DotaTime() + 8
+			pcall(
+				print,
+				string.format(
+					"[SHy-FARM] t=%.0f %s yield-group-push farm=%.2f push=%.2f why=%s",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					desire,
+					join.desire or 0,
+					tostring(join.why)
+				)
+			)
+		end
+		return under
+	end
+end
 
 -- [SHy-ERROR] trap (farm). From ~11:20 every game an unwrapped entry point fails and the engine only
 -- prints "Script Runtime Error: error in error handling" (its handler cannot run, typically a stack

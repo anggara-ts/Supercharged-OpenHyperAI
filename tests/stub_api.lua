@@ -227,6 +227,11 @@ VectorMeta.__index = function(v, key)
 	if data ~= nil and data[key] ~= nil then
 		return data[key]
 	end
+	-- The game's Vector also reads as v[1], v[2], v[3] (Fu.GetDistance does).
+	local axis = key == 1 and "x" or (key == 2 and "y" or (key == 3 and "z" or nil))
+	if data ~= nil and axis ~= nil then
+		return data[axis]
+	end
 	local method = VectorMethods[key]
 	if method == nil then
 		error("stub missing: Vector:" .. tostring(key), 2)

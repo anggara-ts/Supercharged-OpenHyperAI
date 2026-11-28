@@ -80,7 +80,17 @@ local function installBotMode(Fu)
 		local roshanHpRatio = 1
 		if Fu.IsUnitValid(roshanHandle) and roshanHandle:IsAlive() and roshanHandle:CanBeSeen() then
 			roshanHpRatio = Fu.GetHP(roshanHandle)
+		else
+			-- Out of sight (the hero stepped out of the pit): his HP as the team last saw it within 10s (the Roshan
+			-- mode's RoshanHpSeen keeps it). It read 1 here, so a hero who stepped out at 19-34% Roshan HP was sent out
+			-- of the fight as if Roshan were full (#12, game 088: t=1348 Lion, t=1725 Winter Wyvern `rosh-leave why=fight`).
+			local seenHp = Fu.Utils.GameStates and Fu.Utils.GameStates.roshSeenHp
+			local seen = seenHp and seenHp[unit:GetTeam()]
+			if seen ~= nil and DotaTime() - (seen.at or -999) <= 10 and Fu.IsRoshanAlive() then
+				roshanHpRatio = seen.ratio or 1
+			end
 		end
+		unit._roshLeaveRoshHp = roshanHpRatio
 		if roshanHpRatio <= 0.5 then
 			unit._roshHoldOut = false
 			return false

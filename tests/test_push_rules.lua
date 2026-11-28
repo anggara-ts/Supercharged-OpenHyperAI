@@ -1,0 +1,759 @@
+-- bots/lib/systems/push_rules.lua: advantage window, the all-alive push cap, Roshan over push, respawn estimate;
+-- and bots/lib/systems/kill_window.lua learning respawn times from our own deaths (#12).
+local T = ...
+
+local function rules()
+	T.stub.reset({ hero = "npc_dota_hero_lich" })
+	return require(GetScriptDirectory() .. "/lib/systems/push_rules")
+end
+
+T.test("advantage: Aegis and dead enemies open the window, a base threat closes it", function()
+	local R = rules()
+	-- Game 066 21:44: Dire held the Aegis, 5 alive each.
+	local desire, why = R.Advantage({ aegis = true, alliesAlive = 5, enemiesAlive = 5, dead = 0, deadLong = 0 })
+	T.eq(desire, 0.8, "aegis desire")
+	T.eq(why, "aegis", "aegis why")
+	-- Aegis with only 3 alive: no window.
+	T.eq(R.Advantage({ aegis = true, alliesAlive = 3, enemiesAlive = 5, dead = 0, deadLong = 0 }), nil, "aegis 3 alive")
+	-- Three dead for 20s+: 0.9.
+	desire, why = R.Advantage({ alliesAlive = 4, enemiesAlive = 2, dead = 3, deadLong = 3 })
+	T.eq(desire, 0.9, "dead3 desire")
+	T.eq(why, "dead3", "dead3 why")
+	-- Two dead with 4-5 of ours alive: 0.8; with 3 of ours alive: no window.
+	T.eq(R.Advantage({ alliesAlive = 4, enemiesAlive = 3, dead = 2, deadLong = 0 }), 0.8, "dead2 with 4")
+	T.eq(R.Advantage({ alliesAlive = 3, enemiesAlive = 3, dead = 2, deadLong = 2 }), nil, "dead2 with 3")
+	-- Every enemy dead (#87's wipe push).
+	T.eq(select(2, R.Advantage({ alliesAlive = 2, enemiesAlive = 0, dead = 5, deadLong = 5 })), "wipe", "wipe")
+	-- Aegis on top of a dead window.
+	desire, why = R.Advantage({ aegis = true, alliesAlive = 5, enemiesAlive = 3, dead = 2, deadLong = 1 })
+	T.eq(desire, 0.85, "dead2+aegis desire")
+	T.eq(why, "dead2+aegis", "dead2+aegis why")
+	-- Our base is being hit: nothing.
+	T.eq(
+		R.Advantage({ aegis = true, alliesAlive = 5, enemiesAlive = 0, dead = 5, deadLong = 5, baseThreat = true }),
+		nil,
+		"base threat"
+	)
+end)
+
+T.test("advantage: no wipe window before the horn or without enemy heroes (game 088 t=-88)", function()
+	local R = rules()
+	-- Game 088 t=-88: `radiant advantage-start why=wipe dead=0 alive=1/0` (the enemy heroes were not in the game yet).
+	local desire, why =
+		R.Advantage({ alliesAlive = 1, enemiesAlive = 0, dead = 0, deadLong = 0, now = -88, enemyHeroes = 5 })
+	T.eq(desire, nil, "pre-horn desire")
+	T.eq(why, "pre-horn", "pre-horn why")
+	desire, why = R.Advantage({ alliesAlive = 5, enemiesAlive = 0, dead = 0, deadLong = 0, now = 30, enemyHeroes = 0 })
+	T.eq(desire, nil, "no enemy heroes desire")
+	T.eq(why, "no-enemy-heroes", "no enemy heroes why")
+	-- A real wipe after the horn: every enemy hero dead, five on their team.
+	desire, why =
+		R.Advantage({ alliesAlive = 4, enemiesAlive = 0, dead = 5, deadLong = 5, now = 1376, enemyHeroes = 5 })
+	T.eq(desire, 0.9, "wipe desire")
+	T.eq(why, "wipe", "wipe why")
+end)
+
+T.test("five-alive cap: 0.41 for an even game, joiners when ahead or at a T1/T2", function()
+	local R = rules()
+	-- Game 067 33:00: Radiant mid T1 (tier 1), 5 alive each, about even.
+	local cap, joiners, why =
+		R.FiveAliveCap({ enemiesAlive = 5, alliesAlive = 5, nwLead = -500, levelLead = 0.2, tier = 1 })
+	T.eq(cap, 0.7, "outer cap")
+	T.eq(joiners, 3, "outer joiners")
+	T.eq(why, "outer", "outer why")
+	cap, joiners = R.FiveAliveCap({ enemiesAlive = 5, alliesAlive = 5, nwLead = 2500, levelLead = 0, tier = 2 })
+	T.eq(cap, 0.75, "ahead+outer cap")
+	T.eq(joiners, 4, "ahead+outer joiners")
+	cap, joiners = R.FiveAliveCap({ enemiesAlive = 5, alliesAlive = 5, nwLead = 0, levelLead = 1.2, tier = 3 })
+	T.eq(cap, 0.7, "ahead at the high ground")
+	T.eq(joiners, 3, "ahead at the high ground joiners")
+	cap, joiners, why = R.FiveAliveCap({ enemiesAlive = 5, alliesAlive = 5, nwLead = 0, levelLead = 0, tier = 3 })
+	T.eq(cap, 0.41, "even high ground cap")
+	T.eq(joiners, 2, "even high ground joiners")
+	T.eq(why, "even", "even why")
+	-- An enemy dead: the cap is off.
+	T.eq(R.FiveAliveCap({ enemiesAlive = 4, alliesAlive = 5, tier = 3 }), nil, "4 alive")
+end)
+
+T.test("Roshan over push: a live call wins unless the tower is about to fall", function()
+	local R = rules()
+	-- Game 067 32:11: 0.99 kill push, the call now goes in at 0.96.
+	local desire, yielded = R.PushUnderRosh(0.99, 0.96, 0.1, false)
+	T.near(desire, 0.91, 1e-9, "push under the call")
+	T.eq(yielded, true, "yielded")
+	T.eq(select(2, R.PushUnderRosh(0.99, 0.96, 0.1, true)), false, "finishing a tower")
+	T.eq(select(2, R.PushUnderRosh(0.99, 0.96, 3.0, false)), false, "stale Roshan desire")
+	T.eq(select(2, R.PushUnderRosh(0.99, 0.3, 0.1, false)), false, "call off")
+	-- A plain 0.60 call (held back on the high ground, or a timer call) does not cut a 0.99 push.
+	T.eq(select(2, R.PushUnderRosh(0.99, 0.60, 0.1, false)), false, "0.60 call")
+	T.eq(R.PushUnderRosh(0.4, 0.6, 0.1, false), 0.4, "push already lower")
+end)
+
+T.test("lock branch with every enemy dead: the wipe push goes at 0.9 through the lock", function()
+	local R = rules()
+	-- Game 067 t=1376: Dire bots in the mid lock, all five Radiant dead, `lock-capped why=cap desire=0.25 alive=4/0`
+	-- and no wipe push. Now the own-HP cap starts at 30% in a wipe, and the lock raises to the window.
+	T.eq(R.OwnHpCapBelow(true), 0.3, "wipe HP floor")
+	T.eq(R.OwnHpCapBelow(false), 0.5, "normal HP floor")
+	local wipe = R.Advantage({ alliesAlive = 4, enemiesAlive = 0, dead = 5, deadLong = 5 })
+	local desire, cap, raised = R.LockDesire({
+		base = 0.55,
+		advantage = wipe,
+		maxPush = wipe,
+		alliesNear = 2,
+		enemiesNear = 0,
+		enemiesAlive = 0,
+		tier = 3,
+		nearAncient = true,
+		groupHurt = true,
+	})
+	T.eq(desire, 0.9, "wipe desire in the lock")
+	T.eq(cap, nil, "no cap: group-hurt and fewer-than-alive skipped")
+	T.eq(raised, "advantage", "raised")
+	-- The same bot under 30%: maxPush holds the 0.25 cap.
+	desire, cap = R.LockDesire({ base = 0.55, advantage = wipe, maxPush = 0.25, alliesNear = 2, enemiesAlive = 0 })
+	T.eq(desire, 0.25, "low HP still capped")
+	T.eq(cap, "cap", "cap reason")
+end)
+
+T.test("lock branch: the old caps still hold without a window", function()
+	local R = rules()
+	-- 5 alive each, 3 bots at a T2 within 6000 of the Ancient, no window: fewer-than-alive 0.4.
+	local desire, cap = R.LockDesire({
+		base = 0.55,
+		maxPush = 0.41,
+		alliesNear = 3,
+		enemiesNear = 0,
+		enemiesAlive = 5,
+		tier = 2,
+		nearAncient = true,
+	})
+	T.eq(desire, 0.4, "fewer-than-alive")
+	T.eq(cap, "fewer-than-alive", "reason")
+	-- A joiner (ahead, T2) is past it below the high ground.
+	desire, cap = R.LockDesire({
+		base = 0.55,
+		joinCap = 0.75,
+		maxPush = 0.75,
+		alliesNear = 3,
+		enemiesAlive = 5,
+		tier = 2,
+		nearAncient = true,
+	})
+	T.eq(desire, 0.75, "joiner at a T2")
+	T.eq(cap, nil, "joiner no cap")
+	-- Alone against two, and a hurt group with enemies alive.
+	T.eq(
+		R.LockDesire({ base = 0.55, advantage = 0.9, maxPush = 0.9, alliesNear = 1, enemiesNear = 2 }),
+		0.2,
+		"alone-vs-2"
+	)
+	T.eq(
+		R.LockDesire({ base = 0.55, maxPush = 0.65, alliesNear = 3, enemiesAlive = 2, groupHurt = true }),
+		0.15,
+		"group-hurt"
+	)
+end)
+
+T.test("respawn estimate: nearest learned level, else the default", function()
+	local R = rules()
+	T.eq(R.RespawnEstimate({}, 14, 30), 30, "nothing learned")
+	T.eq(R.RespawnEstimate({ [12] = 44, [20] = 70 }, nil, 30), 30, "no level")
+	T.eq(R.RespawnEstimate({ [12] = 44, [20] = 70 }, 13, 30), 44, "nearest below")
+	T.eq(R.RespawnEstimate({ [12] = 44, [20] = 70 }, 18, 30), 70, "nearest above")
+	T.eq(R.RespawnEstimate({ [12] = 44, [14] = 52 }, 13, 30), 52, "tie takes the higher level")
+	-- Only an early sample (level 3, 14s) for a level-20 enemy: not under the 30s default.
+	T.eq(R.RespawnEstimate({ [3] = 14 }, 20, 30), 30, "lower sample floored")
+	T.eq(R.RespawnEstimate({ [25] = 20 }, 20, 30), 20, "higher sample as is")
+	local seconds, source, level = R.RespawnEstimate({ [25] = 100 }, 25, 30)
+	T.eq(seconds, 100, "exact")
+	T.eq(source, "learned", "source")
+	T.eq(level, 25, "level used")
+end)
+
+T.test("kill window: an enemy death uses the respawn time our own death at that level showed", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich", time = 1800 })
+	local KillWindow = require(GetScriptDirectory() .. "/lib/systems/kill_window")
+	KillWindow.Tick()
+	-- Our slot 2 dies at level 14; GetRespawnTime() says 52.
+	local ally = GetTeamMember(2)
+	ally._level = 14
+	ally.GetRespawnTime = function()
+		return 52
+	end
+	ally._alive = false
+	T.stub.time = 1810
+	KillWindow.Tick()
+	-- An enemy at level 14 dies: no API answer on enemies, so 52 from what we learned.
+	local enemy = T.stub.teams[GetOpposingTeam()][1]
+	enemy._level = 14
+	enemy._alive = false
+	T.stub.time = 1900
+	KillWindow.Tick()
+	local dead, deadLong, minLeft = KillWindow.DeadCounts()
+	T.eq(dead, 1, "one dead")
+	T.eq(deadLong, 1, "20s+ left")
+	T.near(minLeft, 52, 0.01, "left")
+	T.stub.time = 1940
+	dead, deadLong = KillWindow.DeadCounts()
+	T.eq(dead, 1, "still dead at 40s")
+	T.eq(deadLong, 0, "under 20s left")
+	local logged = false
+	for _, line in ipairs(T.stub.printed) do
+		if string.find(tostring(line), "src=learned", 1, true) then
+			logged = true
+		end
+	end
+	T.ok(logged, "death line names the learned source")
+end)
+
+T.test("fewer-than-alive: an open Ancient and a lead count the enemies seen near (game 068 50:33)", function()
+	local R = rules()
+	-- Game 068 t=3033-3061: four Dire at Radiant's open Ancient, 18k ahead, no Radiant hero near, five alive.
+	local inputs = {
+		base = 0.55,
+		joinCap = 0.7,
+		maxPush = 0.7,
+		alliesNear = 4,
+		enemiesNear = 0,
+		enemiesAlive = 5,
+		tier = 4,
+		nearAncient = true,
+	}
+	local desire, cap = R.LockDesire(inputs)
+	T.eq(cap, "fewer-than-alive", "T4s up or even: still capped")
+	T.eq(desire, 0.4, "capped desire")
+	inputs.ancientOpen, inputs.ahead = true, true
+	desire, cap = R.LockDesire(inputs)
+	T.eq(cap, nil, "open Ancient + lead: no cap")
+	T.eq(desire, 0.7, "joiner desire")
+	-- Open Ancient but not ahead: the enemies alive count.
+	inputs.ahead = false
+	T.eq(select(2, R.LockDesire(inputs)), "fewer-than-alive", "open, not ahead")
+	-- Open and ahead, but 5 enemies seen near: capped.
+	inputs.ahead, inputs.enemiesNear = true, 5
+	T.eq(select(2, R.LockDesire(inputs)), "fewer-than-alive", "enemies seen near")
+	T.eq(R.FewerThanAliveCount(true, true, 5, 1), 1, "count: seen near")
+	T.eq(R.FewerThanAliveCount(true, false, 5, 1), 5, "count: alive")
+end)
+
+T.test("high-ground gather: an allowed group waits below the high ground, then goes up (game 068 52:33)", function()
+	local R = rules()
+	-- Game 068 t=3153: Undying, joiner 1 of 3, alone near Radiant's open base, 5v5 alive.
+	local s = {
+		nearEnemyFountain = true,
+		enemiesAlive = 5,
+		alliesAlive = 5,
+		alliesNear = 1,
+		atSpot = 1,
+		need = 3,
+		groupAllowed = true,
+	}
+	T.eq(R.HgGather(s), "gather", "joiner alone: gather")
+	s.atSpot = 3
+	T.eq(R.HgGather(s), "go", "3 at the spot: go")
+	s.atSpot, s.alliesNear = 1, 3
+	T.eq(R.HgGather(s), "go", "3 near the bot: go")
+	s.alliesNear, s.released = 1, true
+	T.eq(R.HgGather(s), "go", "latched release while walking up")
+	s.released = nil
+	s.groupAllowed = false
+	T.eq(R.HgGather(s), "cap", "not an allowed group: the 0.15 cap")
+	s.groupAllowed, s.gatherAge = true, 50
+	T.eq(R.HgGather(s), "cap", "gave up after 45s")
+	s.gatherAge, s.coolDown = 0, true
+	T.eq(R.HgGather(s), "cap", "cooling down")
+	s.coolDown, s.atSpot = nil, nil
+	T.eq(R.HgGather(s), "cap", "no spot found")
+	s.atSpot, s.alliesAlive = 1, 4
+	T.eq(R.HgGather(s), "cap", "fewer alive than them")
+	s.enemiesAlive = 0
+	T.eq(R.HgGather(s), "none", "every enemy dead: no high-ground cap")
+	T.eq(R.HgGather({ nearEnemyFountain = false }), "none", "not near their fountain")
+end)
+
+T.test(
+	"high-ground gather: a group already at the front goes, the other-lane cap comes after (game 085 50:43)",
+	function()
+		local R = rules()
+		-- Game 085 t=3043: Shadow Fiend, Sniper and Phoenix at the mid T3 (allies=3, need 2, alive 4/2) while the team's
+		-- gather lane was bot: they were capped to 0.15.
+		local s = {
+			nearEnemyFountain = true,
+			enemiesAlive = 2,
+			alliesAlive = 4,
+			alliesNear = 3,
+			atSpot = 0,
+			need = 2,
+			groupAllowed = true,
+			atFront = 3,
+			otherLane = true,
+		}
+		T.eq(R.HgGather(s), "go", "3 near the bot: go even when the team gathers on another lane")
+		-- A fourth bot arriving alone at the spot while the three stand at the T3: it walks up instead of waiting.
+		s.alliesNear, s.atSpot = 1, 1
+		T.eq(R.HgGather(s), "go", "3 at the front against 2 alive: go")
+		s.enemiesAlive, s.alliesAlive = 4, 5
+		T.eq(R.HgGather(s), "cap", "3 at the front against 4 alive, team gathers elsewhere: cap")
+		s.otherLane = false
+		T.eq(R.HgGather(s), "gather", "3 at the front against 4 alive on the team's lane: gather")
+		s.released, s.otherLane = true, true
+		T.eq(R.HgGather(s), "go", "a latched release beats the other-lane cap")
+	end
+)
+
+T.test("high-ground gather lane: most allies at a front, then the advantage lane, the same for every bot", function()
+	local R = rules()
+	-- Game 085 t=3039: nobody near bot, three at mid; Ringmaster (far, no count anywhere) asked for bot first.
+	local lane, why = R.HgGatherLane({ counts = { 0, 3, 0 }, hgLanes = { true, true, true } })
+	T.eq(lane, 2, "mid has the allies")
+	T.eq(why, "most-allies", "why")
+	-- A kept lane holds on a tie, loses to a lane with strictly more.
+	lane, why = R.HgGatherLane({ counts = { 2, 2, 0 }, kept = 1, advLane = 2 })
+	T.eq(lane, 1, "kept on a tie")
+	T.eq(why, "kept", "kept why")
+	lane = R.HgGatherLane({ counts = { 1, 3, 0 }, kept = 1 })
+	T.eq(lane, 2, "a lane with more allies takes over")
+	-- Ties without a kept lane: the advantage lane, else the lowest tied lane (the smoke test's identical fronts).
+	lane, why = R.HgGatherLane({ counts = { 1, 1, 1 }, advLane = 3 })
+	T.eq(lane, 3, "tie: the advantage lane")
+	T.eq(why, "adv-lane", "tie why")
+	T.eq(R.HgGatherLane({ counts = { 1, 1, 1 } }), 1, "tie, no advantage lane: the lowest")
+	T.eq(R.HgGatherLane({ counts = { 0, 2, 2 } }), 2, "tie between mid and bot: mid")
+	-- Nobody at any front (every bot far): one lane for all of them, never each asker's own lane (game 069 45:57).
+	local counts = { 0, 0, 0 }
+	lane, why = R.HgGatherLane({ counts = counts, hgLanes = { false, true, true } })
+	T.eq(lane, 2, "nobody near: the lowest high-ground lane")
+	T.eq(why, "first-hg", "nobody near why")
+	T.eq(R.HgGatherLane({ counts = counts, advLane = 3, hgLanes = { true, true, true } }), 3, "nobody near: adv lane")
+	T.eq(R.HgGatherLane({ counts = counts, kept = 3, advLane = 1 }), 3, "nobody near: the kept lane")
+	T.eq(R.HgGatherLane({ counts = counts }), 1, "nothing known: lane 1")
+end)
+
+T.test("alone gate: walk to this lane's push group instead of dropping (game 085 35:17-35:56)", function()
+	local R = rules()
+	-- Game 085 t=2147: Phoenix alone (allies=1) on the top push while Sniper, Brewmaster and Shadow Fiend pushed it.
+	local s = { alliesNear = 1, enemiesAlive = 3, enemiesNear = 0, group = 3, joinAge = 0 }
+	local gate, why = R.AloneGate(s)
+	T.eq(gate, "join", "a group on the lane: join")
+	T.eq(why, "alone-join", "join why")
+	s.group = 1
+	gate, why = R.AloneGate(s)
+	T.eq(gate, "drop", "one ally on the lane is no group")
+	T.eq(why, "alone", "drop why")
+	s.group, s.enemiesNear = 3, 1
+	T.eq(R.AloneGate(s), "drop", "an enemy hero near the lone bot: drop")
+	s.enemiesNear, s.joinAge = 0, R.ALONE_JOIN_MAX_SECONDS + 1
+	gate, why = R.AloneGate(s)
+	T.eq(gate, "drop", "walking to the group for too long: drop")
+	T.eq(why, "join-timeout", "timeout why")
+	s.joinAge, s.group, s.window = 0, 0, true
+	T.eq(R.AloneGate(s), "window", "advantage window: comes alone as before")
+	s.window, s.alliesNear = nil, 2
+	T.eq(R.AloneGate(s), "pass", "an ally near: not alone")
+	s.alliesNear, s.enemiesAlive = 1, 2
+	T.eq(R.AloneGate(s), "pass", "2 enemies alive: no alone gate")
+end)
+
+T.test("own-HP cap: 40% in a dead-enemies window with no enemy near, 5% hysteresis (game 068 2331-2376)", function()
+	local R = rules()
+	T.eq(R.OwnHpCap({}), 0.5, "normal")
+	T.eq(R.OwnHpCap({ wipe = true }), 0.3, "wipe")
+	T.eq(R.OwnHpCap({ deadWindow = true, enemiesNear = 0 }), 0.4, "dead window, nobody near")
+	T.eq(R.OwnHpCap({ deadWindow = true, enemiesNear = 1 }), 0.5, "dead window, an enemy near")
+	T.near(R.OwnHpCap({ wasCapped = true }), 0.55, 1e-9, "capped lets go at 55%")
+	T.near(R.OwnHpCap({ deadWindow = true, enemiesNear = 0, wasCapped = true }), 0.45, 1e-9, "dead window capped")
+end)
+
+T.test("creep pressure: tier 3+ lanes with our wave at the target, +0.1 per lane up to +0.2", function()
+	local R = rules()
+	T.ok(R.LaneUnderPressure(3, 900, 4), "wave at their T3")
+	T.ok(not R.LaneUnderPressure(2, 500, 4), "T2 still up")
+	T.ok(not R.LaneUnderPressure(3, 2500, 4), "wave far from the T3")
+	T.ok(not R.LaneUnderPressure(4, 800, 1), "one creep is no wave")
+	T.eq(R.CreepPressureBonus(0), 0, "no lane")
+	T.near(R.CreepPressureBonus(1), 0.1, 1e-9, "one lane")
+	T.near(R.CreepPressureBonus(3), 0.2, 1e-9, "capped at 0.2")
+end)
+
+T.test("Roshan first: every enemy alive, their base open, Roshan up, no window (maintainer 2026-11-22)", function()
+	local R = rules()
+	local s = {
+		enemiesAlive = 5,
+		enemyPlayers = 5,
+		alliesAlive = 5,
+		baseOpen = true,
+		roshAlive = true,
+		ahead = true,
+	}
+	local on, why = R.RoshanFirst(s)
+	T.ok(on, "game 068 52:50: Roshan first")
+	T.eq(why, "ahead", "why")
+	s.advantage = true
+	T.eq(select(2, R.RoshanFirst(s)), "advantage", "an open window still pushes first")
+	s.advantage, s.baseThreat = nil, true
+	T.eq(select(2, R.RoshanFirst(s)), "base-threat", "never with our base hit")
+	s.baseThreat, s.ourAegis = nil, true
+	T.eq(select(2, R.RoshanFirst(s)), "have-aegis", "Aegis taken: push")
+	s.ourAegis, s.roshAlive = nil, false
+	T.eq(select(2, R.RoshanFirst(s)), "rosh-dead", "Roshan down: push (hg-gather)")
+	s.roshAlive, s.enemiesAlive = true, 4
+	T.eq(select(2, R.RoshanFirst(s)), "enemy-dead", "an enemy dead")
+	s.enemiesAlive, s.baseOpen = 5, false
+	T.eq(select(2, R.RoshanFirst(s)), "base-closed", "base closed")
+	s.baseOpen, s.ahead = true, false
+	T.eq(select(2, R.RoshanFirst(s)), "even", "even, no pressure")
+	s.pressureLanes = 1
+	T.eq(select(2, R.RoshanFirst(s)), "pressure", "even with creep pressure")
+	s.alliesAlive = 3
+	T.eq(select(2, R.RoshanFirst(s)), "few-alive", "3 of ours alive")
+end)
+
+T.test("hit-hero: a hero the enemy tower covers is skipped (game 068 16:52)", function()
+	local R = rules()
+	-- Game 068 t=1010-1012: Clinkz 323 from Radiant's mid T2, Alchemist behind it, 1006 from Clinkz.
+	local s = { targetToTower = 690, towerRange = 700, botToTarget = 1006, botToTower = 323, towerHp = 0.8 }
+	local skip, why = R.HitHeroBehindTower(s)
+	T.ok(skip, "behind the tower: skip")
+	T.eq(why, "behind-tower", "why")
+	s.botToTarget = 250
+	T.ok(not R.HitHeroBehindTower(s), "the hero is in front of the tower")
+	s.botToTarget, s.towerHp = 1006, 0.2
+	T.ok(not R.HitHeroBehindTower(s), "tower nearly dead")
+	s.towerHp, s.creepsTanking, s.fightOurs = 0.8, true, true
+	T.ok(not R.HitHeroBehindTower(s), "creeps tank it and the fight is ours")
+	s.fightOurs = false
+	T.ok(R.HitHeroBehindTower(s), "creeps tank it but the fight is even")
+	T.ok(
+		not R.HitHeroBehindTower({ targetToTower = 1200, towerRange = 700, botToTarget = 1500, botToTower = 300 }),
+		"far from the tower"
+	)
+end)
+
+T.test(
+	"hit-hero: the path past the tower counts; numbers, a window or a quick kill keep a good chase (game 069)",
+	function()
+		local R = rules()
+		-- Game 069 t=1368: Dire's mid T2 at (2593,2170); Alchemist at (2896,2571) goes for Undying at (3437,2818), 1064
+		-- from the tower (outside range + 150), past it. 1 Dire dead: 4 can respond to 2 chasers.
+		local tower, bot, target = { 2593, 2170 }, { 2896, 2571 }, { 3437, 2818 }
+		local function dist(a, b)
+			return math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2)
+		end
+		local path = R.PointToSegment(tower[1], tower[2], bot[1], bot[2], target[1], target[2])
+		T.ok(path <= 850, "the path passes within range + 150 (" .. path .. ")")
+		local s = {
+			targetToTower = dist(target, tower),
+			pathToTower = path,
+			towerRange = 700,
+			botToTarget = dist(bot, target),
+			botToTower = dist(bot, tower),
+			towerHp = 0.83,
+			responders = 4,
+			chasers = 2,
+			killTime = 9,
+			surviveTime = 6,
+		}
+		T.ok(s.targetToTower > 850, "Undying outside range + 150")
+		local skip, why = R.HitHeroBehindTower(s)
+		T.ok(skip, "22:48: blocked")
+		T.eq(why, "behind-tower", "why")
+		-- Game 069 t=2013-2022: a dead2 window, 3 Dire alive and near against 3 of ours: the chase that paid off.
+		s.advantage = true
+		s.killTime, s.surviveTime = 4.9, 4.7
+		T.eq(select(2, R.HitHeroBehindTower(s)), "slow-kill", "game 092: a window, but the tower kills us first")
+		s.killTime, s.surviveTime = 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "advantage", "33:30: an open window and the target dies first")
+		s.advantage, s.responders, s.chasers = nil, 3, 3
+		s.killTime, s.surviveTime = 4.1, 3.6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "slow-kill", "game 092: even numbers, but the tower kills us first")
+		s.killTime, s.surviveTime = 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "numbers", "33:30: 3 against 3 and the target dies first")
+		s.responders, s.chasers, s.killTime, s.surviveTime = 4, 2, 3, 6
+		T.eq(select(2, R.HitHeroBehindTower(s)), "kill-first", "the target dies first")
+		s.killTime, s.surviveTime = 3, 2
+		T.ok(R.HitHeroBehindTower(s), "the tower kills us first")
+		-- A hero sideways, the path clear of the tower: taken.
+		T.eq(
+			select(
+				2,
+				R.HitHeroBehindTower({ targetToTower = 1500, pathToTower = 1200, botToTarget = 900, botToTower = 1300 })
+			),
+			"clear",
+			"clear"
+		)
+		T.near(R.PointToSegment(0, 5, -10, 0, 10, 0), 5, 1e-9, "point above the segment")
+		T.near(R.PointToSegment(20, 0, -10, 0, 10, 0), 10, 1e-9, "past the end")
+	end
+)
+
+T.test("own-HP cap in an Aegis window: 40% with nobody near, the holder 30% (game 069 1543-1640)", function()
+	local R = rules()
+	-- Puck at 0.46-0.53 in the Aegis window, no enemy near: not capped any more.
+	T.eq(R.OwnHpCap({ window = true, enemiesNear = 0 }), 0.4, "Aegis window, nobody near")
+	T.eq(R.OwnHpCap({ window = true, enemiesNear = 2 }), 0.5, "Aegis window, enemies near")
+	T.eq(R.OwnHpCap({ window = true, aegisHolder = true, enemiesNear = 2 }), 0.3, "the holder")
+end)
+
+T.test("front walk: a lane with no building left stays on its target (game 071 47:20)", function()
+	local R = rules()
+	-- Game 071 t=2855-2859: Dire's top lane gone, target Dire's mid melee barracks, the top front 2000+ away.
+	T.eq(R.FrontWalk({ distanceToFront = 2300, laneTier = 4, hasTarget = true }), "lane-done", "stay on the barracks")
+	T.eq(R.FrontWalk({ distanceToFront = 2300, laneTier = 4, hasTarget = false }), "walk", "nothing in reach: walk")
+	T.eq(
+		R.FrontWalk({ distanceToFront = 2300, laneTier = 3, hasTarget = true }),
+		"walk",
+		"the lane still has buildings"
+	)
+	T.eq(R.FrontWalk({ distanceToFront = 1500, laneTier = 4, hasTarget = true }), "stay", "near the front")
+	T.eq(R.FrontWalk({ distanceToFront = 2300, recentlyHit = true }), "stay", "hit by a hero")
+end)
+
+T.test("lane-done episode ends: target fell, died, left push, 20s cap", function()
+	local R = rules()
+	local s = { targetAlive = true, botAlive = true, gap = 0.1, outOfPush = 0, age = 5 }
+	T.eq(R.LaneDoneEpisodeEnd(s), nil, "running")
+	s.age = 20
+	T.eq(R.LaneDoneEpisodeEnd(s), "cap", "20s")
+	s.age, s.outOfPush = 5, 2.5
+	T.eq(R.LaneDoneEpisodeEnd(s), "left-push", "out of push 2s+")
+	s.outOfPush, s.gap = 0, 4
+	T.eq(R.LaneDoneEpisodeEnd(s), "died", "no think for 3s+")
+	s.gap, s.targetAlive = 0.1, false
+	T.eq(R.LaneDoneEpisodeEnd(s), "fell", "target dead")
+end)
+
+T.test("finish hold: keeps a finishable tower through the gates, drops with a reason (game 072 10:27)", function()
+	local R = rules()
+	-- Game 072 t=627: Undying + Winter Wyvern at Radiant's bottom T1, 970 HP, 1006 damage in 5s, nobody defending.
+	local s = { towerAlive = true, allies = 2, enemiesNear = 0, damage5s = 1006, towerHp = 970, hp = 0.77, age = 1 }
+	local keep, why = R.FinishHold(s)
+	T.ok(keep, "hold")
+	T.eq(why, "ok", "why")
+	local function dropWhy(changes)
+		local copy = {}
+		for k, v in pairs(s) do
+			copy[k] = v
+		end
+		for k, v in pairs(changes) do
+			copy[k] = v
+		end
+		local kept, reason = R.FinishHold(copy)
+		T.ok(not kept, reason)
+		return reason
+	end
+	T.eq(dropWhy({ towerAlive = false }), "fell", "tower down")
+	T.eq(dropWhy({ allies = 1 }), "alone", "one left")
+	T.eq(dropWhy({ enemiesNear = 2 }), "enemies", "defenders came")
+	T.eq(dropWhy({ damage5s = 600 }), "slow", "damage no longer enough")
+	T.eq(dropWhy({ hp = 0.2 }), "low-hp", "low HP")
+	T.eq(dropWhy({ age = 16 }), "timeout", "15s cap")
+	T.eq(dropWhy({ baseThreat = true }), "base", "our base hit")
+end)
+
+-- Two return values as "a/b" (T.eq compares with ~=, so not tables).
+local function pair(a, b)
+	return tostring(a) .. "/" .. tostring(b)
+end
+
+T.test("finish hold: a Glyph pauses it instead of dropping it (game 074 t=1308-1325)", function()
+	local R = rules()
+	-- Game 074 t=1323: Alchemist, Largo (+1) at Dire's bottom T1, 106 HP, 3405 damage in 5s, no defender, Glyph on.
+	local s = { towerAlive = true, glyphed = true, allies = 3, enemiesNear = 0, damage5s = 3405, towerHp = 106, hp = 1 }
+	local keep, why = R.FinishHold(s)
+	T.ok(keep, "kept through the Glyph")
+	T.eq(why, "glyph", "why")
+	-- The damage and 15s checks wait for the Glyph to end.
+	s.damage5s, s.age = 0, 30
+	keep, why = R.FinishHold(s)
+	T.ok(keep and why == "glyph", "no slow / timeout drop while glyphed")
+	-- Outnumbered, alone or low HP still drop it.
+	s.enemiesNear = 3
+	T.eq(select(2, R.FinishHold(s)), "enemies", "defenders came")
+	s.enemiesNear, s.hp = 0, 0.2
+	T.eq(select(2, R.FinishHold(s)), "low-hp", "low HP")
+	s.hp, s.allies = 1, 1
+	T.eq(select(2, R.FinishHold(s)), "alone", "one left")
+end)
+
+T.test("glyph wait: edge at every tier (game 078: no stay under a T1), back when outnumbered or low", function()
+	local R = rules()
+	-- Game 074's case: a glyphed T1, our creeps under it, 3 of ours and no enemy hero. Game 078 (maintainer): wait at
+	-- the edge, not under the tower.
+	local s = { tier = 1, hp = 1, allies = 3, enemies = 0, creeps = 3 }
+	T.eq(pair(R.GlyphWait(s)), "edge/tier1", "T1 with creeps: edge, no stay")
+	s.creeps = 0
+	T.eq(pair(R.GlyphWait(s)), "edge/no-creeps", "T1 without creeps: just outside its range")
+	s.creeps, s.tier = 3, 2
+	T.eq(pair(R.GlyphWait(s)), "edge/multishot", "T2: multishot hits 5 more, creeps don't cover us")
+	s.tier, s.enemies = 1, 4
+	T.eq(pair(R.GlyphWait(s)), "back/outnumbered", "more enemy heroes than ours")
+	s.enemies = 3
+	T.eq(R.GlyphWait(s), "edge", "even numbers wait at the edge")
+	s.hp = 0.25
+	T.eq(pair(R.GlyphWait(s)), "back/low-hp", "low HP")
+end)
+
+T.test("glyph wait: edge point stays on the arc toward our fountain", function()
+	local R = rules()
+	-- Tower at the origin, our fountain straight down (b = 0,-1), radius 1000, arc 0.8 rad.
+	local x, y = R.GlyphEdgePoint(0, 0, 0, -400, 0, -1, 1000, 0.8)
+	T.near(x, 0, 0.01, "on the line: x")
+	T.near(y, -1000, 0.01, "on the line: pushed out to the radius")
+	-- A bot on the far side of the tower is put on the arc's end on its side (x > 0), not behind the tower.
+	x, y = R.GlyphEdgePoint(0, 0, 500, 500, 0, -1, 1000, 0.8)
+	T.near(x, 1000 * math.sin(0.8), 0.01, "arc end x")
+	T.near(y, -1000 * math.cos(0.8), 0.01, "arc end y")
+	x = R.GlyphEdgePoint(0, 0, -500, 500, 0, -1, 1000, 0.8)
+	T.ok(x < 0, "the other side's end")
+	-- The bot on the tower itself: straight toward our fountain.
+	x, y = R.GlyphEdgePoint(0, 0, 0, 0, 0, -1, 1000, 0.8)
+	T.near(y, -1000, 0.01, "zero vector")
+	T.eq(R.NearestDistance(0, 0, {}), nil, "no allies")
+	T.near(R.NearestDistance(0, 0, { { x = 300, y = 400 }, { x = 0, y = 100 } }), 100, 0.01, "nearest ally")
+end)
+
+T.test("glyph wait: side-steps alternate along the edge and keep 300 from waiting allies", function()
+	local R = rules()
+	local s = { tx = 0, ty = 0, x = 0, y = -1000, bx = 0, by = -1, radius = 1000, step = 250, side = 1, maxAngle = 0.8 }
+	-- Side 1 at the bottom of the tower: the tangent (-uy, ux) = (1, 0), so x grows; it stays on the edge.
+	local x, y, side, gap = R.GlyphSideStep(s)
+	T.ok(x > 200, "stepped along the edge: " .. x)
+	T.near(math.sqrt(x * x + y * y), 1000, 0.01, "on the edge")
+	T.eq(side, 1, "the way asked")
+	T.eq(gap, nil, "no ally")
+	-- The next step (caller flips the side) comes back the other way.
+	s.x, s.y, s.side = x, y, -side
+	local x2 = R.GlyphSideStep(s)
+	T.ok(x2 < x - 200, "alternates: " .. x2)
+	-- An ally waiting where the step would go: the bot steps the other way.
+	s.x, s.y, s.side = 0, -1000, 1
+	s.allies = { { x = 250, y = -970 } }
+	x, y, side, gap = R.GlyphSideStep(s)
+	T.ok(x < 0 and side == -1, "away from the ally: " .. x)
+	T.ok(gap >= 300, "300+ from it: " .. gap)
+	-- At the arc's end the step that way is no move: it goes back along the arc.
+	s.allies = nil
+	s.x, s.y = 1000 * math.sin(0.8), -1000 * math.cos(0.8)
+	s.side = 1
+	x, y, side = R.GlyphSideStep(s)
+	T.ok(x < s.x - 100 and side == -1, "turns at the arc's end: " .. x)
+	-- Crowded on both sides: the candidate farthest from its nearest ally.
+	s.x, s.y, s.side = 0, -1000, 1
+	s.allies = { { x = 0, y = -1000 } }
+	x, y, side, gap = R.GlyphSideStep(s)
+	T.ok(gap ~= nil and gap >= 300 and math.abs(x) > 300, "two steps out when one is too close: " .. x)
+	-- Ground that can't be walked (trees, a cliff) is skipped: the step goes the other way.
+	s.allies = nil
+	s.passable = function(px)
+		return px <= 0
+	end
+	x, y, side = R.GlyphSideStep(s)
+	T.ok(x < 0 and side == -1, "around the blocked side: " .. x .. "," .. y)
+end)
+
+T.test("glyph wait: exit points keep to walkable ground near the lane (#12, games 089 and 091)", function()
+	local R = rules()
+	-- Game 091 t=1657 shape: the lane runs back toward +x (b = 1,0), the bot stands north-east of the tower at about
+	-- 268 (45 degrees off the lane), trees north of the lane (y >= 300), the edge at 950.
+	local s = { tx = 0, ty = 0, x = 190, y = 190, bx = 1, by = 0, radius = 950, lane = { x = 1100, y = -40 } }
+	local points = R.GlyphExitPoints(s)
+	local kinds = {}
+	for i, point in ipairs(points) do
+		kinds[i] = point.kind
+	end
+	T.eq(table.concat(kinds, ","), "own,back,lane,side,side", "not hit: own bearing first, then back along the lane")
+	T.near(
+		math.atan2(points[1].y, points[1].x),
+		R.GLYPH_EXIT_ARC,
+		0.001,
+		"own bearing kept within 0.35 rad of the lane"
+	)
+	T.near(math.sqrt(points[1].x ^ 2 + points[1].y ^ 2), 950, 0.01, "on the edge")
+	T.near(points[2].x, 950, 0.01, "back: straight along the lane")
+	T.ok(points[4].y > 0 and points[5].y < 0, "the arc end on the bot's side first")
+	-- The trees beside the lane: the own-bearing point and the arc end there are left out.
+	s.passable = function(_, y)
+		return y < 300
+	end
+	points = R.GlyphExitPoints(s)
+	kinds = {}
+	for i, point in ipairs(points) do
+		kinds[i] = point.kind
+	end
+	T.eq(table.concat(kinds, ","), "back,lane,side", "blocked ground skipped")
+	T.ok(points[3].y < 0, "the walkable arc end")
+	-- The tower hits the bot (multishot): straight back along the lane first.
+	s.passable = nil
+	s.towerHit = true
+	points = R.GlyphExitPoints(s)
+	T.eq(points[1].kind .. "," .. points[2].kind .. "," .. points[3].kind, "back,lane,own", "tower hit: back first")
+	-- A bot already on the lane line: its own bearing is the back point, listed once.
+	points = R.GlyphExitPoints({ tx = 0, ty = 0, x = 300, y = 10, bx = 1, by = 0, radius = 950 })
+	T.eq(points[1].kind, "back", "own = back: no duplicate")
+	-- Nothing walkable and no lane point: still somewhere to go (back), and a lane point is always kept.
+	points = R.GlyphExitPoints({
+		tx = 0,
+		ty = 0,
+		x = 190,
+		y = 190,
+		bx = 1,
+		by = 0,
+		radius = 950,
+		passable = function()
+			return false
+		end,
+	})
+	T.eq(#points, 1, "one fallback")
+	T.eq(points[1].kind, "back", "fallback back")
+	s.passable = function()
+		return false
+	end
+	s.towerHit = false
+	points = R.GlyphExitPoints(s)
+	T.eq(#points, 1, "only the lane point")
+	T.eq(points[1].kind, "lane", "the lane is walkable")
+end)
+
+T.test("glyph wait: re-path when the walk out gains nothing for 1s", function()
+	local R = rules()
+	-- Game 091: Wraith King walked from 268 to about 300 and stood against the trees.
+	local p = {}
+	T.eq(R.GlyphExitStalled(p, 268, 0), false, "start")
+	T.eq(R.GlyphExitStalled(p, 300, 0.5), false, "0.5s: too early to tell")
+	T.eq(R.GlyphExitStalled(p, 310, 1.0), true, "1s and under 50 gained: next exit point")
+	T.eq(R.GlyphExitStalled(p, 320, 1.5), false, "the clock starts again for the next point")
+	-- A bot that walks out keeps its point.
+	local q = {}
+	R.GlyphExitStalled(q, 268, 0)
+	T.eq(R.GlyphExitStalled(q, 400, 0.6), false, "gaining")
+	T.eq(R.GlyphExitStalled(q, 430, 1.4), false, "0.8s since the last 50 gained")
+	T.eq(R.GlyphExitStalled(q, 440, 1.7), true, "stopped gaining for 1.1s")
+end)
+
+T.test("glyph helpers: tower tier, time left, fight factor", function()
+	local R = rules()
+	T.eq(R.TowerTier("npc_dota_badguys_tower1_bot"), 1, "T1")
+	T.eq(R.TowerTier("npc_dota_goodguys_tower4"), 4, "T4")
+	T.eq(R.TowerTier("npc_dota_goodguys_melee_rax_mid"), nil, "not a tower")
+	T.eq(pair(R.GlyphLeft(4.5, 2)), "4.5/modifier", "modifier time read")
+	T.eq(pair(R.GlyphLeft(nil, 2)), "5/timer", "7s from first seen")
+	T.eq(pair(R.GlyphLeft(nil, 9)), "0/timer", "never negative")
+	-- 7.42 tooltip: no multishot for tier 1, so no multiplier (was 2).
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower1_bot", true, 3), 1, "T1 glyphed")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", false, 3), 1, "no Glyph")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 1), 1, "T2, one hero in reach: same damage")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower3_top", true, 3), 3, "T3, three heroes: each hit")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 9), 6, "at most 6 targets")
+	T.eq(R.GlyphTowerFactor("npc_dota_badguys_tower2_mid", true, 0), 1, "at least 1")
+end)
+
+T.test("glyph edge: each team slot stands on its own angle (game 092 spread=54)", function()
+	local R = rules()
+	T.near(R.GlyphSlotAngle(1), -0.8, 1e-9, "slot 1")
+	T.near(R.GlyphSlotAngle(3), 0, 1e-9, "slot 3, the lane")
+	T.near(R.GlyphSlotAngle(5), 0.8, 1e-9, "slot 5")
+	T.near(R.GlyphSlotAngle(2) - R.GlyphSlotAngle(1), 0.4, 1e-9, "neighbours differ")
+	-- At an edge of about 970, 0.4 rad is about 380, past the 300 spread.
+	T.ok(970 * (R.GlyphSlotAngle(2) - R.GlyphSlotAngle(1)) > R.GLYPH_SPREAD, "further apart than the spread")
+end)

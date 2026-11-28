@@ -142,8 +142,41 @@ local function EndTrip(state, team, now, why, seen)
 	state.visibleSince = nil
 end
 
+-- Why the team is busy at the enemy base, else nil (#12, game 087 35:27: the peek picked Ringmaster, pos 1, during
+-- the strength push on the Radiant base): a strength push runs (bots/lib/systems/strength_push.lua), an advantage
+-- window runs (bots/lib/systems/push.lua), or 2+ of ours are within 1600 of one of their T3s, T4s or their Ancient.
+local THEIR_HG_RADIUS = 1600
+local THEIR_HG_TOWERS = { TOWER_TOP_3, TOWER_MID_3, TOWER_BOT_3, TOWER_BASE_1, TOWER_BASE_2 }
+local function SiegeWhy(team)
+	local StrengthPush = require(GetScriptDirectory() .. "/lib/systems/strength_push")
+	if StrengthPush.State(team).active == true then
+		return "strength"
+	end
+	local Push = require(GetScriptDirectory() .. "/lib/systems/push")
+	if Push.AdvantageActive(team) then
+		return "advantage"
+	end
+	local enemyTeam = GetOpposingTeam()
+	local buildings = { GetAncient(enemyTeam) }
+	for _, towerId in ipairs(THEIR_HG_TOWERS) do
+		buildings[#buildings + 1] = GetTower(enemyTeam, towerId)
+	end
+	for _, building in pairs(buildings) do
+		if
+			building ~= nil
+			and not building:IsNull()
+			and building:IsAlive()
+			and #(Fu.GetAlliesNearLoc(building:GetLocation(), THEIR_HG_RADIUS) or {}) >= 2
+		then
+			return "their-hg"
+		end
+	end
+	return nil
+end
 local function UpdatePeek(state, team, now, seen, pit)
 	local pitVisible = pit ~= nil and IsLocationVisible(pit) == true
+	-- Only read in the respawn window (a peek can start or run only then).
+	local siege = state.phase == "window" and SiegeWhy(team) or nil
 	if state.peekerId ~= nil then
 		local peeker = MemberById(team, state.peekerId)
 		local why = nil
@@ -151,6 +184,8 @@ local function UpdatePeek(state, team, now, seen, pit)
 			why = "seen"
 		elseif state.phase ~= "window" then
 			why = "phase-" .. tostring(state.phase)
+		elseif siege ~= nil then
+			why = "siege-" .. siege
 		elseif peeker == nil or not peeker:IsAlive() then
 			why = "dead"
 		elseif now > (state.tripDeadline or now) then
@@ -178,7 +213,22 @@ local function UpdatePeek(state, team, now, seen, pit)
 		tripActive = false,
 		lastTripEnd = state.lastTripEnd,
 		now = now,
+		siege = siege,
 	})
+	-- One line per team when a due peek is held for a siege (on a change of reason, else every 30s).
+	local dueWithoutSiege = siege ~= nil
+		and Rules.PeekDue({
+			phase = state.phase,
+			seen = seen,
+			pitVisible = pitVisible,
+			tripActive = false,
+			lastTripEnd = state.lastTripEnd,
+			now = now,
+		})
+	if dueWithoutSiege and (siege ~= state.siegeLogWhy or now >= (state.siegeLogAt or -999)) then
+		state.siegeLogWhy, state.siegeLogAt = siege, now + 30
+		RoshLog("%s rosh-peek-skip why=siege-%s since-kill=%s", TeamName(team), siege, SinceKillText(state))
+	end
 	if not due or pit == nil then
 		return
 	end
