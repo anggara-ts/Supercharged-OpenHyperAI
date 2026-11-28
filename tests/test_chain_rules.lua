@@ -412,3 +412,34 @@ T.test("chain: the unknown line keeps a disable-looking name past the cap and co
 	T.ok(string.find(mods, "magic_wand", 1, true) == nil, "the last plain name is cut")
 	T.eq(Chain.UnknownNames({}, 12), "", "an empty list")
 end)
+
+T.test("chain: the far limit is attack range + 350 (at least 700), none for a NO_ATTACK modifier", function()
+	local _, Chain = load()
+	T.eq(Chain.FarLimit(600, false), 950, "Lion's 600 range")
+	T.eq(Chain.FarLimit(nil, false), 700, "no range read")
+	T.eq(Chain.FarLimit(200, false), 700, "a melee range")
+	T.eq(Chain.FarLimit(600, true), nil, "Cold Embrace: no limit")
+end)
+
+T.test("chain: a hold on Cold Embrace is not released as far (game 091 t=1666)", function()
+	local _, Chain = load()
+	-- Game 091: Lion held Earth Spike on the cocooned Wyvern at dist=678, then cast it at dist=801 with 1.87s left
+	-- (why=far), so 0.74s of the stun landed on the cocoon.
+	local lion = fakeHero({ name = "npc_dota_hero_lion", team = TEAM_RADIANT, loc = Vector(0, 0, 0) })
+	local wyvern = fakeHero({ name = "npc_dota_hero_winter_wyvern", team = TEAM_DIRE, loc = Vector(801, 0, 0) })
+	local spike = fakeAbility("lion_impale", 0.3, { speed = 2800, duration = 1.3 }, 600)
+	lion.target = wyvern
+	stun(wyvern, 3.0, "modifier_winter_wyvern_cold_embrace")
+	T.eq(Chain.OnCast(lion, spike, Vector(801, 0, 0), "location"), true, "held past 700")
+	T.eq(#lion.attacks, 0, "no attack on the cocoon")
+	T.eq(#lion.moves, 1, "walks toward him from out of cast range")
+	T.eq(#lines("hold hero=winter_wyvern spell=lion_impale"), 1, "hold line")
+	T.eq(#lines("far=- atk=-"), 1, "the hold line prints no limit")
+	T.eq(#lines("why=far"), 0, "no far release")
+	-- A plain stun at the same distance still releases: the attack order would walk Lion in.
+	Chain.Reset()
+	stun(wyvern, 3.0)
+	T.eq(Chain.OnCast(lion, spike, Vector(801, 0, 0), "location"), false, "a plain stun goes through")
+	T.eq(#lines("why=far"), 1, "why=far")
+	T.eq(#lines("dist=801 far=700 atk=-"), 1, "the cast line names the 700 limit")
+end)

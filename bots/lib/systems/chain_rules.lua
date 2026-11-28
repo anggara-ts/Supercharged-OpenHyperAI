@@ -15,14 +15,16 @@
 --     (general_utils/hero_state.lua) calls that hero free once the time left is down to the bot's need, so the
 --     file orders the disable in time (Chain.ReleaseEarly). Only for that bot, that hero, while the hold lives.
 -- No hold on a channelling hero (the stun ends the TP / channel), while the bot retreats or is below 30% HP, from
--- farther than HOLD_RANGE / attack range + ATTACK_BUFFER (the attack order would walk it in), or for longer than
--- HOLD_CAP. Only stuns and hexes count as disabled (roots, silences and slows leave the hero able
--- to act or blink), and only a time left read from a listed modifier counts: an unread time means no hold.
+-- farther than HOLD_RANGE / attack range + ATTACK_BUFFER (the attack order would walk it in; not for a NO_ATTACK
+-- modifier such as Cold Embrace, where the hold sends no attack), or for longer than HOLD_CAP. Only stuns and hexes
+-- count as disabled (roots, silences and slows leave the hero able to act or blink), and only a time left read from a
+-- listed modifier counts: an unread time means no hold.
 -- Cost: one GetName per targeted cast order; the rest only for a listed disable on an enemy hero. No scan of
 -- nearby units; Fu.IsDisabled pays one compare (Chain.live) while no bot holds.
 --
--- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= dist= src=" (throttled), "... cast hero= spell=
--- left= need= gap= dist= held= real= why=" (a disable cast into a running disable, once per bot, spell and hero
+-- Logs: "[SHy-CHAIN] t= <bot> hold hero= spell= left= need= gap= dist= far= atk= src=" (throttled), "... cast hero=
+-- spell= left= need= gap= dist= far= atk= held= real= why=" (far= the hold's distance limit, - for none; atk= the
+-- attack range read that set it; a cast line is a disable cast into a running disable, once per bot, spell and hero
 -- every 3s; why=held after a hold, chain without one, blocked / far / cap when the rule did not wait),
 -- "... unknown hero= spell= n= mods=" (stunned or hexed but no listed modifier: the list misses a name; n= counts
 -- the unlisted names, disable-looking ones first, at most UNKNOWN_CAP shown), "... off"
@@ -199,6 +201,18 @@ function Chain.Decide(left, need, heldFor, blocked)
 		return "hold"
 	end
 	return "cast"
+end
+
+-- The farthest the bot may stand from the hero and still hold, or nil for no limit. The limit exists because the
+-- hold's attack order would walk the bot in from Fissure / Torrent range. A hero in a NO_ATTACK modifier gets no attack
+-- order (and a bot out of cast range walks only as far as the cast itself would take it), so there is no limit
+-- (#228, game 091 t=1666: Lion held Earth Spike on a Wyvern in Cold Embrace with 2.20s left, released it 0.33s later
+-- as why=far at dist=801, and 0.74s of the stun landed on the cocoon).
+function Chain.FarLimit(attackRange, noAttack)
+	if noAttack then
+		return nil
+	end
+	return math.max(Chain.HOLD_RANGE, (attackRange or 0) + Chain.ATTACK_BUFFER)
 end
 
 -- The time left a teammate's reservation promises (nil when there is none, it is the caster's own, or it lapsed).
@@ -468,10 +482,13 @@ function Chain.OnCast(bot, ability, target, kind)
 		return false
 	end
 	local heldFor = (stamp ~= nil and stamp.passedAt == nil) and (now - stamp.startedAt) or 0
-	local far = false
+	-- The cocoon read on the hero (also when a teammate's claim outlasts it): no attack, no far limit.
+	local noAttack = modName ~= nil and Chain.NO_ATTACK[modName] == true
+	local far, farLimit, attackRange = false, nil, nil
 	if left ~= nil and distance ~= nil then
-		local attackRange = call(bot, "GetAttackRange") or 0
-		far = distance > math.max(Chain.HOLD_RANGE, attackRange + Chain.ATTACK_BUFFER)
+		attackRange = call(bot, "GetAttackRange")
+		farLimit = Chain.FarLimit(attackRange, noAttack)
+		far = farLimit ~= nil and distance > farLimit
 	end
 	if Chain.Decide(left, need, heldFor, blocked or far) == "hold" then
 		if stamp == nil or stamp.passedAt ~= nil then
@@ -488,7 +505,7 @@ function Chain.OnCast(bot, ability, target, kind)
 		if Throttled(botName .. "|hold|" .. spellName, now) then
 			print(
 				string.format(
-					"[SHy-CHAIN] t=%.0f %s hold hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f src=%s mod=%s",
+					"[SHy-CHAIN] t=%.0f %s hold hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f far=%s atk=%s src=%s mod=%s",
 					now,
 					short(botName),
 					short(heroName),
@@ -497,6 +514,8 @@ function Chain.OnCast(bot, ability, target, kind)
 					Fmt(need),
 					Fmt(left - need),
 					distance or -1,
+					farLimit and string.format("%.0f", farLimit) or "-",
+					attackRange and string.format("%.0f", attackRange) or "-",
 					src,
 					tostring(modName or "-")
 				)
@@ -505,7 +524,7 @@ function Chain.OnCast(bot, ability, target, kind)
 		-- The hero file may have cleared the queue (Fu.SetQueuePtToINT) and queued Soul Ring / a Treads switch:
 		-- one plain attack order on the disabled hero replaces them, so the bot hits him instead of standing.
 		-- A hero who takes no physical damage (Cold Embrace): no attack; walk toward him only from out of cast range.
-		if src == "modifier" and Chain.NO_ATTACK[modName] then
+		if noAttack then
 			if castRange ~= nil and castRange > 0 and distance ~= nil and distance > castRange then
 				pcall(bot.Action_MoveToUnit, bot, hero)
 			end
@@ -529,7 +548,7 @@ function Chain.OnCast(bot, ability, target, kind)
 		end
 		print(
 			string.format(
-				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f held=%s real=%s src=%s why=%s",
+				"[SHy-CHAIN] t=%.0f %s cast hero=%s spell=%s left=%s need=%s gap=%s dist=%.0f far=%s atk=%s held=%s real=%s src=%s why=%s",
 				now,
 				short(botName),
 				short(heroName),
@@ -538,6 +557,8 @@ function Chain.OnCast(bot, ability, target, kind)
 				Fmt(need),
 				Fmt(left - need),
 				distance or -1,
+				farLimit and string.format("%.0f", farLimit) or "-",
+				attackRange and string.format("%.0f", attackRange) or "-",
 				Fmt(heldFor),
 				stamp and stamp.checked or "?",
 				tostring(src),
