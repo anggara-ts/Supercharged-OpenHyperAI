@@ -19,6 +19,8 @@ local HumanOrders = require(GetScriptDirectory() .. "/lib/systems/human_orders")
 local bot = GetBot()
 local FarmMode = {}
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+-- #227: the team danger map (no solo farm where 3+ enemies could arrive).
+local DangerMap = require(GetScriptDirectory() .. "/lib/systems/danger_map")
 local radiantBaseLocation = Vector(-7174.000000, -6671.00000, 0.000000)
 local direBaseLocation = Vector(7023.000000, 6450.000000, 0.000000)
 local botName = bot:GetUnitName()
@@ -352,7 +354,7 @@ end
 -- The camp rules of this think (set by the desire, read again by Think when it re-picks a camp, so Think
 -- no longer picks from the unfiltered team table a camp the desire drops a moment later).
 local keepOwnSideNow, aliveEnemyCountNow = false, 5
-local function CampAllowed(camp)
+local function CampAllowedBySide(camp)
 	if not Fu.Site.IsEnemyCamp(camp) or Fu.IsInLaningPhase() then
 		return true
 	end
@@ -362,12 +364,318 @@ local function CampAllowed(camp)
 	-- With at most 2 enemies alive the enemy jungle is open anyway.
 	return aliveEnemyCountNow <= 2 or EnemyCampCovered(camp)
 end
-local function FilterCamps(camps)
-	local allowed = {}
-	for _, camp in ipairs(camps or {}) do
-		if CampAllowed(camp) then
-			allowed[#allowed + 1] = camp
+-- Team danger map (#227, bots/lib/systems/danger_map.lua): after the laning phase a farm spot (camp, lane front or
+-- the wave next to the bot) is skipped when no ally is within 1500 of it and 3+ enemies could reach it within 5s, or
+-- it is on the far side (enemy camp, or nearer their living towers than ours) with 2+ enemies able to reach it or 3+
+-- enemies missing. Game 073: 29 of 86 deaths with no ally within 1200, 22 of them against 3-5 enemies, 9 of those
+-- with farm active in the 30s before. When every camp is skipped the list is empty (alt=none): the farm then takes
+-- a safe lane, the idle walk or the team. [SHy-DANGER] farm-skip names a spot when its skip reason changes (5s
+-- throttle per bot; a change held back prints later), with the spot taken instead (alt=).
+-- Game 084 (t=1023-1029, Underlord at our mid T2, no enemy seen): a missing enemy's reach grows to 4500, so 4 missing
+-- enemies closed the wave under our own tower, and farm, assemble and push took turns 16 times in 20s. Now:
+-- - a lane wave or front our tower covers (T1: 1100, T2 and deeper: 1900 from it; DangerMap.Rules.OwnTowerCover)
+--   counts only the enemies seen in the last 2s ([SHy-DANGER] farm-keep why=own-tower);
+-- - a spot skipped for danger stays skipped 10s (DangerMap.Rules.HoldSkip; held=yes on farm-skip), by its name
+--   (wave, lane<N>, camp key), so the farm does not pick and drop it every think;
+-- - with nothing left (a wave or lane front skipped for danger, no camp) the bot waits for the safest wave by our towers
+--   (SafestTowerWave, [SHy-DANGER] farm-keep why=no-alt) instead of leaving farm.
+local DangerRules = DangerMap.Rules
+local dangerLogged, dangerLogAt = {}, -999
+-- One answer per spot per danger snapshot (rebuilt every 0.5s): the farm desire asks for every camp every think.
+local spotCache, spotCacheAt = {}, nil
+local skipHolds = {} -- spot name -> DangerRules.HoldSkip entry
+local keepLogAt = {} -- farm-keep throttle per reason
+local waveSkippedNow = false -- a lane wave or lane front was skipped for danger in this desire (GetDesireHelper resets it)
+local NO_DANGER = { danger = 0, seen = 0, missing = 0, allies = 0, ownTower = -1, covered = false }
+local function LogDangerKeep(why, spot, loc, info)
+	if DotaTime() < (keepLogAt[why] or -999) then
+		return
+	end
+	keepLogAt[why] = DotaTime() + 10
+	pcall(
+		print,
+		string.format(
+			"[SHy-DANGER] t=%.0f %s farm-keep why=%s spot=%s danger=%d visible=%d missing=%d ownTower=%.0f dist=%.0f",
+			DotaTime(),
+			ShortName(bot),
+			why,
+			spot,
+			info.danger,
+			info.seen,
+			info.missing,
+			info.ownTower,
+			GetUnitToLocationDistance(bot, loc)
+		)
+	)
+end
+-- holdKey: the spot's name for the skip hold (wave, lane<N>, camp key; nil = no hold). isWave: a lane wave or front
+-- (our tower's cover can keep it). Returns the skip reason (nil = farm it), the numbers (DangerMap.FarmSkip) and
+-- whether the reason comes from the hold only.
+local function SpotDangerWhy(loc, enemyCamp, holdKey, isWave)
+	if loc == nil or Fu.IsInLaningPhase() then
+		return nil, NO_DANGER, false
+	end
+	local snap = DangerMap.Snapshot()
+	local at = snap ~= nil and snap.at or nil
+	if at ~= spotCacheAt then
+		spotCache, spotCacheAt = {}, at
+	end
+	local key = (math.floor(loc.x) * 100000 + math.floor(loc.y)) * 2 + (isWave and 1 or 0)
+	local info = spotCache[key]
+	if info == nil then
+		local _
+		_, info = DangerMap.FarmSkip(bot, loc, enemyCamp, isWave)
+		spotCache[key] = info
+	end
+	local why = info.why
+	if holdKey ~= nil then
+		why, skipHolds[holdKey] = DangerRules.HoldSkip(skipHolds[holdKey], DotaTime(), info.why, info.covered)
+	end
+	if why ~= nil then
+		waveSkippedNow = waveSkippedNow or isWave == true
+	elseif info.kept ~= nil then
+		LogDangerKeep(info.kept, holdKey or "-", loc, info)
+	end
+	return why, info, why ~= nil and info.why == nil
+end
+-- skips: DangerSkipEntry for spots skipped this call; clear: keys of spots that are not skipped (their logged state
+-- resets). alt: the spot farmed instead, as text (or a function for it).
+local function LogDangerSkips(skips, clear, alt)
+	for _, key in ipairs(clear or {}) do
+		dangerLogged[key] = nil
+	end
+	if skips == nil or DotaTime() < dangerLogAt then
+		return
+	end
+	local first, changed = nil, 0
+	for _, skip in ipairs(skips) do
+		if dangerLogged[skip.key] ~= skip.why then
+			changed = changed + 1
+			first = first or skip
 		end
+	end
+	if first == nil then
+		return
+	end
+	dangerLogAt = DotaTime() + 5
+	for _, skip in ipairs(skips) do
+		dangerLogged[skip.key] = skip.why
+	end
+	local info = first.info
+	pcall(
+		print,
+		string.format(
+			"[SHy-DANGER] t=%.0f %s farm-skip spot=%s why=%s danger=%d visible=%d missing=%d allies=%d ownTower=%.0f held=%s dist=%.0f alt=%s n=%d",
+			DotaTime(),
+			ShortName(bot),
+			first.key,
+			first.why,
+			info.danger,
+			info.seen,
+			info.missing,
+			info.allies,
+			info.ownTower,
+			first.held and "yes" or "no",
+			GetUnitToLocationDistance(bot, first.loc),
+			type(alt) == "function" and alt() or tostring(alt),
+			changed
+		)
+	)
+end
+local function DangerSkipEntry(key, loc, why, info, held)
+	return { key = key, why = why, info = info, held = held == true, loc = loc }
+end
+local function CampAllowed(camp)
+	if not CampAllowedBySide(camp) then
+		return false
+	end
+	return SpotDangerWhy(CampLoc(camp), Fu.Site.IsEnemyCamp(camp), CampKey(camp), false) == nil
+end
+-- No alternative left (game 084 t=1028: lane2 skipped, alt=camp:none, then farm-left:end_fallback): the lane front
+-- on our half with the fewest seen enemies near our towers (DangerRules.SafestTowerWave). The bot waits for it at
+-- the edge of the tower's cover (DangerRules.CoverPoint), where the wave is farmed with only seen enemies counting.
+-- Returns the spot and the lane candidate, or nil.
+local function SafestTowerWave()
+	local ourFountain, enemyFountain = Fu.GetTeamFountain(), Fu.GetEnemyFountain()
+	local cands = {}
+	for _, lane in ipairs({ LANE_TOP, LANE_MID, LANE_BOT }) do
+		local front = GetLaneFrontLocation(GetTeam(), lane, 0)
+		local dist = GetUnitToLocationDistance(bot, front)
+		if dist < 6000 and Fu.GetDistance(front, ourFountain) < Fu.GetDistance(front, enemyFountain) then
+			local towerDist, _, tower = DangerMap.OwnTower(front)
+			if tower ~= nil then
+				cands[#cands + 1] = {
+					key = "lane" .. lane,
+					lane = lane,
+					front = front,
+					tower = tower,
+					seen = DangerMap.SeenDanger(front),
+					ownTower = towerDist,
+					dist = dist,
+				}
+			end
+		end
+	end
+	local best = DangerRules.SafestTowerWave(cands)
+	if best == nil then
+		return nil
+	end
+	local radius = (best.tower.tier or 1) >= 2 and DangerRules.COVER_DEEP or DangerRules.COVER_T1
+	local x, y = DangerRules.CoverPoint(best.front.x, best.front.y, best.tower.x, best.tower.y, radius)
+	local to = Vector(x, y, best.front.z or 0)
+	if not IsLocationPassable(to) then
+		to = Fu.AdjustLocationWithOffsetTowardsFountain(to, 200)
+	end
+	if not IsLocationPassable(to) or #Fu.GetLastSeenEnemiesNearLoc(to, 1600) > 0 then
+		return nil
+	end
+	return to, best
+end
+-- The no-alternative keep (DangerRules.KeepStep; game 087: none of 6 farm-keep why=no-alt lines held, each was
+-- followed within 2-4s by a camp pick or another spot). The wait point was chosen again on every think, only while
+-- the farm had no camp at all, and Think walked past it to the lane front. Now the first choice is kept: no camp is
+-- picked while it holds (Fu.Site.GetClosestNeutralSpwan drops camps another farming ally is nearer to, so the
+-- allowed list flickers), Think waits at the point and hits the kept wave's creeps there, and the keep ends on
+-- danger, low HP, the front leaving our towers, another mode for 4s, the wave farmed, a cap, or (after 8s with no
+-- creeps yet) a camp. [SHy-DANGER] farm-keep why=no-alt at the start, farm-keep-end with lh= (last hits) at the end.
+local noAltKeep = nil
+local noAltRetryAt = -999
+local keepEndLogAt, keepEndCount = -999, 0
+local function NoAltKeepCreep()
+	if noAltKeep == nil then
+		return nil
+	end
+	local weakest, minHealth = nil, math.huge
+	for _, creep in ipairs(bot:GetNearbyLaneCreeps(1600, true) or {}) do
+		if
+			Fu.IsValid(creep)
+			and Fu.CanBeAttacked(creep)
+			and GetUnitToLocationDistance(creep, noAltKeep.to) <= DangerRules.KEEP_REACH
+			and creep:GetHealth() < minHealth
+		then
+			weakest, minHealth = creep, creep:GetHealth()
+		end
+	end
+	return weakest
+end
+local function EndNoAltKeep(why)
+	local keep = noAltKeep
+	if keep == nil then
+		return
+	end
+	noAltKeep = nil
+	if why ~= "farmed" and why ~= "alt" then
+		noAltRetryAt = DotaTime() + DangerRules.KEEP_RETRY
+	end
+	keepEndCount = keepEndCount + 1
+	if DotaTime() < keepEndLogAt then
+		return
+	end
+	keepEndLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[SHy-DANGER] t=%.0f %s farm-keep-end why=%s spot=%s held=%.0f lh=%d creeps=%s farm=%s dist=%.0f n=%d",
+			DotaTime(),
+			ShortName(bot),
+			why,
+			keep.key,
+			DotaTime() - keep.startedAt,
+			bot:GetLastHits() - keep.lastHits,
+			keep.creepsAt ~= nil and "yes" or "no",
+			bot:GetActiveMode() == BOT_MODE_FARM and "yes" or "no",
+			GetUnitToLocationDistance(bot, keep.to),
+			keepEndCount
+		)
+	)
+	keepEndCount = 0
+end
+local function StartNoAltKeep()
+	if DotaTime() < noAltRetryAt then
+		return nil
+	end
+	local to, best = SafestTowerWave()
+	if to == nil then
+		return nil
+	end
+	local walk = GetUnitToLocationDistance(bot, to) / math.max(bot:GetCurrentMovementSpeed(), 100)
+	noAltKeep = {
+		key = best.key,
+		lane = best.lane,
+		to = to,
+		startedAt = DotaTime(),
+		untilT = DangerRules.KeepUntil(DotaTime(), walk),
+		lastHits = bot:GetLastHits(),
+	}
+	pcall(
+		print,
+		string.format(
+			"[SHy-DANGER] t=%.0f %s farm-keep why=no-alt spot=%s visible=%d missing=%d ownTower=%.0f wait=%.0f dist=%.0f until=%.0f farm=%s",
+			DotaTime(),
+			ShortName(bot),
+			best.key,
+			best.seen,
+			DangerMap.Missing(),
+			best.ownTower,
+			Fu.GetDistance(to, best.front),
+			GetUnitToLocationDistance(bot, to),
+			noAltKeep.untilT - DotaTime(),
+			bot:GetActiveMode() == BOT_MODE_FARM and "yes" or "no"
+		)
+	)
+	return to
+end
+-- One desire think of the keep: the wait point, or nil when it ended.
+local function TickNoAltKeep(camps)
+	local keep = noAltKeep
+	if keep == nil then
+		return nil
+	end
+	local now = DotaTime()
+	local front = GetLaneFrontLocation(GetTeam(), keep.lane, 0)
+	local towerDist = DangerMap.OwnTower(front)
+	local frontOk = towerDist <= DangerRules.FALLBACK_TOWER_REACH
+		and Fu.GetDistance(front, Fu.GetTeamFountain()) < Fu.GetDistance(front, Fu.GetEnemyFountain())
+	local campAllowed = false
+	if now - keep.startedAt >= DangerRules.KEEP_MIN and keep.creepsAt == nil then
+		campAllowed = Fu.Site.GetClosestNeutralSpwan(bot, camps or {}) ~= nil
+	end
+	local why = DangerRules.KeepStep(keep, now, {
+		lowHp = bot:GetHealth() <= 200,
+		seen = DangerMap.SeenDanger(front),
+		enemiesNear = #Fu.GetLastSeenEnemiesNearLoc(keep.to, 1600),
+		frontOk = frontOk,
+		farmActive = bot:GetActiveMode() == BOT_MODE_FARM,
+		creeps = NoAltKeepCreep() ~= nil and 1 or 0,
+		campAllowed = campAllowed,
+	})
+	if why ~= nil then
+		EndNoAltKeep(why)
+		return nil
+	end
+	return keep.to
+end
+local function FilterCamps(camps)
+	local allowed, skips, clear = {}, nil, {}
+	for _, camp in ipairs(camps or {}) do
+		if CampAllowedBySide(camp) then
+			local loc = CampLoc(camp)
+			local why, info, held = SpotDangerWhy(loc, Fu.Site.IsEnemyCamp(camp), CampKey(camp), false)
+			if why == nil then
+				allowed[#allowed + 1] = camp
+				clear[#clear + 1] = CampKey(camp)
+			else
+				skips = skips or {}
+				skips[#skips + 1] = DangerSkipEntry(CampKey(camp), loc, why, info, held)
+			end
+		end
+	end
+	if skips ~= nil then
+		LogDangerSkips(skips, clear, function()
+			return CampKey(Fu.Site.GetClosestNeutralSpwan(bot, allowed))
+		end)
+	else
+		LogDangerSkips(nil, clear, nil)
 	end
 	return allowed
 end
@@ -598,13 +906,20 @@ local function IdleTarget()
 			and not LaneBehind(lane)
 			and #Fu.GetLastSeenEnemiesNearLoc(front, 1600) == 0
 			and IsLocationPassable(front)
+			and SpotDangerWhy(front, false, "lane" .. lane, true) == nil
 		then
 			best, bestDist, bestKind = front, dist, "wave-" .. lane
 		end
 	end
 	for _, camp in ipairs(Fu.Role["availableCampTable"] or {}) do
 		local loc = CampLoc(camp)
-		if loc ~= nil and not Fu.Site.IsEnemyCamp(camp) and not Fu.Site.IsCampDangerous(bot, camp) then
+		-- The danger map's skip too (#227): with no safe wave or camp the walk goes to the team.
+		if
+			loc ~= nil
+			and not Fu.Site.IsEnemyCamp(camp)
+			and not Fu.Site.IsCampDangerous(bot, camp)
+			and SpotDangerWhy(loc, false, CampKey(camp), false) == nil
+		then
 			local dist = GetUnitToLocationDistance(bot, loc)
 			if dist > 800 and dist < bestDist then
 				best, bestDist, bestKind, bestCamp = loc, dist, "camp", camp
@@ -931,9 +1246,21 @@ function GetDesire()
 end
 function GetDesireHelper()
 	bot._farmExitReason = nil
+	waveSkippedNow = false
+	-- The no-alternative keep (#227): a camp set by another path (a human's camp, the code below) ends it, and so do
+	-- death and its hard cap; while it holds no camp is picked here or in the farm block below.
+	if noAltKeep ~= nil then
+		if preferredCamp ~= nil then
+			EndNoAltKeep("camp")
+		elseif not bot:IsAlive() then
+			EndNoAltKeep("dead")
+		elseif DotaTime() - noAltKeep.startedAt >= DangerRules.KEEP_HARD then
+			EndNoAltKeep("cap")
+		end
+	end
 	-- [SHy-CAMP] survey, once per team (site.lua keeps the flag).
 	Fu.Site.SurveyCamps(bot)
-	if preferredCamp == nil then
+	if preferredCamp == nil and noAltKeep == nil then
 		PickCamp(availableCamps, "pick")
 	end
 	if DotaTime() - lastCacheCleanupTime > Utils.CachedVarsCleanTime then
@@ -1154,7 +1481,13 @@ function GetDesireHelper()
 					CampKey(preferredCamp)
 				)
 			end
-			PickCamp(availableCamps, keepOwnSide and "enemy-camp-drop" or "uncovered")
+			local dropWhy = "uncovered"
+			if keepOwnSide then
+				dropWhy = "enemy-camp-drop"
+			elseif CampAllowedBySide(preferredCamp) then
+				dropWhy = "danger"
+			end
+			PickCamp(availableCamps, dropWhy)
 		end
 	end
 	if isAlive and bot:HasModifier("modifier_arc_warden_tempest_double") then
@@ -1319,8 +1652,11 @@ function GetDesireHelper()
 			tostring(Fu.GetPosition(bot))
 		)
 	end
+	if not canFarm and noAltKeep ~= nil then
+		EndNoAltKeep("no-farm")
+	end
 	if canFarm then
-		if preferredCamp == nil then
+		if preferredCamp == nil and noAltKeep == nil then
 			PickCamp(availableCamps, "pick")
 		end
 		if Fu.GetDistanceFromEnemyFountain(bot) > 4000 then
@@ -1341,11 +1677,40 @@ function GetDesireHelper()
 				laneCreeps = {}
 			end
 		end
+		-- The wave next to the bot, by the danger map (#227): 3+ enemies could be there within 5s and no ally is near
+		-- (or the far side with 2+ / 3+ missing). The lane fronts and camps below are checked the same way.
+		if #laneCreeps > 0 then
+			local waveCenter = Fu.GetCenterOfUnits(laneCreeps)
+			local why, info, held = SpotDangerWhy(waveCenter, false, "wave", true)
+			if why ~= nil then
+				LogDangerSkips({ DangerSkipEntry("wave", waveCenter, why, info, held) }, nil, "next-spot")
+				laneCreeps = {}
+			else
+				LogDangerSkips(nil, { "wave" }, nil)
+			end
+		end
 		if #laneCreeps > 0 then
 			local enemiesNearCreeps = Fu.GetEnemiesNearLoc(Fu.GetCenterOfUnits(laneCreeps), 1600)
 			if #enemiesNearCreeps == 0 then
-				bot.farmLocation = Fu.GetCenterOfUnits(laneCreeps)
-				return BOT_MODE_DESIRE_VERYHIGH
+				-- The no-alternative keep (#227): its wave walked past the wait point under our tower (farmed: the
+				-- keep did its job, this path goes on farming it), or another enemy wave was allowed (alt). Our own
+				-- creeps walking through the cover do not end a keep that has not seen its wave yet.
+				local ownCreeps = laneCreeps[1] ~= nil and laneCreeps[1]:GetTeam() == GetTeam()
+				if noAltKeep ~= nil and TickNoAltKeep(availableCamps) ~= nil and NoAltKeepCreep() == nil then
+					if noAltKeep.creepsAt ~= nil then
+						EndNoAltKeep("farmed")
+					elseif not ownCreeps then
+						EndNoAltKeep("alt")
+					end
+				end
+				if noAltKeep == nil or not ownCreeps then
+					bot.farmLocation = Fu.GetCenterOfUnits(laneCreeps)
+					return BOT_MODE_DESIRE_VERYHIGH
+				end
+				laneCreeps = {}
+			elseif noAltKeep ~= nil then
+				-- An enemy hero near the wave next to the bot: the farm leaves it, and the keep with it.
+				EndNoAltKeep("danger")
 			end
 		end
 		if #laneCreeps == 0 then
@@ -1353,6 +1718,7 @@ function GetDesireHelper()
 			local enemyFountain = Fu.GetEnemyFountain()
 			local bestLane = nil
 			local bestScore = 0
+			local laneSkips, laneClear = nil, {}
 			for _, lane in pairs({ LANE_TOP, LANE_MID, LANE_BOT }) do
 				local laneFront = GetLaneFrontLocation(GetTeam(), lane, 0)
 				local frontDistance = GetUnitToLocationDistance(bot, laneFront)
@@ -1360,7 +1726,18 @@ function GetDesireHelper()
 				local distanceToEnemyFountain = Fu.GetDistance(laneFront, enemyFountain)
 				if distanceToOurFountain < distanceToEnemyFountain and frontDistance < 6000 then
 					local lastSeenEnemies = Fu.GetLastSeenEnemiesNearLoc(laneFront, 1600)
+					local dangerWhy, dangerInfo, held = nil, nil, false
 					if #lastSeenEnemies == 0 then
+						dangerWhy, dangerInfo, held = SpotDangerWhy(laneFront, false, "lane" .. lane, true)
+						if dangerWhy ~= nil then
+							laneSkips = laneSkips or {}
+							laneSkips[#laneSkips + 1] =
+								DangerSkipEntry("lane" .. lane, laneFront, dangerWhy, dangerInfo, held)
+						else
+							laneClear[#laneClear + 1] = "lane" .. lane
+						end
+					end
+					if #lastSeenEnemies == 0 and dangerWhy == nil then
 						local score = 1
 							/ math.max(1, frontDistance)
 							* distanceToEnemyFountain
@@ -1372,19 +1749,32 @@ function GetDesireHelper()
 					end
 				end
 			end
+			LogDangerSkips(laneSkips, laneClear, function()
+				if bestLane ~= nil then
+					return "lane" .. bestLane
+				end
+				return "camp:" .. CampKey(preferredCamp)
+			end)
 			if bestLane ~= nil then
 				local farmLaneLocation = GetLaneFrontLocation(GetTeam(), bestLane, 0)
 				if not IsLocationPassable(farmLaneLocation) then
 					farmLaneLocation = Fu.AdjustLocationWithOffsetTowardsFountain(farmLaneLocation, 200)
 				end
 				if IsLocationPassable(farmLaneLocation) then
-					bot.farmLocation = farmLaneLocation
-					return BOT_MODE_DESIRE_VERYHIGH
+					-- A lane front the danger map allows (#227): the keep's own lane goes on waiting at the cover
+					-- point (the front may be past it); another lane ends the keep.
+					if noAltKeep ~= nil and noAltKeep.lane ~= bestLane then
+						EndNoAltKeep("alt")
+					end
+					if noAltKeep == nil then
+						bot.farmLocation = farmLaneLocation
+						return BOT_MODE_DESIRE_VERYHIGH
+					end
 				end
 			end
 		end
 		if #laneCreeps == 0 then
-			if preferredCamp == nil then
+			if preferredCamp == nil and noAltKeep == nil then
 				PickCamp(availableCamps, "pick")
 			end
 			if IsDebug then
@@ -1414,6 +1804,28 @@ function GetDesireHelper()
 					bot._farmExitReason = "walk_to_camp"
 					return BOT_MODE_DESIRE_VERYHIGH
 				end
+			end
+		end
+		-- Nothing left because the danger map skipped the waves (#227, game 084 alt=camp:none): wait for the safest wave
+		-- by our towers instead of leaving farm and coming back every second. VERYHIGH like the lane front above: the
+		-- push scaling in GetDesire already cuts it when the team pushes (game 084: 0.6 -> 0.24 at push 0.7), and a
+		-- MODERATE (0.35 -> 0.15) lost to the bot's own weak push (0.20), which did not hit the wave either.
+		-- Not gated on the active mode (Fu.Site.IsModeSuitableToFarm reads it): that would turn it on and off again.
+		-- Game 087: the wait was chosen again every think and lost to the next camp pick; now it is kept
+		-- (noAltKeep, TickNoAltKeep) until its own end rules say so.
+		if #laneCreeps == 0 and preferredCamp == nil then
+			local waitAt = TickNoAltKeep(availableCamps)
+			if waitAt == nil and noAltKeep == nil and waveSkippedNow and bot:GetHealth() > 200 then
+				waitAt = StartNoAltKeep()
+			end
+			if waitAt ~= nil then
+				local keepCreep = NoAltKeepCreep()
+				if keepCreep ~= nil then
+					waitAt = keepCreep:GetLocation()
+				end
+				bot.farmLocation = waitAt
+				bot._farmExitReason = "danger_no_alt"
+				return BOT_MODE_DESIRE_VERYHIGH
 			end
 		end
 	end
@@ -1485,6 +1897,10 @@ function GetDesireHelper()
 			return BOT_MODE_DESIRE_MODERATE
 		end
 		laneCreeps = bot:GetNearbyLaneCreeps(1600, true)
+		-- The wave the danger map skipped above (or holds, #227) stays skipped here too.
+		if #laneCreeps > 0 and SpotDangerWhy(Fu.GetCenterOfUnits(laneCreeps), false, "wave", true) ~= nil then
+			laneCreeps = {}
+		end
 		if #laneCreeps > 0 then
 			return BOT_MODE_DESIRE_MODERATE
 		end
@@ -1623,6 +2039,24 @@ function Think()
 				return
 			end
 		end
+	end
+	-- The no-alternative keep (#227): wait at the cover point and hit only the kept wave's creeps there. The walk below
+	-- stopped 1200 short of the point and the fallback then attack-moved to the lane front, out of the cover
+	-- (game 087: wait= 200-903, so the front was the nearer target).
+	if noAltKeep ~= nil and preferredCamp == nil then
+		local keepCreep = NoAltKeepCreep()
+		if keepCreep ~= nil then
+			if GetUnitToUnitDistance(bot, keepCreep) > bot:GetAttackRange() then
+				bot:Action_MoveToLocation(keepCreep:GetLocation())
+			else
+				bot:Action_AttackUnit(keepCreep, false)
+			end
+			return
+		end
+		if GetUnitToLocationDistance(bot, noAltKeep.to) > 150 then
+			bot:Action_MoveToLocation(noAltKeep.to)
+		end
+		return
 	end
 	secondOfMinute = math.floor(DotaTime()) % 60
 	if
