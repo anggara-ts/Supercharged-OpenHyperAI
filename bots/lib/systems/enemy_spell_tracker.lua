@@ -1,5 +1,6 @@
 -- Shared bot system (#34, games 067-068): when our team last saw an enemy hero use a spell or item, and whether it
--- can be ready again. Used by bots/heroes/hero_alchemist.lua (escape-ready and disable-risk rules).
+-- can be ready again. Used by bots/heroes/hero_alchemist.lua (escape-ready and disable-risk rules) and
+-- bots/heroes/hero_rubick.lua (#290: each enemy hero's last spell, what Spell Steal would take).
 --
 -- Bot API facts (docs/BOT_API_RUNTIME.md): GetCooldownTimeRemaining() on an enemy hero's ability reads 0 (game 067:
 -- Nyx Assassin's Vendetta read ready 4s and 6s after it was cast), GetCooldown() on an enemy handle gives no value
@@ -303,6 +304,24 @@ end
 
 local casts = {} -- casts[heroName][spellName] = { at=, lastObs=, cooldown=, source=, via=, level= }
 local levels = {} -- levels[heroName][spellName] = the level read at the last sighting
+local lastCasts = {} -- lastCasts[heroName] = { spell=, at= }: the last spell (not item) the callback reported
+
+-- #290: the last spell an enemy hero was reported casting (Rubick's Spell Steal takes "the last spell the hero cast"
+-- and "cannot steal item abilities", datafeed hero 86). Every spell, not only the listed ones; items are skipped.
+-- LastCast returns the spell name and when it was cast, or nil when no cast of that hero was reported.
+function EnemySpells.NoteLastCast(heroName, spell, now)
+	if heroName == nil or spell == nil or string.find(spell, "^item_") ~= nil then
+		return
+	end
+	lastCasts[heroName] = { spell = spell, at = now }
+end
+function EnemySpells.LastCast(heroName)
+	local entry = lastCasts[heroName]
+	if entry == nil then
+		return nil
+	end
+	return entry.spell, entry.at
+end
 
 -- The level of `spell` of `heroName` read at the last sighting of that hero (nil: never read).
 function EnemySpells.KnownLevel(heroName, spell)
@@ -524,7 +543,7 @@ local observeAt = -999
 
 -- For the tests: forget every cast, level and sample.
 function EnemySpells.Reset()
-	casts, levels, levelReadAt, hpSamples, observeAt = {}, {}, {}, {}, -999
+	casts, levels, levelReadAt, hpSamples, observeAt, lastCasts = {}, {}, {}, {}, -999, {}
 end
 
 -- #34, game 068 t=2899: an engage brew started on Clinkz at 9% while Ember Spirit and Vengeful Spirit were killing
@@ -702,6 +721,9 @@ local function OnCast(info)
 				casterTeam == nil and "unknown" or enemy and "enemy" or "ally"
 			)
 		)
+	end
+	if enemy and spell ~= nil and heroName ~= nil and string.find(heroName, "^npc_dota_hero_") ~= nil then
+		EnemySpells.NoteLastCast(heroName, spell, DotaTime())
 	end
 	if enemy and spell ~= nil and heroName ~= nil and (EnemySpells.COOLDOWNS[spell] ~= nil or probeInterest[spell]) then
 		local isHero = string.find(heroName, "^npc_dota_hero_") ~= nil

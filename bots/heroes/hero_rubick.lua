@@ -4,7 +4,10 @@ local bot = GetBot()
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_context")
 local Rubick = dofile(GetScriptDirectory() .. "/lib/hero/rubick")
-local SpellProbList = require(GetScriptDirectory() .. "/lib/data/spell_prob_list")
+local SpellStealRules = require(GetScriptDirectory() .. "/lib/systems/spell_steal_rules")
+local EnemySpells = require(GetScriptDirectory() .. "/lib/systems/enemy_spell_tracker")
+-- #290: the cast callback records each enemy hero's last spell (what Spell Steal takes), also out of vision.
+EnemySpells.InstallCastProbe({})
 local Minion = require(GetScriptDirectory() .. "/lib/hero/minion")
 local sTalentList = Fu.Skill.GetTalentList(bot)
 local sAbilityList = Fu.Skill.GetAbilityList(bot)
@@ -155,6 +158,7 @@ if bot.shouldBlink == nil then
 end
 local isRetreating
 function X.SkillsComplement()
+	X.WatchStealResult()
 	if Fu.CanNotUseAbility(bot) then
 		return
 	end
@@ -181,6 +185,13 @@ function X.SkillsComplement()
 	if spellStealDesire > 0 then
 		bot:Action_UseAbilityOnEntity(spellStealAbility, spellStealTarget)
 		lastSpellStealTime = DotaTime()
+		-- #290: X.WatchStealResult logs what arrived; the order is given again each think until it is cast, so the
+		-- spell expected is the latest pick's.
+		if bot._stealPending == nil then
+			bot._stealPending = { orderAt = DotaTime() }
+		end
+		bot._stealPending.expected = bot._stealExpected
+		bot._stealPending.from = bot._stealFrom
 		return
 	end
 	telekinesisDesire, telekinesisTarget = X.ConsiderTelekinesis()
@@ -623,26 +634,162 @@ function X.ConsiderStolenSpell2()
 	Rubick.ConsiderStolenSpell(stolenSpell2)
 	return BOT_ACTION_DESIRE_HIGH, 0, ""
 end
+-- #290: what an ability handle reads, for SpellStealRules.Value (nil when it does not read).
+local function StealInfo(ability)
+	if ability == nil then
+		return nil
+	end
+	local ok, info = pcall(function()
+		local behavior = ability:GetBehavior() or 0
+		return {
+			isPassive = ability:IsPassive(),
+			isUltimate = ability:IsUltimate(),
+			isAOE = bit.band(behavior, DOTA_ABILITY_BEHAVIOR_AOE or 32) ~= 0,
+			damage = ability:GetAbilityDamage() or 0,
+		}
+	end)
+	return ok and info or nil
+end
+local function SafeName(ability)
+	if ability == nil then
+		return nil
+	end
+	local ok, name = pcall(function()
+		return ability:GetName()
+	end)
+	return ok and name or nil
+end
+-- A held stolen spell: name, value, kind, cooldown left, full cooldown, damage.
+local function HeldSpell(ability)
+	local name = SafeName(ability)
+	if SpellStealRules.IsEmpty(name) then
+		return { name = name, value = 0, kind = "empty", cd = 0, fullCd = 0, damage = 0 }
+	end
+	local info = SpellStealRules.KIND[name] == nil and StealInfo(ability) or nil
+	local value, kind = SpellStealRules.Value(name, info)
+	local okCd, cd = pcall(function()
+		return ability:GetCooldownTimeRemaining()
+	end)
+	local okFull, fullCd = pcall(function()
+		return ability:GetCooldown()
+	end)
+	local okDamage, damage = pcall(function()
+		return ability:GetAbilityDamage()
+	end)
+	return {
+		name = name,
+		value = value,
+		kind = kind,
+		cd = okCd and cd or 0,
+		fullCd = okFull and fullCd or 0,
+		damage = okDamage and damage or 0,
+	}
+end
+local function ShortHero(unit)
+	return (string.gsub(unit:GetUnitName(), "npc_dota_hero_", ""))
+end
+-- The spell `enemyHero` would give: the one it is casting now (it is the last cast once its cast point ends; a cast
+-- that is cancelled is unverified), else its last cast the cast callback reported. via: casting / seen / none.
+local function IncomingSpell(enemyHero, now)
+	if enemyHero:IsCastingAbility() or enemyHero:IsUsingAbility() then
+		local active = enemyHero:GetCurrentActiveAbility()
+		local name = SafeName(active)
+		if name ~= nil and string.find(name, "^item_") == nil then
+			return name, "casting", now
+		end
+	end
+	local name, at = EnemySpells.LastCast(enemyHero:GetUnitName())
+	if name ~= nil then
+		return name, "seen", at
+	end
+	return nil, "none", nil
+end
+-- 0.5 s after Spell Steal went on cooldown: which spell arrived and its cooldown (settles whether a stolen spell
+-- arrives ready, and whether the last cast the tracker had was the one he got).
+function X.WatchStealResult()
+	local pending = bot._stealPending
+	if pending == nil then
+		return
+	end
+	local now = DotaTime()
+	if pending.castAt == nil and spellStealAbility:GetCooldownTimeRemaining() > 0 then
+		pending.castAt = now
+	end
+	local done = pending.castAt ~= nil and now - pending.castAt >= 0.5
+	-- Not cast within 5 s of the order (the target walked away, the order changed): logged with cast=no.
+	if not done and (pending.castAt ~= nil or now - pending.orderAt <= 5) then
+		return
+	end
+	bot._stealPending = nil
+	local got = bot:GetAbilityInSlot(3)
+	local second = bot:GetAbilityInSlot(4)
+	local gotName = SafeName(got) or "none"
+	local okCd, cd = pcall(function()
+		return got:GetCooldownTimeRemaining()
+	end)
+	local okFull, fullCd = pcall(function()
+		return got:GetCooldown()
+	end)
+	local match = "blind"
+	if pending.expected ~= nil then
+		match = (pending.expected == gotName) and "yes" or "no"
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUBICK] t=%.0f rubick steal-result from=%s expected=%s got=%s cd=%.1f fullCd=%.1f second=%s match=%s cast=%s",
+			now,
+			tostring(pending.from),
+			tostring(pending.expected),
+			gotName,
+			okCd and cd or -1,
+			okFull and fullCd or -1,
+			SafeName(second) or "none",
+			match,
+			done and "yes" or "no"
+		)
+	)
+end
+-- The fields of a steal-pick / steal-skip line.
+local function PickLine(pick, held, otherName, from)
+	return string.format(
+		"from=%s incoming=%s via=%s ago=%.0f score=%.0f kind=%s src=%s held=%s heldScore=%.1f heldKind=%s cd=%.1f"
+			.. " fullCd=%.1f other=%s why=%s",
+		from,
+		tostring(pick.incoming),
+		pick.via,
+		pick.ago,
+		pick.score,
+		pick.kind,
+		pick.source,
+		tostring(held.name),
+		pick.heldScore,
+		held.kind,
+		held.cd,
+		held.fullCd,
+		tostring(otherName),
+		pick.why
+	)
+end
 function X.ConsiderSpellSteal()
 	if not spellStealAbility:IsFullyCastable() then
 		return BOT_ACTION_DESIRE_NONE, nil
 	end
-	if DotaTime() - lastSpellStealTime < 60 then
-		if stolenSpell1:IsFullyCastable() and stolenSpell1:IsUltimate() and not bot:HasScepter() then
-			return BOT_ACTION_DESIRE_NONE, nil
-		end
-		if stolenSpell2:IsFullyCastable() and stolenSpell2:IsUltimate() then
-			return BOT_ACTION_DESIRE_NONE, nil
-		end
-	end
-	if stolenSpell1:GetCooldownTimeRemaining() < 5 and stolenSpell1:GetAbilityDamage() >= 280 then
-		return BOT_ACTION_DESIRE_NONE, nil
-	end
-	if stolenSpell2:GetCooldownTimeRemaining() < 5 and stolenSpell2:GetAbilityDamage() >= 280 then
-		return BOT_ACTION_DESIRE_NONE, nil
-	end
+	local now = DotaTime()
+	local hasScepter = bot:HasScepter()
+	-- The old 60 s hold for a stolen ultimate that can be cast, kept (#290).
+	local ultHold = now - lastSpellStealTime < SpellStealRules.HOLD_ULT
+		and (
+			(stolenSpell1:IsFullyCastable() and stolenSpell1:IsUltimate() and not hasScepter)
+			or (stolenSpell2:IsFullyCastable() and stolenSpell2:IsUltimate())
+		)
+	-- With Scepter he holds two; the new spell is compared with the second slot, the one that would drop out (#290;
+	-- which slot drops is unverified, the steal-result line shows both).
+	local held = HeldSpell(hasScepter and stolenSpell2 or stolenSpell1)
+	local otherName = hasScepter and SafeName(stolenSpell1) or nil
 	local castRange = Fu.GetProperCastRange(false, bot, spellStealAbility:GetCastRange())
 	local nearbyEnemies = Fu.GetEnemiesNearLoc(bot:GetLocation(), castRange + 300)
+	local best, bestSkip = nil, nil
 	for _, enemyHero in pairs(nearbyEnemies) do
 		if
 			Fu.IsValidHero(enemyHero)
@@ -650,57 +797,84 @@ function X.ConsiderSpellSteal()
 			and not Fu.IsSuspiciousIllusion(enemyHero)
 			and not Fu.IsMeepoClone(enemyHero)
 		then
-			if
-				enemyHero:IsUsingAbility()
-				or enemyHero:IsCastingAbility()
-				or Fu.IsCastingUltimateAbility(enemyHero)
-				or enemyHero:GetLevel() > 10
-			then
-				-- The weight table is keyed by spell NAME; passing the handle always gave the default 1,
-				-- and "weight*100*100 >= rand(1,70)" was always true, so Rubick re-stole every cooldown and
-				-- threw away good stolen spells. Now: weight of the held spell (0 keep .. 1 replace) against
-				-- a roll that is redrawn only every 15s (a per-frame roll passes within a second anyway).
-				if DotaTime() >= (bot._stealRollAt or -999) then
-					bot._stealRollAt = DotaTime() + 15
-					bot._stealRoll = RandomInt(1, 100)
-					bot._stealRoll2 = RandomInt(1, 100)
+			local incoming, via, castAt = IncomingSpell(enemyHero, now)
+			-- No known last spell: the old blind steal (a hero above level 10 has cast something), scored as a nuke.
+			if incoming ~= nil or enemyHero:GetLevel() > 10 then
+				local value, kind, source = 0, "unknown", "none"
+				if incoming ~= nil then
+					local info = nil
+					if SpellStealRules.KIND[incoming] == nil then
+						local okHandle, handle = pcall(function()
+							return enemyHero:GetAbilityByName(incoming)
+						end)
+						info = StealInfo(okHandle and handle or nil)
+					end
+					value, kind, source = SpellStealRules.Value(incoming, info)
 				end
-				local heldSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell1:GetName()) * 100
-				local stealRoll = bot._stealRoll
-				local steal = false
-				if bot:HasScepter() then
-					local secondSpellWeight = SpellProbList.GetSpellReplaceWeight(stolenSpell2:GetName()) * 100
-					if heldSpellWeight >= stealRoll and secondSpellWeight >= bot._stealRoll2 then
-						steal = true
-					end
-					if secondSpellWeight >= stealRoll then
-						steal = true
-					end
-				else
-					if heldSpellWeight >= stealRoll then
-						steal = true
-					end
-				end
+				local steal, why, heldScore = SpellStealRules.Decide({
+					incoming = incoming,
+					incomingValue = value,
+					incomingKind = kind,
+					held = held.name,
+					heldValue = held.value,
+					heldCd = held.cd,
+					heldDamage = held.damage,
+					other = otherName,
+					ultHold = ultHold,
+				})
+				local score = incoming ~= nil and value or SpellStealRules.BLIND_VALUE
+				local pick = {
+					hero = enemyHero,
+					incoming = incoming,
+					via = via,
+					ago = castAt ~= nil and now - castAt or -1,
+					score = score,
+					kind = kind,
+					source = source,
+					heldScore = heldScore,
+					why = why,
+				}
 				if steal then
-					if DotaTime() >= (bot._stealLogAt or -999) then
-						bot._stealLogAt = DotaTime() + 5
-						pcall(
-							print,
-							string.format(
-								"[SHy-RUBICK] t=%.0f spell-steal from=%s held=%s w=%.0f roll=%d",
-								DotaTime(),
-								(string.gsub(enemyHero:GetUnitName(), "npc_dota_hero_", "")),
-								stolenSpell1:GetName(),
-								heldSpellWeight,
-								stealRoll
-							)
-						)
+					if best == nil or score > best.score then
+						best = pick
 					end
-					bot._stealRollAt = -999
-					return BOT_ACTION_DESIRE_HIGH, enemyHero
+				elseif bestSkip == nil or score > bestSkip.score then
+					bestSkip = pick
 				end
 			end
 		end
+	end
+	local pick = best or bestSkip
+	if pick == nil then
+		return BOT_ACTION_DESIRE_NONE, nil
+	end
+	local from = ShortHero(pick.hero)
+	if best ~= nil then
+		bot._stealExpected = pick.incoming
+		bot._stealFrom = from
+		if now >= (bot._stealLogAt or -999) then
+			bot._stealLogAt = now + 5
+			pcall(
+				print,
+				string.format("[SHy-RUBICK] t=%.0f rubick steal-pick %s", now, PickLine(pick, held, otherName, from))
+			)
+		end
+		return BOT_ACTION_DESIRE_HIGH, pick.hero
+	end
+	-- A skip: printed when the target, its spell, the held spell or the reason changes, at most every 3 s.
+	local last = bot._stealSkip
+	local changed = last == nil
+		or last.from ~= from
+		or last.incoming ~= pick.incoming
+		or last.held ~= held.name
+		or last.why ~= pick.why
+	if changed and now >= (bot._stealSkipAt or -999) then
+		bot._stealSkip = { from = from, incoming = pick.incoming, held = held.name, why = pick.why }
+		bot._stealSkipAt = now + 3
+		pcall(
+			print,
+			string.format("[SHy-RUBICK] t=%.0f rubick steal-skip %s", now, PickLine(pick, held, otherName, from))
+		)
 	end
 	return BOT_ACTION_DESIRE_NONE, nil
 end
