@@ -1668,11 +1668,16 @@ function GetDesireRaw()
 		-- ABSOLUTE + 0.02 is 0.72 and loses to a Roshan call (0.96 / 0.97). A power rune within a
 		-- second's walk is taken anyway (game 092: Shadow Fiend at 139 stayed in Roshan mode).
 		local takeDesire = BOT_MODE_DESIRE_ABSOLUTE + 0.02
-		if
-			bot:GetActiveMode() == BOT_MODE_ROSHAN
-			and RuneRules.TakeDuringRoshan(runeDist, RuneMode.IsPowerRune(runeId))
-		then
-			takeDesire = math.max(takeDesire, RuneRules.ROSHAN_NEAR_DESIRE)
+		local nearDesire, nearLatch = RuneRules.RoshanNearTake(
+			bot:GetActiveMode() == BOT_MODE_ROSHAN,
+			RuneRules.TakeDuringRoshan(runeDist, RuneMode.IsPowerRune(runeId)),
+			bot._roshNearTake,
+			runeId,
+			DotaTime()
+		)
+		if nearDesire ~= nil then
+			takeDesire = math.max(takeDesire, nearDesire)
+			bot._roshNearTake = nearLatch
 			LogRoshanNearTake(runeId, runeDist)
 		end
 		return give(takeDesire, "underfoot")
@@ -1775,8 +1780,12 @@ function GetDesireRaw()
 						-- Roshan mode), unless the power rune is about a second away. The claim passes to the
 						-- nearest ally: game 092, Furion kept it at 828 and Shadow Fiend left it as claimed:furion.
 						skipWhy = "roshan"
-						RuneRules.passClaims[claimKey] =
-							RuneRules.NextClaim(nil, closer, DotaTime(), closer:GetActiveMode() == BOT_MODE_RUNE)
+						RuneRules.passClaims[claimKey] = RuneRules.NextClaim(
+							RuneRules.passClaims[claimKey],
+							closer,
+							DotaTime(),
+							closer:GetActiveMode() == BOT_MODE_RUNE
+						)
 					end
 					if skipWhy ~= nil and not yield then
 						local skipKey = id .. ":" .. skipWhy .. ":" .. math.floor(DotaTime() / RuneCycle(id))
@@ -1826,11 +1835,16 @@ function GetDesireRaw()
 						end
 						-- The Roshan skip above did not fire because the power rune is within ROSHAN_NEAR.
 						-- 0.97 still loses to the call, so the take uses ROSHAN_NEAR_DESIRE.
-						if
-							bot:GetActiveMode() == BOT_MODE_ROSHAN
-							and RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id))
-						then
-							passDesire = math.max(passDesire, RuneRules.ROSHAN_NEAR_DESIRE)
+						local nearDesire, nearLatch = RuneRules.RoshanNearTake(
+							bot:GetActiveMode() == BOT_MODE_ROSHAN,
+							RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id)),
+							bot._roshNearTake,
+							id,
+							DotaTime()
+						)
+						if nearDesire ~= nil then
+							passDesire = math.max(passDesire, nearDesire)
+							bot._roshNearTake = nearLatch
 							LogRoshanNearTake(id, mine)
 						end
 						-- Taking it over from a closer ally: the picker rules (IsTheClosestAlly, so PickerSpot and

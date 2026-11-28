@@ -270,6 +270,17 @@ RuneRules.ROSHAN_NEAR = 300
 -- BOT_MODE_DESIRE_ABSOLUTE + 0.02 is 0.72 on the rescaled desire steps (global_overrides.lua) and
 -- loses to that call, so a near take uses this number instead.
 RuneRules.ROSHAN_NEAR_DESIRE = 0.98
+-- Once this desire wins, the active mode is rune, so the Roshan check would drop it under the call
+-- and the bot flips every think. The latch keeps 0.98 for 2s, long enough to walk onto a rune within ROSHAN_NEAR.
+function RuneRules.RoshanNearTake(modeIsRoshan, near, latch, runeId, now)
+	if modeIsRoshan and near then
+		return RuneRules.ROSHAN_NEAR_DESIRE, { id = runeId, untilAt = now + 2 }
+	end
+	if latch ~= nil and latch.id == runeId and now < (latch.untilAt or 0) and near then
+		return RuneRules.ROSHAN_NEAR_DESIRE, latch
+	end
+	return nil, nil
+end
 function RuneRules.TakeDuringRoshan(dist, power)
 	return power == true and dist ~= nil and dist <= RuneRules.ROSHAN_NEAR
 end

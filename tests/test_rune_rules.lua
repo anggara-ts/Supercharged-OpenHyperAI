@@ -498,4 +498,7 @@ T.test("rune rules: a power rune within 300 is taken during a Roshan call (game 
 	T.eq(R.TakeDuringRoshan(828, true), false, "Furion at 828 gives the claim up")
 	T.eq(R.TakeDuringRoshan(139, false), false, "a bounty or water rune still waits")
 	T.eq(R.TakeDuringRoshan(nil, true), false, "no distance")
+	local desire, latch = R.RoshanNearTake(true, true, nil, 1, 10)
+	T.ok(desire > 0.96, "the Roshan take starts above the call")
+	T.eq(select(1, R.RoshanNearTake(false, true, latch, 1, 11)), desire, "still above 0.96 once the mode is rune")
 end)
