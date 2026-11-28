@@ -39,6 +39,9 @@ Rules.BLIND_VALUE = Rules.VALUE.nuke
 Rules.HOLD_ULT = 60
 Rules.HOLD_STRONG_DAMAGE = 280
 Rules.HOLD_STRONG_READY = 5
+-- Seconds after Spell Steal goes on cooldown before steal-result is logged anyway. A read at 0.5 s is before the
+-- projectile lands, so the line showed the old slot (game 092). The cap is the review's wait, not a datafeed value.
+Rules.RESULT_WAIT = 3
 
 -- Hand table for the spells that matter. Each kind was checked against the ability's Valve datafeed description
 -- (herodata, 2026-11-28: "stuns", "taunts", "roots", "silences", "puts ... to sleep", "cannot move or attack", ...).
@@ -222,6 +225,19 @@ function Rules.Decide(o)
 		return true, "better", heldScore
 	end
 	return false, o.incoming ~= nil and "keep" or "blind-keep", heldScore
+end
+
+-- Whether steal-result should be logged. before3/before4 are the ability names in slots 3 and 4 when the cast
+-- started; now3/now4 are those slots now; elapsed is seconds since Spell Steal went on cooldown.
+-- Returns ready, why: "changed" when either slot's name differs, "timeout" at RESULT_WAIT.
+function Rules.ResultReady(before3, before4, now3, now4, elapsed)
+	if now3 ~= before3 or now4 ~= before4 then
+		return true, "changed"
+	end
+	if (elapsed or 0) >= Rules.RESULT_WAIT then
+		return true, "timeout"
+	end
+	return false, nil
 end
 
 return Rules

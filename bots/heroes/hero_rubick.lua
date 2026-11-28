@@ -686,6 +686,10 @@ local function SafeName(ability)
 	end)
 	return ok and name or nil
 end
+-- Ability name in a slot, or "none" when the slot is empty or the handle does not read.
+local function SlotName(slot)
+	return SafeName(bot:GetAbilityInSlot(slot)) or "none"
+end
 -- A held stolen spell: name, value, kind, cooldown left, full cooldown, damage.
 local function HeldSpell(ability)
 	local name = SafeName(ability)
@@ -731,8 +735,9 @@ local function IncomingSpell(enemyHero, now)
 	end
 	return nil, "none", nil
 end
--- 0.5 s after Spell Steal went on cooldown: which spell arrived and its cooldown (settles whether a stolen spell
--- arrives ready, and whether the last cast the tracker had was the one he got).
+-- After Spell Steal goes on cooldown, wait until slot 3 or 4 changes name from the spell that was there when the
+-- cast started, or SpellStealRules.RESULT_WAIT seconds, then log once. A read at 0.5 s was before the projectile
+-- landed, so match=no showed the old slot (game 092). cd= is the same read as before.
 function X.WatchStealResult()
 	local pending = bot._stealPending
 	if pending == nil then
@@ -741,16 +746,34 @@ function X.WatchStealResult()
 	local now = DotaTime()
 	if pending.castAt == nil and spellStealAbility:GetCooldownTimeRemaining() > 0 then
 		pending.castAt = now
+		pending.before3 = SlotName(3)
+		pending.before4 = SlotName(4)
 	end
-	local done = pending.castAt ~= nil and now - pending.castAt >= 0.5
-	-- Not cast within 5 s of the order (the target walked away, the order changed): logged with cast=no.
-	if not done and (pending.castAt ~= nil or now - pending.orderAt <= 5) then
+	local cast = pending.castAt ~= nil
+	local why = "uncast"
+	if cast then
+		local ready, reason = SpellStealRules.ResultReady(
+			pending.before3,
+			pending.before4,
+			SlotName(3),
+			SlotName(4),
+			now - pending.castAt
+		)
+		-- Still the pre-steal spell, and under the wait: one line per steal, not one per think.
+		if not ready then
+			return
+		end
+		why = reason
+	elseif now - pending.orderAt <= 5 then
+		-- Not cast within 5 s of the order (the target walked away, the order changed): logged with cast=no.
 		return
 	end
+	local from = pending.from
+	local expected = pending.expected
+	local waited = cast and (now - pending.castAt) or -1
 	bot._stealPending = nil
 	local got = bot:GetAbilityInSlot(3)
-	local second = bot:GetAbilityInSlot(4)
-	local gotName = SafeName(got) or "none"
+	local gotName = SlotName(3)
 	local okCd, cd = pcall(function()
 		return got:GetCooldownTimeRemaining()
 	end)
@@ -758,24 +781,27 @@ function X.WatchStealResult()
 		return got:GetCooldown()
 	end)
 	-- With Scepter which slot takes the new spell is unverified: either slot counts as a match.
-	local secondName = SafeName(second) or "none"
+	local secondName = SlotName(4)
 	local match = "blind"
-	if pending.expected ~= nil then
-		match = (pending.expected == gotName or pending.expected == secondName) and "yes" or "no"
+	if expected ~= nil then
+		match = (expected == gotName or expected == secondName) and "yes" or "no"
 	end
 	pcall(
 		print,
 		string.format(
-			"[SHy-RUBICK] t=%.0f rubick steal-result from=%s expected=%s got=%s cd=%.1f fullCd=%.1f second=%s match=%s cast=%s",
+			"[SHy-RUBICK] t=%.0f rubick steal-result from=%s expected=%s got=%s cd=%.1f fullCd=%.1f"
+				.. " second=%s match=%s cast=%s wait=%.1f why=%s",
 			now,
-			tostring(pending.from),
-			tostring(pending.expected),
+			tostring(from),
+			tostring(expected),
 			gotName,
 			okCd and cd or -1,
 			okFull and fullCd or -1,
 			secondName,
 			match,
-			done and "yes" or "no"
+			cast and "yes" or "no",
+			waited,
+			why
 		)
 	)
 end
