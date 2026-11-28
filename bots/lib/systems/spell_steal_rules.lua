@@ -42,9 +42,10 @@ Rules.HOLD_STRONG_READY = 5
 
 -- Hand table for the spells that matter. Each kind was checked against the ability's Valve datafeed description
 -- (herodata, 2026-11-28: "stuns", "taunts", "roots", "silences", "puts ... to sleep", "cannot move or attack", ...).
--- Not here: big damage and ultimates without a disable (Culling Blade, Laguna Blade, Finger of Death, Echo Slam:
--- "damaging enemy units", no stun), which the fallback from the handle scores as "big". A spell missing here is
--- never counted as a disable.
+-- Damage ultimates are listed too ("big"): an enemy's ability handle may not read (docs/BOT_API_RUNTIME.md confirms
+-- only GetLevel and GetMana on it), and the fallback would then score Culling Blade as utility. Echo Slam is "big",
+-- not a disable: "damaging enemy units", no stun. Ministuns (Lightning Bolt, Lucent Beam, Void) are "big" too, for
+-- their damage: a 0.1-0.2 s stun is not Hex. A spell missing here is never counted as a disable.
 Rules.KIND = {
 	-- Area disables: stun, root, taunt, sleep, fear or silence on every enemy in an area or a line.
 	abyssal_underlord_pit_of_malice = "area_disable",
@@ -103,11 +104,9 @@ Rules.KIND = {
 	enigma_malefice = "single_disable",
 	legion_commander_duel = "single_disable",
 	lion_voodoo = "single_disable",
-	luna_lucent_beam = "single_disable",
 	mars_spear = "single_disable",
 	mirana_arrow = "single_disable",
 	necrolyte_reapers_scythe = "single_disable",
-	night_stalker_void = "single_disable",
 	obsidian_destroyer_astral_imprisonment = "single_disable",
 	ogre_magi_fireblast = "single_disable",
 	primal_beast_pulverize = "single_disable",
@@ -122,7 +121,19 @@ Rules.KIND = {
 	vengefulspirit_magic_missile = "single_disable",
 	windrunner_shackleshot = "single_disable",
 	witch_doctor_paralyzing_cask = "single_disable",
-	zuus_lightning_bolt = "single_disable",
+	-- Big: damage ultimates and big nukes (datafeed: ultimate, damage 475-1450 at max level; the ministuns 300-380).
+	antimage_mana_void = "big",
+	axe_culling_blade = "big",
+	earthshaker_echo_slam = "big",
+	lich_chain_frost = "big",
+	lina_laguna_blade = "big",
+	lion_finger_of_death = "big",
+	luna_lucent_beam = "big",
+	night_stalker_void = "big",
+	queenofpain_sonic_wave = "big",
+	skywrath_mage_mystic_flare = "big",
+	zuus_lightning_bolt = "big",
+	zuus_thundergods_wrath = "big",
 }
 
 -- Is this a stolen-spell slot with nothing in it?

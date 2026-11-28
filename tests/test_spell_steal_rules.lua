@@ -30,8 +30,8 @@ local function decide(R, o)
 	})
 end
 
--- What the handle of Culling Blade reads (datafeed hero 2: ultimate, unit target, damage 475 at level 3... the API's
--- GetAbilityDamage may read another value; it is not in KIND, so it is scored from the handle).
+-- What a handle of Culling Blade could read (datafeed hero 2: ultimate, unit target). It is in KIND as "big", so the
+-- score does not depend on it: an enemy's handle may not read at all.
 local CULLING = { isUltimate = true, isAOE = false, isPassive = false, damage = 0 }
 
 T.test("spell steal: a ready Earth Spike is kept over Culling Blade (game 089)", function()
@@ -60,6 +60,12 @@ T.test("spell steal: Earth Spike on a long cooldown gives way to Culling Blade",
 		true,
 		"7.7 s left"
 	)
+	T.eq(
+		(decide(R, { incoming = "axe_culling_blade", held = "lion_impale", heldCd = 7.7 })),
+		true,
+		"7.7 s left, the enemy's handle read nothing"
+	)
+	T.eq(select(3, R.Value("axe_culling_blade")), "hand", "Culling Blade from the hand table")
 	T.eq(
 		(decide(R, { incoming = "axe_culling_blade", incomingInfo = CULLING, held = "lion_impale", heldCd = 3 })),
 		false,
@@ -158,6 +164,8 @@ T.test("spell steal: values from the hand table and from the handle", function()
 		"utility",
 		"unknown: never a disable"
 	)
+	T.eq(select(2, R.Value("zuus_lightning_bolt")), "big", "a ministun counts for its damage, not as a disable")
+	T.eq(select(2, R.Value("some_new_ult", { isUltimate = true })), "big", "an ultimate from the handle")
 	T.eq(select(2, R.Value("some_new_spell", { isPassive = true })), "weak", "passive")
 	T.eq(select(2, R.Value("some_new_spell", { damage = 320 })), "big", "300+ damage")
 	T.eq((R.Value("some_new_spell", { damage = 100, isAOE = true })), 35, "area nuke")

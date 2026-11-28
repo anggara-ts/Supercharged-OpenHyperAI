@@ -639,16 +639,27 @@ local function StealInfo(ability)
 	if ability == nil then
 		return nil
 	end
-	local ok, info = pcall(function()
-		local behavior = ability:GetBehavior() or 0
-		return {
-			isPassive = ability:IsPassive(),
-			isUltimate = ability:IsUltimate(),
-			isAOE = bit.band(behavior, DOTA_ABILITY_BEHAVIOR_AOE or 32) ~= 0,
-			damage = ability:GetAbilityDamage() or 0,
-		}
-	end)
-	return ok and info or nil
+	-- Each read on its own: one that fails on an enemy's handle does not drop the others.
+	local function Read(method)
+		local ok, value = pcall(function()
+			return ability[method](ability)
+		end)
+		if ok then
+			return value
+		end
+		return nil
+	end
+	local behavior = Read("GetBehavior")
+	local isAOE = nil
+	if type(behavior) == "number" then
+		isAOE = bit.band(behavior, DOTA_ABILITY_BEHAVIOR_AOE or 32) ~= 0
+	end
+	return {
+		isPassive = Read("IsPassive") == true,
+		isUltimate = Read("IsUltimate") == true,
+		isAOE = isAOE == true,
+		damage = tonumber(Read("GetAbilityDamage")) or 0,
+	}
 end
 local function SafeName(ability)
 	if ability == nil then
@@ -730,9 +741,11 @@ function X.WatchStealResult()
 	local okFull, fullCd = pcall(function()
 		return got:GetCooldown()
 	end)
+	-- With Scepter which slot takes the new spell is unverified: either slot counts as a match.
+	local secondName = SafeName(second) or "none"
 	local match = "blind"
 	if pending.expected ~= nil then
-		match = (pending.expected == gotName) and "yes" or "no"
+		match = (pending.expected == gotName or pending.expected == secondName) and "yes" or "no"
 	end
 	pcall(
 		print,
@@ -744,7 +757,7 @@ function X.WatchStealResult()
 			gotName,
 			okCd and cd or -1,
 			okFull and fullCd or -1,
-			SafeName(second) or "none",
+			secondName,
 			match,
 			done and "yes" or "no"
 		)
@@ -798,8 +811,14 @@ function X.ConsiderSpellSteal()
 			and not Fu.IsMeepoClone(enemyHero)
 		then
 			local incoming, via, castAt = IncomingSpell(enemyHero, now)
-			-- No known last spell: the old blind steal (a hero above level 10 has cast something), scored as a nuke.
-			if incoming ~= nil or enemyHero:GetLevel() > 10 then
+			-- No known last spell: the old blind steal (a hero casting, or above level 10, has cast something), scored
+			-- as a nuke.
+			if
+				incoming ~= nil
+				or enemyHero:IsUsingAbility()
+				or enemyHero:IsCastingAbility()
+				or enemyHero:GetLevel() > 10
+			then
 				local value, kind, source = 0, "unknown", "none"
 				if incoming ~= nil then
 					local info = nil
