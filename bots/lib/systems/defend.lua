@@ -991,19 +991,6 @@ local function BaseModeLane(bot)
 	end
 	return Lane.Mid
 end
--- The lane of this bot's rim in the team's base assignment, the same lane BaseAssignDesire keeps (#294), or nil
--- when there is no assignment or the bot has no rim.
-local function AssignedBaseLane(bot)
-	local assignment = BaseAssignment()
-	if not assignment.active then
-		return nil
-	end
-	local rimLane = assignment.assign[bot:GetPlayerID()]
-	if rimLane == "base" then
-		return BaseModeLane(bot)
-	end
-	return rimLane
-end
 function Defend.ShouldDefend(bot, building, radius)
 	if not isAliveBuilding(building) then
 		return false
@@ -1189,9 +1176,9 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	end
 	-- #295, game 092: this gate ran before the base-lane gate and zeroed the assigned lane (other-lane /
 	-- committed-other), so a full-HP bot read 0.00 on all three lanes while heroes stood on the Ancient.
-	-- The assigned base lane is the priority. With no assignment, the same skip applies while the base is the
-	-- defence (2+ heroes at the Ancient or on the high ground, the Ancient being hit, or 2+ creeps there: the
-	-- facts that turn the base floor on). The per-bot floor is built later; the base-lane gate then keeps one lane.
+	-- The assigned lane beats the Valve gate only when that lane is already a base lane (T2 down), or while
+	-- 2+ heroes are at the Ancient. High ground, a hit on the Ancient, or creeps there do not skip the gate:
+	-- the lanes would otherwise be scored freely and flip.
 	local commitDesires, commitDists = {}, {}
 	for _, candidate in ipairs(candidates) do
 		commitDesires[candidate.lane] = candidate.desire
@@ -1203,11 +1190,11 @@ function Defend.GetDefendDesireHelper(bot, lane)
 		rawRim = assignmentNow.assign[bot:GetPlayerID()]
 	end
 	local assignedLane = rawRim == "base" and BaseModeLane(bot) or rawRim
-	local heroesNow = gameState.enemiesAtAncient or 0
-	local basePriority = heroesNow >= 2 or (gameState.enemiesOnHG or 0) >= 2
-	if not basePriority and assignedLane == nil then
-		local threatNow = ReadBaseThreat(gameState)
-		basePriority = threatNow.hit or (threatNow.creeps or 0) >= 2
+	local basePriority = (gameState.enemiesAtAncient or 0) >= 2
+	-- A T1/T2 rim assignment must not zero the other lanes. Only a base lane, or a base under 2+ heroes, does.
+	local gateAssigned = assignedLane
+	if gateAssigned ~= nil and not IsBaseLane(gateAssigned) and not basePriority then
+		gateAssigned = nil
 	end
 	local thisCandidate = arrayFind(candidates, function(_, candidate)
 		return candidate.lane == lane
@@ -1227,7 +1214,7 @@ function Defend.GetDefendDesireHelper(bot, lane)
 		DefendLaneRules.CommitZero(lane, nil, commitDesires, commitDists, commitLane, commitActive, false, takeCommit)
 	local reason, nextCommit, gateRan = DefendLaneRules.CommitZero(
 		lane,
-		assignedLane,
+		gateAssigned,
 		commitDesires,
 		commitDists,
 		commitLane,
@@ -1238,8 +1225,8 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	if
 		reason == nil
 		and valveReason ~= nil
-		and assignedLane ~= nil
-		and lane == assignedLane
+		and gateAssigned ~= nil
+		and lane == gateAssigned
 		and DotaTime() >= (bot._baseKeptLogAt or -999)
 		and not Fu.IsMeepoClone(bot)
 	then
@@ -2632,9 +2619,10 @@ function Defend.DefendThink(bot, lane)
 	local info = { tier = tier, wave = 0, heroes = 0, spotLane = lane }
 	-- The "base" rim is the Ancient, whichever defend mode the lane label mapped to (#295). Game 092 sent
 	-- a base-assign lane=base bot to that lane's group-up while the heroes hit the tier-4 towers.
+	-- A !def order or a T1/T2 defend uses this Think too: only a base lane walks to the Ancient.
 	local assignment = BaseAssignment()
 	local rawRim = assignment.active and assignment.assign[bot:GetPlayerID()] or nil
-	if rawRim == "base" then
+	if rawRim == "base" and IsBaseLane(lane) then
 		local heroesAtAncient = ancient ~= nil
 				and #Fu.GetLastSeenEnemiesNearLoc(ancientLoc, DefendLaneRules.BASE_RADIUS)
 			or 0
