@@ -320,6 +320,7 @@ Tools: `gh_personal` (GitHub CLI as the anggara-ts login), `tools/issue-prs.js`,
 
 Observations and requests from the maintainer (in chat, PR comments or issues) can be wrong: a misread of the
 game, an outdated mechanic, or an idea that has a better alternative. Not every comment has to be implemented.
+The maintainer is open to being wrong (2026-11-28): argue when a request does not make sense, and do not carry out every request.
 - Check each one against the log, the game data and, where it helps, online sources (the Valve datafeed,
   Liquipedia / the Dota 2 wiki, patch notes) before acting on it. Cite what you found.
 - If the evidence disagrees, or you see a better approach, say so plainly and suggest the alternative instead

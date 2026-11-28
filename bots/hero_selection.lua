@@ -948,8 +948,10 @@ local function handleChatCommand(text, senderId, teamOnly)
 	end
 end
 function HandleLocaleSetting(locale)
-	CustomLoader.Localization = locale
-	log("Set to speak: %s", locale)
+	-- Same path as the in-game `!sp` (localization.lua): sets the language, or queues a refusal when the code
+	-- is not one this script speaks. `jp` counts as Japanese. The reply is said from the next level-up think.
+	Localization.TakeLanguageCommand("!sp " .. tostring(locale or ""), GetTeam())
+	log("Set to speak: %s", tostring(locale))
 end
 local function initPickTimes()
 	if pickState.initialized then

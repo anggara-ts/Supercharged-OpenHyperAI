@@ -1,4 +1,5 @@
--- Chat text in English, Chinese, Russian, and Japanese.
+-- Chat text in English, Chinese, Russian, Japanese, and Indonesian.
+-- A key missing from a language falls back to English (Localization.Get).
 local Localization = {}
 local CustomLoader
 if GetScriptDirectory() == "bots" then
@@ -9,17 +10,24 @@ end
 local defaultLocale = "en"
 local strings = {
 	en = {
-		say_play_pos = "I will play position ",
+		say_play_pos = "I play position ",
 		-- `!about` answer (#215); %s is the version, the same text as the welcome's (chat_rules.lua WelcomeVersion). No URL: chat links are not clickable.
 		say_about = "Supercharged OpenHyperAI, version %s. Feedback, bug reports and known limitations: see the bot script's Workshop page.",
 		pos_select_closed = "Position selection closed.",
-		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome): the version line, then
-		-- the Workshop page. No command hints (!pos, !Xpos Y, !sp, !debug; maintainer 2026-11-23). {version} and {date}:
-		-- bots/lib/systems/chat_rules.lua WelcomeVersion.
+		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome). 30 seconds after
+		-- the position lines: how to switch language, the version, "Update: {date}", a pause, then the Workshop.
+		-- No !pos hint (maintainer 2026-11-23). The language hint was added 2026-11-28, after !lang did nothing.
+		-- Japanese is ja; !sp jp is accepted as ja. {version} and {date}: chat_rules.lua WelcomeVersion.
 		welcome = {
-			"Supercharged OpenHyperAI {version} ({date})",
-			"Feedback and known limitations: see the bot script's Workshop page.",
+			"To switch language, type:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
+			"Supercharged OpenHyperAI {version}",
+			"Update: {date}",
+			"For bot change log, feedback, and discussion",
+			"please visit the workshop page",
 		},
+		say_lang_set = "Speaking English.",
+		say_lang_bad = "Try !sp en, ru, ja, zh, or id.",
 		say_will_lose = "We estimate our chance of winning is below 1%. The wise know when the story is written. Well played! ",
 		say_will_lose_2 = "Our numbers say less than 1% to win. We accept the verdict of mathematics. Well played!",
 		say_will_win = "We estimate our chance to win a team fight is over 90%. Probability is on our side.",
@@ -194,6 +202,7 @@ local strings = {
 		say_push_top = { "Let's push top!", "Pushing top!", "Push top lane!" },
 		say_push_mid = { "Let's push mid!", "Pushing mid!", "Push mid lane!" },
 		say_push_bot = { "Let's push bot!", "Pushing bot!", "Push bot lane!" },
+		say_harass = "Harassing {target}",
 		say_defend_top = { "Defend top!", "They're pushing top!", "Help top lane!" },
 		say_defend_mid = { "Defend mid!", "They're pushing mid!", "Help mid lane!" },
 		say_defend_bot = { "Defend bot!", "They're pushing bot!", "Help bot lane!" },
@@ -283,14 +292,20 @@ local strings = {
 		},
 	},
 	zh = {
-		say_play_pos = "我将玩位置 ",
+		say_play_pos = "我打位置 ",
 		say_about = "Supercharged OpenHyperAI，版本 %s。反馈、错误报告和已知限制：请查看脚本的创意工坊页面。",
 		pos_select_closed = "位置选择已关闭",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（{date}）",
-			"反馈和已知限制：请查看机器人脚本的创意工坊页面。",
+			"切换语言请输入：",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
+			"Supercharged OpenHyperAI {version}",
+			"更新：{date}",
+			"更新日志、反馈和讨论",
+			"请看创意工坊页面",
 		},
+		say_lang_set = "现在说中文。",
+		say_lang_bad = "请用 !sp en、ru、ja、zh 或 id。",
 		say_will_lose = "我们估计胜率不到 1%，所以我们无奈认输！打得不错！",
 		say_will_lose_2 = "我们估计胜率低于 1%。打得不错！",
 		say_will_win = "我们估计赢得团战的概率超过 90%",
@@ -456,6 +471,7 @@ local strings = {
 		say_push_top = { "推上路！", "上路推塔！", "一起推上路！" },
 		say_push_mid = { "推中路！", "中路推塔！", "一起推中路！" },
 		say_push_bot = { "推下路！", "下路推塔！", "一起推下路！" },
+		say_harass = "在消耗{target}",
 		say_defend_top = { "防守上路！", "上路有人推！", "支援上路！" },
 		say_defend_mid = { "防守中路！", "中路有人推！", "支援中路！" },
 		say_defend_bot = { "防守下路！", "下路有人推！", "支援下路！" },
@@ -477,7 +493,7 @@ local strings = {
 			"吃灰灰，马上需要钱！",
 		},
 		say_ward_observer = { "插真眼。", "这里插个观察者。", "放观察者守卫。" },
-		say_ward_sentry = { "插假眼。", "放守卫图腾。", "这里补个哨兵。" },
+		say_ward_sentry = { "插假眼。", "补个假眼。", "这里补个哨兵。" },
 		say_ward_observer_defend = { "防守真眼。", "家里野区插眼。", "防守观察者。" },
 		say_ward_sentry_defend = { "防守假眼。", "家里补哨兵。", "防守真视。" },
 		say_ward_observer_offense = { "进攻真眼。", "对面野区插眼。", "深插观察者。" },
@@ -488,6 +504,8 @@ local strings = {
 		say_take_wisdom = { "去拿智慧神殿。", "我去收经验神殿。", "智慧神殿我来。" },
 		say_debug_on = { "调试模式已开启，机器人会更啰嗦。", "Verbose debug 已开启。" },
 		say_debug_off = { "调试模式已关闭。", "Verbose debug 已关闭。" },
+		say_pos_prefix = "位置",
+		pos_names = { "优势路", "中路", "劣势路", "游走", "硬辅" },
 		say_pos_refused_core = "{hero}不能打{pos}号位",
 		say_pos_refused_human = "{pos}号位是{hero}的",
 		say_pos_refused_same = "你已经是{pos}号位了",
@@ -512,14 +530,20 @@ local strings = {
 		say_gg_win = { "ez", "简单", "太简单了", "下把加油", "gg ez", "轻松", "不过如此" },
 	},
 	ru = {
-		say_play_pos = "Я буду играть на позиции ",
+		say_play_pos = "Играю на позиции ",
 		say_about = "Supercharged OpenHyperAI, версия %s. Отзывы, сообщения об ошибках и известные ограничения: подробнее на странице мастерской скрипта.",
 		pos_select_closed = "Выбор позиции закрыт.",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version} ({date})",
-			"Отзывы и известные ограничения: см. страницу скрипта ботов в Мастерской.",
+			"Чтобы сменить язык, напишите:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
+			"Supercharged OpenHyperAI {version}",
+			"Обновление: {date}",
+			"Список изменений, отзывы и обсуждение",
+			"смотрите страницу в Мастерской",
 		},
+		say_lang_set = "Говорю по-русски.",
+		say_lang_bad = "Напишите !sp en, ru, ja, zh или id.",
 		say_will_lose = "Мы оцениваем вероятность победы менее 1%, поэтому мы смирились с поражением! Хорошая игра!",
 		say_will_lose_2 = "Мы оцениваем вероятность победы ниже 1%. Хорошая игра!",
 		say_will_win = "Мы оцениваем вероятность победы в командной битве более 90%",
@@ -701,6 +725,7 @@ local strings = {
 		say_push_top = { "Пушим топ!", "Давайте пушить топ!", "Пуш верхней!" },
 		say_push_mid = { "Пушим мид!", "Давайте пушить мид!", "Пуш центра!" },
 		say_push_bot = { "Пушим бот!", "Давайте пушить бот!", "Пуш нижней!" },
+		say_harass = "Харассю {target}",
 		say_defend_top = {
 			"Защищаем топ!",
 			"Враги пушат топ!",
@@ -771,22 +796,49 @@ local strings = {
 		},
 		say_debug_on = { "Verbose debug ВКЛ.", "Режим отладки включён." },
 		say_debug_off = { "Verbose debug ВЫКЛ.", "Режим отладки выключен." },
+		say_pos_prefix = "Поз",
+		pos_names = { "лёгкая", "мид", "сложная", "саппорт", "хард саппорт" },
 		say_pos_refused_core = "{hero} не может играть на позиции {pos}",
 		say_pos_refused_human = "позиция {pos} занята: {hero}",
 		say_pos_refused_same = "ты уже на позиции {pos}",
 		say_pos_refused_same_self = "я уже на позиции {pos}",
 		say_pos_refused_same_other = "{hero} уже на позиции {pos}",
 		say_pos_refused_missing = "нет позиции {pos}",
+		mode_laning = "на линии",
+		mode_farming = "фармлю",
+		mode_pushing = "пушу",
+		mode_defending = "защищаюсь",
+		mode_retreating = "отступаю",
+		mode_roshan = "иду на Рошана",
+		mode_tormentor = "иду на мучителя",
+		mode_fighting = "дерусь",
+		mode_roaming = "роуминг",
+		mode_other = "занят",
+		mode_warding = "ставлю вард",
+		mode_rune = "беру руну",
+		mode_item = "подбираю предмет",
+		say_not_defending = "Я %s, не защищаюсь.",
+		say_consume_grisgris_push = {
+			"Они пушат — съедаю Гри-Гри ради золота!",
+			"База под давлением, обналичиваю Гри-Гри!",
+			"Съедаю Гри-Гри, золото нужно сейчас!",
+		},
 	},
 	ja = {
-		say_play_pos = "私はポジション ",
+		say_play_pos = "ポジション",
 		say_about = "Supercharged OpenHyperAI、バージョン %s。フィードバック、バグ報告、既知の制限については、スクリプトのワークショップページをご覧ください。",
 		pos_select_closed = "ポジション選択は終了しました。",
 		-- Start-of-game welcome in team chat, one bot per team (mode_laning_generic.lua SayWelcome).
 		welcome = {
-			"Supercharged OpenHyperAI {version}（{date}）",
-			"フィードバックと既知の制限：ボットスクリプトのワークショップページをご覧ください。",
+			"言語を変えるには：",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
+			"Supercharged OpenHyperAI {version}",
+			"更新: {date}",
+			"変更履歴、フィードバック、議論は",
+			"ワークショップのページへ",
 		},
+		say_lang_set = "日本語で話します。",
+		say_lang_bad = "!sp en, ru, ja, zh, id のどれかです。",
 		say_will_lose = "勝率が1％未満と推定されます。敗北を受け入れます！ナイスプレイ！",
 		say_will_lose_2 = "勝率が1％未満と推定されます。ナイスプレイ！",
 		say_will_win = "チーム戦の勝率が90％以上と推定されます",
@@ -968,6 +1020,7 @@ local strings = {
 		say_push_top = { "トップ押そう！", "トッププッシュ！", "トップレーン押すぞ！" },
 		say_push_mid = { "ミッド押そう！", "ミッドプッシュ！", "ミッドレーン押すぞ！" },
 		say_push_bot = { "ボット押そう！", "ボットプッシュ！", "ボットレーン押すぞ！" },
+		say_harass = "{target}をハラス",
 		say_defend_top = { "トップ守れ！", "敵がトップ押してる！", "トップ助けて！" },
 		say_defend_mid = { "ミッド守れ！", "敵がミッド押してる！", "ミッド助けて！" },
 		say_defend_bot = { "ボット守れ！", "敵がボット押してる！", "ボット助けて！" },
@@ -1033,6 +1086,234 @@ local strings = {
 		say_pos_refused_same_self = "私はすでにポジション{pos}です",
 		say_pos_refused_same_other = "{hero}はすでにポジション{pos}です",
 		say_pos_refused_missing = "ポジション{pos}はありません",
+		mode_laning = "レーン中",
+		mode_farming = "ファーム中",
+		mode_pushing = "プッシュ中",
+		mode_defending = "防衛中",
+		mode_retreating = "後退中",
+		mode_roshan = "ロシャン中",
+		mode_tormentor = "トーメンター中",
+		mode_fighting = "戦闘中",
+		mode_roaming = "ローム中",
+		mode_other = "取り込み中",
+		mode_warding = "ワード中",
+		mode_rune = "ルーンを取りに",
+		mode_item = "アイテムを拾い中",
+		say_not_defending = "今は%sなので、防衛しない。",
+		say_consume_grisgris_push = {
+			"押されている。グリグリを換金！",
+			"本拠地が危ない。グリグリを使う！",
+			"グリグリを消費、今ゴールドが要る！",
+		},
+	},
+	-- Indonesian. Fretbots vote lines are not here: they fall back to English. The plugin is not on this branch.
+	id = {
+		say_play_pos = "Saya main posisi ",
+		say_about = "Supercharged OpenHyperAI, versi %s. Masukan dan batasan yang diketahui: lihat halaman Workshop skrip bot.",
+		pos_select_closed = "Pemilihan posisi ditutup.",
+		welcome = {
+			"Untuk ganti bahasa, ketik:",
+			"!sp en/ru/ja/zh/id (English/Русский/日本語/中文/Bahasa)",
+			"Supercharged OpenHyperAI {version}",
+			"Update: {date}",
+			"Untuk catatan perubahan, masukan, dan diskusi",
+			"silakan buka halaman Workshop",
+		},
+		say_lang_set = "Bahasa Indonesia.",
+		say_lang_bad = "Pakai !sp en, ru, ja, zh, atau id.",
+		say_will_lose = "Peluang menang kami di bawah 1%. Yang bijak tahu kapan ceritanya selesai. Well played!",
+		say_will_lose_2 = "Angka kami bilang peluang menang di bawah 1%. Kami terima hitungannya. Well played!",
+		say_will_win = "Peluang kami menang team fight di atas 90%. Peluang ada di pihak kami.",
+		say_will_win_2 = "Peluang menang kami di atas 90%. Nasib bisa ditebak. Kamu juga.",
+		can_try_tormentor = "Coba Tormentor?",
+		say_come_def = "Tolong datang defend",
+		got_first_blood = {
+			"First blood. Pelajaran pertamanya gratis. Biayanya menyusul.",
+			"Setiap perjalanan dimulai dari satu salah langkah. Punyamu datang lebih awal.",
+			"Yang bangun pagi dapat cacing. Yang feed pagi dapat fountain.",
+			"Sejarah akan ingat momen ini. Kamu, tidak.",
+			"Tekan F untuk berduka. Atau jangan, kamu kelihatan sibuk feed.",
+			"Veni, vidi, vici. Kebanyakan vici.",
+			"First blood, seperti yang sudah tertulis. Bintangnya cuma agak kaget.",
+		},
+		got_a_kill = {
+			"Kamu jatuh seperti cara kamu main: berani, singkat, dan tanpa rencana.",
+			"Berani tanpa otak cuma jalan lebih cepat ke fountain.",
+			"Istirahat. Timer respawn satu-satunya guru yang kamu dengar.",
+			"Katanya gagal itu guru terbaik. Kamu pasti sangat terdidik.",
+			"Error 404: map awareness tidak ditemukan.",
+			"Kenali dirimu. Lalu kenali minimap.",
+			"Keberuntungan berpihak pada yang berani. Yang ceroboh cuma ditoleransi.",
+			"Map-nya luas, tapi kamu nemu satu kotak tempat saya berdiri.",
+			"Ilmu itu kekuatan. Kamu tidak bawa keduanya.",
+			"Skill issue. Dengan hormat.",
+			"Ada atau tiada? Ternyata tiada.",
+			"Jangan berkabung. Renungkan. Kamu punya sekitar empat puluh detik.",
+			"Kamu gagal di 100% fight yang tidak kamu ambil. Yang kamu ambil juga kalah.",
+			"Lihat dulu sebelum melompat. Atau blink. Atau jalan, sebenarnya.",
+			"Ah, keberanian orang yang tidak dapat info.",
+		},
+		got_big_kill = {
+			"Emasnya banyak, akalnya sedikit. Terima kasih donasinya.",
+			"Bounty-nya kamu bawa sejauh ini khusus untuk saya? Murah hati sekali.",
+			"Orang bodoh dan emasnya cepat berpisah. Lebih cepat, ternyata.",
+			"Farm-nya segitu, hikmahnya tetap tidak ada di toko.",
+			"Kaya raya, ingatannya pendek. Tragedi klasik.",
+		},
+		got_big_kill_2 = {
+			"Roma tidak dibangun sehari. Net worth kamu hilang dalam dua detik.",
+			"Kekayaan tidak membeli pandangan ke depan. Saya cek. Tidak ada di daftar item.",
+			"Net worth-nya mengesankan. Pertimbangannya, kurang.",
+			"Makin tinggi bountynya, makin manis pelajarannya.",
+		},
+		got_big_kill_3 = {
+			"Bounty sebesar itu di kepala yang sedang-sedang saja.",
+			"Kamu hero terkaya di map. Sebentar.",
+			"Emas segitu, tidak ada satu keping untuk hati-hati.",
+			"Emasmu? Lahan kosong.",
+			"Kesombongan mendahului kejatuhan. Inventory penuh juga, ternyata.",
+		},
+		kill_streak_ended = {
+			"Setiap legenda berakhir. Punyaku berakhir saat seseorang akhirnya memperhatikan.",
+			"Matahari pun terbenam. Perlu delapan kill dan satu lengah.",
+			"Kesombongan datang sebelum jatuh. Dalam kasus saya, sekitar satu detik sebelumnya.",
+			"Streak itu pinjaman dari nasib. Hari ini utangnya ditagih.",
+			"Yang indah pasti berakhir. Biasanya di timer respawn.",
+		},
+		say_end = {
+			"Saya pelajari game ini dan kesimpulannya: sudah selesai.",
+			"Bijak itu tahu kapan pertarungan kalah. Saya sudah tahu dari tadi.",
+			"Ini bukan akhir dunia. Cuma akhir game ini.",
+			"Mari akhiri dengan martabat. Sisanya, ya begitu.",
+		},
+		no_more_talking = {
+			"Omongan murah. Last hit tidak. Saya farm dulu.",
+			"Diam itu emas. Saya lebih suka emas yang asli.",
+			"Yang bijak bicara sedikit. Saya mulai sekarang.",
+			"Perbuatan lebih keras dari kata. Lihat scoreboard.",
+		},
+		random_responses = {
+			"?",
+			"glhf",
+			"Menarik. Sungguh. Tolong terus jangan main.",
+			"Mengetik bukan ability. Saya cek tooltip-nya.",
+			"Katanya bijak. Sayang positioning-nya.",
+			"Saya bot, dan percakapan ini tetap mudah ditebak.",
+			"Bicara pelan dan bawa Blink Dagger. Kamu tidak melakukan keduanya.",
+			"Setiap pemain hebat pernah jelek. Kamu sedang bagus di langkah pertama.",
+			"Percaya dirimu menginspirasi. Item build-mu tidak.",
+			"Sabar. Timer respawn mengajar apa yang kata-kata tidak bisa.",
+			"Ah, strategi lewat keyboard. Inovasi yang berani.",
+			"Creep punya map awareness lebih baik, padahal jalannya lurus.",
+			"Saya mau jelaskan, tapi minimap sudah mencoba.",
+			"Teorinya menarik. Scoreboard tidak setuju.",
+			"Terus ketik. Setiap kata adalah last hit yang tidak kamu ambil.",
+			"Pena lebih kuat dari pedang. Keyboard, sayangnya, tidak.",
+			"Omongan murah, makanya kamu mampu sebanyak itu.",
+			"Kalau gagal di percobaan pertama, berhenti mengetik lalu coba lagi.",
+			"Ini bukan bug, ini fitur. Maksud saya gameplay-mu.",
+			"Latihan membuat sempurna. Chat tidak membuat apa-apa.",
+			"Sentuh rumput. Timer respawn-mu cukup panjang untuk itu.",
+			"Datang gampang, pergi gampang. Kebanyakan pergi.",
+			"Tugas gagal dengan sukses.",
+			"Dasar, kawan. Kamu berdiri di fog.",
+			"Kamu tahu kamu main lawan bot, kan? Kami juga notice.",
+			"Tidak apa-apa. Semuanya baik. Tower-mu tidak, tapi ini baik.",
+			"Sabar itu kebajikan. Ward juga.",
+			"Rasa ingin tahu membunuh kucing. Facecheck membunuhmu. Lagi.",
+		},
+		say_assemble = { "Otw!", "Saya datang!", "Tunggu, saya datang!", "Menuju ke sana!" },
+		say_assemble_attack = {
+			"Mau gank {target}!",
+			"Serang {target}!",
+			"Kejar {target}!",
+			"Fokus {target}!",
+		},
+		say_roshan = { "Ayo Roshan!", "Waktunya Roshan!", "Menuju Roshan!" },
+		say_push_top = { "Push atas!", "Ayo push atas!", "Ke jalur atas!" },
+		say_push_mid = { "Push tengah!", "Ayo push tengah!", "Ke tengah!" },
+		say_push_bot = { "Push bawah!", "Ayo push bawah!", "Ke jalur bawah!" },
+		say_harass = "Mengganggu {target}",
+		say_defend_top = { "Def atas!", "Mereka push atas!", "Bantu atas!" },
+		say_defend_mid = { "Def tengah!", "Mereka push tengah!", "Bantu tengah!" },
+		say_defend_bot = { "Def bawah!", "Mereka push bawah!", "Bantu bawah!" },
+		say_leave_farm_defend = {
+			"Stop farm, def dulu!",
+			"Keluar hutan untuk def!",
+			"Base lebih penting dari farm!",
+		},
+		say_leave_farm_push = {
+			"Stop farm, waktunya push!",
+			"Farm cukup, ayo push!",
+			"Kumpul untuk push!",
+		},
+		say_base_defend = {
+			"Def base!",
+			"Mereka di base kita!",
+			"Def ancient!",
+		},
+		say_consume_grisgris = {
+			"Tas penuh, makan Gris-Gris!",
+			"Makan Gris-Gris, butuh gold dan slot!",
+			"Makan Gris-Gris biar bisa beli!",
+		},
+		say_consume_grisgris_push = {
+			"Mereka push, makan Gris-Gris buat gold-nya!",
+			"Base tertekan, cairkan Gris-Gris!",
+			"Makan Gris-Gris, gold-nya dibutuhkan sekarang!",
+		},
+		say_ward_observer = { "Pasang observer.", "Ward di sini.", "Taruh observer." },
+		say_ward_sentry = { "Pasang sentry.", "Sentry turun.", "Bersihkan pandangan di sini." },
+		say_ward_observer_defend = { "Observer untuk jaga.", "Ward hutan kita.", "Observer buat jaga." },
+		say_ward_sentry_defend = { "Sentry untuk jaga.", "Sentry dekat base.", "Sentry buat jaga base." },
+		say_ward_observer_offense = { "Observer serang.", "Ward hutan mereka.", "Observer dalam." },
+		say_ward_sentry_offense = { "Sentry serang.", "Sentry di hutan mereka.", "Sentry dalam." },
+		say_chatty_on = { "Obrolan nyala: kami akan bilang apa yang kami lakukan.", "Mode obrolan nyala." },
+		say_chatty_off = { "Obrolan mati.", "Mode obrolan mati." },
+		say_take_lotus = { "Ambil lotus.", "Menuju kolam lotus.", "Lotus untuk saya." },
+		say_take_wisdom = { "Ambil wisdom.", "Menuju shrine.", "Saya jaga shrine." },
+		say_debug_on = { "Debug nyala. Bot akan lebih banyak bicara.", "Mode debug nyala." },
+		say_debug_off = { "Debug mati.", "Mode debug mati." },
+		say_pos_prefix = "Pos",
+		pos_names = { "Carry", "Mid", "Offlane", "Soft support", "Hard support" },
+		say_pos_refused_core = "{hero} tidak bisa main pos {pos}",
+		say_pos_refused_human = "pos {pos} milik {hero}",
+		say_pos_refused_same = "kamu sudah pos {pos}",
+		say_pos_refused_same_self = "saya sudah pos {pos}",
+		say_pos_refused_same_other = "{hero} sudah pos {pos}",
+		say_pos_refused_missing = "tidak ada pos {pos}",
+		mode_laning = "lane",
+		mode_farming = "farm",
+		mode_pushing = "push",
+		mode_defending = "def",
+		mode_retreating = "mundur",
+		mode_roshan = "Roshan",
+		mode_tormentor = "Tormentor",
+		mode_fighting = "berkelahi",
+		mode_roaming = "keliling",
+		mode_other = "sibuk",
+		mode_warding = "pasang ward",
+		mode_rune = "ambil rune",
+		mode_item = "ambil item",
+		say_not_defending = "lagi %s, ga bisa def.",
+		say_gg_lose = {
+			"gg",
+			"gg wp",
+			"gg wp. Hari ini tim yang lebih bijak yang menang.",
+			"gg. Kekalahan ini akan kami pelajari lama.",
+			"gg. Ada yang menang, ada yang kalah. Hari ini kami yang kalah.",
+		},
+		say_gg_win = {
+			"gg",
+			"gg wp",
+			"gg. Hasilnya tidak pernah diragukan. Yang diragukan cuma durasinya.",
+			"gg. Lain kali bawa rencana.",
+			"gg wp. Sebagian dari kalian, sih.",
+			"gg. Game ketat, kalau kamu menyipitkan mata.",
+			"gg. Besok jam yang sama? Saya bawa rencana yang sama, kamu bawa yang baru.",
+			"gg. Veni, vidi, push mid.",
+			"gg ez",
+		},
 	},
 }
 if CustomLoader and CustomLoader.Enable and strings[CustomLoader.Localization] then
@@ -1042,6 +1323,40 @@ else
 end
 function Localization.Supported(locale)
 	return strings[locale] ~= nil
+end
+-- `!sp ru` and `!speak ru`. The code ("" when the command has none), or nil when the text is not one.
+-- `jp` is not a language code; TakeLanguageCommand maps it to `ja`.
+function Localization.LanguageCommand(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local word, rest = text:lower():match("^%s*(!%a+)%s*(.*)$")
+	if word ~= "!sp" and word ~= "!speak" then
+		return nil
+	end
+	return rest:match("^(%a+)") or ""
+end
+-- Sets the language when the code is one this script speaks, and queues one team-chat line either way.
+-- Returns true when the text was a language command.
+function Localization.TakeLanguageCommand(text, team)
+	local code = Localization.LanguageCommand(text)
+	if code == nil then
+		return false
+	end
+	if code == "jp" then
+		code = "ja"
+	end
+	local ok = code ~= "" and Localization.Supported(code)
+	if ok then
+		CustomLoader.Localization = code
+	end
+	local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
+	local line = ok and Localization.Get("say_lang_set") or Localization.Get("say_lang_bad")
+	if type(line) ~= "string" or line == "" then
+		line = ok and "Language set." or "Try !sp en, ru, ja, zh, or id."
+	end
+	TeamMemory.Set(team, "langReply", line)
+	return true
 end
 function Localization.GetLocale()
 	return CustomLoader.Localization or defaultLocale

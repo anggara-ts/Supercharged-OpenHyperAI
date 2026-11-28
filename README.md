@@ -48,7 +48,7 @@ example).
 | `!Xpos Y` | Swap the players on positions X and Y (e.g. `!3pos 5`; the same command again swaps them back); before the horn |
 | `!pick HERO` | Force a bot pick |
 | `!ban HERO` | Ban a hero from bot picks; during the draft |
-| `!sp XX` | Bot language: `en`, `zh`, `ru`, `ja` |
+| `!sp XX` | Bot language: `en`, `ru`, `ja`, `zh`, `id`. `!speak` does the same. `jp` is accepted as Japanese. One bot confirms in team chat. |
 | `!about` | One bot per team says the script name, version and where to send feedback (the Workshop page) |
 
 ---

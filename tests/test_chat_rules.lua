@@ -7,11 +7,11 @@ local function load()
 	return require(GetScriptDirectory() .. "/lib/systems/chat_rules")
 end
 
-T.test("chat rules: dates read as D Mon YYYY", function()
+T.test("chat rules: dates read as D-Mon-YYYY", function()
 	local R = load()
-	T.eq(R.FormatDate("2026.11.22-222"), "22 Nov 2026")
-	T.eq(R.FormatDate("2026.11.03-f82a8ea+dirty"), "3 Nov 2026")
-	T.eq(R.FormatDate("2027.01.09"), "9 Jan 2027")
+	T.eq(R.FormatDate("2026.11.22-222"), "22-Nov-2026")
+	T.eq(R.FormatDate("2026.11.03-f82a8ea+dirty"), "3-Nov-2026")
+	T.eq(R.FormatDate("2027.01.09"), "9-Jan-2027")
 	T.eq(R.FormatDate("2026.13.01-1"), nil, "no month 13")
 	T.eq(R.FormatDate("unknown"), nil)
 	T.eq(R.FormatDate(nil), nil)
@@ -30,7 +30,7 @@ T.test("chat rules: a Workshop copy shows the release, a git build shows dev and
 	local version, date =
 		R.WelcomeVersion({ number = "2026.11.22-222", release = "v0.4", releaseNumber = "2026.11.22-222" })
 	T.eq(version, "v0.4")
-	T.eq(date, "22 Nov 2026")
+	T.eq(date, "22-Nov-2026")
 	-- bots/customize/version.lua with build_info: number is the commit's, releaseNumber still the release's.
 	version, date = R.WelcomeVersion({
 		number = "2026.11.23-f82a8ea+dirty",
@@ -39,10 +39,10 @@ T.test("chat rules: a Workshop copy shows the release, a git build shows dev and
 		commit = "f82a8ea",
 	})
 	T.eq(version, "dev 2026.11.23-f82a8ea+dirty")
-	T.eq(date, "23 Nov 2026")
+	T.eq(date, "23-Nov-2026")
 	version, date = R.WelcomeVersion({ number = "2026.11.22-222" })
 	T.eq(version, "2026.11.22-222", "no release field: the number")
-	T.eq(date, "22 Nov 2026")
+	T.eq(date, "22-Nov-2026")
 	version, date = R.WelcomeVersion(nil)
 	T.eq(version, "?")
 	T.eq(date, "?")
@@ -58,13 +58,26 @@ end)
 T.test("chat rules: the welcome line gets the version and the date", function()
 	local R = load()
 	T.eq(
-		R.FillWelcomeLine("Supercharged OpenHyperAI {version} ({date})", "v0.4", "22 Nov 2026"),
-		"Supercharged OpenHyperAI v0.4 (22 Nov 2026)"
+		R.FillWelcomeLine("Supercharged OpenHyperAI {version}", "v0.9", "27-Nov-2026"),
+		"Supercharged OpenHyperAI v0.9"
 	)
+	T.eq(R.FillWelcomeLine("Update: {date}", "v0.9", "27-Nov-2026"), "Update: 27-Nov-2026")
 	T.eq(R.FillWelcomeLine("100% {other}", "v0.4", "d"), "100% {other}", "other text and placeholders stay")
 	local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
-	local first = Localization.Get("welcome")[1]
-	T.ok(first:find("{version}", 1, true) and first:find("{date}", 1, true), "the first welcome line has no version")
+	local lines = Localization.Get("welcome")
+	T.ok(lines[1]:find("language", 1, true) or lines[1]:find("type", 1, true), "the language hint comes first")
+	T.ok(lines[3]:find("{version}", 1, true) and not lines[3]:find("{date}", 1, true), "the version line")
+	T.ok(lines[4]:find("{date}", 1, true), "the update line")
+	T.eq(#lines, 6, "language hint, version, update, then the two Workshop lines")
+	T.eq(R.WELCOME_AFTER_POS, 30, "30 seconds after the position line")
+	T.eq(R.WelcomeGap(1), 0)
+	T.eq(R.WelcomeGap(2), 0.5, "language hint then the !sp line")
+	T.eq(R.WelcomeGap(3), 2, "the !sp line then the version")
+	T.eq(R.WelcomeGap(4), 0.5, "version then the update date")
+	T.eq(R.WelcomeGap(5), 5, "pause before the Workshop lines")
+	T.eq(R.WelcomeGap(6), 0.5, "changelog then the Workshop page")
+	T.eq(R.WelcomeStart(-89), -59, "30 seconds after the first position line")
+	T.eq(R.WelcomeStart(nil), R.WELCOME_START, "no position line: the fallback clock")
 end)
 
 T.test("chat rules: the first position line waits for the welcome's version line, not for ever", function()

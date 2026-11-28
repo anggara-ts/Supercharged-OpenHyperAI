@@ -2,6 +2,7 @@
 local Utils = require(GetScriptDirectory() .. "/lib/systems/utils")
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local HeroDisplayNames = require(GetScriptDirectory() .. "/lib/data/hero_display_names")
 local LaneHarassRules = require(GetScriptDirectory() .. "/lib/systems/lane_harass_rules")
 local LaneTowerRules = require(GetScriptDirectory() .. "/lib/systems/lane_tower_rules")
 local LastHitRules = require(GetScriptDirectory() .. "/lib/systems/last_hit_rules")
@@ -748,7 +749,13 @@ local function AnnounceOffsideHarass(target)
 		return
 	end
 	bot.sOffsideHarassChatTime = now
-	ChatRules.SayDecision(bot, "Harassing " .. PrettyHeroName(target), "harass")
+	local names = HeroDisplayNames[Localization.GetLocale()] or HeroDisplayNames.en
+	local name = names[target:GetUnitName()] or HeroDisplayNames.en[target:GetUnitName()] or PrettyHeroName(target)
+	local line = Localization.Get("say_harass")
+	if type(line) ~= "string" or line == "" then
+		line = "Harassing {target}"
+	end
+	ChatRules.SayDecision(bot, (string.gsub(line, "{target}", name)), "harass")
 end
 -- Right-clicking a hero pulls every enemy lane creep within 500 that is not already on us.
 local function CreepAggroCounts(hero)
@@ -1606,17 +1613,15 @@ function PickOneAnnouncer()
 	bot.isAnnouncer = playerId == lowestBotId
 	hasPickedAnnouncer = true
 end
--- One bot per team (the announcer) posts the welcome lines in team chat early in the pre-game, one line every
--- WELCOME_GAP seconds. The first line names the version and its date ("Supercharged OpenHyperAI v0.4 (22 Nov
--- 2026)", maintainer 2026-11-23), the second points to the Workshop page. No command hints ("no need to hint !pos and
--- !Xpos Y, or language change in welcome message", no !debug hint; maintainer 2026-11-23). No URL: chat links are not
--- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team, so Meepo clones (same player ID as the
--- announcer) don't repeat it; welcomeNext > 1 means the version line was said. It starts at -1:00
--- (ChatRules.WELCOME_START), after the position lines, which no longer wait for it (ChatRules.POSITION_WAITS_FOR_WELCOME).
+-- One bot per team (the announcer) posts the welcome in team chat. The position lines go first. The version line
+-- waits ChatRules.WELCOME_AFTER_POS seconds after the team's first one (or WELCOME_START when none was said). Then
+-- the update date, a longer pause, and the two Workshop lines (ChatRules.WELCOME_GAPS). The first two lines say
+-- how to switch language with !sp (maintainer 2026-11-28). No !pos hint (2026-11-23). No URL: chat links are not
+-- clickable (maintainer, 2026-11-22). TeamMemory keeps the progress per team,
+-- so Meepo clones (same player ID as the announcer) don't repeat it; welcomeNext > 1 means the version line was said.
 local WELCOME_START = ChatRules.WELCOME_START
-local WELCOME_GAP = 2
 local function SayWelcome()
-	if not bot.isAnnouncer or GetGameState() ~= GAME_STATE_PRE_GAME or DotaTime() < WELCOME_START then
+	if not bot.isAnnouncer or GetGameState() ~= GAME_STATE_PRE_GAME then
 		return
 	end
 	local lines = Localization.Get("welcome")
@@ -1625,7 +1630,16 @@ local function SayWelcome()
 	if type(lines) ~= "table" or nextLine > #lines then
 		return
 	end
-	if DotaTime() < (TeamMemory.Get(team, "welcomeAt") or -999) + WELCOME_GAP then
+	local startAt = ChatRules.WelcomeStart(TeamMemory.Get(team, "posSaidAt"))
+	if startAt == nil then
+		startAt = WELCOME_START
+	end
+	if DotaTime() < startAt then
+		return
+	end
+	local gap = ChatRules.WelcomeGap(nextLine)
+	local saidAt = TeamMemory.Get(team, "welcomeAt")
+	if nextLine > 1 and (saidAt == nil or DotaTime() < saidAt + gap) then
 		return
 	end
 	TeamMemory.Set(team, "welcomeNext", nextLine + 1)

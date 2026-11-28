@@ -2,6 +2,8 @@
 local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
 local LastHitRules = require(GetScriptDirectory() .. "/lib/systems/last_hit_rules")
 local ChatRules = require(GetScriptDirectory() .. "/lib/systems/chat_rules")
+local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+local HeroDisplayNames = require(GetScriptDirectory() .. "/lib/data/hero_display_names")
 BotsInit = require("game/botsinit")
 local X = BotsInit.CreateGeneric()
 local bot = GetBot()
@@ -228,12 +230,15 @@ function X.Think()
 							local now = DotaTime()
 							if bot.sOffsideHarassChatTime == nil or now - bot.sOffsideHarassChatTime >= 10 then
 								bot.sOffsideHarassChatTime = now
-								local name = string.gsub(enemy:GetUnitName(), "npc_dota_hero_", "")
-								name = string.gsub(name, "_(%l)", function(letter)
-									return " " .. string.upper(letter)
-								end)
-								name = string.upper(string.sub(name, 1, 1)) .. string.sub(name, 2)
-								ChatRules.SayDecision(bot, "Harassing " .. name, "harass")
+								local names = HeroDisplayNames[Localization.GetLocale()] or HeroDisplayNames.en
+								local name = names[enemy:GetUnitName()]
+									or HeroDisplayNames.en[enemy:GetUnitName()]
+									or string.gsub(enemy:GetUnitName(), "npc_dota_hero_", "")
+								local line = Localization.Get("say_harass")
+								if type(line) ~= "string" or line == "" then
+									line = "Harassing {target}"
+								end
+								ChatRules.SayDecision(bot, (string.gsub(line, "{target}", name)), "harass")
 							end
 							bot:Action_AttackUnit(enemy, true)
 							return

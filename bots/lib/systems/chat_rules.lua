@@ -50,11 +50,34 @@ function ChatRules.SayDecision(bot, text, key)
 	return on
 end
 
--- The welcome (mode_laning_generic.lua SayWelcome) starts at this DotaTime() in the pre-game: at -1:00, after the bots'
--- "I will play position N" lines (t=-89 to -80) have settled. Maintainer 2026-11-24: "send welcome message (bot version
--- etc) at -0:30. now it's crowded with bot position", then (game 082, -0:30 worked) "move the welcome message to -1:00".
--- It was -80, right with the position lines.
+-- Fallback welcome clock when no position line was said (1v1 mid, or the lines never went out): -1:00.
+-- Maintainer 2026-11-24: welcome after the position lines, at -1:00. Maintainer 2026-11-28: 30 seconds after the
+-- position lines, then how to switch language, the version, the update date, a 5 second pause, and the two
+-- Workshop lines.
 ChatRules.WELCOME_START = -60
+-- Seconds after the team's first "I play position N" line before the first welcome line.
+ChatRules.WELCOME_AFTER_POS = 30
+-- Seconds to wait after the previous welcome line before saying this one. Line 1 waits WELCOME_AFTER_POS instead.
+-- A pair waits 0.5s: the language hint and the !sp line, the version and the date, the changelog and the
+-- Workshop page (maintainer 2026-11-28). The !sp line and the version stay 2s apart. The 5 is the pause
+-- before the Workshop pair.
+ChatRules.WELCOME_GAPS = { 0, 0.5, 2, 0.5, 5, 0.5 }
+
+function ChatRules.WelcomeGap(lineIndex)
+	local gap = ChatRules.WELCOME_GAPS[lineIndex]
+	if type(gap) ~= "number" then
+		return 2
+	end
+	return gap
+end
+
+-- When the version line may start. posSaidAt is the team's first position line (DotaTime), or nil.
+function ChatRules.WelcomeStart(posSaidAt)
+	if type(posSaidAt) == "number" then
+		return posSaidAt + ChatRules.WELCOME_AFTER_POS
+	end
+	return ChatRules.WELCOME_START
+end
 -- Whether the first position line waits for the welcome's version line (maintainer 2026-11-23: version first). Off
 -- since the welcome moved after them (2026-11-24): the position lines go out at once, the welcome comes later on its own.
 ChatRules.POSITION_WAITS_FOR_WELCOME = false
@@ -81,7 +104,7 @@ end
 
 local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
 
--- "2026.11.22", "2026.11.22-222" or "2026.11.23-f82a8ea+dirty" -> "22 Nov 2026"; nil without a date.
+-- "2026.11.22", "2026.11.22-222" or "2026.11.23-f82a8ea+dirty" -> "22-Nov-2026"; nil without a date.
 function ChatRules.FormatDate(number)
 	if type(number) ~= "string" then
 		return nil
@@ -91,7 +114,7 @@ function ChatRules.FormatDate(number)
 	if year == nil or monthName == nil then
 		return nil
 	end
-	return string.format("%d %s %s", tonumber(day), monthName, year)
+	return string.format("%d-%s-%s", tonumber(day), monthName, year)
 end
 
 -- The welcome's version and date from the bots/customize/version.lua table. A git build (bots/customize/build_info.lua

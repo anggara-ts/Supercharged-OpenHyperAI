@@ -41,16 +41,43 @@ T.test("chat: every locale has the welcome lines, short and without links", func
 			T.ok(charCount(line) <= 120, "welcome line too long: " .. line)
 			T.ok(not line:find("http", 1, true), "chat links are not clickable: " .. line)
 			T.ok(not line:find("!debug", 1, true), "no !debug hint in the welcome (maintainer, 2026-11-23): " .. line)
-			-- "no need to hint !pos and !Xpos Y, or language change in welcome message" (maintainer, 2026-11-23).
+			-- No !pos / !Xpos Y hint (maintainer, 2026-11-23). The !sp hint was added 2026-11-28.
 			T.ok(not line:find("pos", 1, true), "no !pos / !Xpos Y hint in the welcome: " .. line)
-			T.ok(not line:find("!sp", 1, true), "no language (!sp) hint in the welcome: " .. line)
 		end
 		T.ok(block:find("{version}", 1, true) and block:find("{date}", 1, true), "a welcome without the version line")
+		T.ok(block:find("!sp en/ru/ja/zh/id", 1, true) ~= nil, "the language hint")
 		lineCount = lineCount or count
 		T.eq(count, lineCount, "every locale has the same number of welcome lines")
 	end
-	T.eq(blocks, 4, "welcome lines in en, zh, ru and ja")
-	T.eq(lineCount, 2, "the welcome is the version line and the Workshop-page line")
+	T.eq(blocks, 5, "welcome lines in en, zh, ru, ja and id")
+	T.eq(lineCount, 6, "language hint, version, update date, then the two Workshop lines")
 	T.ok(not src:find("welcome_msgs", 1, true), "the old, never printed welcome_msgs are back")
 	T.ok(not src:find("http", 1, true), "a link in chat text (links in chat are not clickable)")
+end)
+
+T.test("chat: !sp ru sets the language, !lang does not, and jp means Japanese", function()
+	Stub.reset({ hero = "npc_dota_hero_lich" })
+	local Localization = require(GetScriptDirectory() .. "/lib/systems/localization")
+	T.eq(Localization.LanguageCommand("!lang ru"), nil, "!lang is not a command")
+	T.eq(Localization.LanguageCommand("!sp ru"), "ru")
+	T.eq(Localization.LanguageCommand("!SP RU"), "ru")
+	T.eq(Localization.LanguageCommand("!speak ja"), "ja")
+	T.eq(Localization.LanguageCommand("!sp"), "")
+	T.eq(Localization.LanguageCommand("!pos 2"), nil)
+	T.eq(Localization.Supported("id"), true, "Indonesian")
+	T.eq(Localization.Supported("jp"), false, "jp is an alias, not its own language")
+	T.eq(Localization.Supported("xx"), false)
+	local TeamMemory = require(GetScriptDirectory() .. "/lib/systems/team_memory")
+	T.eq(Localization.TakeLanguageCommand("!sp ru", 2), true)
+	T.eq(Localization.GetLocale(), "ru")
+	T.ok(
+		type(TeamMemory.Get(2, "langReply")) == "string" and TeamMemory.Get(2, "langReply") ~= "",
+		"a reply was queued"
+	)
+	T.eq(Localization.TakeLanguageCommand("!sp jp", 2), true)
+	T.eq(Localization.GetLocale(), "ja", "!sp jp is Japanese")
+	T.eq(Localization.TakeLanguageCommand("!sp nope", 2), true)
+	T.eq(Localization.GetLocale(), "ja", "a bad code leaves the language")
+	T.eq(Localization.TakeLanguageCommand("!lang id", 2), false)
+	T.eq(Localization.GetLocale(), "ja", "!lang does not change it")
 end)
