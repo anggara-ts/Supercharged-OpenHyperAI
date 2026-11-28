@@ -10789,6 +10789,200 @@ function Usage.WatchDeflectResult(force)
 		)
 	)
 end
+-- One tower attack stream per second, after armour, minus regen. Glyph multishot (tooltip
+-- DOTA_Tooltip_ability_fountain_glyph, cited in glyph_rules.lua) adds 5 targets; it does not add extra hits on the
+-- same unit. Whether a multishot shot equals the primary hit is unverified, so this counts one full stream: the bot
+-- is treated as taking the shot, and leaves unless the target dies even sooner. nil when the attack cannot be read.
+local function GlyphTowerDamagePerSecond(tower)
+	local okDamage, attackDamage = pcall(function()
+		return tower:GetAttackDamage()
+	end)
+	local okSpeed, attackSpeed = pcall(function()
+		return tower:GetAttackSpeed()
+	end)
+	if
+		not (
+			okDamage
+			and okSpeed
+			and type(attackDamage) == "number"
+			and type(attackSpeed) == "number"
+			and attackDamage > 0
+			and attackSpeed > 0
+		)
+	then
+		return nil
+	end
+	local raw = attackDamage * attackSpeed
+	local incoming = raw
+	local okIncoming, reduced = pcall(function()
+		return bot:GetActualIncomingDamage(raw, DAMAGE_TYPE_PHYSICAL)
+	end)
+	if okIncoming and type(reduced) == "number" and reduced > 0 then
+		incoming = reduced
+	end
+	local regen = 0
+	local okRegen, recovered = pcall(function()
+		return bot:GetHealthRegen()
+	end)
+	if okRegen and type(recovered) == "number" and recovered > 0 then
+		regen = recovered
+	end
+	return incoming - regen
+end
+-- GetEstimatedDamageToTarget's contents are not documented (same note as rubick.lua). Two seconds, then per second.
+local GLYPH_KILL_WINDOW = 2
+local function GlyphDamagePerSecond(attacker, victim)
+	local ok, dealt = pcall(function()
+		return attacker:GetEstimatedDamageToTarget(true, victim, GLYPH_KILL_WINDOW, DAMAGE_TYPE_ALL)
+	end)
+	if not ok or type(dealt) ~= "number" or dealt <= 0 then
+		return 0
+	end
+	return dealt / GLYPH_KILL_WINDOW
+end
+local function GlyphUnitHealth(unit)
+	local ok, health = pcall(function()
+		return unit:GetHealth()
+	end)
+	if not ok or type(health) ~= "number" then
+		return nil
+	end
+	return health
+end
+-- A unit that itself has the Glyph is invulnerable (tooltip: structures 7s, lane creeps 3s): it does not die first.
+local function GlyphTargetDiesFirst(tower, target)
+	if target:HasModifier("modifier_fountain_glyph") then
+		return false
+	end
+	local targetSeconds = LaneTowerRules.SecondsUntilDead(GlyphUnitHealth(target), GlyphDamagePerSecond(bot, target))
+	local botSeconds = LaneTowerRules.SecondsUntilDead(GlyphUnitHealth(bot), GlyphTowerDamagePerSecond(tower))
+	return LaneTowerRules.DiesFirst(targetSeconds, botSeconds)
+end
+-- A spot at least reach + margin + step from the tower, along "away from the tower" blended toward our fountain,
+-- and never closer than the bot already is. The same blend as the laning tower-exit.
+local function GlyphStandOff(tower, reach, dist)
+	local towerLoc = tower:GetLocation()
+	local away = bot:GetLocation() - towerLoc
+	local home = Fu.GetTeamFountain() - towerLoc
+	local dir = away + home
+	if dir:Length2D() < 0.3 then
+		dir = away
+	end
+	if dir:Length2D() < 0.3 then
+		dir = home
+	end
+	if dir:Length2D() < 0.3 then
+		dir = Vector(1, 0, 0)
+	end
+	local minDist = reach + LaneTowerRules.EXIT_MARGIN + LaneTowerRules.EXIT_STEP
+	return towerLoc + dir:Normalized() * math.max(dist, minDist)
+end
+-- Outside push mode, walk out of a Glyphed enemy tower (#12, game 092: tower-deflect-skip why=glyph ran in attack
+-- mode and the heroes stayed; the walk-out exists only in push). Do not attack a unit standing inside that tower's
+-- reach unless that unit dies before the bot (LaneTowerRules.GlyphLeave). Runs from the item think, after the mode's
+-- Think, so the move replaces the attack. One [SHy-AGGRO] glyph-leave per entry into the reach, and not again for 3s.
+-- Push mode is left alone: its own Think walks out.
+function Usage.LeaveGlyphedTower()
+	if Fu.IsPushing(bot) then
+		-- Push walks out on its own. Drop a leave started in another mode so the next one logs.
+		bot._glyphLeaveOn = nil
+		return false
+	end
+	if not bot:IsAlive() or bot:IsInvulnerable() then
+		return false
+	end
+	if bot:IsStunned() or bot:IsRooted() or bot:IsHexed() or bot:IsChanneling() then
+		return false
+	end
+	local towers = {}
+	for _, tower in pairs(bot:GetNearbyTowers(1200, true) or {}) do
+		if Fu.IsValidBuilding(tower) and tower:IsAlive() and tower:HasModifier("modifier_fountain_glyph") then
+			local okRange, rawRange = pcall(function()
+				return tower:GetAttackRange()
+			end)
+			local reach =
+				LaneTowerRules.Reach(okRange and rawRange or nil, tower:GetBoundingRadius(), bot:GetBoundingRadius())
+			towers[#towers + 1] = {
+				tower = tower,
+				reach = reach,
+				dist = GetUnitToUnitDistance(bot, tower),
+			}
+		end
+	end
+	if #towers == 0 then
+		bot._glyphLeaveOn = nil
+		return false
+	end
+	local target = nil
+	local okTarget, got = pcall(function()
+		return bot:GetTarget()
+	end)
+	if okTarget and Fu.IsValid(got) and got ~= bot then
+		target = got
+	end
+	if target == nil then
+		local okAttack, attacking = pcall(function()
+			return bot:GetAttackTarget()
+		end)
+		if okAttack and Fu.IsValid(attacking) and attacking ~= bot then
+			target = attacking
+		end
+	end
+	local focus, botInZone, targetInReach, diesFirst = nil, false, false, false
+	local deepest = nil
+	for i = 1, #towers do
+		local info = towers[i]
+		if LaneTowerRules.InZone(info.dist, info.reach) then
+			if deepest == nil or info.dist - info.reach < deepest.dist - deepest.reach then
+				deepest = info
+			end
+		end
+	end
+	if deepest ~= nil then
+		focus = deepest
+		botInZone = true
+		if target ~= nil and GetUnitToUnitDistance(target, deepest.tower) <= deepest.reach then
+			targetInReach = true
+			diesFirst = GlyphTargetDiesFirst(deepest.tower, target)
+		end
+	elseif target ~= nil then
+		for i = 1, #towers do
+			local info = towers[i]
+			if GetUnitToUnitDistance(target, info.tower) <= info.reach then
+				focus = info
+				targetInReach = true
+				diesFirst = GlyphTargetDiesFirst(info.tower, target)
+				break
+			end
+		end
+	end
+	if LaneTowerRules.GlyphLeave(false, botInZone, targetInReach, diesFirst) ~= "leave" or focus == nil then
+		bot._glyphLeaveOn = nil
+		return false
+	end
+	local now = DotaTime()
+	if focus.dist <= focus.reach then
+		if bot._glyphLeaveOn ~= focus.tower and now - (bot._glyphLeaveLogAt or -99) >= 3 then
+			bot._glyphLeaveLogAt = now
+			pcall(
+				print,
+				string.format(
+					"[SHy-AGGRO] t=%.0f %s glyph-leave mode=%s dist=%d reach=%d",
+					now,
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					StuckModeName(bot:GetActiveMode()),
+					math.floor(focus.dist),
+					math.floor(focus.reach)
+				)
+			)
+		end
+		bot._glyphLeaveOn = focus.tower
+	else
+		bot._glyphLeaveOn = nil
+	end
+	bot:Action_MoveToLocation(GlyphStandOff(focus.tower, focus.reach, focus.dist))
+	return true
+end
 function Usage.DeflectTowerAggro()
 	local now = DotaTime()
 	if not bot:IsAlive() or bot:IsInvulnerable() or now < (bot._deaggroAt or -99) + 2 then
@@ -10809,7 +11003,8 @@ function Usage.DeflectTowerAggro()
 		if Fu.IsValidBuilding(tower) and tower:GetAttackTarget() == bot then
 			-- A Glyphed tower (#12, game 091 t=1657: Wraith King's deflect inside the bottom T2's multishot ended
 			-- still-on-me): the multishot hits 5 more targets, so moving its aggro to a creep does not take it off the
-			-- bot; the push's Glyph wait walks out instead. At most one line per 3s.
+			-- bot. Push mode walks out on its own. Outside push, Usage.LeaveGlyphedTower walks out (game 092: this
+			-- skip ran in attack mode and the heroes stayed). At most one line per 3s.
 			if tower:HasModifier("modifier_fountain_glyph") then
 				if now - (bot._deaggroGlyphLogAt or -99) >= 3 then
 					bot._deaggroGlyphLogAt = now
@@ -11832,13 +12027,21 @@ function ItemUsageThink()
 		-- Once per bot: a broken hook would silently drop every timed last hit.
 		bot._lhTimingErr = true
 		pcall(print, string.format("[SHy-LH] t=%.0f %s timing error=%s", DotaTime(), botName, tostring(timingLastHit)))
-	elseif okLastHit and timingLastHit then
-		_perfDone()
-		return
 	end
 	-- Tower aggro: one attack order on an allied lane creep under the tower, never a walk.
 	local okDeaggro, deaggroed = pcall(Usage.DeflectTowerAggro)
+	-- A Glyphed tower outside push mode: walk out, and do not keep an attack on a unit inside it. After the mode's
+	-- Think (and after a last hit issued just above), so this move is the one that sticks.
+	local okGlyph, leaving = pcall(Usage.LeaveGlyphedTower)
+	if okGlyph and leaving then
+		_perfDone()
+		return
+	end
 	if okDeaggro and deaggroed then
+		return
+	end
+	if okLastHit and timingLastHit then
+		_perfDone()
 		return
 	end
 	-- Kiting for ranged heroes in every mode: a step away from a melee hero, lane creep or neutral hitting them, between
@@ -12267,6 +12470,7 @@ do
 		"UseDustNow",
 		"WalkOutOfSnakes",
 		"DeflectTowerAggro",
+		"LeaveGlyphedTower",
 		"LogStuck",
 		"LogModeFlip",
 		"BannerFromBackpack",
