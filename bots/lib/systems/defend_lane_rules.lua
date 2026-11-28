@@ -239,27 +239,31 @@ end
 -- Rules: enemy heroes at a rim pull every bot there (the rim with the most heroes). Otherwise a bot keeps its rim while
 -- that rim's wave is alive (no walking rim to rim mid-wave), then the nearest free bots fill each rim up to its need,
 -- nearest pair first. A bot no rim needs gets nothing (it leaves the defence).
--- Returns { [bot id] = lane }, { [lane] = assigned count } and the map to pass as previous next time (empty after a
--- hero pull: once the heroes leave, the bots are reassigned by need, not kept where the heroes were).
-function DefendLaneRules.AssignRims(rims, bots, previous)
+-- Returns { [bot id] = lane }, { [lane] = assigned count }, the map to pass as previous next time (empty after a
+-- hero pull: once the heroes leave, the bots are reassigned by need, not kept where the heroes were), the hero-rim
+-- hold { lane, at, heroes } (nil when no hero rim) and why the hero rim was picked.
+--   held   the previous hold (nil: none)
+--   now    game time, for the 5s hold (#295)
+-- How long a hero rim is kept, and how many more heroes another rim needs before it takes over now (#295). Choices,
+-- not game data. Game 092: the rim flipped base / mid / top every 1-5s while heroes stood on the T4s.
+DefendLaneRules.HERO_RIM_HOLD = 5
+DefendLaneRules.HERO_RIM_MARGIN = 2
+function DefendLaneRules.AssignRims(rims, bots, previous, held, now)
 	local assign, count = {}, {}
 	local byLane = {}
 	for _, rim in ipairs(rims) do
 		byLane[rim.lane] = rim
 		count[rim.lane] = 0
 	end
-	local heroRim = nil
-	for _, rim in ipairs(rims) do
-		if rim.why == "heroes" and (heroRim == nil or (rim.heroes or 0) > (heroRim.heroes or 0)) then
-			heroRim = rim
-		end
-	end
+	-- On a tie the base rim wins (PickHeroRim, #294). The last hero rim is kept for HERO_RIM_HOLD seconds unless
+	-- another rim has HERO_RIM_MARGIN more heroes (#295).
+	local heroRim, why, heldAt = DefendLaneRules.PickHeroRim(rims, held, now)
 	if heroRim ~= nil then
 		for _, b in ipairs(bots) do
 			assign[b.id] = heroRim.lane
 			count[heroRim.lane] = count[heroRim.lane] + 1
 		end
-		return assign, count, {}
+		return assign, count, {}, { lane = heroRim.lane, at = heldAt, heroes = heroRim.heroes or 0 }, why
 	end
 	previous = previous or {}
 	local free = {}
@@ -292,7 +296,7 @@ function DefendLaneRules.AssignRims(rims, bots, previous)
 		assign[b.id] = bestRim.lane
 		count[bestRim.lane] = count[bestRim.lane] + 1
 	end
-	return assign, count, assign
+	return assign, count, assign, nil, nil
 end
 -- Does a rim keep its bots? While it is threatened, and while its wave lives up to RELEASE_SECONDS after the last
 -- threat (a wave that our creeps now hold frees its bots after that, instead of keeping them all game).
@@ -322,6 +326,134 @@ function DefendLaneRules.LaneStayBack(now, even, backUntil, evenSince)
 		return false
 	end
 	return evenSince == nil or now - evenSince < DefendLaneRules.LANE_EVEN_SECONDS
+end
+
+-- The one base lane a bot defends while the base is under threat (#294). Two rules used to pick it on their own: the
+-- bot's base-lane gate (the lane where enemy heroes were seen) and the team's rim assignment (AssignRims). When they
+-- named different lanes each zeroed the other's, and every lane read 0. Game 091, 38:23-39:00: Zeus, Dark Willow and
+-- Winter Wyvern at full HP stood in retreat mode at 0.00 while four Radiant heroes took the Ancient from 100% to 3%
+-- (`base-lane=top(seen)` against `base-assign lane=mid ... assigned=dark_willow,...`). The assignment wins: it is the
+-- team's decision and the one that also zeroes the other lanes.
+--   assignedLane  the lane of this bot's assigned rim (nil: no assignment, or the bot is not assigned)
+--   seenLane      the lane the gate's own rule picked (nil: none)
+-- Returns the lane, its source ("assigned" | "seen"), and whether the two disagreed.
+function DefendLaneRules.ChooseBaseLane(assignedLane, seenLane)
+	if assignedLane ~= nil then
+		return assignedLane, "assigned", seenLane ~= nil and seenLane ~= assignedLane
+	end
+	return seenLane, "seen", false
+end
+
+-- Which hero rim the team takes (#294 tie: the base rim wins; #295: keep the last one).
+--   rims   list of { lane, why, heroes }
+--   held   { lane, at } from the last pick, or nil
+--   now    game time
+-- Returns the rim, why ("heroes" | "hold" | "more-heroes" | "hold-over"), and the time the hold started.
+-- The hold applies only while that rim still has heroes. Another rim takes over immediately when it has
+-- HERO_RIM_MARGIN more heroes, or when the hold has run out.
+function DefendLaneRules.PickHeroRim(rims, held, now)
+	now = now or 0
+	local best = nil
+	for _, rim in ipairs(rims) do
+		if rim.why == "heroes" then
+			local heroes = rim.heroes or 0
+			local bestHeroes = best ~= nil and (best.heroes or 0) or -1
+			if heroes > bestHeroes or (heroes == bestHeroes and rim.lane == "base") then
+				best = rim
+			end
+		end
+	end
+	if best == nil then
+		return nil, nil, nil
+	end
+	if held ~= nil and held.lane ~= nil and now - (held.at or -999) < DefendLaneRules.HERO_RIM_HOLD then
+		local heldRim = nil
+		for _, rim in ipairs(rims) do
+			if rim.lane == held.lane and rim.why == "heroes" then
+				heldRim = rim
+				break
+			end
+		end
+		if heldRim ~= nil and best.lane ~= heldRim.lane then
+			local extra = (best.heroes or 0) - (heldRim.heroes or 0)
+			if extra < DefendLaneRules.HERO_RIM_MARGIN then
+				return heldRim, "hold", held.at
+			end
+			return best, "more-heroes", now
+		end
+	end
+	local why = "heroes"
+	if held ~= nil and held.lane ~= nil and held.lane ~= best.lane then
+		why = "hold-over"
+	end
+	return best, why, now
+end
+
+-- The lane Valve's GetDefendLaneDesire (already times the tier weight) would commit to.
+--   desires  { [lane] = score } for lanes over 0.1
+--   dists    { [lane] = distance }, closer wins a tie (nil: no tie break)
+-- Returns the lane, or nil when fewer than two lanes qualify (the commit gate does not run).
+function DefendLaneRules.ValvePriority(desires, dists)
+	local best, bestScore, bestDist, n = nil, -math.huge, math.huge, 0
+	for lane, score in pairs(desires or {}) do
+		n = n + 1
+		local dist = dists ~= nil and dists[lane] or 0
+		if best == nil or score > bestScore or (score == bestScore and dist < bestDist) then
+			best, bestScore, bestDist = lane, score, dist
+		end
+	end
+	if n < 2 then
+		return nil
+	end
+	return best
+end
+
+-- The commit gate (other-lane / committed-other) in front of the base-lane gate (#295, game 092).
+-- Valve's desire times the tier weight picked one lane and zeroed the others, and a 5s commit kept that choice.
+-- That ran before the base-lane gate, so the assigned base lane read 0 too: 43:41, full-HP Clinkz had
+-- top=0.00(base-other-lane) mid=0.00(other-lane) bot=0.00(committed-other) with 4 heroes at the Ancient.
+--   lane           the lane being scored
+--   assignedLane   this bot's assigned base lane (nil: none). A "base" rim is already a mode lane.
+--   desires, dists as ValvePriority
+--   commitLane     the lane already committed (0 or nil: none)
+--   commitActive   the commit has not expired
+--   basePriority   true when the base is the defence (2+ heroes at the Ancient, or the base floor is on)
+--   takeCommit     this lane is a deeper tier with enemies, so it may replace the commit
+-- Returns the zero reason ("other-lane" | "committed-other") or nil, the lane to commit to (nil: leave it),
+-- and whether the gate ran (false: fewer than two Valve lanes, the caller may clear an expired commit).
+function DefendLaneRules.CommitZero(
+	lane,
+	assignedLane,
+	desires,
+	dists,
+	commitLane,
+	commitActive,
+	basePriority,
+	takeCommit
+)
+	local priority = DefendLaneRules.ValvePriority(desires, dists)
+	if priority == nil then
+		return nil, nil, false
+	end
+	if assignedLane ~= nil then
+		if lane == assignedLane then
+			return nil, assignedLane, true
+		end
+		return "other-lane", assignedLane, true
+	end
+	if basePriority then
+		return nil, nil, true
+	end
+	if commitActive and commitLane ~= nil and commitLane ~= 0 and lane ~= commitLane then
+		if takeCommit then
+			return nil, lane, true
+		end
+		return "committed-other", nil, true
+	end
+	if lane ~= priority then
+		return "other-lane", priority, true
+	end
+	return nil, priority, true
 end
 
 return DefendLaneRules

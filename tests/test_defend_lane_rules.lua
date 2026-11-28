@@ -240,3 +240,108 @@ T.test("lane defence (game 069): after a lane-back, stay back 4s unless even for
 	T.eq(R.LaneStayBack(104, true, 104, 103.9), false, "hold over")
 	T.eq(R.LaneStayBack(102, true, nil, nil), false, "no hold, even: go")
 end)
+
+T.test("base lane (#294): the team's rim assignment decides, the seen lane only without one", function()
+	local R = rules()
+	-- Game 091, 38:23: the gate saw the heroes on top, the assignment put the bot on the mid rim.
+	local lane, why, conflict = R.ChooseBaseLane("mid", "top")
+	T.eq(lane, "mid", "the assignment wins")
+	T.eq(why, "assigned")
+	T.eq(conflict, true, "the two disagreed")
+	lane, why, conflict = R.ChooseBaseLane("mid", "mid")
+	T.eq(lane, "mid")
+	T.eq(conflict, false, "same lane: no conflict")
+	lane, why, conflict = R.ChooseBaseLane(nil, "top")
+	T.eq(lane, "top", "no assignment: the seen lane")
+	T.eq(why, "seen")
+	T.eq(conflict, false)
+	T.eq((R.ChooseBaseLane(nil, nil)), nil, "nothing to pick")
+end)
+
+T.test("base split (#294): heroes at the Ancient pull the group to the base rim on a tie with a lane rim", function()
+	local R = rules()
+	local three = bots({ { "a", 3000, 3000 }, { "b", 2000, 4000 }, { "c", 4000, 2000 } })
+	-- Game 091, 38:39: four heroes counted at the mid rim and at the base rim; all bots went to mid before.
+	local rims = {
+		{ lane = "mid", why = "heroes", heroes = 4, need = 5, alive = true },
+		{ lane = "base", why = "heroes", heroes = 4, need = 5, alive = true },
+	}
+	local assign = R.AssignRims(rims, three, {})
+	T.eq(assign.a, "base")
+	T.eq(assign.b, "base")
+	T.eq(assign.c, "base")
+	-- More heroes at a lane rim still win there.
+	rims[1].heroes = 5
+	assign = R.AssignRims(rims, three, {})
+	T.eq(assign.a, "mid", "five at mid against four at the base")
+end)
+
+T.test("commit gate (#295): an assigned base lane is never zeroed by the other-lane gate", function()
+	local R = rules()
+	-- Game 092, 43:41: Valve's weighted desires and a commit on another lane zeroed the assigned lane, so
+	-- every lane read 0 while heroes stood on the Ancient.
+	local desires = { top = 3, mid = 1, bot = 2 }
+	local dists = { top = 4000, mid = 800, bot = 2000 }
+	local samples = {
+		{ desires = desires, dists = dists, commit = "bot", active = true, take = false },
+		{ desires = desires, dists = dists, commit = "top", active = true, take = true },
+		{ desires = { top = 0.2, mid = 0.2, bot = 3 }, dists = dists, commit = "bot", active = true, take = true },
+	}
+	for _, sample in ipairs(samples) do
+		local reason =
+			R.CommitZero("mid", "mid", sample.desires, sample.dists, sample.commit, sample.active, true, sample.take)
+		T.eq(reason, nil, "assigned mid stays")
+	end
+	T.eq(
+		R.CommitZero("top", "mid", desires, dists, "bot", true, false, false),
+		"other-lane",
+		"another lane still loses"
+	)
+	T.eq(
+		R.CommitZero("bot", "mid", desires, dists, "bot", true, true, true),
+		"other-lane",
+		"a deeper tier does not steal it"
+	)
+	-- No assignment: Valve's top wins, and a live commit still zeroes the others.
+	T.eq(R.CommitZero("mid", nil, desires, dists, 0, false, false, false), "other-lane")
+	T.eq(R.CommitZero("mid", nil, desires, dists, "bot", true, false, false), "committed-other")
+	-- The deeper tier may take the commit only when no base lane is assigned.
+	T.eq(R.CommitZero("top", nil, desires, dists, "bot", true, false, true), nil, "deeper tier")
+	-- 2+ heroes at the Ancient, no assignment yet: the gate does not zero any lane.
+	T.eq(R.CommitZero("mid", nil, desires, dists, "bot", true, true, false), nil)
+	T.eq(R.CommitZero("top", nil, desires, dists, "bot", true, true, false), nil)
+	T.eq(R.CommitZero("bot", nil, desires, dists, "bot", true, true, false), nil)
+	-- One Valve lane: the gate does not run, so it cannot zero the assigned lane.
+	local reason, _, gateRan = R.CommitZero("mid", "mid", { mid = 2 }, dists, "bot", true, false, false)
+	T.eq(gateRan, false)
+	T.eq(reason, nil)
+end)
+
+T.test("base split (#295): a hero rim holds for 5s unless another has 2 more heroes", function()
+	local R = rules()
+	local three = bots({ { "a", 3000, 3000 }, { "b", 2000, 4000 }, { "c", 4000, 2000 } })
+	local rims = {
+		{ lane = "mid", why = "heroes", heroes = 4, need = 5, alive = true },
+		{ lane = "base", why = "heroes", heroes = 4, need = 5, alive = true },
+	}
+	local assign, _, _, held, why = R.AssignRims(rims, three, {}, nil, 100)
+	T.eq(assign.a, "base", "tie: the base rim")
+	T.eq(why, "heroes")
+	-- 2s later mid has one more hero: stay on the base.
+	rims[1].heroes = 5
+	assign, _, _, held, why = R.AssignRims(rims, three, {}, held, 102)
+	T.eq(assign.a, "base", "one more hero does not switch")
+	T.eq(why, "hold")
+	T.eq(assign.b, "base")
+	-- Two more heroes than the held rim: switch now.
+	rims[1].heroes = 6
+	assign, _, _, held, why = R.AssignRims(rims, three, {}, held, 103)
+	T.eq(assign.a, "mid", "two more heroes")
+	T.eq(why, "more-heroes")
+	-- The 5s hold has run out: a one-hero lead may switch.
+	rims[1].heroes = 4
+	rims[2].heroes = 3
+	assign, _, _, _, why = R.AssignRims(rims, three, {}, { lane = "base", at = 100, heroes = 4 }, 106)
+	T.eq(assign.a, "mid")
+	T.eq(why, "hold-over")
+end)

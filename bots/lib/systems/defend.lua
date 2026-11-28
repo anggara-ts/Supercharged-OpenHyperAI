@@ -19,16 +19,6 @@ local function stringIncludes(self, searchString, position)
 	local foundIndex = string.find(self, searchString, position, true)
 	return foundIndex ~= nil
 end
-local function arraySort(self, compareFn)
-	if compareFn ~= nil then
-		table.sort(self, function(left, right)
-			return compareFn(nil, left, right) < 0
-		end)
-	else
-		table.sort(self)
-	end
-	return self
-end
 local function arrayFind(self, callback, thisArg)
 	for i = 1, #self do
 		local element = self[i]
@@ -800,8 +790,17 @@ local function BaseAssignment()
 	local previous = baseAssign.keep or {}
 	local logKey = baseAssign.logKey or {}
 	local lastThreat = baseAssign.lastThreat or {}
-	baseAssign =
-		{ at = now, active = false, assign = {}, keep = {}, rims = {}, logKey = logKey, lastThreat = lastThreat }
+	local heldHero = baseAssign.heldHero
+	baseAssign = {
+		at = now,
+		active = false,
+		assign = {},
+		keep = {},
+		rims = {},
+		logKey = logKey,
+		lastThreat = lastThreat,
+		heldHero = heldHero,
+	}
 	local ancient = GetAncient(ourTeam)
 	if ancient == nil or not ancient:IsAlive() then
 		return baseAssign
@@ -921,8 +920,22 @@ local function BaseAssignment()
 			names[member:GetPlayerID()] = string.gsub(member:GetUnitName(), "npc_dota_hero_", "")
 		end
 	end
-	local assign, count, keep = DefendLaneRules.AssignRims(rimList, bots, previous)
-	baseAssign.assign, baseAssign.rims, baseAssign.count, baseAssign.keep = assign, byLane, count, keep
+	local assign, count, keep, held, switchWhy = DefendLaneRules.AssignRims(rimList, bots, previous, heldHero, now)
+	baseAssign.assign, baseAssign.rims, baseAssign.count, baseAssign.keep, baseAssign.heldHero =
+		assign, byLane, count, keep, held
+	if held ~= nil and heldHero ~= nil and held.lane ~= heldHero.lane then
+		pcall(
+			print,
+			string.format(
+				"[SHy-DEFEND] t=%.0f %s base-rim-switch from=%s to=%s why=%s",
+				now,
+				ourTeam == TEAM_DIRE and "dire" or "radiant",
+				tostring(laneNames[heldHero.lane] or heldHero.lane),
+				tostring(laneNames[held.lane] or held.lane),
+				tostring(switchWhy or "hold-over")
+			)
+		)
+	end
 	for _, rim in ipairs(rimList) do
 		local who = {}
 		for id, lane in pairs(assign) do
@@ -1161,42 +1174,89 @@ function Defend.GetDefendDesireHelper(bot, lane)
 			}
 		end
 	end
-	if #candidates >= 2 then
-		arraySort(candidates, function(_, left, right)
-			if left.desire ~= right.desire then
-				return right.desire - left.desire
-			end
-			return left.dist - right.dist
+	-- #295, game 092: this gate ran before the base-lane gate and zeroed the assigned lane (other-lane /
+	-- committed-other), so a full-HP bot read 0.00 on all three lanes while heroes stood on the Ancient.
+	-- The assigned lane beats the Valve gate only when that lane is already a base lane (T2 down), or while
+	-- 2+ heroes are at the Ancient. High ground, a hit on the Ancient, or creeps there do not skip the gate:
+	-- the lanes would otherwise be scored freely and flip.
+	local commitDesires, commitDists = {}, {}
+	for _, candidate in ipairs(candidates) do
+		commitDesires[candidate.lane] = candidate.desire
+		commitDists[candidate.lane] = candidate.dist
+	end
+	local rawRim = nil
+	local assignmentNow = BaseAssignment()
+	if assignmentNow.active then
+		rawRim = assignmentNow.assign[bot:GetPlayerID()]
+	end
+	local assignedLane = rawRim == "base" and BaseModeLane(bot) or rawRim
+	local basePriority = (gameState.enemiesAtAncient or 0) >= 2
+	-- A T1/T2 rim assignment must not zero the other lanes. Only a base lane, or a base under 2+ heroes, does.
+	local gateAssigned = assignedLane
+	if gateAssigned ~= nil and not IsBaseLane(gateAssigned) and not basePriority then
+		gateAssigned = nil
+	end
+	local thisCandidate = arrayFind(candidates, function(_, candidate)
+		return candidate.lane == lane
+	end)
+	local committedCandidate = nil
+	if commitLane ~= 0 then
+		committedCandidate = arrayFind(candidates, function(_, candidate)
+			return candidate.lane == commitLane
 		end)
-		local priorityLane = candidates[1].lane
-		if commitLane ~= 0 and DotaTime() < commitUntil and lane ~= commitLane then
-			local committedCandidate = arrayFind(candidates, function(_, candidate)
-				return candidate.lane == commitLane
-			end)
-			local thisCandidate = arrayFind(candidates, function(_, candidate)
-				return candidate.lane == lane
-			end)
-			if
-				thisCandidate
-				and committedCandidate
-				and thisCandidate.tier > committedCandidate.tier
-				and thisCandidate.enemies >= 1
-			then
-				bot._defendCommitLane = lane
-				bot._defendCommitUntil = DotaTime() + 5
-			else
-				return DefNone(bot, "committed-other")
-			end
-		elseif lane ~= priorityLane then
-			bot._defendCommitLane = priorityLane
-			bot._defendCommitUntil = DotaTime() + 5
-			return DefNone(bot, "other-lane")
-		else
-			bot._defendCommitLane = priorityLane
+	end
+	local takeCommit = thisCandidate ~= nil
+		and committedCandidate ~= nil
+		and thisCandidate.tier > committedCandidate.tier
+		and thisCandidate.enemies >= 1
+	local commitActive = commitLane ~= 0 and DotaTime() < commitUntil
+	local valveReason =
+		DefendLaneRules.CommitZero(lane, nil, commitDesires, commitDists, commitLane, commitActive, false, takeCommit)
+	local reason, nextCommit, gateRan = DefendLaneRules.CommitZero(
+		lane,
+		gateAssigned,
+		commitDesires,
+		commitDists,
+		commitLane,
+		commitActive,
+		basePriority,
+		takeCommit
+	)
+	if
+		reason == nil
+		and valveReason ~= nil
+		and gateAssigned ~= nil
+		and lane == gateAssigned
+		and DotaTime() >= (bot._baseKeptLogAt or -999)
+		and not Fu.IsMeepoClone(bot)
+	then
+		bot._baseKeptLogAt = DotaTime() + 5
+		local valveLane = DefendLaneRules.ValvePriority(commitDesires, commitDists)
+		pcall(
+			print,
+			string.format(
+				"[SHy-DEFEND] t=%.0f %s base-lane-kept lane=%s valve=%s commit=%s why=assigned",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				tostring(laneNames[lane]),
+				tostring(laneNames[valveLane] or valveLane or "-"),
+				tostring(laneNames[commitLane] or (commitActive and commitLane or "-"))
+			)
+		)
+	end
+	if not gateRan then
+		if DotaTime() >= commitUntil then
+			bot._defendCommitLane = 0
+		end
+	elseif reason ~= nil then
+		if nextCommit ~= nil then
+			bot._defendCommitLane = nextCommit
 			bot._defendCommitUntil = DotaTime() + 5
 		end
-	elseif DotaTime() >= commitUntil then
-		bot._defendCommitLane = 0
+		return DefNone(bot, reason)
+	elseif nextCommit ~= nil then
+		bot._defendCommitLane = nextCommit
+		bot._defendCommitUntil = DotaTime() + 5
 	end
 	local defendState = getDefendState(bot)
 	defendState.defendLoc = laneState.laneFronts[lane]
@@ -1287,38 +1347,52 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	-- Group up before taking on a base siege (SiegeGroupUp). 0.7: above the 0.65 attack "follow ally"
 	-- that pulled heroes in from 2000-4000 away, and above farm's usual 0.6.
 	local siege = Defend.GetBaseSiege()
-	if siege ~= nil and not lastStand and not ancientLow and Fu.GetHP(bot) >= 0.3 then
+	-- The base rim walks to the Ancient (ancient-heroes), not a lane's T3 group-up (#295). A group-up on another
+	-- lane must not zero the assigned base lane either: game 092 t=2626 had mid at 0.00(group-up-other-lane) while
+	-- the assigned lane was already 0 from the commit gate.
+	if rawRim == "base" then
+		bot._defendGroupUpUntil = 0
+		bot._defendGroupUpPoint = nil
+	elseif siege ~= nil and not lastStand and not ancientLow and Fu.GetHP(bot) >= 0.3 then
 		local group = SiegeGroupUp(bot, siege)
 		if group ~= nil then
 			local siegeLane = siege.lane or threatLane
-			bot._defendGroupUpUntil = DotaTime() + 1
-			bot._defendGroupUpPoint = group.point
-			if DotaTime() >= (bot._groupUpLogAt or -999) then
-				bot._groupUpLogAt = DotaTime() + 5
-				pcall(
-					print,
-					string.format(
-						"[SHy-DEFEND] t=%.0f %s group-up lane=%s siege=%d at=%.0f,%.0f grouped=%d engaged=%d dist=%d fountainDist=%d",
-						DotaTime(),
-						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
-						tostring(laneNames[siegeLane]),
-						siege.n,
-						siege.loc.x,
-						siege.loc.y,
-						group.grouped,
-						group.engaged,
-						math.floor(GetUnitToLocationDistance(bot, group.point)),
-						math.floor(bot:DistanceFromFountain())
-					)
-				)
-			end
-			if lane ~= siegeLane then
+			local takeGroup = lane == siegeLane
+			local keepAssigned = assignedLane ~= nil and lane == assignedLane
+			if not takeGroup and not keepAssigned and not (basePriority and assignedLane == nil) then
 				return DefNone(bot, "group-up-other-lane")
 			end
-			defendState.defendLoc = group.point
-			bot.laneToDefend = lane
-			bot._defendWhy = "group-up"
-			return GROUP_UP_DESIRE
+			if takeGroup then
+				bot._defendGroupUpUntil = DotaTime() + 1
+				bot._defendGroupUpPoint = group.point
+				if DotaTime() >= (bot._groupUpLogAt or -999) then
+					bot._groupUpLogAt = DotaTime() + 5
+					pcall(
+						print,
+						string.format(
+							"[SHy-DEFEND] t=%.0f %s group-up lane=%s siege=%d at=%.0f,%.0f grouped=%d engaged=%d dist=%d fountainDist=%d",
+							DotaTime(),
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							tostring(laneNames[siegeLane]),
+							siege.n,
+							siege.loc.x,
+							siege.loc.y,
+							group.grouped,
+							group.engaged,
+							math.floor(GetUnitToLocationDistance(bot, group.point)),
+							math.floor(bot:DistanceFromFountain())
+						)
+					)
+				end
+				defendState.defendLoc = group.point
+				bot.laneToDefend = lane
+				bot._defendWhy = "group-up"
+				return GROUP_UP_DESIRE
+			end
+			if keepAssigned then
+				bot._defendGroupUpUntil = 0
+				bot._defendGroupUpPoint = nil
+			end
 		end
 	end
 	local outnumbered = not ancientLow
@@ -1428,10 +1502,34 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	-- enemies at the bottom T3 out of sight, bot read 0 "no-threat", top 0.30 "base-floor"), Primal
 	-- Beast's defend mode flipped to top and he TPed from the fountain to the top T2, chatting
 	-- "Defending the base!". The bot then stays on the base lane: no "no-threat" exit below either.
+	-- #294: the team's rim assignment decides the lane when it gives this bot one, so this gate and BaseAssignDesire
+	-- keep the same lane (they used to pick different ones and zero each other's: every lane read 0).
 	local baseLane = nil
 	if baseFloor.active or enemiesAtAncient >= 2 then
-		local why
-		baseLane, why = BaseThreatLane(gameState.team, threatLane)
+		local why, seenWhy, conflict
+		local seenLane
+		seenLane, seenWhy = BaseThreatLane(gameState.team, threatLane)
+		baseLane, why, conflict = DefendLaneRules.ChooseBaseLane(assignedLane, seenLane)
+		if why == "seen" then
+			why = seenWhy
+		end
+		if conflict and DotaTime() >= (bot._baseLaneConflictLogAt or -999) and not Fu.IsMeepoClone(bot) then
+			bot._baseLaneConflictLogAt = DotaTime() + 5
+			pcall(
+				print,
+				string.format(
+					"[SHy-DEFEND] t=%.0f %s base-lane-conflict own=%s(%s) assigned=%s fixed=%s hg=%d anc=%d",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					tostring(laneNames[seenLane]),
+					tostring(seenWhy),
+					tostring(laneNames[assignedLane]),
+					tostring(laneNames[baseLane]),
+					enemiesOnHG or 0,
+					enemiesAtAncient or 0
+				)
+			)
+		end
 		if baseLane ~= nil and lane ~= baseLane then
 			if DotaTime() >= (bot._baseLaneLogAt or -999) and not Fu.IsMeepoClone(bot) then
 				bot._baseLaneLogAt = DotaTime() + 5
@@ -2519,6 +2617,29 @@ function Defend.DefendThink(bot, lane)
 	local homeSpot = Fu.AdjustLocationWithOffsetTowardsFountain(ancientLoc, 300)
 	local building, tier = LaneBuildingEntry(lane)
 	local info = { tier = tier, wave = 0, heroes = 0, spotLane = lane }
+	-- The "base" rim is the Ancient, whichever defend mode the lane label mapped to (#295). Game 092 sent
+	-- a base-assign lane=base bot to that lane's group-up while the heroes hit the tier-4 towers.
+	-- A !def order or a T1/T2 defend uses this Think too: only a base lane walks to the Ancient.
+	local assignment = BaseAssignment()
+	local rawRim = assignment.active and assignment.assign[bot:GetPlayerID()] or nil
+	if rawRim == "base" and IsBaseLane(lane) then
+		local heroesAtAncient = ancient ~= nil
+				and #Fu.GetLastSeenEnemiesNearLoc(ancientLoc, DefendLaneRules.BASE_RADIUS)
+			or 0
+		local baseRim = assignment.rims ~= nil and assignment.rims.base or nil
+		if baseRim ~= nil then
+			heroesAtAncient = math.max(heroesAtAncient, baseRim.heroes or 0)
+		end
+		info.heroes, info.spotLoc, info.spotLane = heroesAtAncient, homeSpot, "base"
+		local target, targetDist = NearestAttackableHero(ancientLoc, DefendLaneRules.BASE_RADIUS + 400, bot)
+		if target ~= nil and targetDist <= 1600 then
+			return DefendStep(bot, lane, "ancient-heroes", "base-rim", "attack", target, info)
+		end
+		if GetUnitToLocationDistance(bot, homeSpot) > 600 then
+			return DefendStep(bot, lane, "ancient-heroes", "base-rim", "move", homeSpot, info)
+		end
+		return DefendStep(bot, lane, "ancient-heroes", "base-rim", "attack-move", vectorAdd(ancientLoc, offset), info)
+	end
 	-- Group-up (GetDefendDesireHelper): go to the group point and hold there; hit an enemy hero that comes within reach.
 	if (bot._defendGroupUpUntil or -1) > now and bot._defendGroupUpPoint ~= nil then
 		local point = bot._defendGroupUpPoint
