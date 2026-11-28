@@ -139,13 +139,18 @@ end
 -- ordered once that hold is the active mode or after LOW_RIFT_WAIT, and then no other order for holdFor (the cast
 -- point + CAST_ORDER_SLACK + a turn). age: seconds since the escape started; sinceWanted: since the escape Rift was
 -- last wanted; orderedAgo: since the last Rift order (nil: none yet). Returns "cast" (its cooldown started),
+-- "stale" (an escape left open past LOW_RIFT_STALE, e.g. she died and the think did not run until the respawn),
 -- "hold" (an order in its cast point), "timeout" / "lapsed" (no Rift: give up / no longer wanted), "order" or "wait".
 EscapeRules.LOW_RIFT_WAIT = 0.4
 EscapeRules.LOW_RIFT_GIVEUP = 1.2
 EscapeRules.LOW_RIFT_LAPSE = 0.5
 -- After a give-up the escape-low Rift is skipped this long, so the walk or a Phase Shift goes out instead.
 EscapeRules.LOW_RIFT_SKIP = 1.0
+EscapeRules.LOW_RIFT_STALE = 3.0
 function EscapeRules.EscapeRiftStep(age, sinceWanted, holdUp, orderedAgo, holdFor, onCooldown)
+	if (age or 0) >= EscapeRules.LOW_RIFT_STALE then
+		return "stale"
+	end
 	if onCooldown == true then
 		return "cast"
 	end

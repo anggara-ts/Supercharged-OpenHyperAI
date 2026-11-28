@@ -1163,7 +1163,8 @@ function X.FinishLowRift(result, why)
 	)
 end
 -- Every think (SkillsComplement) and inside the cast hold (X.CastHoldTick): ends an escape once the Rift is out, the
--- wait ran out or the Rift is no longer wanted.
+-- wait ran out or the Rift is no longer wanted. why=stale: left open (she died; the think may not run while dead),
+-- with no skip after it.
 function X.LowRiftTick()
 	local state = bot._lowRift
 	if state == nil then
@@ -1187,7 +1188,7 @@ function X.LowRiftTick()
 	if step == "cast" then
 		-- other-order: the Rift went out from another order (a tower-escape Rift) before this one's.
 		X.FinishLowRift("cast", state.orders > 0 and "cast" or "other-order")
-	elseif step == "timeout" or step == "lapsed" then
+	elseif step == "timeout" or step == "lapsed" or step == "stale" then
 		X.FinishLowRift("no-cast", step)
 	end
 end
@@ -1235,7 +1236,7 @@ function X.LowRiftStep(point)
 		bot._phaseHoldAskUntil = state.askUntil
 		return false
 	end
-	-- cast / timeout / lapsed: the escape ends here.
+	-- cast / timeout / lapsed / stale: the escape ends here.
 	X.LowRiftTick()
 	return false
 end

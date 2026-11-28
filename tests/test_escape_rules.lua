@@ -328,7 +328,9 @@ T.test("escape rules: the escape-low Rift waits for the hold, then holds its cas
 	T.eq(R.EscapeRiftStep(0.3, 0, true, 0.15, holdFor, true), "cast", "its cooldown started: the Rift went out")
 	T.eq(R.EscapeRiftStep(0.8, 0, true, holdFor + 0.01, holdFor, false), "order", "cut anyway: one more order")
 	T.eq(R.EscapeRiftStep(R.LOW_RIFT_GIVEUP, 0, true, holdFor + 0.1, holdFor, false), "timeout", "give up")
-	T.eq(R.EscapeRiftStep(R.LOW_RIFT_GIVEUP + 1, 0, true, 0.1, holdFor, false), "hold", "a held order ends first")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_GIVEUP + 0.2, 0, true, 0.3, holdFor, false), "hold", "a held order ends first")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_STALE + 20, 30, false, 30, holdFor, false), "stale", "open since her death")
+	T.eq(R.EscapeRiftStep(R.LOW_RIFT_STALE + 20, 30, false, 30, holdFor, true), "stale", "stale before a later cast")
 	T.eq(R.EscapeRiftStep(0.7, R.LOW_RIFT_LAPSE + 0.1, false, nil, holdFor, false), "lapsed", "no longer wanted")
 end)
 
