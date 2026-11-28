@@ -260,6 +260,19 @@ function RuneRules.ClaimTakeover(myDist, holderDist)
 		and myDist <= RuneRules.CLAIM_TAKE_NEAR
 		and holderDist - myDist >= RuneRules.CLAIM_TAKE_GAP
 end
+-- A power rune this close is taken even during a Roshan call (game 092, 28:14: Furion skipped
+-- `passing-take-skip why=roshan` at 828, and Shadow Fiend stood 139 from the rune in Roshan mode;
+-- nobody picked it up). 300 is about a second of walking. Farther than this the call still wins and
+-- the claim passes to the nearest ally. power: the spot holds a power rune, not a bounty or water rune.
+RuneRules.ROSHAN_NEAR = 300
+-- The passing grab's 0.97 lost to the Roshan call (game 069). A team call returns 0.96 and a forced
+-- human Roshan order 0.97 (mode_roshan_generic.lua). This sits just above both. Underfoot's
+-- BOT_MODE_DESIRE_ABSOLUTE + 0.02 is 0.72 on the rescaled desire steps (global_overrides.lua) and
+-- loses to that call, so a near take uses this number instead.
+RuneRules.ROSHAN_NEAR_DESIRE = 0.98
+function RuneRules.TakeDuringRoshan(dist, power)
+	return power == true and dist ~= nil and dist <= RuneRules.ROSHAN_NEAR
+end
 
 -- Wisdom shrine (#32). Game data (7.42 pak01 scripts/npc/npc_units.txt, npc_dota_xp_fountain): RingRadius 100, so a
 -- hero can't walk closer than ~140 to the shrine's centre (game 068: Vengeful Spirit and Nyx stopped at 139-140 for

@@ -486,3 +486,16 @@ T.test(
 		T.eq(R.ClaimTakeover(nil, 962), false)
 	end
 )
+
+T.test("rune rules: a power rune within 300 is taken during a Roshan call (game 092)", function()
+	local R = load()
+	-- 28:14: Shadow Fiend stood 139 from a power rune in Roshan mode; Furion skipped why=roshan at 828.
+	T.eq(R.ROSHAN_NEAR, 300, "about a second of walking")
+	T.ok(R.ROSHAN_NEAR_DESIRE > R.PASS_DESIRE, "above the 0.97 that lost to the Roshan call")
+	T.eq(R.TakeDuringRoshan(139, true), true, "139 away: take it")
+	T.eq(R.TakeDuringRoshan(300, true), true, "the edge")
+	T.eq(R.TakeDuringRoshan(301, true), false, "farther: the call wins and the claim passes on")
+	T.eq(R.TakeDuringRoshan(828, true), false, "Furion at 828 gives the claim up")
+	T.eq(R.TakeDuringRoshan(139, false), false, "a bounty or water rune still waits")
+	T.eq(R.TakeDuringRoshan(nil, true), false, "no distance")
+end)

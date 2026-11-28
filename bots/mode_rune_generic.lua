@@ -178,6 +178,27 @@ local function ModeTag(mode)
 	end
 	return "m" .. tostring(mode)
 end
+-- One line per rune spawn when a Roshan call would have kept this bot off a power rune it is about a
+-- second from, and it takes the rune anyway (game 092, [SHy-RUNE] why=near).
+local function LogRoshanNearTake(id, dist)
+	local logKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+	if bot._passNearKey == logKey then
+		return
+	end
+	bot._passNearKey = logKey
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s passing-take spot=%d type=%s dist=%d why=near mode=%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			id,
+			tostring(GetRuneType(id)),
+			dist,
+			ModeTag(bot:GetActiveMode())
+		)
+	)
+end
 local function RuneTag(id)
 	if id == RUNE_BOUNTY_1 then
 		return "b1"
@@ -1644,7 +1665,17 @@ function GetDesireRaw()
 		runeInfo.distance = runeDist
 		runeInfo.status = RUNE_STATUS_AVAILABLE
 		runeInfo.type = GetRuneType(runeId)
-		return give(BOT_MODE_DESIRE_ABSOLUTE + 0.02, "underfoot")
+		-- ABSOLUTE + 0.02 is 0.72 and loses to a Roshan call (0.96 / 0.97). A power rune within a
+		-- second's walk is taken anyway (game 092: Shadow Fiend at 139 stayed in Roshan mode).
+		local takeDesire = BOT_MODE_DESIRE_ABSOLUTE + 0.02
+		if
+			bot:GetActiveMode() == BOT_MODE_ROSHAN
+			and RuneRules.TakeDuringRoshan(runeDist, RuneMode.IsPowerRune(runeId))
+		then
+			takeDesire = math.max(takeDesire, RuneRules.ROSHAN_NEAR_DESIRE)
+			LogRoshanNearTake(runeId, runeDist)
+		end
+		return give(takeDesire, "underfoot")
 	end
 	-- A leftover bounty sits beside the spawn, not on a second rune id. Stay and walk the ring.
 	local sweepDesire = RuneMode.BountySweepDesire()
@@ -1734,10 +1765,18 @@ function GetDesireRaw()
 						else
 							skipWhy = "claimed:" .. holderName
 						end
-					elseif closer ~= nil and not yield and bot:GetActiveMode() == BOT_MODE_ROSHAN then
+					elseif
+						closer ~= nil
+						and not yield
+						and bot:GetActiveMode() == BOT_MODE_ROSHAN
+						and not RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id))
+					then
 						-- A takeover loses to a running Roshan call (game 069 40:18-40:22: 0.97 never won over the
-						-- Roshan mode): leave the rune to an ally instead of taking it over.
+						-- Roshan mode), unless the power rune is about a second away. The claim passes to the
+						-- nearest ally: game 092, Furion kept it at 828 and Shadow Fiend left it as claimed:furion.
 						skipWhy = "roshan"
+						RuneRules.passClaims[claimKey] =
+							RuneRules.NextClaim(nil, closer, DotaTime(), closer:GetActiveMode() == BOT_MODE_RUNE)
 					end
 					if skipWhy ~= nil and not yield then
 						local skipKey = id .. ":" .. skipWhy .. ":" .. math.floor(DotaTime() / RuneCycle(id))
@@ -1784,6 +1823,15 @@ function GetDesireRaw()
 							and not bot:WasRecentlyDamagedByAnyHero(1.5)
 						if not enemyNear or powerStep then
 							passDesire = math.max(passDesire, RuneRules.PASS_DESIRE)
+						end
+						-- The Roshan skip above did not fire because the power rune is within ROSHAN_NEAR.
+						-- 0.97 still loses to the call, so the take uses ROSHAN_NEAR_DESIRE.
+						if
+							bot:GetActiveMode() == BOT_MODE_ROSHAN
+							and RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id))
+						then
+							passDesire = math.max(passDesire, RuneRules.ROSHAN_NEAR_DESIRE)
+							LogRoshanNearTake(id, mine)
 						end
 						-- Taking it over from a closer ally: the picker rules (IsTheClosestAlly, so PickerSpot and
 						-- BackUpPicker in Think) treat this bot as the picker for a few seconds, or it would hold the
