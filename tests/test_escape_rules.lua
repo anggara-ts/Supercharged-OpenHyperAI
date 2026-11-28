@@ -347,7 +347,8 @@ T.test("escape rules: an Orb in flight makes the shift an escape, and one escape
 	-- 10:39: 60% HP, her Orb flying, enemies one ahead of her side. allies includes her.
 	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 1), true, "game 092 10:39: orb out, HP falling, 2 vs her")
 	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 1), true, "3 enemies, alone")
-	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 2), false, "an ally within range")
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 2), true, "3 enemies, her and one ally: still one ahead")
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 2), false, "an ally there and not one ahead")
 	T.eq(R.OrbFlightEscapeShift(true, 0.01, 3, 1), false, "HP not really falling")
 	T.eq(R.OrbFlightEscapeShift(false, 0.2, 3, 1), false, "no Orb of hers in flight")
 	T.eq(R.OrbFlightEscapeShift(true, 0.2, 1, 1), false, "not outnumbered")
