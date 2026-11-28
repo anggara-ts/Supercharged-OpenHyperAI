@@ -1154,7 +1154,7 @@ function Push.GetPushDesireHelper(bot, lane)
 		end
 		local whyHold = nil
 		local episode = bot._laneDoneEpisode
-		if not targetAlive(laneTarget) and episode ~= nil and targetAlive(episode.target) then
+		if not targetAlive(laneTarget) and episode ~= nil and episode.lane == lane and targetAlive(episode.target) then
 			laneTarget = episode.target
 			whyHold = "lane-done"
 		end
@@ -1655,7 +1655,8 @@ function getLaneTargetBuilding(lane)
 		local result = cached.result
 		-- A building that died this tenth of a second must not stay the cached target (game 092 t=713: no-lane-target
 		-- the second the top T1 fell, while the next tower was already standing).
-		if result == nil or result:IsNull() or result:IsAlive() then
+		-- A null handle is a building that just died: recompute. A live building, or no building, stays cached.
+		if result == nil or (not result:IsNull() and result:IsAlive()) then
 			return result
 		end
 	end
@@ -2602,8 +2603,10 @@ local function GlyphWaitThink(bot, lane)
 	local allyGoals, allyHere = GlyphWaitingAllies(bot, tower, now)
 	if now - wait.start >= 2 then
 		local closest = PushRules.NearestDistance(botLocation.x, botLocation.y, allyHere)
+		-- The latest gap, not the smallest one since the wait started. Bots who arrive together
+		-- used to keep that first small number on the glyph-end line.
 		if closest ~= nil then
-			wait.spread = math.min(wait.spread or math.huge, closest)
+			wait.spread = closest
 		end
 	end
 	-- Step back toward our side while an enemy hero it can't hit is near enough to cast, or a hero, creep (a glyphed
