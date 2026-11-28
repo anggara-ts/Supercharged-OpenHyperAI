@@ -442,7 +442,7 @@ function X.SampleEnemyLastSeen(now)
 			if sample == nil then
 				sample = { anchor = seen.location, since = now - ago }
 				enemyLastSeen[playerId] = sample
-			elseif Fu.GetDistance(seen.location, sample.anchor) > ShadowRealmRules.LANDING_RADIUS then
+			elseif (seen.location - sample.anchor):Length2D() > ShadowRealmRules.LANDING_RADIUS then
 				-- A new spot: the sighting before it is kept as the approach.
 				sample.prev = { loc = sample.loc, ago = sample.ago, at = sample.at }
 				sample.anchor, sample.since = seen.location, now - ago
