@@ -117,13 +117,14 @@ local function LogPowerRuneSkip(why)
 				pcall(
 					print,
 					string.format(
-						"[SHy-RUNE] t=%.0f %s powerrune-near-skip spot=%d type=%s dist=%d why=%s",
+						"[SHy-RUNE] t=%.0f %s powerrune-near-skip spot=%d type=%s dist=%d why=%s pass=%s",
 						DotaTime(),
 						(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 						id,
 						tostring(runeType),
 						dist,
-						tostring(why)
+						tostring(why),
+						tostring(bot._passWhy)
 					)
 				)
 				return
@@ -176,6 +177,27 @@ local function ModeTag(mode)
 		return "outpost"
 	end
 	return "m" .. tostring(mode)
+end
+-- One line per rune spawn when a Roshan call would have kept this bot off a power rune it is about a
+-- second from, and it takes the rune anyway (game 092, [SHy-RUNE] why=near).
+local function LogRoshanNearTake(id, dist)
+	local logKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+	if bot._passNearKey == logKey then
+		return
+	end
+	bot._passNearKey = logKey
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s passing-take spot=%d type=%s dist=%d why=near mode=%s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			id,
+			tostring(GetRuneType(id)),
+			dist,
+			ModeTag(bot:GetActiveMode())
+		)
+	)
 end
 local function RuneTag(id)
 	if id == RUNE_BOUNTY_1 then
@@ -490,23 +512,76 @@ end
 -- so the item mode takes over as soon as it wants the rune.
 local WATER_AT = { 0, 120, 240 }
 local RIVER_HOLD_DESIRE = 0.35
+-- #32, game 077 (1:58-2:15): Io stood on the bottom spot with the 2:00 water rune (type 7) up for about 11s, and
+-- Valve's item mode never started (itemMode=false); at the horn it did take the top river gold (mode 21 at 0.90,
+-- t=7.2), and Puck (hp 0.51) took the 2:00 rune 20s later through the item mode. Io was at full HP; whether the item
+-- mode skips a water rune for a full hero, or skips a bot already on the spot, is unverified. For every water-walk
+-- and river-bounty-return, note when the bot first stood on the spot and whether the item mode ever became active,
+-- and print it at the end with the bot's HP / mana and the rune type:
+--   [SHy-RUNE] water-walk-end|river-return-end why= spot= ... type= hp= mp= onSpot=before|after|never itemMode=
+function RuneMode.NoteRiverWait(wait, dist, now)
+	if wait.onSpotAt == nil and dist <= 200 then
+		wait.onSpotAt = now
+	end
+	if bot:GetActiveMode() == BOT_MODE_ITEM then
+		wait.itemMode = true
+	end
+end
+function RuneMode.RiverWaitFields(wait, spawnAt)
+	local okT, runeType = pcall(GetRuneType, wait.id)
+	local onSpot = "never"
+	if wait.onSpotAt ~= nil then
+		onSpot = wait.onSpotAt < spawnAt and "before" or "after"
+	end
+	return string.format(
+		"type=%s hp=%.2f mp=%.2f onSpot=%s itemMode=%s",
+		tostring(okT and runeType),
+		Fu.GetHP(bot),
+		Fu.GetMP(bot),
+		onSpot,
+		wait.itemMode and "yes" or "no"
+	)
+end
+function RuneMode.LogRiverWait(what, why, wait, dist)
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s %s why=%s spot=%d dist=%d status=%s %s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			what,
+			why,
+			wait.id,
+			dist,
+			StatusTag(RawGetRuneStatus(wait.id)),
+			RuneMode.RiverWaitFields(wait, wait.t0)
+		)
+	)
+end
 function RuneMode.WaterWalk()
 	local now = DotaTime()
 	local waterWalk = bot._waterWalk
 	if waterWalk ~= nil then
+		local walkDist = GetUnitToLocationDistance(bot, waterWalk.loc)
+		RuneMode.NoteRiverWait(waterWalk, walkDist, now)
 		if not bot:IsAlive() or now > waterWalk.t0 + 8 then
 			bot._waterWalk = nil
+			if now >= waterWalk.t0 then
+				RuneMode.LogRiverWait("water-walk-end", bot:IsAlive() and "time" or "dead", waterWalk, walkDist)
+			end
 			return nil
 		end
-		if GetUnitToLocationDistance(bot, waterWalk.loc) <= 200 then
+		if walkDist <= 200 then
 			return now < waterWalk.t0 and "hold" or "near"
 		end
 		return "walk"
 	end
 	bot._waterDone = bot._waterDone or {}
+	-- The team's own spot first (RuneRules.RiverSpotOrder): Radiant top, Dire bottom.
+	local spotOrder = RuneRules.RiverSpotOrder(GetTeam() == TEAM_DIRE, RUNE_POWERUP_1, RUNE_POWERUP_2)
 	for _, spawnTime in ipairs(WATER_AT) do
 		if now >= spawnTime - 8 and now <= spawnTime + 4 then
-			for _, id in ipairs({ RUNE_POWERUP_1, RUNE_POWERUP_2 }) do
+			for _, id in ipairs(spotOrder) do
 				local key = spawnTime .. ":" .. id
 				local loc = GetRuneSpawnLocation(id)
 				if
@@ -519,6 +594,19 @@ function RuneMode.WaterWalk()
 				then
 					bot._waterDone[key] = true
 					bot._waterWalk = { id = id, loc = loc, t0 = spawnTime }
+					-- [SHy-RUNE] river-walk-pick spot= own=1|0 (the team's own spot) dist= spawn=: once per walk.
+					pcall(
+						print,
+						string.format(
+							"[SHy-RUNE] t=%.0f %s river-walk-pick spot=%d own=%d dist=%d spawn=%d",
+							now,
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							id,
+							id == spotOrder[1] and 1 or 0,
+							GetUnitToLocationDistance(bot, loc),
+							spawnTime
+						)
+					)
 					return "walk"
 				end
 			end
@@ -680,14 +768,15 @@ local function EndRiverReturn(why)
 	pcall(
 		print,
 		string.format(
-			"[SHy-RUNE] t=%.0f %s river-return-end why=%s spot=%d dist=%d took=%.0fs status=%s",
+			"[SHy-RUNE] t=%.0f %s river-return-end why=%s spot=%d dist=%d took=%.0fs status=%s %s",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			why,
 			riverReturn.id,
 			GetUnitToLocationDistance(bot, riverReturn.loc),
 			DotaTime() - riverReturn.t0,
-			StatusTag(GetRuneStatus(riverReturn.id))
+			StatusTag(GetRuneStatus(riverReturn.id)),
+			RuneMode.RiverWaitFields(riverReturn, riverReturn.t0)
 		)
 	)
 end
@@ -697,6 +786,7 @@ function RuneMode.RiverBountyReturn()
 	local riverReturn = bot._riverReturn
 	if riverReturn ~= nil then
 		local dist = GetUnitToLocationDistance(bot, riverReturn.loc)
+		RuneMode.NoteRiverWait(riverReturn, dist, now)
 		if not bot:IsAlive() then
 			EndRiverReturn("dead")
 		elseif GetRuneStatus(riverReturn.id) ~= RUNE_STATUS_AVAILABLE then
@@ -740,6 +830,9 @@ function RuneMode.RiverBountyReturn()
 			and RiverRuneSeenUp(id)
 			and not RiverSpotContested(loc)
 			and not RiverReturnClaimed(id, spawn, loc)
+			-- After a release (RuneMode.RiverReleaseDesire) not while still on the spot (game 080, 0:09: Io's return
+			-- started at dist 0 and held him there 7s more); walked off, the return may bring the bot back onto it.
+			and not (RuneMode.Released(id, spawn) and dist <= RuneRules.RELEASE_RADIUS)
 		then
 			-- The nearest of the free allies (a fighting one closer to it doesn't count).
 			local nearest = true
@@ -788,21 +881,40 @@ end
 -- one of those happened.
 -- 0.92: above the item mode's 0.90 (game 031 log); ended early by a hero hit or an enemy hero at the spot.
 -- Stops for the rest of the game after its first worked=no (game 063: worked=no in all 4 tries, 0:01-4:19), so the
--- probe doesn't keep the item mode off the spot for 1.5s every spawn.
+-- probe doesn't keep the item mode off the spot for 1.5s every spawn. Per rune type (#32, game 077): the order takes
+-- water runes (games 070-077: worked=yes type=7 in 7 of 10 tries, 2 unsure, 1 no; Sniper and Puck) but never a river
+-- bounty (type 5, worked=no at every horn), and the horn bounty's worked=no stopped the 2:00 water try too. Io then
+-- stood on the bottom spot with the water rune up and no pick-up order, and Valve's item mode didn't take it either.
 local RIVER_PICKUP_TRY_DESIRE = 0.92
+-- Where the order never took the rune (RuneRules.RiverOrderWorks: river bounties, anything at the bottom spot) or it
+-- already failed for this rune type, the bot steps onto the spot and lets go at once, with no order
+-- (RuneRules.RiverTryPlan, RuneMode.StartRiverYield): no 1.5s held above the item mode, no walk off the spot.
 function RuneMode.RiverPickupTry(id, spawn)
 	bot._riverPickupTried = bot._riverPickupTried or {}
+	bot._riverYielded = bot._riverYielded or {}
 	local key = spawn .. ":" .. id
+	local okT, runeType = pcall(GetRuneType, id)
+	local typeKey = tostring(okT and runeType)
 	if
-		bot._riverPickupNo
-		or bot._riverPickupTried[key]
+		bot._riverPickupTried[key]
 		or bot._riverPickup ~= nil
+		or bot._riverRelease ~= nil
 		or GetRuneStatus(id) ~= RUNE_STATUS_AVAILABLE
 	then
 		return false
 	end
+	local stopped = bot._riverPickupNo ~= nil and bot._riverPickupNo[typeKey] == true
+	local orderWorks = RuneRules.RiverOrderWorks(id, okT and runeType or nil, RUNE_POWERUP_1, RUNE_WATER)
+	local spot = GetRuneSpawnLocation(id)
+	local plan = RuneRules.RiverTryPlan(orderWorks, stopped, bot._riverYielded[key] == true)
+	if plan == "yield" then
+		bot._riverYielded[key] = true
+		RuneMode.StartRiverYield(id, spawn, okT and runeType or nil, spot)
+		return true
+	elseif plan == "none" then
+		return false
+	end
 	bot._riverPickupTried[key] = true
-	local okT, runeType = pcall(GetRuneType, id)
 	bot._riverPickup = {
 		id = id,
 		at = DotaTime(),
@@ -811,9 +923,67 @@ function RuneMode.RiverPickupTry(id, spawn)
 		mode = bot:GetActiveMode(),
 		itemMode = false,
 		others = false,
+		spawn = spawn,
 	}
 	bot:Action_PickUpRune(id)
 	return true
+end
+-- Has this bot let go of the rune at spot `id` of the spawn at `spawn` (RuneMode.RiverReleaseDesire)? The water
+-- stay doesn't hold it there again for that spawn.
+function RuneMode.Released(id, spawn)
+	local done = bot._riverReleaseDone
+	return done ~= nil and done[spawn .. ":" .. id] == true
+end
+-- A release (RuneRules.ReleaseStep) runs from GetDesire, so the timer and the result line run while another mode
+-- (the item mode, laning) has the bot: 0 while it lasts (RELEASE_STEP_DESIRE while it walks back onto the spot first),
+-- nil once it ended. [SHy-RUNE] river-release-end taken= stepped=.
+function RuneMode.RiverReleaseDesire()
+	local release = bot._riverRelease
+	if release == nil then
+		return nil
+	end
+	if bot:GetActiveMode() == BOT_MODE_ITEM then
+		release.itemMode = true
+	end
+	local now = DotaTime()
+	local step, taken = RuneRules.ReleaseStep(
+		release,
+		now,
+		RawGetRuneStatus(release.id) == RUNE_STATUS_AVAILABLE,
+		GetUnitToLocationDistance(bot, release.loc)
+	)
+	if step == "step" and bot:IsAlive() then
+		-- Back onto the spot first (Think: river-step); a release from off the spot never got the rune.
+		return RuneRules.RELEASE_STEP_DESIRE
+	end
+	if step == "hold" and bot:IsAlive() then
+		return BOT_MODE_DESIRE_NONE
+	end
+	bot._riverRelease = nil
+	-- A no-order release that didn't get the rune leaves the stay and the return on: the order runs after it
+	-- (RuneRules.RiverTryPlan) while the bot is still on the spot.
+	if taken or release.why ~= "no-order" then
+		bot._riverReleaseDone = bot._riverReleaseDone or {}
+		bot._riverReleaseDone[tostring(release.spawn) .. ":" .. release.id] = true
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.1f %s river-release-end why=%s spot=%d taken=%s held=%.1f stepped=%.1f itemMode=%s gold+=%d dist=%d mode=%s",
+			now,
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			release.why or "pickup-failed",
+			release.id,
+			taken and "yes" or "no",
+			now - release.t0,
+			release.stepped or (release.step and now - (release.stepAt or now)) or 0,
+			release.itemMode and "yes" or "no",
+			bot:GetGold() - release.gold,
+			GetUnitToLocationDistance(bot, release.loc),
+			ModeTag(bot:GetActiveMode())
+		)
+	)
+	return nil
 end
 local function OtherHeroAtSpot(loc)
 	for _, list in ipairs({ UNIT_LIST_ALLIED_HEROES, UNIT_LIST_ENEMY_HEROES }) do
@@ -829,6 +999,37 @@ local function OtherHeroAtSpot(loc)
 		end
 	end
 	return false
+end
+-- Let go of a river rune at once, with no pick-up order (RuneRules.RiverTryPlan "yield"): desire 0 for YIELD_FOR
+-- seconds (RuneMode.RiverReleaseDesire) so Valve's item mode can take it from the spot.
+-- [SHy-RUNE] river-release why=no-order spot= type= dist= others= stopped= for=1s, then river-release-end why=no-order.
+function RuneMode.StartRiverYield(id, spawn, runeType, spot)
+	bot._riverRelease = {
+		id = id,
+		spawn = spawn,
+		loc = spot,
+		t0 = DotaTime(),
+		gold = bot:GetGold(),
+		itemMode = false,
+		why = "no-order",
+		duration = RuneRules.YIELD_FOR,
+		step = GetUnitToLocationDistance(bot, spot) > RuneRules.RIVER_YIELD_RADIUS,
+	}
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.1f %s river-release why=no-order spot=%d type=%s dist=%d others=%s stopped=%s since=%.1f for=%ds",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			id,
+			tostring(runeType),
+			GetUnitToLocationDistance(bot, spot),
+			tostring(OtherHeroAtSpot(spot)),
+			tostring(bot._riverPickupNo ~= nil and bot._riverPickupNo[tostring(runeType)] == true),
+			DotaTime() - spawn,
+			RuneRules.YIELD_FOR
+		)
+	)
 end
 function RuneMode.RiverPickupCheck()
 	local pickup = bot._riverPickup
@@ -848,7 +1049,8 @@ function RuneMode.RiverPickupCheck()
 	local gone = RawGetRuneStatus(pickup.id) ~= RUNE_STATUS_AVAILABLE
 	local worked = not gone and "no" or (pickup.itemMode or pickup.others) and "unsure" or "yes"
 	if worked == "no" then
-		bot._riverPickupNo = true
+		bot._riverPickupNo = bot._riverPickupNo or {}
+		bot._riverPickupNo[tostring(pickup.type)] = true
 	end
 	pcall(
 		print,
@@ -867,6 +1069,34 @@ function RuneMode.RiverPickupCheck()
 			worked == "no" and "yes" or "no"
 		)
 	)
+	-- After a failed order on the spot: let go for Valve's item mode (RuneMode.RiverReleaseDesire).
+	local spot = GetRuneSpawnLocation(pickup.id)
+	local spotDist = GetUnitToLocationDistance(bot, spot)
+	if RuneRules.ReleaseStarts(worked, spotDist, not gone) then
+		bot._riverRelease = {
+			id = pickup.id,
+			spawn = pickup.spawn,
+			loc = spot,
+			t0 = DotaTime(),
+			gold = bot:GetGold(),
+			itemMode = false,
+			-- The order may have walked the bot off the spot (5 of 16 in games 081-085): back onto it first.
+			step = spotDist > RuneRules.RIVER_YIELD_RADIUS,
+		}
+		pcall(
+			print,
+			string.format(
+				"[SHy-RUNE] t=%.1f %s river-release why=pickup-failed spot=%d type=%s dist=%d others=%s for=%ds",
+				DotaTime(),
+				(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+				pickup.id,
+				tostring(pickup.type),
+				spotDist,
+				tostring(pickup.others),
+				RuneRules.RELEASE_FOR
+			)
+		)
+	end
 end
 -- Leftover rune (RuneRules.IsLeftover: available, type -1, spot in vision, 10s+ into its cycle; river or jungle).
 -- One pick-up order (game 062: it took the rune every time), then stand on the spot with no orders for up to 3s so
@@ -974,6 +1204,37 @@ function RuneMode.LeftoverDesire()
 	end
 	hold.phase = phase
 	return phase == "hold" and LEFTOVER_HOLD_DESIRE or LEFTOVER_TRY_DESIRE
+end
+-- [SHy-RUNE] spots b1= b2= p1= p2=: where GetRuneSpawnLocation puts the four rune spots, once per team at the first
+-- think (#32, game 078: from the logged distances the API's bounty 2 is near 550,-4650; the next game compares it
+-- with where the runes really spawn).
+function RuneMode.LogSpots()
+	if RuneMode._spotsLogged or not IsTeamLogger() then
+		return
+	end
+	RuneMode._spotsLogged = true
+	local parts = {}
+	for _, pair in ipairs({
+		{ "b1", RUNE_BOUNTY_1 },
+		{ "b2", RUNE_BOUNTY_2 },
+		{ "p1", RUNE_POWERUP_1 },
+		{ "p2", RUNE_POWERUP_2 },
+	}) do
+		local okL, loc = pcall(GetRuneSpawnLocation, pair[2])
+		parts[#parts + 1] = pair[1]
+			.. "="
+			.. ((okL and loc ~= nil) and string.format("%.0f,%.0f", loc.x, loc.y) or "err")
+	end
+	pcall(
+		print,
+		string.format(
+			"[SHy-RUNE] t=%.0f %s spots team=%s %s",
+			DotaTime(),
+			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+			GetTeam() == TEAM_RADIANT and "radiant" or "dire",
+			table.concat(parts, " ")
+		)
+	)
 end
 function RuneMode.RuneWatch()
 	local now = DotaTime()
@@ -1101,6 +1362,7 @@ function RuneMode.GoldCycleStep()
 	return true
 end
 function GetDesire()
+	pcall(RuneMode.LogSpots)
 	pcall(RuneMode.RuneWatch)
 	pcall(RuneMode.RiverPickupCheck)
 	if bot._goldCycle ~= nil and DotaTime() < 15 then
@@ -1125,6 +1387,18 @@ function GetDesire()
 			runeWhy = "river-pickup-try"
 			RuneMode.RuneDbg(RIVER_PICKUP_TRY_DESIRE)
 			return RIVER_PICKUP_TRY_DESIRE
+		end
+	end
+	-- A release after a failed pick-up order (RuneMode.RiverReleaseDesire): before GetDesireRaw, so neither the water
+	-- stay nor the bounty return holds the bot on the rune meanwhile.
+	if bot._riverRelease ~= nil then
+		local okR, releaseDesire = pcall(RuneMode.RiverReleaseDesire)
+		if not okR then
+			bot._riverRelease = nil
+		elseif releaseDesire ~= nil then
+			runeWhy = releaseDesire > 0 and "river-step" or "river-release"
+			RuneMode.RuneDbg(releaseDesire)
+			return releaseDesire
 		end
 	end
 	-- A leftover-rune hold (RuneMode.LeftoverDesire): before GetDesireRaw, so no other rune rule (the bounty
@@ -1160,6 +1434,7 @@ function RuneMode.MeepoBodyInFight()
 end
 function GetDesireRaw()
 	pcall(CheckPickupResult)
+	bot._passWhy = "not-reached"
 	RuneMode.InitRune()
 	bot._mapObjKind = nil
 	bot._mapObjLoc = nil
@@ -1270,7 +1545,8 @@ function GetDesireRaw()
 				SpawnHoldEnd("empty")
 				return give(BOT_MODE_DESIRE_NONE, "water-empty")
 			end
-			if sinceSpawn <= 5 and spotDist <= 300 then
+			-- Not after a release (a failed pick-up order let go of this spawn's rune, RuneMode.RiverReleaseDesire).
+			if sinceSpawn <= 5 and spotDist <= 300 and not RuneMode.Released(bot._waterWalk.id, bot._waterWalk.t0) then
 				SpawnHoldEnd("on-spot")
 				if bot._waterStayLogged ~= bot._waterWalk.t0 then
 					bot._waterStayLogged = bot._waterWalk.t0
@@ -1389,7 +1665,22 @@ function GetDesireRaw()
 		runeInfo.distance = runeDist
 		runeInfo.status = RUNE_STATUS_AVAILABLE
 		runeInfo.type = GetRuneType(runeId)
-		return give(BOT_MODE_DESIRE_ABSOLUTE + 0.02, "underfoot")
+		-- ABSOLUTE + 0.02 is 0.72 and loses to a Roshan call (0.96 / 0.97). A power rune within a
+		-- second's walk is taken anyway (game 092: Shadow Fiend at 139 stayed in Roshan mode).
+		local takeDesire = BOT_MODE_DESIRE_ABSOLUTE + 0.02
+		local nearDesire, nearLatch = RuneRules.RoshanNearTake(
+			bot:GetActiveMode() == BOT_MODE_ROSHAN,
+			RuneRules.TakeDuringRoshan(runeDist, RuneMode.IsPowerRune(runeId)),
+			bot._roshNearTake,
+			runeId,
+			DotaTime()
+		)
+		if nearDesire ~= nil then
+			takeDesire = math.max(takeDesire, nearDesire)
+			bot._roshNearTake = nearLatch
+			LogRoshanNearTake(runeId, runeDist)
+		end
+		return give(takeDesire, "underfoot")
 	end
 	-- A leftover bounty sits beside the spawn, not on a second rune id. Stay and walk the ring.
 	local sweepDesire = RuneMode.BountySweepDesire()
@@ -1401,11 +1692,14 @@ function GetDesireRaw()
 	-- and no enemy is closer or about to take it. Laning used to need it within 500, and after
 	-- laning it had to be the "best" rune and the bot not pushing or defending.
 	-- Not while enemy heroes are at our Ancient (that exit now comes after this grab).
-	if
-		not dying
-		and hpRatio >= 0.35
-		and Fu.Utils.CountEnemyHeroesNear(GetAncient(GetTeam()):GetLocation(), 3200) == 0
-	then
+	-- bot._passWhy: why the grab didn't fire, for the powerrune-near-skip line (game 066 printed `why=too-far` for a
+	-- rune 357 away: that was the last rule below, not the reason).
+	bot._passWhy = "-"
+	if dying or hpRatio < 0.35 then
+		bot._passWhy = "hp"
+	elseif Fu.Utils.CountEnemyHeroesNear(GetAncient(GetTeam()):GetLocation(), 3200) > 0 then
+		bot._passWhy = "ancient"
+	else
 		-- Power runes too (user call), with the laning rules for who takes the river runes.
 		for _, id in ipairs({ RUNE_BOUNTY_1, RUNE_BOUNTY_2, RUNE_POWERUP_1, RUNE_POWERUP_2 }) do
 			if GetRuneStatus(id) == RUNE_STATUS_AVAILABLE then
@@ -1413,20 +1707,111 @@ function GetDesireRaw()
 				local mine = GetUnitToLocationDistance(bot, loc)
 				local riverOk = not IsRiverRune(id)
 					or not (RuneMode.SidelaneSkipsRiver(id, mine) or RuneMode.SkipSecondLaningRune(id))
-				if mine <= 1000 and riverOk and not RuneMode.RuneSkipped(id) and not RuneMode.IsEnemyPickRune(id) then
-					local allyCloser = false
+				if mine > 1000 then
+					-- not passing
+				elseif not riverOk then
+					bot._passWhy = "river-rule"
+				elseif RuneMode.RuneSkipped(id) then
+					bot._passWhy = "skipped"
+				elseif RuneMode.IsEnemyPickRune(id) then
+					bot._passWhy = "enemy-closer"
+				else
+					local closer, closerDist = nil, mine
 					for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES) or {}) do
-						if
-							ally ~= bot
-							and ally:IsAlive()
-							and not ally:IsIllusion()
-							and GetUnitToLocationDistance(ally, loc) < mine
-						then
-							allyCloser = true
-							break
+						if ally ~= bot and ally:IsAlive() and not ally:IsIllusion() then
+							local allyDist = GetUnitToLocationDistance(ally, loc)
+							if allyDist < closerDist then
+								closer, closerDist = ally, allyDist
+							end
 						end
 					end
-					if not allyCloser then
+					-- A closer bot that doesn't go for it within 1s gives it up (RuneRules.PassingYield).
+					bot._passWait = bot._passWait or {}
+					local wait = bot._passWait[id]
+					if closer == nil or wait == nil or wait.ally ~= closer then
+						wait = closer ~= nil and { ally = closer, since = DotaTime(), startDist = closerDist } or nil
+						bot._passWait[id] = wait
+					end
+					local waited = wait ~= nil and DotaTime() - wait.since or 0
+					local yield = RuneRules.PassingYield(
+						closer ~= nil,
+						closer ~= nil and not closer:IsBot(),
+						closer ~= nil and closer:GetActiveMode() == BOT_MODE_RUNE,
+						waited,
+						closer ~= nil and wait ~= nil and RuneRules.AllyApproaching(wait.startDist, closerDist)
+					)
+					local claimKey = GetTeam() .. ":" .. id
+					local claim = RuneRules.passClaims[claimKey]
+					local skipWhy = nil
+					if RuneRules.ClaimedByOther(claim, bot, DotaTime()) and claim.holder:IsAlive() then
+						local holderDist = GetUnitToLocationDistance(claim.holder, loc)
+						local holderName = (string.gsub(claim.holder:GetUnitName(), "npc_dota_hero_", ""))
+						if RuneRules.ClaimTakeover(mine, holderDist) then
+							-- Game 091, 32:37: the claim passes to the bot that is now much closer.
+							RuneRules.passClaims[claimKey] =
+								RuneRules.NextClaim(nil, bot, DotaTime(), bot:GetActiveMode() == BOT_MODE_RUNE)
+							claim = RuneRules.passClaims[claimKey]
+							local takeKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+							if bot._passClaimTakeKey ~= takeKey then
+								bot._passClaimTakeKey = takeKey
+								pcall(
+									print,
+									string.format(
+										"[SHy-RUNE] t=%.0f %s passing-take spot=%d dist=%d over=%s holderDist=%d why=closer-than-claim",
+										DotaTime(),
+										(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+										id,
+										mine,
+										holderName,
+										holderDist
+									)
+								)
+							end
+						else
+							skipWhy = "claimed:" .. holderName
+						end
+					elseif
+						closer ~= nil
+						and not yield
+						and bot:GetActiveMode() == BOT_MODE_ROSHAN
+						and not RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id))
+					then
+						-- A takeover loses to a running Roshan call (game 069 40:18-40:22: 0.97 never won over the
+						-- Roshan mode), unless the power rune is about a second away. The claim passes to the
+						-- nearest ally: game 092, Furion kept it at 828 and Shadow Fiend left it as claimed:furion.
+						skipWhy = "roshan"
+						RuneRules.passClaims[claimKey] = RuneRules.NextClaim(
+							RuneRules.passClaims[claimKey],
+							closer,
+							DotaTime(),
+							closer:GetActiveMode() == BOT_MODE_RUNE
+						)
+					end
+					if skipWhy ~= nil and not yield then
+						local skipKey = id .. ":" .. skipWhy .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+						if bot._passSkipKey ~= skipKey then
+							bot._passSkipKey = skipKey
+							pcall(
+								print,
+								string.format(
+									"[SHy-RUNE] t=%.0f %s passing-take-skip spot=%d type=%s dist=%d why=%s closer=%s mode=%s",
+									DotaTime(),
+									(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+									id,
+									tostring(GetRuneType(id)),
+									mine,
+									skipWhy,
+									closer ~= nil and (string.gsub(closer:GetUnitName(), "npc_dota_hero_", "")) or "-",
+									ModeTag(bot:GetActiveMode())
+								)
+							)
+						end
+					end
+					if yield then
+						bot._passWhy = "ally:" .. (string.gsub(closer:GetUnitName(), "npc_dota_hero_", ""))
+					elseif skipWhy ~= nil then
+						bot._passWhy = skipWhy
+					else
 						local runeInfo = bot.rune.normal
 						runeInfo.location = id
 						runeInfo.distance = mine
@@ -1435,8 +1820,61 @@ function GetDesireRaw()
 						-- No enemy hero near: above a walking push or defend (0.95). Game 048 18:10: Night
 						-- Stalker walked past the top jungle bounty 885 away on a push (passing gave 0.75).
 						local passDesire = mine <= 600 and BOT_MODE_DESIRE_VERYHIGH or BOT_MODE_DESIRE_HIGH
-						if #(Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE) or {}) == 0 then
-							passDesire = math.max(passDesire, 0.97)
+						local enemyNear = #(Fu.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE) or {}) > 0
+						-- A power rune a short step away beats a chase too (maintainer, game 038: above every mode
+						-- but a real retreat), unless heroes are hitting the bot. Game 066, 78:01: an invisibility
+						-- rune 357 from Elder Titan, who kept chasing Omniknight (attack 0.65-0.95). Not a type -1 spot (the
+						-- leftover hold in Think handles those).
+						local powerStep = IsRiverRune(id)
+							and runeInfo.type ~= -1
+							and runeInfo.type ~= RUNE_INVALID
+							and mine <= RuneRules.PASS_POWER_STEP
+							and not bot:WasRecentlyDamagedByAnyHero(1.5)
+						if not enemyNear or powerStep then
+							passDesire = math.max(passDesire, RuneRules.PASS_DESIRE)
+						end
+						-- The Roshan skip above did not fire because the power rune is within ROSHAN_NEAR.
+						-- 0.97 still loses to the call, so the take uses ROSHAN_NEAR_DESIRE.
+						local nearDesire, nearLatch = RuneRules.RoshanNearTake(
+							bot:GetActiveMode() == BOT_MODE_ROSHAN,
+							RuneRules.TakeDuringRoshan(mine, RuneMode.IsPowerRune(id)),
+							bot._roshNearTake,
+							id,
+							DotaTime()
+						)
+						if nearDesire ~= nil then
+							passDesire = math.max(passDesire, nearDesire)
+							bot._roshNearTake = nearLatch
+							LogRoshanNearTake(id, mine)
+						end
+						-- Taking it over from a closer ally: the picker rules (IsTheClosestAlly, so PickerSpot and
+						-- BackUpPicker in Think) treat this bot as the picker for a few seconds, or it would hold the
+						-- backup spot 450 off the rune.
+						if closer ~= nil then
+							bot._passTake = { id = id, untilAt = DotaTime() + RuneRules.PASS_TAKE_FOR }
+							-- The team's claim: the other bots leave this rune to this one (see RuneRules.NextClaim).
+							RuneRules.passClaims[claimKey] =
+								RuneRules.NextClaim(claim, bot, DotaTime(), bot:GetActiveMode() == BOT_MODE_RUNE)
+						end
+						-- One line per rune and spawn cycle when the old rule would not have taken it.
+						local logKey = id .. ":" .. math.floor(DotaTime() / RuneCycle(id))
+						if (closer ~= nil or powerStep and enemyNear) and bot._passLogKey ~= logKey then
+							bot._passLogKey = logKey
+							pcall(
+								print,
+								string.format(
+									"[SHy-RUNE] t=%.0f %s passing-take spot=%d type=%s dist=%d over=%s waited=%.1f des=%.2f mode=%s",
+									DotaTime(),
+									(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+									id,
+									tostring(runeInfo.type),
+									mine,
+									closer ~= nil and (string.gsub(closer:GetUnitName(), "npc_dota_hero_", "")) or "-",
+									waited,
+									passDesire,
+									ModeTag(bot:GetActiveMode())
+								)
+							)
 						end
 						return give(passDesire, IsRiverRune(id) and "power-passing" or "bounty-passing")
 					end
@@ -1648,6 +2086,13 @@ end
 local nextPreHoldMoveTime = -math.huge
 function Think()
 	bot._runeDo = "fall"
+	-- A release stepping back onto its river spot (RuneMode.RiverReleaseDesire).
+	local release = bot._riverRelease
+	if release ~= nil and release.step then
+		bot:Action_MoveToLocation(release.loc)
+		doing("river-step")
+		return
+	end
 	if bot._waterWalk ~= nil then
 		if GetUnitToLocationDistance(bot, bot._waterWalk.loc) > 200 then
 			bot:Action_MoveToLocation(bot._waterWalk.loc)
@@ -1844,6 +2289,16 @@ function Think()
 			if RuneMode.BackUpPicker(runeInfo.location) then
 				return
 			end
+			-- Skipped: leave it now, from any distance (game 016: Medusa went back to a skipped spot every 3s, the
+			-- target rune was kept after the skip). This check used to come after the walk-on below, so it only ran
+			-- within 130: game 077, 2:15-2:29, Io looped `skipped` (walk to the lane) / `move-on` (walk back) every
+			-- 0.2s about 130 from the bottom river rune for 14s (`[SHy-STUCK] t=146 wisp mode=rune/0.77`).
+			if RuneMode.RuneSkipped(runeInfo.location) then
+				local laneBackNow = GetLaneFrontLocation(GetTeam(), assignedLane or bot:GetAssignedLane(), -600)
+				bot:Action_MoveToLocation(laneBackNow)
+				doing("skipped")
+				return
+			end
 			-- Pickup from the bank does not collect a river rune. Walk onto the point.
 			-- If that walk makes no progress, leave so the lane is not abandoned.
 			if liveDist > 130 then
@@ -1887,13 +2342,6 @@ function Think()
 			bot._runeReach = nil
 			local now0 = DotaTime()
 			local laneBack = GetLaneFrontLocation(GetTeam(), assignedLane or bot:GetAssignedLane(), -600)
-			-- Skipped: leave it now (game 016: Medusa went back to a skipped spot every 3s, the
-			-- target rune was kept after the skip).
-			if RuneMode.RuneSkipped(runeInfo.location) then
-				bot:Action_MoveToLocation(laneBack)
-				doing("skipped")
-				return
-			end
 			-- The status says up but nothing is there (GetRuneType -1, game 016 at the horn on both
 			-- power spots): skip it at once.
 			local rType = GetRuneType and GetRuneType(runeInfo.location) or nil
@@ -2597,6 +3045,14 @@ function RuneMode.BackUpPicker(id)
 	return true
 end
 function RuneMode.IsTheClosestAlly(unit, location)
+	-- A passing grab took this rune over from a closer ally that ignored it (RuneRules.PassingYield).
+	local take = unit._passTake
+	if take ~= nil and DotaTime() < take.untilAt then
+		local spot = GetRuneSpawnLocation(take.id)
+		if math.abs(spot.x - location.x) < 1 and math.abs(spot.y - location.y) < 1 then
+			return true
+		end
+	end
 	local closestAlly = unit
 	local closestDistance = GetUnitToLocationDistance(unit, location)
 	for playerIndex = 1, 5 do
@@ -2952,6 +3408,7 @@ function RuneMode.GetLaningRuneDesire(laningRuneRange)
 			and RuneMode.ShouldCheckRuneStatus(bountyRune)
 			and not RuneMode.IsHumanDangerPingedRune(bountyRune)
 			and not RuneMode.SkipSecondLaningRune(bountyRune)
+			and not RuneMode.RuneSkipped(bountyRune)
 		then
 			local distance = GetUnitToLocationDistance(bot, GetRuneSpawnLocation(bountyRune))
 			if distance < laningRuneRange then
@@ -2972,9 +3429,12 @@ function RuneMode.GetLaningRuneDesire(laningRuneRange)
 	local bestRune = nil
 	local bestDistance = laningRuneRange
 	local allRunes = { RUNE_BOUNTY_1, RUNE_BOUNTY_2, RUNE_POWERUP_1, RUNE_POWERUP_2 }
+	-- Not a skipped rune (game 077, 2:15-2:29: this loop kept Io's rune desire at 0.70 `why=laning` for the bottom
+	-- river rune after the river-bounty-return gave up on it, and the rune Think walked him to the lane and back).
 	for _, runeId in pairs(allRunes) do
 		if
 			RuneMode.ShouldCheckRuneStatus(runeId)
+			and not RuneMode.RuneSkipped(runeId)
 			and not RuneMode.IsHumanDangerPingedRune(runeId)
 			and not RuneMode.IsAllyWithBottleCloser(runeId)
 		then

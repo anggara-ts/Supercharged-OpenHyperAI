@@ -2,6 +2,38 @@
 -- the bot API.
 local RuneRules = {}
 
+-- Passing-by grab (#32): does this bot leave a rune to an ally closer to it? The old rule left it to any closer ally,
+-- whether or not that ally went for it. Game 066, 78:01: an invisibility rune (type 3) lay 357 from Elder Titan and
+-- 382 from Earthshaker while they chased Omniknight, both said `powerrune-near-skip`, and nobody took it.
+-- A closer human always has it. A closer bot has it while its active mode is the rune mode, and for the first
+-- PASS_WAIT seconds this bot sees it closer (its rune mode needs a think to win). After that, a closer bot that still
+-- isn't in the rune mode has given it up, and this bot takes it. waited: seconds this bot has seen that ally closer.
+RuneRules.PASS_WAIT = 1.0
+-- Seconds a bot that took a rune over stays its picker (renewed every think the passing grab still wants it).
+RuneRules.PASS_TAKE_FOR = 3
+-- allyApproaching: the closer ally has walked PASS_APPROACH or more toward the rune since this bot first saw it closer
+-- (game 091, 32:35-32:37: Largo walked from 885 to 407 on the push, not in the rune mode, and Lion from 962 took it
+-- over after 2.4 s; the closer one was going there anyway).
+RuneRules.PASS_APPROACH = 150
+function RuneRules.PassingYield(allyCloser, allyIsHuman, allyInRuneMode, waited, allyApproaching)
+	if not allyCloser then
+		return false
+	end
+	if allyIsHuman or allyInRuneMode or allyApproaching then
+		return true
+	end
+	return waited < RuneRules.PASS_WAIT
+end
+-- Has the closer ally walked toward the rune since this bot first saw it closer? startDist / nowDist: that ally's
+-- distance to the rune then and now.
+function RuneRules.AllyApproaching(startDist, nowDist)
+	return startDist ~= nil and nowDist ~= nil and startDist - nowDist >= RuneRules.PASS_APPROACH
+end
+-- The passing grab's desire with no enemy hero within 1200 (above a walking push or defend at 0.95, #99), and for a
+-- power rune within PASS_POWER_STEP even with enemy heroes near, unless one hit the bot in the last 1.5s.
+RuneRules.PASS_DESIRE = 0.97
+RuneRules.PASS_POWER_STEP = 400
+
 -- Leftover rune: a spot (river or jungle) whose status reads available while GetRuneType says -1 (no type), with
 -- the spot in our vision, after the first 10s of its spawn cycle (the type reads -1 just after a spawn too: game
 -- 017, the horn). Game 063: the bottom river bounty from 0:00 was never taken and read `type=-1` all game; bots
@@ -104,6 +136,431 @@ function RuneRules.RiverWalkDesire(dist, rank, oldDesire)
 		return math.max(RuneRules.RIVER_WALK_DESIRE, oldDesire)
 	end
 	return oldDesire
+end
+
+-- Release after a failed pick-up order at a river spot (#32, game 080, 0:00-0:15): at the bottom spot the order never
+-- worked (7 of 7 `river-pickup-try id=1 worked=no`, games 070-080), and then the 5s `water-stay` (0.60) and the
+-- bounty return (0.60) kept Winter Wyvern and Io standing on the rune with Valve's item mode never starting
+-- (`water-walk-end ... status=up type=5 itemMode=no`); the item mode took it at 0:21 (`mode=m21/0.90`). So after a
+-- `worked=no` with the bot on the spot and the rune up, the rune mode lets go (desire 0, under every mode, the item
+-- mode's 0.90 included) for RELEASE_FOR seconds and logs whether the rune went. A worked=unsure / yes keeps the stay.
+-- Unverified why the item mode does not start there: the 0.60 stay was already under its 0.90, and in game 080 it did
+-- not start under laning (0.27) either, so the release may not be enough on its own; the result line shows it.
+RuneRules.RELEASE_FOR = 3
+RuneRules.RELEASE_RADIUS = 300
+
+-- Start a release? worked: the try's verdict ("no" / "unsure" / "yes"); dist: bot to the spot; up: the rune reads up.
+function RuneRules.ReleaseStarts(worked, dist, up)
+	return worked == "no" and up == true and (dist or math.huge) <= RuneRules.RELEASE_RADIUS
+end
+
+-- One step of a release (release = { t0 = start, duration = seconds or nil for RELEASE_FOR, step = true while the bot
+-- still has to get back onto the spot, stepAt = when that began }): "step" (walk back onto the spot first, at
+-- RELEASE_STEP_DESIRE), "hold" (keep the desire at 0) or "end" plus taken (true when the rune is gone). dist: bot to
+-- the spot. The let-go clock (t0) starts once the bot is within RIVER_YIELD_RADIUS, or after RELEASE_STEP_FOR seconds
+-- of trying: games 081-084, every release that began 167-287 off the spot ended taken=no (5 of 5), every one within 72
+-- but one got the rune.
+RuneRules.RIVER_YIELD_RADIUS = 100
+RuneRules.RELEASE_STEP_FOR = 2
+-- Above laning / ward / farm (0.27-0.60 at the horn in games 081-085), under Valve's item mode (0.90) and fights.
+RuneRules.RELEASE_STEP_DESIRE = 0.65
+function RuneRules.ReleaseStep(release, now, up, dist)
+	if not up then
+		return "end", true
+	end
+	if release.step then
+		release.stepAt = release.stepAt or now
+		if (dist or math.huge) > RuneRules.RIVER_YIELD_RADIUS and now - release.stepAt < RuneRules.RELEASE_STEP_FOR then
+			return "step"
+		end
+		release.step = false
+		release.stepped = now - release.stepAt
+		release.t0 = now
+	end
+	if now - release.t0 >= (release.duration or RuneRules.RELEASE_FOR) then
+		return "end", false
+	end
+	return "hold"
+end
+
+-- Where our pick-up order takes a river rune (#32, `river-pickup-try` lines, games 075-085): a water rune (type 7) at
+-- the top spot (RUNE_POWERUP_1): worked=yes 9, unsure 2, no 0. Never anything at the bottom spot (RUNE_POWERUP_2,
+-- id=1: worked=no 14 of 14, bounties and water runes), and never a river bounty (type 5) or an unknown type -1 at the
+-- top spot (worked=no 12, one unsure with others on the spot). There the order only cost time: the bot stood 1.5s on
+-- the rune held above the item mode, and in 5 of the 16 failed orders in games 081-085 it had walked 167-287 off the
+-- spot while the order ran (084 Tusk: `[SHy-STUCK] t=1 ... action=2 moved=63`); none of those 5 got the rune
+-- (`river-release-end taken=no`). Released on the spot (dist 0-72), the item mode took it 0.2-0.4s later, 10 of 11.
+-- topId / waterType: RUNE_POWERUP_1 / RUNE_WATER (nil when the API has no RUNE_WATER).
+function RuneRules.RiverOrderWorks(id, runeType, topId, waterType)
+	return id == topId and waterType ~= nil and runeType == waterType
+end
+-- The no-order release (`river-release why=no-order`) lasts YIELD_FOR seconds once on the spot. Every take after a
+-- release on the spot came within 0.4s.
+RuneRules.YIELD_FOR = 1
+-- What the river pick-up step does on a spot with the rune up: "order" (Action_PickUpRune, released if it fails),
+-- "yield" (no order: let go at once for Valve's item mode; the release steps onto the spot first) or "none".
+-- orderWorks: RiverOrderWorks; stopped: an order for this rune type already failed this game; yielded: this bot already
+-- let go of this spawn's rune without an order. Every quick item-mode take in games 081-085 came right after an order,
+-- so letting go without one is not proven to bring the item mode (game 080: Io stood at dist 0 in laning, 0.27, and it
+-- didn't come). When the no-order release ends with the rune still up, the order runs once (then the old release, which
+-- steps back onto the spot if the order walked the bot off it).
+function RuneRules.RiverTryPlan(orderWorks, stopped, yielded)
+	if orderWorks and not stopped then
+		return "order"
+	end
+	if not yielded then
+		return "yield"
+	end
+	if stopped then
+		return "none"
+	end
+	return "order"
+end
+
+-- Which river spot the water walk tries first (#32, game 078, 0:00): both teams tried the top spot (RUNE_POWERUP_1)
+-- first, so both mids went top and nobody went bottom; Io (Dire) took the top spot 1981 away with the bottom one 1694
+-- away (`river-walk-near spot=0 dist=1981`). Maintainer: "usually bots take top river horn bounty and dire bottom".
+-- Radiant tries the top spot first, Dire the bottom one; then the other spot. top / bottom: the two rune ids.
+function RuneRules.RiverSpotOrder(isDire, top, bottom)
+	if isDire then
+		return { bottom, top }
+	end
+	return { top, bottom }
+end
+
+-- A takeover claims the rune for the team (#32, game 069 40:18-40:22: during a Roshan take Vengeful Spirit took a rune
+-- over from Puck, Puck took it back from her, then Zeus from her: each takeover lost to the Roshan mode, nobody picked it
+-- up). Claims are shared by the team's bots (this module is one table per team VM), keyed by team and rune id: an
+-- ally's live claim makes the others leave the rune (pass=claimed:<hero>). A claim lasts PASS_TAKE_FOR and is renewed
+-- while its holder is in the rune mode, or within PASS_WAIT of taking it (its rune mode needs a think to win); a holder
+-- that never switches to the rune mode loses it after PASS_TAKE_FOR.
+RuneRules.passClaims = {}
+-- The claim after this think: a new one (claim nil), or the old one renewed or kept. holder: any value naming the bot.
+function RuneRules.NextClaim(claim, holder, now, inRuneMode)
+	if claim == nil or claim.holder ~= holder or now >= claim.untilAt then
+		return { holder = holder, at = now, untilAt = now + RuneRules.PASS_TAKE_FOR }
+	end
+	if inRuneMode or now - claim.at <= RuneRules.PASS_WAIT then
+		claim.untilAt = now + RuneRules.PASS_TAKE_FOR
+	end
+	return claim
+end
+-- Another bot's live claim on the rune: true when this bot should leave it.
+function RuneRules.ClaimedByOther(claim, holder, now)
+	return claim ~= nil and claim.holder ~= holder and now < claim.untilAt
+end
+-- A claim passes to a bot that is now much closer than its holder (game 091, 32:37: Lion claimed the top jungle
+-- bounty from 962, and Largo, by then 407 from it, left it: `passing-take-skip ... dist=407 why=claimed:lion`).
+-- myDist / holderDist: this bot's and the holder's distance to the rune.
+RuneRules.CLAIM_TAKE_NEAR = 500
+RuneRules.CLAIM_TAKE_GAP = 300
+function RuneRules.ClaimTakeover(myDist, holderDist)
+	return myDist ~= nil
+		and holderDist ~= nil
+		and myDist <= RuneRules.CLAIM_TAKE_NEAR
+		and holderDist - myDist >= RuneRules.CLAIM_TAKE_GAP
+end
+-- A power rune this close is taken even during a Roshan call (game 092, 28:14: Furion skipped
+-- `passing-take-skip why=roshan` at 828, and Shadow Fiend stood 139 from the rune in Roshan mode;
+-- nobody picked it up). 300 is about a second of walking. Farther than this the call still wins and
+-- the claim passes to the nearest ally. power: the spot holds a power rune, not a bounty or water rune.
+RuneRules.ROSHAN_NEAR = 300
+-- The passing grab's 0.97 lost to the Roshan call (game 069). A team call returns 0.96 and a forced
+-- human Roshan order 0.97 (mode_roshan_generic.lua). This sits just above both. Underfoot's
+-- BOT_MODE_DESIRE_ABSOLUTE + 0.02 is 0.72 on the rescaled desire steps (global_overrides.lua) and
+-- loses to that call, so a near take uses this number instead.
+RuneRules.ROSHAN_NEAR_DESIRE = 0.98
+-- Once this desire wins, the active mode is rune, so the Roshan check would drop it under the call
+-- and the bot flips every think. The latch keeps 0.98 for 2s, long enough to walk onto a rune within ROSHAN_NEAR.
+function RuneRules.RoshanNearTake(modeIsRoshan, near, latch, runeId, now)
+	if modeIsRoshan and near then
+		return RuneRules.ROSHAN_NEAR_DESIRE, { id = runeId, untilAt = now + 2 }
+	end
+	if latch ~= nil and latch.id == runeId and now < (latch.untilAt or 0) and near then
+		return RuneRules.ROSHAN_NEAR_DESIRE, latch
+	end
+	return nil, nil
+end
+function RuneRules.TakeDuringRoshan(dist, power)
+	return power == true and dist ~= nil and dist <= RuneRules.ROSHAN_NEAR
+end
+
+-- Wisdom shrine (#32). Game data (7.42 pak01 scripts/npc/npc_units.txt, npc_dota_xp_fountain): RingRadius 100, so a
+-- hero can't walk closer than ~140 to the shrine's centre (game 068: Vengeful Spirit and Nyx stopped at 139-140 for
+-- the whole window). npc_abilities.txt, ability_xp_fountain: radius 300, countdown_time 3: a hero inside 300 for 3s
+-- takes the XP. The old stand rule waited for dist <= 100, which a hero never reaches, so no stand was ever timed and
+-- no shrine claimed (games 064-068). Stand at 220: inside the 300 radius with 80 to spare, outside the ~140 the
+-- shrine's ring allows.
+RuneRules.WISDOM_RADIUS = 300
+RuneRules.WISDOM_STAND = 220
+-- Seconds on the shrine after the mark before a stand with no XP seen counts as covered (countdown_time 3 + 0.5).
+RuneRules.WISDOM_COVER = 3.5
+-- Seconds the shrine window stays open after the mark (the InMarkWindow stayAfter of the shrine trip).
+RuneRules.WISDOM_STAY = 8
+-- A bot already on the shrine (within WISDOM_STAND) when the window closes stays this much longer, to run its stand
+-- (WISDOM_COVER) out. Games 082-085: Winter Wyvern (082 t=428), Puck (083 t=2108), Tusk (084 t=428) and Wraith King
+-- (085 t=1268) reached the shrine at 139-140 as the window closed (`give-up why=window dist=139 late=8`) and walked off.
+-- Whether the XP is still there after the window is not in the game data; the stand's `taken|covered ... late=` (11-12)
+-- answers it. Some stands before a mark gained 203-679 XP (`taken ... late=417-419`, games 083-085), one +3 (082 t=839):
+-- creep XP can't be told apart, so this is unverified.
+RuneRules.WISDOM_LATE_STAND = RuneRules.WISDOM_COVER + 1
+-- The InMarkWindow stayAfter of a shrine trip for a bot this far from the shrine.
+function RuneRules.WisdomStayAfter(dist)
+	if (dist or math.huge) <= RuneRules.WISDOM_STAND then
+		return RuneRules.WISDOM_STAY + RuneRules.WISDOM_LATE_STAND
+	end
+	return RuneRules.WISDOM_STAY
+end
+-- The mark a stand on the shrine is for: the next mark from WISDOM_LOOKAHEAD seconds before it (a trip arrives up to
+-- ~25s early), else the last one. The stand used the last passed mark, so a bot on the shrine before a mark ran its
+-- 3.5s toward the previous mark and printed `taken ... late=419` (games 083-085: Phantom Assassin, Tusk, Lone Druid,
+-- Phoenix) before this mark's countdown began, and marked the previous mark claimed.
+RuneRules.WISDOM_LOOKAHEAD = 40
+function RuneRules.WisdomStandMark(now, interval)
+	return math.floor((math.max(0, now) + RuneRules.WISDOM_LOOKAHEAD) / interval) * interval
+end
+
+-- Can this shrine trip still make it? Returns "go" | "cant-arrive" | "window". etaW: seconds to the mark (negative
+-- after it). A bot already on the shrine never reads cant-arrive, and a window with under 1s left reads "window":
+-- game 068 t=428, Vengeful Spirit at dist=140 printed `cant-arrive travel=0 eta=-8` (travel 0.4s > 0s left).
+-- On the shrine the window runs WISDOM_LATE_STAND longer.
+function RuneRules.WisdomTrip(dist, travel, etaW)
+	local left = etaW + RuneRules.WISDOM_STAY
+	if dist <= RuneRules.WISDOM_STAND then
+		if left + RuneRules.WISDOM_LATE_STAND <= 0 then
+			return "window"
+		end
+		return "go"
+	end
+	if travel > left then
+		if left <= 1 then
+			return "window"
+		end
+		return "cant-arrive"
+	end
+	return "go"
+end
+
+-- The stand clock on the shrine starts at the mark: a stand from before the mark counts from the mark, so a bot that
+-- arrived early does not read "covered" (and leave) the moment the mark passes, before the 3s countdown ran.
+-- Returns the stand start to use.
+function RuneRules.WisdomStandFrom(standSince, mark, now)
+	if standSince == nil then
+		return now
+	end
+	if now >= mark and standSince < mark then
+		return mark
+	end
+	return standSince
+end
+
+-- XP gained between two reads of GetXPNeededToLevel() and GetLevel() (the bot handle has no GetCurrentXP, game 069).
+-- Same level: the drop in XP still needed. A level up: at least the XP that was still needed then (the part into the
+-- new level is not known without the level table). Returns gain, leveled.
+function RuneRules.XpGain(prevNeeded, prevLevel, needed, level)
+	if prevNeeded == nil or needed == nil then
+		return 0, false
+	end
+	if (level or 0) > (prevLevel or 0) then
+		return prevNeeded, true
+	end
+	return math.max(0, prevNeeded - needed), false
+end
+
+-- When a shrine stand is done (#32, live game 2026-11-23: `t=423 largo taken xp=+1 stood=0.3`, `t=428 winter_wyvern
+-- taken xp=+1 stood=1.2`: a 1-XP rise, creep XP or rounding, read as the shrine paying out, and they left before its
+-- countdown). The shrine pays a hero that stays inside its radius for countdown_time 3 (7.42 npc_abilities.txt
+-- ability_xp_fountain), so a gain before that is not the shrine's: the stand always runs WISDOM_COVER (3 + 0.5) from
+-- the mark or the arrival. How much the shrine gives is a runtime value (dota_en.txt "Shrine of Wisdom ({d:xp} XP)"),
+-- not in the game files, so the label uses WISDOM_BIG_XP, a guess above a creep's share: "taken" with a gain of at
+-- least that, else "covered". Returns done, label.
+RuneRules.WISDOM_BIG_XP = 100
+function RuneRules.WisdomStandDone(stood, gain, leveled)
+	if stood < RuneRules.WISDOM_COVER then
+		return false, nil
+	end
+	if leveled or (gain or 0) >= RuneRules.WISDOM_BIG_XP then
+		return true, "taken"
+	end
+	return true, "covered"
+end
+
+-- Lotus pool (7.42 npc_abilities.txt ability_lotus_pool): radius 350, first_lotus_pickup_time 1.5,
+-- pickup_time_reduction_pct 70, min_lotus_pickup_time 0.3: after the first lotus, each next one in the pool comes
+-- 0.45s later. Live game 2026-11-23: a bot that took the lotus stood ~6s more (the pluck-stall clock restarted on the
+-- new charge, `do=hold` ... `do=stalled`). Now a stand ends LOTUS_MORE_WAIT after the last lotus taken when no other
+-- came. state: { base = lotus charges at the stand's start, lastRise, first } (kept per bot and mark).
+-- Returns "wait" or "leave", the seconds since the first lotus taken and the seconds since the last one. A bot that
+-- takes several in a row stays more than 2s from the first (game 084 t=2706, Lone Druid's bear: `taken-leave after=3.3
+-- value=5`, five Healing Lotuses' worth): the time since the last one is what this rule bounds.
+RuneRules.LOTUS_MORE_WAIT = 1.0
+function RuneRules.LotusTakeStep(state, have, now)
+	if have < state.base then
+		-- Eaten or used while standing: count from here.
+		state.base = have
+	elseif have > state.base then
+		state.base = have
+		state.lastRise = now
+		state.first = state.first or now
+	end
+	if state.lastRise ~= nil and now - state.lastRise >= RuneRules.LOTUS_MORE_WAIT then
+		return "leave", now - state.first, now - state.lastRise
+	end
+	return "wait", nil
+end
+
+-- Healing Lotus tiers (7.42 items_all.txt): item_famango (stacks to 3), item_great_famango (recipe: 3 item_famango,
+-- stacks to 2), item_greater_famango (recipe: 2 item_great_famango, stacks to 3). The recipes consume the charges
+-- (ItemRecipeConsumesCharges 1), so a third lotus picked up next to two turns into one Great Healing Lotus and the charge
+-- total drops from 2 to 1. LotusValue counts every tier in Healing Lotuses (1 / 3 / 6), so a pickup, merged or not,
+-- always raises it. items: list of { name =, charges = }.
+RuneRules.LOTUS_TIER = { item_famango = 1, item_great_famango = 3, item_greater_famango = 6 }
+function RuneRules.LotusValue(items)
+	local value = 0
+	for i = 1, #(items or {}) do
+		local tier = RuneRules.LOTUS_TIER[items[i].name]
+		if tier ~= nil then
+			value = value + tier * math.max(1, items[i].charges or 1)
+		end
+	end
+	return value
+end
+
+-- Lotus stand result (#32, game 074, maintainer 2026-11-23: "45 seconds is too long. can bot check if their inventory
+-- change (added or upgraded lotus) after certain time in the area?"). The pool's lotus count can't be read
+-- (LotusCountOnUnit), so the stand reads the bot's own lotuses: a rise in LotusValue is a lotus taken by us; standing
+-- LOTUS_STAND_WAIT in the pluck ring after the spawn with no rise means the lotus is gone (someone else took it).
+-- Game data (7.42 npc_abilities.txt ability_lotus_pool): radius 350, first_lotus_pickup_time 1.5 (a hero in the pool
+-- gets its first lotus after 1.5s). Game 074, 6:00: Winter Wyvern stood from 357.5 and had the lotus at 361.4 (mark +1.4,
+-- `taken-leave after=1.2` at 362.6). LOTUS_STAND_WAIT = 1.5 + 1s for think and walk-in lag. With an enemy hero in the
+-- pool the wait is one second longer: whether a contesting hero delays the pickup is not in the game data (unverified).
+-- LOTUS_AREA: the bot fights and casts without walking back while within it (inside the 350 radius). Stand time counts
+-- only in the pluck ring (LOTUS_RING): the bot walks to 140 and a pickup is proven there (game 074: taken at 132; the
+-- old comment in map_objectives says the pool's lip never granted one), so a bot fighting at 250 doesn't read "gone" on
+-- a lotus that may still be there. LOTUS_HOLD_CAP: backstop, wall seconds from the bot's first think within LOTUS_NEAR
+-- after the spawn (a pause for retreat counts too); it also ends a stand whose lotus was taken but whose take step never
+-- ran.
+RuneRules.LOTUS_AREA = 300
+RuneRules.LOTUS_RING = 150
+RuneRules.LOTUS_NEAR = 800
+RuneRules.LOTUS_STAND_WAIT = 2.5
+RuneRules.LOTUS_STAND_WAIT_CONTESTED = 3.5
+RuneRules.LOTUS_HOLD_CAP = 10
+-- A think gap longer than this (the rune mode lost, e.g. paused for retreat) counts as no time stood in the ring.
+RuneRules.LOTUS_THINK_GAP = 0.5
+function RuneRules.NewLotusStand(mark, value)
+	return { mark = mark, base = value, stood = 0 }
+end
+-- Wall seconds since the stand began (its first think within LOTUS_NEAR after the spawn), 0 before that.
+function RuneRules.LotusHeld(stand, now)
+	return stand.since ~= nil and now - stand.since or 0
+end
+-- One think of a stand. mark: the spawn this stand is for; dist: bot to pool; contested: an enemy hero in the pool.
+-- stood (in the ring) counts think time only, so a pause in another mode adds nothing; held is wall time (the cap).
+-- Returns "wait" | "taken" | "gone" | "cap", stood and held. gone / cap stay; taken can still become cap.
+function RuneRules.LotusStandStep(stand, now, value, dist, contested)
+	if stand.result == "gone" or stand.result == "cap" then
+		return stand.result, stand.stood, RuneRules.LotusHeld(stand, now)
+	end
+	if now < stand.mark then
+		-- Waiting for the spawn: nothing to take yet.
+		stand.lastAt = nil
+		if value < stand.base then
+			stand.base = value
+		end
+		if value > stand.base then
+			-- A lotus left in the pool from before: taken.
+			stand.result = "taken"
+		end
+		return stand.result or "wait", 0, 0
+	end
+	local dt = 0
+	if stand.lastAt ~= nil then
+		dt = now - stand.lastAt
+		if dt > RuneRules.LOTUS_THINK_GAP or dt < 0 then
+			dt = 0
+		end
+	end
+	stand.lastAt = now
+	if stand.since == nil and dist <= RuneRules.LOTUS_NEAR then
+		stand.since = now
+	end
+	local held = RuneRules.LotusHeld(stand, now)
+	if stand.result == "taken" then
+		if held >= RuneRules.LOTUS_HOLD_CAP then
+			stand.result = "cap"
+		end
+		return stand.result, stand.stood, held
+	end
+	if value > stand.base then
+		stand.result = "taken"
+		return "taken", stand.stood, held
+	end
+	if value < stand.base then
+		-- Eaten or given away while standing: not a pickup, count from here.
+		stand.base = value
+	end
+	if dist <= RuneRules.LOTUS_RING then
+		stand.stood = stand.stood + dt
+	end
+	local wait = contested and RuneRules.LOTUS_STAND_WAIT_CONTESTED or RuneRules.LOTUS_STAND_WAIT
+	if stand.stood >= wait then
+		stand.result = "gone"
+	elseif held >= RuneRules.LOTUS_HOLD_CAP then
+		stand.result = "cap"
+	end
+	return stand.result or "wait", stand.stood, held
+end
+
+-- At the pool (#32, maintainer 2026-11-23: "being hit by hero/creep should apply same mechanism like being hit in
+-- outside the area but they will try to maintain it unless retreat mode is active"). The hold desire (0.75) used to
+-- beat retreat: game 074, 3:00-3:19, Winter Wyvern was hit 1v1 by Leshrac from 0.96 to 0.34 HP while retreat asked
+-- 0.30-0.40 (0.61 at 0.42 HP) and lost to it. Now the hold gives way while retreat asks LOTUS_RETREAT_YIELD or more:
+-- about the laning mode's 0.30, the level at which retreat took over from laning in that game
+-- (`[SHy-FLIP] ... retreat:0.30@184>laning:0.30@186`, printed with %.2f, so a little under 0.30). Retreat's base formula
+-- (mode_retreat_generic.lua, the line-533 return) stays well under that for a bot that isn't hit and isn't low: about
+-- 0.18 for a healthy bot with an enemy near, minus 0.175 in the laning phase when not hit, so no hit gate is needed.
+-- retreatDesire: retreat's last desire (nil when not fresh).
+RuneRules.LOTUS_RETREAT_YIELD = 0.29
+function RuneRules.LotusHoldYields(retreatDesire)
+	return retreatDesire ~= nil and retreatDesire >= RuneRules.LOTUS_RETREAT_YIELD
+end
+-- A yielding bot pushed this far by retreat can still resume the hold (beside is 800 otherwise).
+RuneRules.LOTUS_RESUME_DIST = 1600
+-- The pause state for the spawn at `mark`: one from an earlier spawn is dropped (nil). map_objectives also drops it when
+-- the stand gets its result (taken / gone / cap), so a resumed hold isn't ended as "window" after the lotus is taken.
+function RuneRules.LotusYieldFor(state, mark)
+	if state ~= nil and state.mark ~= mark then
+		return nil
+	end
+	return state
+end
+-- The yield is a pause, not the end (coordinator, 2026-11-23): the hold returns 0 while retreat asks for it, and comes
+-- back when retreat drops below the line while the spawn is still open (in its window, no taken / gone / cap). The spawn
+-- is dropped only when it closes (window or cap) during a yield. state: { yielding, resumed } per bot and spawn. open:
+-- the spawn's window still runs and it has no result; capped: the stand's wall-time cap ran out; far: the bot is beyond
+-- LOTUS_RESUME_DIST. A resumed hold is dropped the same way: game 083 t=199, Zeus resumed from 1074 away and the cap
+-- only ended it at `held=18.4` (the stand's own cap step runs within LOTUS_NEAR); game 084 t=395, Pugna printed
+-- `hold-resume` 10562 away after a death. Returns "hold" | "yield-start" | "yield" | "resume" | "drop".
+function RuneRules.LotusYieldStep(state, retreatDesire, open, capped, far)
+	if (state.yielding or state.resumed) and (not open or capped or far) then
+		state.yielding = false
+		state.resumed = false
+		return "drop"
+	end
+	if RuneRules.LotusHoldYields(retreatDesire) then
+		if state.yielding then
+			return "yield"
+		end
+		state.yielding = true
+		return "yield-start"
+	end
+	if state.yielding then
+		state.yielding = false
+		state.resumed = true
+		return "resume"
+	end
+	return "hold"
 end
 
 return RuneRules
