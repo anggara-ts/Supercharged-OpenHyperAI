@@ -124,6 +124,9 @@ local coldEmbraceAbility =
 	SafeAbility(bot:GetAbilityByName("winter_wyvern_cold_embrace"), "winter_wyvern_cold_embrace", "winter_wyvern")
 local wintersCurseAbility =
 	SafeAbility(bot:GetAbilityByName("winter_wyvern_winters_curse"), "winter_wyvern_winters_curse", "winter_wyvern")
+-- X.SampleAllyEnemyDist: player ID -> { { t =, dist = }, ... } oldest first, and the next sample time.
+local allyEnemyDist = {}
+local sampleAllyAt = -999
 -- [SHy-WYVERN] lines: throttled per reason, at most once per 5s.
 function X.LogWyvern(why, fmt, ...)
 	X.LogWyvernAs(why, why, fmt, ...)
@@ -149,7 +152,12 @@ end
 -- cast in the last 1s or in its cast point now, or a Dark Willow whose own script has ordered an escape Shadow
 -- Realm (ally._dwRealm, set by hero_dark_willow.lua at the order, why=retreat|dodge; the realm buff only shows 0.3s
 -- later, game 083: mod=0.30, as long as the embrace's cast point). Returns the modifier, or nil and the spell and
--- how long ago ("phase": in its cast point, "order": her script's order), or nil.
+-- how long ago ("phase": in its cast point, "order": her script's order), and for a jump why it counts
+-- (JumpIsEscape: "retreat" or "away"), or nil.
+-- A jump that goes either way (AllyEscapeRules.EITHER_WAY: a blink, leap or Force Staff) counts only when the ally
+-- moved away from the enemy heroes or is in retreat mode (game 091, 34:51: Dark Willow's Blink onto Axe skipped the
+-- embrace). One that doesn't count is passed over, and the other spells are still checked. Logs:
+--   [SHy-WYVERN] escape-not-counted why=initiation|unknown ally= spell= ago= before= now=  (once per 5s)
 function X.AllyEscaping(ally)
 	local realm = ally._dwRealm
 	if type(realm) == "table" and realm.why ~= nil and realm.why ~= "attack" then
@@ -160,6 +168,7 @@ function X.AllyEscaping(ally)
 			return name
 		end
 	end
+	local passed = nil
 	for _, name in ipairs(AllyEscapeRules.SPELLS) do
 		local ability
 		if string.sub(name, 1, 5) == "item_" then
@@ -168,16 +177,92 @@ function X.AllyEscaping(ally)
 			ability = ally:GetAbilityByName(name)
 		end
 		if ability ~= nil and not ability:IsNull() then
+			local agoText, ago = nil, nil
 			if ability:IsInAbilityPhase() then
-				return nil, name, "phase"
+				agoText = "phase"
+			else
+				local just, secondsAgo =
+					AllyEscapeRules.JustCast(ability:GetCooldown(), ability:GetCooldownTimeRemaining())
+				if just then
+					ago = secondsAgo
+					agoText = string.format("%.2f", secondsAgo)
+				end
 			end
-			local just, ago = AllyEscapeRules.JustCast(ability:GetCooldown(), ability:GetCooldownTimeRemaining())
-			if just then
-				return nil, name, string.format("%.2f", ago)
+			if agoText ~= nil then
+				if not AllyEscapeRules.EITHER_WAY[name] then
+					return nil, name, agoText
+				end
+				-- In its cast point the ally has not moved yet: no sample before (only retreat mode counts).
+				local before = ago ~= nil
+						and AllyEscapeRules.SampleBefore(allyEnemyDist[ally:GetPlayerID()], DotaTime(), ago)
+					or nil
+				local nowDist = X.NearestEnemyDist(ally)
+				local counts, jumpWhy =
+					AllyEscapeRules.JumpIsEscape(before, nowDist, ally:GetActiveMode() == BOT_MODE_RETREAT)
+				if counts then
+					return nil, name, agoText, jumpWhy
+				end
+				passed = passed
+					or {
+						name = name,
+						ago = agoText,
+						why = jumpWhy,
+						before = before ~= nil and before.dist or nil,
+						now = nowDist,
+					}
 			end
 		end
 	end
+	if passed ~= nil then
+		X.LogWyvernAs(
+			"escape-not-counted",
+			"escape-not-counted",
+			"why=%s ally=%s spell=%s ago=%s before=%s now=%s",
+			passed.why,
+			(string.gsub(ally:GetUnitName(), "npc_dota_hero_", "")),
+			passed.name,
+			passed.ago,
+			passed.before ~= nil and string.format("%.0f", passed.before) or "-",
+			passed.now ~= nil and string.format("%.0f", passed.now) or "-"
+		)
+	end
 	return nil
+end
+-- The nearest visible real enemy hero within 1600 of the unit, or nil.
+function X.NearestEnemyDist(unit)
+	local nearest = nil
+	for _, foe in pairs(Fu.GetNearbyHeroes(unit, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(foe) and not Fu.IsSuspiciousIllusion(foe) then
+			local dist = GetUnitToUnitDistance(unit, foe)
+			if nearest == nil or dist < nearest then
+				nearest = dist
+			end
+		end
+	end
+	return nearest
+end
+-- Each ally's nearest enemy hero 4 times a second for the last 2s (by player ID), so X.AllyEscaping can tell whether
+-- a jump moved it away (AllyEscapeRules.SampleBefore). Runs at the top of every SkillsComplement.
+function X.SampleAllyEnemyDist()
+	local now = DotaTime()
+	if now < sampleAllyAt then
+		return
+	end
+	sampleAllyAt = now + 0.25
+	for i = 1, 5 do
+		local ally = GetTeamMember(i)
+		if ally ~= nil and not ally:IsNull() and not ally:IsAlive() then
+			allyEnemyDist[ally:GetPlayerID()] = nil
+		elseif ally ~= nil and not ally:IsNull() then
+			local pid = ally:GetPlayerID()
+			local samples = allyEnemyDist[pid] or {}
+			while samples[1] ~= nil and samples[1].t < now - 2 do
+				table.remove(samples, 1)
+			end
+			samples[#samples + 1] = { t = now, dist = X.NearestEnemyDist(ally) }
+			allyEnemyDist[pid] = samples
+		end
+	end
 end
 -- True when a visible real enemy hero within 1600 of the ally has it as its attack target.
 function X.IsAttackedByEnemyHero(ally)
@@ -195,23 +280,24 @@ end
 -- Every ally-target embrace goes through here. Logs:
 --   [SHy-WYVERN] embrace-save why= ally= hp= channel=no|yes [kind= left= dmg= health= ratio= attackers=]
 --   [SHy-WYVERN] embrace-skip why=channel ally= kind= left= dmg= health= ratio= attackers=  (once per 5s)
---   [SHy-WYVERN] embrace-skip why=escaping save= ally= hp= mod= spell= ago=  (once per 5s): the ally is escaping
+--   [SHy-WYVERN] embrace-skip why=escaping save= ally= hp= mod= spell= ago= jump=  (once per 5s): the ally is escaping
 --                (X.AllyEscaping; game 083 44:51), checked before the channel rule (Phase Shift is a channel).
 local EMBRACE_CAST_POINT = 0.3
 function X.EmbraceAlly(allyHero, why)
 	local name = (string.gsub(allyHero:GetUnitName(), "npc_dota_hero_", ""))
-	local escapeMod, escapeSpell, escapeAgo = X.AllyEscaping(allyHero)
+	local escapeMod, escapeSpell, escapeAgo, escapeJump = X.AllyEscaping(allyHero)
 	if escapeMod ~= nil or escapeSpell ~= nil then
 		X.LogWyvernAs(
 			"embrace-skip-escaping",
 			"embrace-skip",
-			"why=escaping save=%s ally=%s hp=%.2f mod=%s spell=%s ago=%s",
+			"why=escaping save=%s ally=%s hp=%.2f mod=%s spell=%s ago=%s jump=%s",
 			why,
 			name,
 			Fu.GetHP(allyHero),
 			escapeMod or "-",
 			escapeSpell or "-",
-			escapeAgo or "-"
+			escapeAgo or "-",
+			escapeJump or "-"
 		)
 		return false
 	end
@@ -247,6 +333,7 @@ local isEngaging
 local isRetreating
 local hpRatio
 function X.SkillsComplement()
+	X.SampleAllyEnemyDist()
 	X.EmbraceCastCheck()
 	if Fu.CanNotUseAbility(bot) then
 		return
@@ -672,7 +759,7 @@ function X.EmbraceCastCheck()
 	if not coldEmbraceAbility:IsInAbilityPhase() or not Fu.IsValidHero(ally) then
 		return
 	end
-	local escapeMod, escapeSpell, escapeAgo = X.AllyEscaping(ally)
+	local escapeMod, escapeSpell, escapeAgo, escapeJump = X.AllyEscaping(ally)
 	if escapeMod == nil and escapeSpell == nil then
 		return
 	end
@@ -681,12 +768,13 @@ function X.EmbraceCastCheck()
 	pending.name = (string.gsub(ally:GetUnitName(), "npc_dota_hero_", ""))
 	X.LogWyvern(
 		"embrace-cancel",
-		"why=escaping ally=%s hp=%.2f mod=%s spell=%s ago=%s",
+		"why=escaping ally=%s hp=%.2f mod=%s spell=%s ago=%s jump=%s",
 		pending.name,
 		Fu.GetHP(ally),
 		escapeMod or "-",
 		escapeSpell or "-",
-		escapeAgo or "-"
+		escapeAgo or "-",
+		escapeJump or "-"
 	)
 end
 function X.ConsiderColdEmbrace()

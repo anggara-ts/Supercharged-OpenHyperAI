@@ -62,6 +62,64 @@ AllyEscapeRules.SPELLS = {
 
 AllyEscapeRules.RECENT = 1.0
 
+-- Jumps that go either way: a blink, leap or push can start a fight as well as end one (game 091, 34:51: Dark Willow
+-- blinked onto Axe, `[SHy-ITEM] blink-initiate target=axe dist=1197`, and Cold Embrace skipped her as escaping). One
+-- of these counts only when the ally moved away from the enemy heroes or is in retreat mode (JumpIsEscape). Every
+-- name is also in SPELLS. The rest of SPELLS (untargetable or invisible) always counts.
+AllyEscapeRules.EITHER_WAY = {
+	puck_ethereal_jaunt = true,
+	antimage_blink = true,
+	queenofpain_blink = true,
+	mirana_leap = true,
+	faceless_void_time_walk = true,
+	storm_spirit_ball_lightning = true,
+	morphling_waveform = true,
+	item_blink = true,
+	item_swift_blink = true,
+	item_arcane_blink = true,
+	item_overwhelming_blink = true,
+	item_force_staff = true,
+	item_hurricane_pike = true,
+}
+
+-- How much further (units) the nearest enemy hero must be after a jump for it to count as moving away.
+AllyEscapeRules.AWAY_MARGIN = 100
+
+-- An ally's samples are { t = game time, dist = nearest visible enemy hero, nil for none in range }, oldest first.
+-- Returns the newest sample taken before a cast `ago` seconds before `now` (where the ally stood before the jump), or
+-- nil.
+function AllyEscapeRules.SampleBefore(samples, now, ago)
+	if samples == nil or type(ago) ~= "number" then
+		return nil
+	end
+	local castAt = now - ago
+	local found = nil
+	for _, sample in ipairs(samples) do
+		if sample.t < castAt then
+			found = sample
+		end
+	end
+	return found
+end
+
+-- Did a jump take the ally away from the enemy heroes? before: the sample from before the cast (SampleBefore), or
+-- nil; nowDist: the nearest visible enemy hero now, nil for none in range; retreating: the ally is in retreat mode.
+-- Returns counts, why: "retreat" (retreat mode), "away" (the nearest enemy is AWAY_MARGIN further, or none is in range
+-- now), "initiation" (as close or closer), "unknown" (no sample or no enemy before the jump: only retreat mode counts).
+-- A jump still in its cast point has not moved the ally yet: the caller passes no sample.
+function AllyEscapeRules.JumpIsEscape(before, nowDist, retreating)
+	if retreating then
+		return true, "retreat"
+	end
+	if before == nil or before.dist == nil then
+		return false, "unknown"
+	end
+	if nowDist == nil or nowDist > before.dist + AllyEscapeRules.AWAY_MARGIN then
+		return true, "away"
+	end
+	return false, "initiation"
+end
+
 -- Cast within `window` seconds, from an ally's ability: its cooldown (GetCooldown) and the time left on it. A read
 -- with the time left above the cooldown is not trusted. Cooldown reduction makes the time left start lower, so the
 -- cast reads older than it is: a missed skip, never a false one. Returns justCast, secondsAgo (nil when not on
