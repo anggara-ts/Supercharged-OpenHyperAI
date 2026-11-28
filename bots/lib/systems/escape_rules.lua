@@ -168,6 +168,14 @@ function EscapeRules.EscapeRiftStep(age, sinceWanted, holdUp, orderedAgo, holdFo
 	end
 	return "wait"
 end
+-- Issue the escape-low Rift from the top of the think (X.LowRiftTick), once EscapeRiftStep says "order"
+-- and she can cast. ConsiderWaningRift, which used to be the only place that ordered it, runs last in
+-- SkillsComplement, so a think that returns earlier (a Phase Shift wait) never re-read the want and the
+-- escape lapsed at LOW_RIFT_LAPSE with orders=0 (game 092, after=0.60). The tick passes the real hold
+-- and a refreshed want, so "order" is the hold being up, or the 0.4s wait having run out.
+function EscapeRules.LowRiftIssueFromTick(step, canCast)
+	return step == "order" and canCast == true
+end
 
 -- A low-HP shift against units only (no hero hit in the last 1.5s, no stun or projectile due) only delays the death
 -- inside a creep wave or among zombies (game 071, t=2051: a second shift in place at 5% HP among 14-17 creeps, dead
@@ -442,6 +450,19 @@ function EscapeRules.IsEscapeShift(why, retreating, hp)
 	end
 	return retreating == true or (hp or 1) < EscapeRules.ESCAPE_HP
 end
+-- A Phase Shift taken while her own Orb is already flying, her HP is falling and the enemies are at
+-- least one more than the allies (allies includes her) is an escape shift too, so the phase-end Jaunt
+-- is checked, including when=orb-end. Game 092, 10:39: phase at 60% HP why=hero escape=false while a
+-- damage Orb was in flight, and the Jaunt never ran, so the Orb ended inside the 1s shift. The Orb
+-- flies max_distance / orb_speed = 1950 / 750 = 2.6s (datafeed hero 13, fetched 2026-11-28: orb_speed
+-- 750, max_distance 1950, cast range 1950). hpLoss: the drop over the last second, a share of max HP;
+-- falling means at least LOW_HP_LOSS.
+function EscapeRules.OrbFlightEscapeShift(orbInFlight, hpLoss, enemies, allies)
+	if orbInFlight ~= true or (hpLoss or 0) < EscapeRules.LOW_HP_LOSS then
+		return false
+	end
+	return (enemies or 0) >= (allies or 0) + 1
+end
 
 -- Throw the Orb toward the escape point first, during the wait for the hold (dead time), so she can Jaunt to it as
 -- the shift ends: an escape shift, the Orb ready, Jaunt usable (not rooted: Jaunt is ROOT_DISABLES, game files) and
@@ -506,6 +527,22 @@ end
 EscapeRules.KEEP_ORB_RANGE = 1200
 function EscapeRules.KeepOrbForEscape(hp, enemiesNear)
 	return (hp or 1) < EscapeRules.ESCAPE_HP and (enemiesNear or 0) >= 1
+end
+-- Keep one escape when she is alone against a crowd (game 092, 10:36-10:41: a target Rift, a Dream Coil
+-- and a damage Orb, then a dodge shift, and nothing left to leave with). 3+ enemy heroes within
+-- SAVE_ESCAPE_RANGE and no ally there (alliesNear includes her, so 1 means she is alone). A damage Orb
+-- whose point is closer to home than she is still goes: that Orb is also the way out. A target Rift does
+-- not (it jumps onto someone). Escape Orbs are not damage Orbs.
+EscapeRules.SAVE_ESCAPE_ENEMIES = 3
+EscapeRules.SAVE_ESCAPE_RANGE = 1200
+function EscapeRules.SaveOneEscape(enemiesNear, alliesNear)
+	return (enemiesNear or 0) >= EscapeRules.SAVE_ESCAPE_ENEMIES and alliesNear ~= nil and alliesNear <= 1
+end
+function EscapeRules.DamageOrbBlocked(saveEscape, towardHome)
+	return saveEscape == true and towardHome ~= true
+end
+function EscapeRules.TargetRiftBlocked(saveEscape)
+	return saveEscape == true
 end
 
 -- How far the Orb must be for an exit Jaunt: what it can have reached. EXIT_PATH_SHARE of the path it has flown

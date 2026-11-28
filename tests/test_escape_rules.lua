@@ -332,6 +332,35 @@ T.test("escape rules: the escape-low Rift waits for the hold, then holds its cas
 	T.eq(R.EscapeRiftStep(R.LOW_RIFT_STALE + 20, 30, false, 30, holdFor, false), "stale", "open since her death")
 	T.eq(R.EscapeRiftStep(R.LOW_RIFT_STALE + 20, 30, false, 30, holdFor, true), "stale", "stale before a later cast")
 	T.eq(R.EscapeRiftStep(0.7, R.LOW_RIFT_LAPSE + 0.1, false, nil, holdFor, false), "lapsed", "no longer wanted")
+	-- Game 092: want not refreshed, hold up, 0.60s in, no order yet -> the old tick lapsed it.
+	-- Refreshed want (sinceWanted 0) with the hold up is an order, and the tick issues it.
+	T.eq(R.EscapeRiftStep(0.6, 0.6, true, nil, holdFor, false), "lapsed", "game 092: stale want lapses at 0.60s")
+	T.eq(R.EscapeRiftStep(0.6, 0, true, nil, holdFor, false), "order", "game 092: hold up and the want refreshed")
+	T.eq(R.LowRiftIssueFromTick("order", true), true, "the top of the think issues it")
+	T.eq(R.LowRiftIssueFromTick("order", false), false, "silenced or inside a shift: not yet")
+	T.eq(R.LowRiftIssueFromTick("wait", true), false, "still waiting for the hold")
+	T.eq(R.LowRiftIssueFromTick("lapsed", true), false, "already given up")
+end)
+
+T.test("escape rules: an Orb in flight makes the shift an escape, and one escape is kept (game 092)", function()
+	local R = load()
+	-- 10:39: 60% HP, her Orb flying, enemies one ahead of her side. allies includes her.
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 2, 1), true, "game 092 10:39: orb out, HP falling, 2 vs her")
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 1), true, "3 enemies, alone")
+	T.eq(R.OrbFlightEscapeShift(true, 0.1, 3, 2), false, "an ally within range")
+	T.eq(R.OrbFlightEscapeShift(true, 0.01, 3, 1), false, "HP not really falling")
+	T.eq(R.OrbFlightEscapeShift(false, 0.2, 3, 1), false, "no Orb of hers in flight")
+	T.eq(R.OrbFlightEscapeShift(true, 0.2, 1, 1), false, "not outnumbered")
+	-- 10:36: target Rift and a damage Orb while alone against 3. An Orb toward home still goes.
+	T.eq(R.SaveOneEscape(3, 1), true, "3 enemies, no ally")
+	T.eq(R.SaveOneEscape(2, 1), false, "only 2 enemies")
+	T.eq(R.SaveOneEscape(3, 2), false, "an ally within 1200")
+	T.eq(R.SaveOneEscape(3, nil), false, "ally count unknown: do not block")
+	T.eq(R.DamageOrbBlocked(true, false), true, "damage Orb, not toward home")
+	T.eq(R.DamageOrbBlocked(true, true), false, "the Orb goes toward home")
+	T.eq(R.DamageOrbBlocked(false, false), false, "not alone")
+	T.eq(R.TargetRiftBlocked(true), true, "no target Rift while alone against 3")
+	T.eq(R.TargetRiftBlocked(false), false, "a target Rift with an ally there")
 end)
 
 T.test("escape rules: out of an enemy tower's range, hop over it on the way home (game 072, 19:56-20:05)", function()

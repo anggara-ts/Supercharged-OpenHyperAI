@@ -551,7 +551,19 @@ end
 -- One line per escape action (#36, game 064: no line named the escape action or where it went).
 -- jump: how far the point is; home: distance to our fountain now -> from the point; nearest: the nearest enemy
 -- hero and its distance now -> to the point.
+-- One line per escape. The same spell and why, still being chosen, extends the window and prints
+-- nothing: a Hard roll can block the cast while the think keeps picking it (game 092, t=887-891,
+-- about 70 `escape-action spell=orb why=retreat` lines). A gap, or a different spell or why, is a new escape.
+local ESCAPE_ACTION_GAP = 1.5
 function X.LogEscapeAction(spell, why, point)
+	local now = DotaTime()
+	local key = tostring(spell) .. ":" .. tostring(why)
+	if key == bot._escapeActionKey and now < (bot._escapeActionUntil or -999) then
+		bot._escapeActionUntil = now + ESCAPE_ACTION_GAP
+		return
+	end
+	bot._escapeActionKey = key
+	bot._escapeActionUntil = now + ESCAPE_ACTION_GAP
 	local here = bot:GetLocation()
 	local fountain = Fu.GetTeamFountain()
 	local nearest, nearestDist = nil, math.huge
@@ -1162,25 +1174,76 @@ function X.FinishLowRift(result, why)
 		)
 	)
 end
+-- True when an escape-low Rift order can go out this think: not inside a Phase Shift or another cast hold,
+-- and the Rift itself is usable. A Rift order during the shift would end it.
+function X.LowRiftCanCast()
+	local now = DotaTime()
+	if bot._castHoldUntil ~= nil and now < bot._castHoldUntil and not X.RiftHoldOn() then
+		return false
+	end
+	if bot:HasModifier("modifier_puck_phase_shift") then
+		return false
+	end
+	if bot._phaseOrderAt ~= nil and phaseShiftAbility:GetCooldownTimeRemaining() > 0 then
+		local duration = phaseShiftAbility:GetSpecialValueFloat("duration") or 1
+		if now - bot._phaseOrderAt < duration + 0.05 then
+			return false
+		end
+	end
+	if not waningRiftAbility:IsFullyCastable() or Fu.CanNotUseAbility(bot) then
+		return false
+	end
+	return true
+end
+function X.LowRiftPoint()
+	local moveDistance = waningRiftAbility:GetSpecialValueInt("max_distance")
+	if moveDistance == nil or moveDistance <= 0 then
+		moveDistance = 350
+	end
+	return X.EscapePoint(moveDistance - 10)
+end
+-- Bookkeeping for one escape-low Rift order (the cast itself is the caller's).
+function X.MarkLowRiftOrdered(state)
+	local now = DotaTime()
+	state.orders = state.orders + 1
+	if bot:GetActiveMode() == (BOT_MODE_OUTPOST or 26) then
+		state.held = state.held + 1
+	end
+	state.orderAt = now
+	state.wantAt = now
+	state.castHoldUntil = math.max(bot._castHoldUntil or -1, now + state.holdFor)
+	bot._castHoldUntil = state.castHoldUntil
+	state.askUntil = math.max(bot._phaseHoldAskUntil or -1, now + state.holdFor + 0.1)
+	bot._phaseHoldAskUntil = state.askUntil
+end
 -- Every think (SkillsComplement) and inside the cast hold (X.CastHoldTick): ends an escape once the Rift is out, the
--- wait ran out or the Rift is no longer wanted. why=stale: left open (she died; the think may not run while dead),
--- with no skip after it.
+-- wait ran out or the Rift is no longer wanted, and issues the Rift once the step says order (the hold is up, or
+-- the 0.4s wait ran out) and nothing has been ordered yet. The want used to be refreshed only in
+-- ConsiderWaningRift, which SkillsComplement reaches last, so a Phase Shift wait returned first and the escape
+-- lapsed at 0.5s with orders=0 (game 092, after=0.60). why=stale: left open (she died; the think may not run
+-- while dead), with no skip after it. Returns true when this think ordered the Rift (the caller stops).
 function X.LowRiftTick()
 	local state = bot._lowRift
 	if state == nil then
-		return
+		return false
 	end
 	if not bot:IsAlive() then
 		X.FinishLowRift("no-cast", "dead")
-		return
+		return false
 	end
 	local now = DotaTime()
+	local still = false
+	local okWant, wanted = pcall(X.EscapeRiftWanted)
+	if okWant and wanted == true then
+		still = true
+		state.wantAt = now
+	end
 	-- The want is not read inside the cast hold (SkillsComplement does not run): count from the hold's end.
 	local wantRef = math.max(state.wantAt, state.orderAt ~= nil and state.orderAt + state.holdFor or -999)
 	local step = EscapeRules.EscapeRiftStep(
 		now - state.at,
-		now - wantRef,
-		false,
+		still and 0 or now - wantRef,
+		bot:GetActiveMode() == (BOT_MODE_OUTPOST or 26),
 		state.orderAt ~= nil and now - state.orderAt or nil,
 		state.holdFor,
 		waningRiftAbility:GetCooldownTimeRemaining() > 0
@@ -1188,9 +1251,38 @@ function X.LowRiftTick()
 	if step == "cast" then
 		-- other-order: the Rift went out from another order (a tower-escape Rift) before this one's.
 		X.FinishLowRift("cast", state.orders > 0 and "cast" or "other-order")
-	elseif step == "timeout" or step == "lapsed" or step == "stale" then
+		return false
+	end
+	local canCast = false
+	local okCast, castable = pcall(X.LowRiftCanCast)
+	if okCast and castable == true then
+		canCast = true
+	end
+	if EscapeRules.LowRiftIssueFromTick(step, canCast) then
+		local point = X.LowRiftPoint()
+		X.MarkLowRiftOrdered(state)
+		X.riftWhy = "escape-low"
+		pcall(
+			print,
+			string.format(
+				"[SHy-PUCK] t=%.0f rift why=%s via=tick heroes=%d dist=%d",
+				now,
+				"escape-low",
+				#Fu.GetEnemiesNearLoc(point, waningRiftAbility:GetSpecialValueInt("radius")),
+				GetUnitToLocationDistance(bot, point)
+			)
+		)
+		bot:Action_UseAbilityOnLocation(waningRiftAbility, point)
+		return true
+	end
+	if state.orders == 0 and (step == "wait" or step == "order") then
+		state.askUntil = math.max(bot._phaseHoldAskUntil or -1, now + 0.3)
+		bot._phaseHoldAskUntil = state.askUntil
+	end
+	if step == "timeout" or step == "lapsed" or step == "stale" then
 		X.FinishLowRift("no-cast", step)
 	end
+	return false
 end
 -- The escape-low Rift wanted this think: true when the Rift order goes out now, false while it waits for the hold.
 function X.LowRiftStep(point)
@@ -1220,15 +1312,7 @@ function X.LowRiftStep(point)
 		waningRiftAbility:GetCooldownTimeRemaining() > 0
 	)
 	if step == "order" then
-		state.orders = state.orders + 1
-		if holdUp then
-			state.held = state.held + 1
-		end
-		state.orderAt = now
-		state.castHoldUntil = math.max(bot._castHoldUntil or -1, now + state.holdFor)
-		bot._castHoldUntil = state.castHoldUntil
-		state.askUntil = math.max(bot._phaseHoldAskUntil or -1, now + state.holdFor + 0.1)
-		bot._phaseHoldAskUntil = state.askUntil
+		X.MarkLowRiftOrdered(state)
 		return true
 	end
 	if step == "wait" or step == "hold" then
@@ -1302,8 +1386,9 @@ function X.LogPhaseDodge(want, result, how)
 		)
 	)
 end
--- How long the Orb flies: max_distance / orb_speed (1950 / 750 = 2.6s, datafeed hero 13), read from the handle;
--- nil when the values are missing.
+-- How long the Orb flies: max_distance / orb_speed, read from the handle. Datafeed hero 13, fetched
+-- 2026-11-28: orb_speed 750, max_distance 1950 (cast range 1950 too), so 1950 / 750 = 2.6s. nil when the
+-- values are missing.
 function X.OrbFlightTime()
 	local maxDistance = illusoryOrbAbility:GetSpecialValueInt("max_distance")
 	local speed = illusoryOrbAbility:GetSpecialValueInt("orb_speed")
@@ -1893,7 +1978,12 @@ end
 function X.SkillsComplement()
 	pcall(X.SampleHp)
 	pcall(X.TrackOrbPath)
-	pcall(X.LowRiftTick)
+	-- The escape-low Rift goes out here, before a Phase Shift wait returns and never reaches ConsiderWaningRift
+	-- (game 092: rift-low why=lapsed orders=0).
+	local okRift, riftOrdered = pcall(X.LowRiftTick)
+	if okRift and riftOrdered == true then
+		return
+	end
 	local okHold, errHold = pcall(X.HoldTpInDanger)
 	if not okHold then
 		X.LogStepError("HoldTpInDanger", errHold)
@@ -2044,13 +2134,24 @@ function X.SkillsComplement()
 			bot._phaseWantMaxWait
 		)
 		-- An escape shift (EscapeRules.IsEscapeShift) ends with a Jaunt to the Orb (X.ShiftExit) and blocks the
-		-- offensive Rift for 2s after it (X.OffensiveRiftBlocked).
-		local escapeShift = wantFresh and bot._phaseWantEscape == true
+		-- offensive Rift for 2s after it (X.OffensiveRiftBlocked). Her own Orb already flying, HP falling and
+		-- enemies at least allies + 1 is an escape shift too (EscapeRules.OrbFlightEscapeShift, game 092 10:39:
+		-- the damage Orb ended inside a non-escape shift, so the phase-end Jaunt, when=orb-end, never ran).
+		local baseEscape = wantFresh and bot._phaseWantEscape == true
 			or EscapeRules.IsEscapeShift(
 				X.phaseWhy,
 				isRetreating or activeMode == BOT_MODE_RETREAT or DotaTime() < (bot._hardRetreatUntil or -1),
 				Fu.GetHP(bot)
 			)
+		local orbFlightEscape = false
+		local okFlight, flightEscape = pcall(X.OrbFlightEscapeShift)
+		if okFlight and flightEscape == true then
+			orbFlightEscape = true
+		end
+		local escapeShift = baseEscape or orbFlightEscape
+		if orbFlightEscape and not baseEscape then
+			X.NoteOrbFlightEscape()
+		end
 		-- orb-first=left (the Orb thrown for this shift is out: its cooldown runs) | cancelled (it never left) |
 		-- rooted | orb-out | orb-down | jaunt-down | - (not an escape shift, or no wait).
 		local orbFirst = wantFresh and bot._phaseOrbFirstWhy or "-"
@@ -2157,6 +2258,82 @@ function X.SkillsComplement()
 		return
 	end
 end
+-- Her own Orb is in flight (not an enemy Puck's, and not inside Chronosphere).
+function X.OwnOrbInFlight()
+	local at = X.OwnOrbLocation()
+	if at == nil or Fu.IsLocationInChrono(at) then
+		return false
+	end
+	return true
+end
+-- EscapeRules.OrbFlightEscapeShift: own Orb flying, HP falling, enemies >= allies + 1 (allies includes her).
+function X.OrbFlightEscapeShift()
+	local here = bot:GetLocation()
+	local range = EscapeRules.SAVE_ESCAPE_RANGE
+	return EscapeRules.OrbFlightEscapeShift(
+		X.OwnOrbInFlight(),
+		X.HpLoss(),
+		#Fu.GetEnemiesNearLoc(here, range),
+		#Fu.GetAlliesNearLoc(here, range)
+	)
+end
+-- Once, on the cast this rule turns into an escape shift. [SHy-PUCK] phase escape why=orb-flight.
+function X.NoteOrbFlightEscape()
+	local here = bot:GetLocation()
+	local range = EscapeRules.SAVE_ESCAPE_RANGE
+	pcall(
+		print,
+		string.format(
+			"[SHy-PUCK] t=%.0f phase escape why=orb-flight hp=%.2f loss=%.2f enemies=%d allies=%d",
+			DotaTime(),
+			Fu.GetHP(bot),
+			X.HpLoss(),
+			#Fu.GetEnemiesNearLoc(here, range),
+			#Fu.GetAlliesNearLoc(here, range)
+		)
+	)
+end
+-- EscapeRules.SaveOneEscape, with the counts for the log. allies includes her.
+function X.SaveOneEscapeNow()
+	local here = bot:GetLocation()
+	local range = EscapeRules.SAVE_ESCAPE_RANGE
+	local enemies = #Fu.GetEnemiesNearLoc(here, range)
+	local allies = #Fu.GetAlliesNearLoc(here, range)
+	return EscapeRules.SaveOneEscape(enemies, allies), enemies, allies
+end
+-- The point is closer to our fountain than she is now: a damage Orb that is also the way home.
+function X.OrbGoesHome(point)
+	local fountain = Fu.GetTeamFountain()
+	local here = bot:GetLocation()
+	if fountain == nil or here == nil or point == nil then
+		return false
+	end
+	local ok, closer = pcall(function()
+		return (fountain - point):Length2D() < (fountain - here):Length2D()
+	end)
+	return ok and closer == true
+end
+-- [SHy-PUCK] escape-save spell=orb|rift why=alone, at most once per 3s per spell.
+function X.LogEscapeSave(spell, enemies, allies)
+	local now = DotaTime()
+	local logged = bot._escapeSaveLogAt or {}
+	bot._escapeSaveLogAt = logged
+	if now < (logged[spell] or -999) then
+		return
+	end
+	logged[spell] = now + 3
+	pcall(
+		print,
+		string.format(
+			"[SHy-PUCK] t=%.0f escape-save spell=%s why=alone enemies=%d allies=%d hp=%.2f",
+			now,
+			spell,
+			enemies or -1,
+			allies or -1,
+			Fu.GetHP(bot)
+		)
+	)
+end
 -- The Orb stays for the escape (Orb + Jaunt) under 50% HP with an enemy hero within 1200
 -- (EscapeRules.KeepOrbForEscape, game 069: at 6 of 6 escape shifts the Orb was already out as a fight Orb or on
 -- cooldown). Only the escape Orbs (stuck, retreat) go then. [SHy-PUCK] orb-keep hp= enemies=, once per 3s.
@@ -2166,14 +2343,23 @@ function X.ConsiderIllusoryOrb()
 		return desire, location
 	end
 	local enemies = #Fu.GetEnemiesNearLoc(bot:GetLocation(), EscapeRules.KEEP_ORB_RANGE)
-	if not EscapeRules.KeepOrbForEscape(Fu.GetHP(bot), enemies) then
-		return desire, location
+	if EscapeRules.KeepOrbForEscape(Fu.GetHP(bot), enemies) then
+		if DotaTime() >= (bot._orbKeepLogAt or -999) then
+			bot._orbKeepLogAt = DotaTime() + 3
+			pcall(
+				print,
+				string.format("[SHy-PUCK] t=%.0f orb-keep hp=%.2f enemies=%d", DotaTime(), Fu.GetHP(bot), enemies)
+			)
+		end
+		return BOT_ACTION_DESIRE_NONE, 0
 	end
-	if DotaTime() >= (bot._orbKeepLogAt or -999) then
-		bot._orbKeepLogAt = DotaTime() + 3
-		pcall(print, string.format("[SHy-PUCK] t=%.0f orb-keep hp=%.2f enemies=%d", DotaTime(), Fu.GetHP(bot), enemies))
+	-- Alone against 3+ heroes: no damage Orb unless it goes toward home (game 092, 10:36).
+	local save, crowdEnemies, crowdAllies = X.SaveOneEscapeNow()
+	if EscapeRules.DamageOrbBlocked(save, X.OrbGoesHome(location)) then
+		X.LogEscapeSave("orb", crowdEnemies, crowdAllies)
+		return BOT_ACTION_DESIRE_NONE, 0
 	end
-	return BOT_ACTION_DESIRE_NONE, 0
+	return desire, location
 end
 function X.ConsiderIllusoryOrbRaw()
 	if not illusoryOrbAbility:IsFullyCastable() or bot:HasModifier("modifier_puck_phase_shift") then
@@ -2488,7 +2674,13 @@ function X.ConsiderWaningRift()
 				and #nearbyAllies >= #targetAllies
 				and not X.OffensiveRiftBlocked("target")
 			then
-				return BOT_ACTION_DESIRE_HIGH, botTarget:GetExtrapolatedLocation(castPoint)
+				-- Alone against 3+ heroes: keep the Rift for the escape (game 092, 10:36, why=target).
+				local save, crowdEnemies, crowdAllies = X.SaveOneEscapeNow()
+				if EscapeRules.TargetRiftBlocked(save) then
+					X.LogEscapeSave("rift", crowdEnemies, crowdAllies)
+				else
+					return BOT_ACTION_DESIRE_HIGH, botTarget:GetExtrapolatedLocation(castPoint)
+				end
 			end
 		end
 	end
