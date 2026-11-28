@@ -42,3 +42,27 @@ T.test("chat guard: the wrapper is installed over ActionImmediate_Chat", functio
 	T.ok(src:find("function CDOTA_Bot_Script:ActionImmediate_Chat(", 1, true) ~= nil, "no chat wrapper")
 	T.ok(src:find("ChatGuard.Allow(", 1, true) ~= nil, "wrapper does not use ChatGuard.Allow")
 end)
+
+T.test("chat guard: SayDirect answers a repeated command and records the time (game 088 swap-backs)", function()
+	local G = guard()
+	local sent = {}
+	local unit = {
+		GetTeam = function()
+			return 3
+		end,
+	}
+	local savedOriginal, savedSaid = G.originalChat, G.said
+	G.originalChat = function(_, text)
+		sent[#sent + 1] = text
+	end
+	G.said = { ["3t:I will play position 1 (Safelane)"] = DotaTime() }
+	G.SayDirect(unit, "I will play position 1 (Safelane)", false)
+	T.eq(#sent, 1, "said although the same text went out just before")
+	T.eq(G.said["3t:I will play position 1 (Safelane)"], DotaTime(), "time recorded for the filter")
+	T.eq(
+		G.Allow(G.said, "3t:I will play position 1 (Safelane)", DotaTime() + 1),
+		false,
+		"a plain repeat stays filtered"
+	)
+	G.originalChat, G.said = savedOriginal, savedSaid
+end)
