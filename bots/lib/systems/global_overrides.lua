@@ -957,6 +957,16 @@ function CDOTA_Bot_Script:ActionImmediate_SwapItems(slotA, slotB)
 	self._swapDespiteCooldown = nil
 	-- A branch parked for any other item gets pulled straight back, and that round trip
 	-- leaves it on cooldown. The grenade is the exception: it has to stay throwable.
+	-- #15: a main slot freed for a Roshan item stays free until the item is taken (bots/lib/systems/item.lua sets
+	-- _roshSlotFreeUntil; game 083, 39:52: Largo swapped a Healing Lotus into the slot freed for the Aegis and then
+	-- dropped four items for one Aegis).
+	if
+		DotaTime() < (self._roshSlotFreeUntil or -99)
+		and ((slotA >= 6 and slotA <= 8 and slotB <= 5) or (slotB >= 6 and slotB <= 8 and slotA <= 5))
+	then
+		LogGrenadeSwap(self, slotA, slotB, "blocked-roshan-room")
+		return nil
+	end
 	if SwapMovesBranchToBackpack(self, slotA, slotB) or SwapMovesBranchToBackpack(self, slotB, slotA) then
 		LogGrenadeSwap(self, slotA, slotB, "blocked-branch-rule")
 		return nil
@@ -1006,6 +1016,31 @@ function CDOTA_Bot_Script:ActionImmediate_SwapItems(slotA, slotB)
 		LogGrenadeSwap(self, slotA, slotB, string.format("blocked-fight(enemies=%d)", enemies))
 	end
 	return nil
+end
+-- An item a bot put aside for the Aegis is never sold (#15, maintainer 2026-11-23: "do not mark the item to
+-- sell"): bots/lib/systems/item.lua sets bot._roshKeep[name] = until; every sell rule goes through this method.
+local originalSellItem = CDOTA_Bot_Script.ActionImmediate_SellItem
+function CDOTA_Bot_Script:ActionImmediate_SellItem(item)
+	local keep = self._roshKeep
+	if keep ~= nil and item ~= nil and not item:IsNull() then
+		local name = item:GetName()
+		if keep[name] ~= nil and DotaTime() < keep[name] then
+			if DotaTime() >= (self._roshKeepLogAt or -99) then
+				self._roshKeepLogAt = DotaTime() + 10
+				pcall(
+					print,
+					string.format(
+						"[SHy-ITEM] t=%.0f %s sell-skip item=%s why=aegis-aside",
+						DotaTime(),
+						(string.gsub(self:GetUnitName(), "npc_dota_hero_", "")),
+						(string.gsub(name, "^item_", ""))
+					)
+				)
+			end
+			return nil
+		end
+	end
+	return originalSellItem(self, item)
 end
 local originalMethodGetUnitToLocationDistance = CDOTA_Bot_Script.GetUnitToLocationDistance
 function CDOTA_Bot_Script:GetUnitToLocationDistance(unit, location)

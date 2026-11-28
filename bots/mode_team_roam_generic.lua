@@ -41,6 +41,9 @@ local towerAvoidUntil = 0
 local towerAvoidDuration = 3
 local itemToPickUp = nil
 local minPickupItemCost = 200
+-- With enemy heroes at our Ancient, only Roshan items (the Aegis, an item put aside for it) this close still pull a
+-- bot into team roam (Item.RoshanDropDesire maxRange): the claimer at the pit, not one walking in from afar.
+local ROSH_DROP_RANGE_BASE_THREAT = 1500
 local ignoredItems, pickupAttempts = {}, 0
 local lastItemScanTime = -90
 local lastCheeseSwapTime = -90
@@ -229,6 +232,26 @@ function GetDesire()
 		return RoamDone(0, 0)
 	end
 	if Fu.GetEnemiesAroundAncient(bot, 3200) > 0 then
+		-- The Roshan items close by still count (#15, game 085, 59:00: with this gate first, nobody went for the Aegis
+		-- or kept away from it, and Valve's item mode gave it to the nearest hero instead of the claimer).
+		local dropDesire = Item.RoshanDropDesire(bot, ROSH_DROP_RANGE_BASE_THREAT)
+		if dropDesire > 0 then
+			roamWhy = "rosh-drop"
+			if DotaTime() >= (bot._roshThreatLogAt or -99) then
+				bot._roshThreatLogAt = DotaTime() + 10
+				pcall(
+					print,
+					string.format(
+						"[SHy-ROSH] t=%.0f %s drop-under-threat desire=%.2f mode=%d",
+						DotaTime(),
+						(string.gsub(botName, "npc_dota_hero_", "")),
+						dropDesire,
+						bot:GetActiveMode() or -1
+					)
+				)
+			end
+			return RoamDone(dropDesire, dropDesire)
+		end
 		roamWhy = "ancient-threat"
 		return RoamDone(BOT_MODE_DESIRE_NONE, BOT_MODE_DESIRE_NONE)
 	end
@@ -240,6 +263,11 @@ function GetDesire()
 		end
 	end
 	local desire = GetDesireHelper()
+	if roamWhy == "rosh-drop" then
+		-- Not cut by the push / laning caps: in a push mode right after Roshan 0.97 became 0.5, below Valve's
+		-- item mode, and another hero picked the Aegis up (#15).
+		return RoamDone(desire, desire)
+	end
 	if offerUnit ~= nil then
 		LastHitOverlay.Offer(bot, offerUnit, adjustDesire(offerDesire), offerWhy)
 	end
@@ -907,6 +935,9 @@ function Think()
 		return
 	end
 	if Item.TryPickupRoshanDrop(bot) then
+		return
+	end
+	if Item.TryGuardRoshanDrop(bot) then
 		return
 	end
 	if isAvoidingTower and towerAvoidLocation ~= nil then

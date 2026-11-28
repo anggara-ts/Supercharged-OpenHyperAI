@@ -1867,7 +1867,7 @@ end
 -- item think (#52: one table less per bot per think); same slots in the same order.
 Usage.itemThinkSlots = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 16 }
 local function ConsiderItems()
-	Usage.SetStashItemTimeUpdate()
+	Usage.UpdateBackpackSeenTime()
 	-- WD: cash Gris-Gris before other item logic (bypasses CanCastAbility).
 	if Usage.TryConsumeGrisGris and Usage.TryConsumeGrisGris() then
 		return BOT_ACTION_DESIRE_HIGH
@@ -1973,7 +1973,8 @@ local function ConsiderItems()
 		local item = bot:GetItemInSlot(slot)
 		local itemName = item ~= nil and item:GetName() or nil
 		local inBackpack = slot >= 6 and slot <= 8
-		local smokeFromBag = inBackpack and itemName == "item_smoke_of_deceit"
+		-- Used from the backpack: Smoke of Deceit, and Roshan's Banner since 7.42.
+		local smokeFromBag = inBackpack and (itemName == "item_smoke_of_deceit" or itemName == "item_roshans_banner")
 		if inBackpack and not smokeFromBag then
 			itemName = nil
 		end
@@ -1988,12 +1989,29 @@ local function ConsiderItems()
 		if ready and itemName ~= nil and Usage.IsDoomed(bot) and DoomWastes(itemName) then
 			ready = false
 		end
+		if itemName == "item_roshans_banner" and not ready then
+			Usage.BannerSkip(
+				Usage.IsDoomed(bot) and "doomed" or "not-ready",
+				nil,
+				string.format("cd=%.1f", item:GetCooldownTimeRemaining() or -1)
+			)
+		end
+		-- The backpack swap-cooldown gate is for items moved from the backpack into a main slot. Smoke and the Banner
+		-- are cast from the backpack itself (both carry "ItemCanBeUsedWithoutInventory" "1" in the 7.42 game files,
+		-- read as the backpack-use flag: an inference, the proof is [SHy-BANNER] plant-result planted=yes and
+		-- [SHy-ITEM] smoke ... slot=6-8 in a game), and a backpack item is stamped on every think, so the gate always
+		-- held them back: game 069, Vengeful Spirit kept the Banner in slot 7 from 41:21 to the end, 23 x
+		-- [SHy-BANNER] plant-skip why=stash, no plant (#15).
+		local swapCooldown = not smokeFromBag and itemName ~= nil and Usage.WasInBackpackRecently(itemName)
+		if ready and itemName == "item_roshans_banner" and swapCooldown then
+			Usage.BannerSkip("swap-cooldown", nil)
+		end
 		-- Another player's item can't be used from this inventory (#141).
 		if ready and itemName ~= nil and ForeignItems.Check(bot, item) then
 			ready = false
 		end
 		if ready and itemName ~= nil then
-			if Usage.ConsiderItemDesire[itemName] ~= nil and not Usage.IsItemInStash(itemName) then
+			if Usage.ConsiderItemDesire[itemName] ~= nil and not swapCooldown then
 				local desire, target, castType, castReason = Usage.ConsiderItemDesire[itemName](item)
 				if desire > 0 then
 					local nearbyAllies = Fu.GetAllyList(bot, 1200) or {}
@@ -2105,7 +2123,9 @@ function Usage.IsWithoutSpellShield(unit)
 		and not unit:HasModifier("modifier_item_lotus_orb_active")
 end
 local lastStashCleanTime = -90
-function Usage.SetStashItemTimeUpdate()
+-- stashItemSeenTime: when each item name was last seen in a backpack slot (6-8): an item moved from the backpack to the main inventory
+-- is on the swap cooldown for 6s. Usage.UpdateBackpackSeenTime stamps it, Usage.WasInBackpackRecently reads it.
+function Usage.UpdateBackpackSeenTime()
 	local now = DotaTime()
 	for slot = 6, 8 do
 		local item = bot:GetItemInSlot(slot)
@@ -2122,7 +2142,9 @@ function Usage.SetStashItemTimeUpdate()
 		end
 	end
 end
-function Usage.IsItemInStash(itemName)
+-- True while an item of that name was in a backpack slot within the last 6.05s (still in the backpack, or moved out
+-- of it and on the swap cooldown).
+function Usage.WasInBackpackRecently(itemName)
 	if stashItemSeenTime[itemName] ~= nil and DotaTime() < stashItemSeenTime[itemName] + 6.05 then
 		return true
 	end
@@ -6168,8 +6190,42 @@ Usage.ConsiderItemDesire["item_tango_single"] = function(item)
 	local castType = "tree"
 	local hEffectTarget = nil
 	local castReason = nil
-	local tangoHealAmount = item:GetName() == "item_tango" and 200 or 160
+	-- Game files (7.42): Tango 7 HP/s for 16s = 112; a shared Tango (item_tango_single) 3.5 HP/s = 56 (the code
+	-- counted 200 / 160, so a Tango was only eaten far too late).
+	local tangoHealAmount = item:GetName() == "item_tango" and 112 or 56
 	local missingHealth = bot:OriginalGetMaxHealth() - bot:OriginalGetHealth()
+	-- A shared Tango is a gift that expires (game files: duration_to_use 40, it is gone 40s after it is given;
+	-- maintainer, game 050 6:30: Weaver held one at ~80% HP). Eat it as soon as a tree is in reach, whatever the
+	-- HP missing: no enemy hero right on the bot, the tree outside enemy tower range.
+	if item:GetName() == "item_tango_single" and missingHealth >= 1 then
+		local giftTrees = bot:GetNearbyTrees(800)
+		local closeEnemies = Fu.GetNearbyHeroes(bot, 400, true, BOT_MODE_NONE) or {}
+		local giftTowers = bot:GetNearbyTowers(1400, true)
+		if giftTrees[1] ~= nil and #closeEnemies == 0 then
+			local treeLocation = GetTreeLocation(giftTrees[1])
+			if
+				IsLocationVisible(treeLocation)
+				and IsLocationPassable(treeLocation)
+				and (#giftTowers == 0 or GetUnitToLocationDistance(giftTowers[1], treeLocation) > 920)
+			then
+				if DotaTime() >= (bot._sharedTangoLogAt or -999) then
+					bot._sharedTangoLogAt = DotaTime() + 5
+					pcall(
+						print,
+						string.format(
+							"[SHy-ITEM] t=%.0f %s shared-tango hp=%.2f missing=%d tree-dist=%d",
+							DotaTime(),
+							(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+							Fu.GetHP(bot),
+							missingHealth,
+							GetUnitToLocationDistance(bot, treeLocation)
+						)
+					)
+				end
+				return BOT_ACTION_DESIRE_HIGH, giftTrees[1], castType, "shared tango (expires)"
+			end
+		end
+	end
 	if bot:HasModifier("modifier_furion_sprout_damage") then
 		local closeTrees = bot:GetNearbyTrees(280)
 		if
@@ -6264,7 +6320,8 @@ Usage.ConsiderItemDesire["item_tango_single"] = function(item)
 				castReason = "近处的树"
 				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
 			end
-			if missingHealth > tangoHealAmount * 0.38 and bot:WasRecentlyDamagedByAnyHero(2.0) then
+			-- 0.7 of the real heal (112): about the 76 HP this rule used with the old, wrong 200.
+			if missingHealth > tangoHealAmount * 0.7 and bot:WasRecentlyDamagedByAnyHero(2.0) then
 				hEffectTarget = closeTrees[1]
 				castReason = "提前吃树"
 				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, castType, castReason
@@ -8382,11 +8439,13 @@ local function SmokeLog(why, allies)
 	pcall(
 		print,
 		string.format(
-			"[SHy-ITEM] t=%.0f %s smoke why=%s allies=%d",
+			"[SHy-ITEM] t=%.0f %s smoke why=%s allies=%d slot=%d",
 			DotaTime(),
 			(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
 			why,
-			allies or 0
+			allies or 0,
+			-- 6-8: used from the backpack (#15: blocked until game 069's fix).
+			bot:FindItemSlot("item_smoke_of_deceit")
 		)
 	)
 end
@@ -8816,164 +8875,304 @@ DustDesire = function(item)
 end
 -- Roshan's Banner (datafeed: placed within 1200, 120s, buffs our lane creeps in a 600/900/1200
 -- radius by level; can be destroyed, melee heroes hit it twice as hard). Bots had no rule for it.
--- Bots carry it in the backpack: a.BannerFromBackpack swaps it into a main slot first.
 -- Pushing (user call): planted behind our wave once the wave is at an enemy tower, barracks or
--- the ancient, so the creeps fighting the building get the buff. One banner per push.
--- Pushing, with an enemy tower, barracks or the ancient within 2500: a banner in the backpack goes
--- into a main slot (an empty one, else the cheapest), early enough for any backpack cooldown to run
--- out before the wave reaches the building. Once per 5s.
+-- the ancient, so the creeps fighting the building get the buff. One banner per push. Since #15 (game 063) also
+-- right after a won fight at an enemy building and while defending our base, in any mode (rules below).
+-- 7.42: it is used straight from the backpack, like Smoke of Deceit (game file: AllowedInBackpack 1;
+-- maintainer, 2026-11-20), so the item loop reads the backpack slots for it. The swap into a main slot that
+-- stood here is gone: bot swaps never took (game 036: 6 swaps, none; game 029: 9 tries).
+-- After a plant order: is the Banner out of the bag 1.5s later? (Proves the cast from the backpack.)
+-- The name is the old swap function's: the item think's timing list (#52) wraps it by this name.
 function Usage.BannerFromBackpack()
-	-- Game 036: GetNearbyTowers/GetNearbyBarracks at 2500 ran every tick while pushing (the 5s gate was
-	-- set only when a building was found) and the engine warned "querying nearby units with a distance
-	-- greater than cached (2500)" 3185 times. Now at most once per 1s, and buildings are read from the
-	-- enemy building list by distance, which has no radius cache.
-	local now = DotaTime()
-	if now < (bot._bannerCheckAt or -999) then
+	local plantAt = bot._bannerPlantAt
+	if plantAt == nil or DotaTime() < plantAt + 1.5 then
 		return
 	end
-	bot._bannerCheckAt = now + 1
+	bot._bannerPlantAt = nil
 	local slot = bot:FindItemSlot("item_roshans_banner")
-	if slot >= 0 and slot <= 5 then
-		-- In a main slot: the last swap worked.
-		bot._bannerSwapPending, bot._bannerSwapFails = false, 0
-	end
-	if slot < 6 or slot > 8 or not Fu.IsPushing(bot) or now < (bot._bannerSwapAt or -999) or bot._bannerSwapGaveUp then
-		return
-	end
-	-- A swap was ordered and the banner is still in the backpack: count it. Game 036: 6 swaps, none took.
-	if bot._bannerSwapPending then
-		bot._bannerSwapPending = false
-		bot._bannerSwapFails = (bot._bannerSwapFails or 0) + 1
-		if bot._bannerSwapFails >= 3 then
-			bot._bannerSwapGaveUp = true
-			pcall(
-				print,
-				string.format(
-					"[SHy-BANNER] t=%.0f %s swap-failed tries=%d slot=%d, giving up",
-					now,
-					(string.gsub(botName, "npc_dota_hero_", "")),
-					bot._bannerSwapFails,
-					slot
-				)
-			)
-			return
-		end
-	end
-	local nearestBuilding, nearestDist = nil, 2500
-	for _, enemyBuilding in pairs(GetUnitList(UNIT_LIST_ENEMY_BUILDINGS) or {}) do
-		if Fu.IsValidBuilding(enemyBuilding) then
-			local unitName = enemyBuilding:GetUnitName() or ""
-			if enemyBuilding:IsTower() or string.find(unitName, "rax", 1, true) ~= nil then
-				local dist = GetUnitToUnitDistance(bot, enemyBuilding)
-				if dist <= nearestDist then
-					nearestBuilding, nearestDist = enemyBuilding, dist
-				end
-			end
-		end
-	end
-	local enemyAncient = GetAncient(GetOpposingTeam())
-	if nearestBuilding == nil and enemyAncient ~= nil and GetUnitToUnitDistance(bot, enemyAncient) <= 2500 then
-		nearestBuilding = enemyAncient
-	end
-	if nearestBuilding == nil then
-		return
-	end
-	local destSlot = require(GetScriptDirectory() .. "/lib/systems/item").GetMainInvLessValItemSlot(bot)
-	if destSlot == nil or destSlot < 0 then
-		return
-	end
-	bot._bannerSwapAt = DotaTime() + 5
-	local swappedOutItem = bot:GetItemInSlot(destSlot)
-	-- Forced: the swap wrapper (global_overrides) refuses a swap with an enemy hero within 1000,
-	-- and an enemy base always has one (game 029, 52:33-53:24: 9 tries, the banner never moved).
-	bot._swapDespiteEnemies = true
-	bot._swapDespiteCooldown = true
 	pcall(
 		print,
 		string.format(
-			"[SHy-BANNER] t=%.0f %s swap slot%d->%d out=%s building=%s dist=%.0f",
+			"[SHy-BANNER] t=%.0f %s plant-result planted=%s from-slot=%d now-slot=%d",
 			DotaTime(),
 			(string.gsub(botName, "npc_dota_hero_", "")),
-			slot,
-			destSlot,
-			swappedOutItem ~= nil and swappedOutItem:GetName() or "-",
-			(string.gsub(nearestBuilding:GetUnitName(), "npc_dota_", "")),
-			GetUnitToUnitDistance(bot, nearestBuilding)
+			slot < 0 and "yes" or "no",
+			bot._bannerPlantSlot or -1,
+			slot
 		)
 	)
-	bot._bannerSwapPending = true
-	bot:ActionImmediate_SwapItems(slot, destSlot)
 end
-Usage.ConsiderItemDesire["item_roshans_banner"] = function(item)
-	if not Fu.IsPushing(bot) or bot:WasRecentlyDamagedByAnyHero(1.5) and Fu.GetHP(bot) < 0.4 then
-		return BOT_ACTION_DESIRE_NONE
+-- Plant rules (#15, game 063): bots/lib/systems/banner_rules.lua. Push: an enemy building within 1600 and 5+ of our creeps
+-- in the Banner's radius around a point 250 behind the wave, in a push mode, or in attack / team roam with no more enemy
+-- heroes near than ours (right after a won fight). Defend: our T2, T3, barracks or Ancient within 1600 with enemy
+-- heroes at it (or a hero hit it in the last 3s; enemy creeps alone are a creep clash), and 4+ of our creeps in the
+-- radius around a point 200 behind our creeps toward the building (between it and the enemy wave). Any mode. In game 063 Weaver (Dire) held a Banner in the backpack from 46:34 while
+-- Radiant sieged Dire's bottom T3 and barracks (defend_tower_bot / attack / team_roam) and never planted it: the rule
+-- only ran in a push mode.
+-- [SHy-BANNER] t= <hero> plant-skip why=<gate> creeps= mode= slot= <detail>: why a held Banner was not planted, once
+-- per 10s per bot. Game 067: Death Prophet held one in the backpack (slot 7) from t=3548, pushed the barracks and
+-- the base, and no Banner line was printed: every gate returned silently. Gates: hurt, creeps (under
+-- BannerRules.DEFEND_CREEPS of ours within 1600), no-rule (BannerRules.Why: detail names the counts), own-banner,
+-- far, not-passable, and in the item loop not-ready / doomed / swap-cooldown (a Banner moved from the backpack into a
+-- main slot in the last 6s; game 069's why=stash on every backpack Banner was a bug, #15).
+function Usage.BannerSkip(why, creeps, detail)
+	if DotaTime() < (bot._bannerSkipLogAt or -999) then
+		return
 	end
-	local building = nil
-	local bestDist = 99999
-	local candidates = {}
-	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
-		table.insert(candidates, tower)
-	end
-	for _, barracks in pairs(bot:GetNearbyBarracks(1600, true) or {}) do
-		table.insert(candidates, barracks)
-	end
-	local enemyAncient = GetAncient(GetOpposingTeam())
-	if enemyAncient ~= nil and GetUnitToUnitDistance(bot, enemyAncient) <= 1600 then
-		table.insert(candidates, enemyAncient)
-	end
-	for _, candidate in ipairs(candidates) do
-		if Fu.IsValidBuilding(candidate) and not candidate:IsInvulnerable() then
-			local dist = GetUnitToUnitDistance(bot, candidate)
-			if dist < bestDist then
-				building, bestDist = candidate, dist
-			end
+	bot._bannerSkipLogAt = DotaTime() + 10
+	pcall(
+		print,
+		string.format(
+			"[SHy-BANNER] t=%.0f %s plant-skip why=%s creeps=%d mode=%d slot=%d%s",
+			DotaTime(),
+			(string.gsub(botName, "npc_dota_hero_", "")),
+			why,
+			creeps or -1,
+			bot:GetActiveMode(),
+			bot:FindItemSlot("item_roshans_banner"),
+			detail and (" " .. detail) or ""
+		)
+	)
+end
+local function BannerCreepsNear(creeps, loc, radius)
+	local n = 0
+	for _, creep in ipairs(creeps) do
+		if GetUnitToLocationDistance(creep, loc) <= radius then
+			n = n + 1
 		end
 	end
-	if building == nil then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	-- Our creeps at the building (within 900 of it).
-	local wave = {}
-	for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
-		if Fu.IsValid(creep) and GetUnitToUnitDistance(creep, building) <= 900 then
-			table.insert(wave, creep)
-		end
-	end
-	-- 5+ creeps (user call: 3 is too few to be worth it).
-	if #wave < 5 then
-		return BOT_ACTION_DESIRE_NONE
-	end
-	-- Not on top of another of our banners.
+	return n
+end
+local function OwnBannerNear(loc)
 	for _, allyUnit in pairs(GetUnitList(UNIT_LIST_ALLIES) or {}) do
 		if
 			allyUnit ~= nil
 			and not allyUnit:IsNull()
 			and allyUnit:IsAlive()
 			and string.find(allyUnit:GetUnitName(), "roshans_banner")
-			and GetUnitToUnitDistance(allyUnit, building) <= 1500
+			and GetUnitToLocationDistance(allyUnit, loc) <= 1500
 		then
-			return BOT_ACTION_DESIRE_NONE
+			return true
 		end
 	end
-	-- Behind the wave, 250 toward our fountain from its center: the creeps stay in the radius,
-	-- and the banner is not the first thing the building shoots.
-	local loc = Fu.GetXUnitsTowardsLocation2(Fu.GetCenterOfUnits(wave), Fu.GetTeamFountain(), 250)
-	if GetUnitToLocationDistance(bot, loc) > 1150 or not IsLocationPassable(loc) then
+	return false
+end
+-- Our base buildings worth a Banner: T2, T3, the Ancient's towers, barracks, the Ancient, with enemies at it (lane
+-- creeps within 900 or heroes within 1200). Returns the nearest, its distance, the enemy heroes within 1200 of it and
+-- whether a hero hit it in the last 3s: a wave alone at our T2 is a creep clash, not a siege (BannerRules.Why).
+local function BannerDefendBuilding(enemyCreeps, enemyHeroes)
+	local team = GetTeam()
+	local candidates = {}
+	for _, id in ipairs({
+		TOWER_TOP_2,
+		TOWER_MID_2,
+		TOWER_BOT_2,
+		TOWER_TOP_3,
+		TOWER_MID_3,
+		TOWER_BOT_3,
+		TOWER_BASE_1,
+		TOWER_BASE_2,
+	}) do
+		local tower = GetTower(team, id)
+		if tower ~= nil and GetUnitToUnitDistance(bot, tower) <= 1600 then
+			candidates[#candidates + 1] = tower
+		end
+	end
+	for _, barracks in pairs(bot:GetNearbyBarracks(1600, false) or {}) do
+		candidates[#candidates + 1] = barracks
+	end
+	local ancient = GetAncient(team)
+	if ancient ~= nil and GetUnitToUnitDistance(bot, ancient) <= 1600 then
+		candidates[#candidates + 1] = ancient
+	end
+	local best, bestDist, bestHeroes, bestHit = nil, 99999, 0, false
+	for _, building in ipairs(candidates) do
+		if Fu.IsValidBuilding(building) then
+			local attacked = false
+			for _, creep in ipairs(enemyCreeps) do
+				if GetUnitToUnitDistance(creep, building) <= 900 then
+					attacked = true
+					break
+				end
+			end
+			local heroes = 0
+			for _, enemy in ipairs(enemyHeroes) do
+				if GetUnitToUnitDistance(enemy, building) <= 1200 then
+					heroes = heroes + 1
+				end
+			end
+			local dist = GetUnitToUnitDistance(bot, building)
+			if (attacked or heroes > 0) and dist < bestDist then
+				local okHit, hit = pcall(function()
+					return building:WasRecentlyDamagedByAnyHero(3)
+				end)
+				best, bestDist, bestHeroes, bestHit = building, dist, heroes, okHit and hit == true
+			end
+		end
+	end
+	return best, bestDist, bestHeroes, bestHit
+end
+Usage.ConsiderItemDesire["item_roshans_banner"] = function(item)
+	if bot:WasRecentlyDamagedByAnyHero(1.5) and Fu.GetHP(bot) < 0.4 then
+		Usage.BannerSkip("hurt", nil)
 		return BOT_ACTION_DESIRE_NONE
 	end
-	pcall(
-		print,
-		string.format(
-			"[SHy-BANNER] t=%.0f %s plant at=%.0f,%.0f building=%s dist=%.0f creeps=%d",
-			DotaTime(),
-			(string.gsub(botName, "npc_dota_hero_", "")),
-			loc.x,
-			loc.y,
-			(string.gsub(building:GetUnitName(), "npc_dota_", "")),
-			bestDist,
-			#wave
+	local BannerRules = require(GetScriptDirectory() .. "/lib/systems/banner_rules")
+	-- Radius by the Banner's level (game file: 600 900 1200); 600 when the value can't be read.
+	local okR, radius = pcall(function()
+		return item:GetSpecialValueInt("radius")
+	end)
+	if not okR or type(radius) ~= "number" or radius <= 0 then
+		radius = 600
+	end
+	local ourCreeps = {}
+	for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, false) or {}) do
+		if Fu.IsValid(creep) then
+			ourCreeps[#ourCreeps + 1] = creep
+		end
+	end
+	if #ourCreeps < BannerRules.DEFEND_CREEPS then
+		Usage.BannerSkip("creeps", #ourCreeps)
+		return BOT_ACTION_DESIRE_NONE
+	end
+	local fountain = Fu.GetTeamFountain()
+	-- Push side: the nearest enemy building within 1600 and the point 250 behind our creeps at it.
+	local enemyBuilding, enemyDist = nil, 99999
+	local candidates = {}
+	for _, tower in pairs(bot:GetNearbyTowers(1600, true) or {}) do
+		candidates[#candidates + 1] = tower
+	end
+	for _, barracks in pairs(bot:GetNearbyBarracks(1600, true) or {}) do
+		candidates[#candidates + 1] = barracks
+	end
+	local enemyAncient = GetAncient(GetOpposingTeam())
+	if enemyAncient ~= nil and GetUnitToUnitDistance(bot, enemyAncient) <= 1600 then
+		candidates[#candidates + 1] = enemyAncient
+	end
+	for _, candidate in ipairs(candidates) do
+		if Fu.IsValidBuilding(candidate) and not candidate:IsInvulnerable() then
+			local dist = GetUnitToUnitDistance(bot, candidate)
+			if dist < enemyDist then
+				enemyBuilding, enemyDist = candidate, dist
+			end
+		end
+	end
+	local pushLoc, pushCreeps = nil, 0
+	if enemyBuilding ~= nil then
+		local wave = {}
+		for _, creep in ipairs(ourCreeps) do
+			if GetUnitToUnitDistance(creep, enemyBuilding) <= 900 then
+				wave[#wave + 1] = creep
+			end
+		end
+		if #wave > 0 then
+			pushLoc = Fu.GetXUnitsTowardsLocation2(Fu.GetCenterOfUnits(wave), fountain, 250)
+			pushCreeps = BannerCreepsNear(ourCreeps, pushLoc, radius)
+		end
+	end
+	-- Defend side: our building under attack and the point 200 behind our creeps at it, toward the building.
+	local enemyHeroes = {}
+	for _, enemy in pairs(bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not enemy:IsIllusion() then
+			enemyHeroes[#enemyHeroes + 1] = enemy
+		end
+	end
+	local enemyCreeps = {}
+	for _, creep in pairs(bot:GetNearbyLaneCreeps(1600, true) or {}) do
+		if Fu.IsValid(creep) then
+			enemyCreeps[#enemyCreeps + 1] = creep
+		end
+	end
+	local ownBuilding, ownDist, heroesAtBuilding, heroHitBuilding = BannerDefendBuilding(enemyCreeps, enemyHeroes)
+	local defendLoc, defendCreeps = nil, 0
+	if ownBuilding ~= nil then
+		local guards = {}
+		for _, creep in ipairs(ourCreeps) do
+			if GetUnitToUnitDistance(creep, ownBuilding) <= 1200 then
+				guards[#guards + 1] = creep
+			end
+		end
+		if #guards > 0 then
+			defendLoc = Fu.GetXUnitsTowardsLocation2(Fu.GetCenterOfUnits(guards), ownBuilding:GetLocation(), 200)
+			defendCreeps = BannerCreepsNear(ourCreeps, defendLoc, radius)
+		end
+	end
+	local botMode = bot:GetActiveMode()
+	local why = BannerRules.Why({
+		pushing = Fu.IsPushing(bot),
+		fightMode = botMode == BOT_MODE_ATTACK or botMode == BOT_MODE_TEAM_ROAM,
+		enemyBuilding = pushLoc ~= nil,
+		pushCreeps = pushCreeps,
+		alliesNear = math.max(1, #(Fu.GetAllyList(bot, 1600) or {})),
+		enemiesNear = #enemyHeroes,
+		ownBuilding = defendLoc ~= nil,
+		defendCreeps = defendCreeps,
+		heroesAtBuilding = heroesAtBuilding,
+		heroHitBuilding = heroHitBuilding,
+	})
+	if why == nil then
+		Usage.BannerSkip(
+			"no-rule",
+			#ourCreeps,
+			string.format(
+				"enemyBuilding=%s pushCreeps=%d pushing=%s fight=%s allies=%d enemies=%d ownBuilding=%s defendCreeps=%d heroesAt=%d radius=%d",
+				enemyBuilding ~= nil and (string.gsub(enemyBuilding:GetUnitName(), "npc_dota_", "")) or "none",
+				pushCreeps,
+				tostring(Fu.IsPushing(bot)),
+				tostring(botMode == BOT_MODE_ATTACK or botMode == BOT_MODE_TEAM_ROAM),
+				math.max(1, #(Fu.GetAllyList(bot, 1600) or {})),
+				#enemyHeroes,
+				ownBuilding ~= nil and (string.gsub(ownBuilding:GetUnitName(), "npc_dota_", "")) or "none",
+				defendCreeps,
+				heroesAtBuilding,
+				radius
+			)
 		)
-	)
+		return BOT_ACTION_DESIRE_NONE
+	end
+	local loc, building, buildingDist, creeps = pushLoc, enemyBuilding, enemyDist, pushCreeps
+	if why == "defend" then
+		loc, building, buildingDist, creeps = defendLoc, ownBuilding, ownDist, defendCreeps
+	end
+	-- Not on top of another of our banners; within cast range (1200) on walkable ground.
+	local placeSkip = nil
+	if OwnBannerNear(loc) or OwnBannerNear(building:GetLocation()) then
+		placeSkip = "own-banner"
+	elseif GetUnitToLocationDistance(bot, loc) > 1150 then
+		placeSkip = "far"
+	elseif not IsLocationPassable(loc) then
+		placeSkip = "not-passable"
+	end
+	if placeSkip ~= nil then
+		Usage.BannerSkip(
+			placeSkip,
+			creeps,
+			string.format("rule=%s dist=%.0f", why, GetUnitToLocationDistance(bot, loc))
+		)
+		return BOT_ACTION_DESIRE_NONE
+	end
+	if bot._bannerPlantAt == nil then
+		bot._bannerPlantAt = DotaTime()
+		bot._bannerPlantSlot = bot:FindItemSlot("item_roshans_banner")
+		pcall(
+			print,
+			string.format(
+				"[SHy-BANNER] t=%.0f %s planting why=%s building=%s creeps=%d radius=%d at=%.0f,%.0f dist=%.0f mode=%d slot=%d from=%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				why,
+				(string.gsub(building:GetUnitName(), "npc_dota_", "")),
+				creeps,
+				radius,
+				loc.x,
+				loc.y,
+				buildingDist,
+				botMode,
+				bot._bannerPlantSlot,
+				bot._bannerPlantSlot >= 6 and "backpack" or "main"
+			)
+		)
+	end
 	return BOT_ACTION_DESIRE_HIGH, loc, "ground", nil
 end
 Usage.ConsiderItemDesire["item_trusty_shovel"] = function(item)
