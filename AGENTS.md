@@ -143,6 +143,9 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   Short names only for loop counters (`i`, `j`), unused values (`_`) and coordinates.
 - Locals only. A helper used before its definition goes on the module table (`X.Helper`) or is forward-declared;
   never add a global (several heroes once shared a global `HasBlink` / `CanBKB` and ran each other's copy).
+  The five root scripts the engine loads (`ability_item_usage_generic.lua`, `bot_generic.lua`, `hero_selection.lua`,
+  `item_purchase_generic.lua`, `mode_*_generic.lua`) do not get new top-level locals; `tools/test-build.js` and
+  `tools/export-bots.js --test-game` warn at 180 chunk locals and refuse at 195.
 - `GetTeamMember(i)` takes a team **slot** 1..5, not a player ID from `GetTeamPlayers()`.
 - Guard handles that may be nil (stolen spells, optional items) before calling methods on them.
 - **Per-frame answers** (#52, #251): `Fu.GetNearbyHeroes` checks a hero (valid, not our Meepo clone) once per frame

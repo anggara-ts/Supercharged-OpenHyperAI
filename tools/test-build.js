@@ -204,6 +204,7 @@ function build(prs, result) {
 			result.conflicts.push(p.n);
 			console.log(`#${p.n} ${p.branch}: CONFLICT (skipped) in ${unmerged.split(/\r?\n/).join(", ")}`);
 		}
+		require("./lua_locals").checkDir(path.join(wt, "bots"));
 		result.head = git(["rev-parse", "HEAD"], { cwd: wt });
 	} finally {
 		git(["worktree", "remove", "--force", wt], { allowFail: true });
