@@ -2055,6 +2055,17 @@ end
 heroSpecificDesire["npc_dota_hero_pugna"] = function()
 	return CheckHighPriorityChannelAbility("pugna_life_drain")
 end
+-- Dark Willow's escape Shadow Realm (#48 / PR #203 item 1, game 073: 4 escape realms in push / defend ended by her own
+-- attack, drop-act=4 attacked=yes). hero_dark_willow.lua sets bot._dwEscapeHoldUntil at the cast (realm duration +
+-- 0.3s) and clears it when the realm ends; this mode takes her meanwhile and gives no order, and the realm tick walks
+-- her home (move orders only). 1.5: above retreat too, whose fight-back would end the realm as well.
+heroSpecificDesire["npc_dota_hero_dark_willow"] = function()
+	if bot._dwEscapeHoldUntil ~= nil and DotaTime() < bot._dwEscapeHoldUntil then
+		bot._outpostHoldUntil = DotaTime() + 0.15
+		return BOT_DESIRE_OVERRIDE * 1.5
+	end
+	return BOT_MODE_DESIRE_NONE
+end
 heroSpecificDesire["npc_dota_hero_drow_ranger"] = function()
 	return CheckHighPriorityChannelAbility("drow_ranger_multishot")
 end

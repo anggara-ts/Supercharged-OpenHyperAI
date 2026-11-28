@@ -125,6 +125,7 @@ function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
 local ShadowRealmRules = require(GetScriptDirectory() .. "/lib/systems/shadow_realm_rules")
+local EnemySpells = require(GetScriptDirectory() .. "/lib/systems/enemy_spell_tracker")
 local brambleMazeAbility =
 	SafeAbility(bot:GetAbilityByName("dark_willow_bramble_maze"), "dark_willow_bramble_maze", "dark_willow")
 local shadowRealmAbility =
@@ -150,6 +151,7 @@ local isInTeamFight
 -- (bThinkWhileInvulnerable lets only this tick run then).
 X["bThinkWhileInvulnerable"] = true
 function X.SkillsComplement()
+	X.TrackEnemyJumps()
 	local okRealm, realmOrder = pcall(X.ShadowRealmTick)
 	if not okRealm then
 		X.LogRealmError(realmOrder)
@@ -163,6 +165,15 @@ function X.SkillsComplement()
 	hpRatio = context.hp
 	isInTeamFight = context.isTeamFight
 	if Fu.CanNotUseAbility(bot) then
+		return
+	end
+	-- Cornered realm first (#203, game 083 47:06): Bramble Maze, Terrorize and Bedlam each return, and the silence
+	-- or stun of the gank lands within a second.
+	local cornerTrigger, cornerInfo = X.ConsiderCorneredRealm()
+	if cornerTrigger ~= nil then
+		X.StartShadowRealm("retreat", nil, "cornered")
+		X.LogCorneredRealm(cornerTrigger, cornerInfo)
+		bot:Action_UseAbility(shadowRealmAbility)
 		return
 	end
 	brambleMazeDesire, brambleMazeLocation = X.ConsiderBrambleMaze()
@@ -185,10 +196,10 @@ function X.SkillsComplement()
 		lastBedlamTime = DotaTime()
 		return
 	end
-	local shadowRealmWhy, shadowRealmTarget
-	shadowRealmDesire, shadowRealmWhy, shadowRealmTarget = X.ConsiderShadowRealm()
+	local shadowRealmWhy, shadowRealmTarget, shadowRealmRule
+	shadowRealmDesire, shadowRealmWhy, shadowRealmTarget, shadowRealmRule = X.ConsiderShadowRealm()
 	if shadowRealmDesire > 0 then
-		X.StartShadowRealm(shadowRealmWhy, shadowRealmTarget)
+		X.StartShadowRealm(shadowRealmWhy, shadowRealmTarget, shadowRealmRule)
 		bot:Action_UseAbility(shadowRealmAbility)
 		-- return: without it the Cursed Crown order below replaced Shadow Realm in the same frame.
 		return
@@ -285,25 +296,440 @@ function X.ConsiderShadowRealm()
 			and botTarget:GetHealth()
 				> botTarget:GetActualIncomingDamage(bot:GetAttackDamage() * 2, DAMAGE_TYPE_PHYSICAL)
 		then
-			return BOT_ACTION_DESIRE_HIGH, "attack", botTarget
+			-- Not in a losing fight (#48, game 069): under 60% HP or outnumbered within 1200.
+			local enemies, ourHeroes = X.FightCounts()
+			local skip = ShadowRealmRules.AttackSkip(hpRatio, enemies, ourHeroes)
+			if skip == nil then
+				return BOT_ACTION_DESIRE_HIGH, "attack", botTarget, "attack"
+			end
+			X.LogRealmSkip("attack", skip, enemies, ourHeroes)
 		end
 	end
-	if
-		(isRetreating or isRetreating and hpRatio < 0.6 and bot:WasRecentlyDamagedByAnyHero(2))
-		and not Fu.IsRealInvisible(bot)
-		and nearbyEnemies ~= nil
-		and #nearbyEnemies >= 1
-	then
-		if Fu.DidEnemyCastAbility() or hpRatio < 0.5 or Fu.IsStunProjectileIncoming(bot, 800) then
-			return BOT_ACTION_DESIRE_HIGH, "retreat", nil
+	if not Fu.IsRealInvisible(bot) and nearbyEnemies ~= nil and #nearbyEnemies >= 1 then
+		local rule, skip = ShadowRealmRules.Escape({
+			retreating = isRetreating,
+			engaging = isGoingOnSomeone,
+			hp = hpRatio,
+			hit = bot:WasRecentlyDamagedByAnyHero(2),
+		})
+		if rule ~= nil then
+			if Fu.DidEnemyCastAbility() or hpRatio < 0.5 or Fu.IsStunProjectileIncoming(bot, 800) then
+				return BOT_ACTION_DESIRE_HIGH, "retreat", nil, rule
+			end
+			return BOT_ACTION_DESIRE_MODERATE, "retreat", nil, rule
 		end
-		return BOT_ACTION_DESIRE_MODERATE, "retreat", nil
+		if skip ~= nil then
+			local enemies, ourHeroes = X.FightCounts()
+			X.LogRealmSkip("retreat", skip, enemies, ourHeroes)
+		end
 	end
 	return BOT_ACTION_DESIRE_NONE
 end
+-- Every think: the distance of each real enemy hero within 1600, for the jump-in trigger (ShadowRealmRules.Jump: an
+-- enemy within 450 that was 500+ farther 0.6s ago, or not seen in that time). A jump is kept in bot._dwJump.
+-- Keyed by the unit handle (weak keys, like channel_save.lua), not the name: two units of one name (Meepo, a Tempest
+-- Double, an illusion IsSuspiciousIllusion misses) would read each other's distance as a jump.
+local enemySeen = setmetatable({}, { __mode = "k" })
+-- A unit handle does not carry a sighting across the fog (an enemy hero's handle can read IsNull out of vision,
+-- docs/BOT_API_RUNTIME.md "Enemy hero handles"; game 087 t=1108 kind=appear from=-1). So an "appear" is checked
+-- against his player's last-seen spot (GetHeroLastSeenInfo, team vision), sampled every LAST_SEEN_EVERY before the
+-- sighting: player ID -> { loc, ago (time_since_seen then), at (DotaTime of the sample), anchor and since (the spot
+-- he was first seen at within LANDING_RADIUS, and when), prev (the last sighting before he reached that spot: loc,
+-- ago, at) }. Two sightings, because the newest can already be his landing spot (ShadowRealmRules.AppearIsJump).
+local enemyLastSeen = {}
+local LAST_SEEN_EVERY = 0.2
+-- Jump items and spells for ShadowRealmRules.AppearIsJump: a hero that has one can land next to her out of the fog.
+-- A judgement list (spells that move the caster to a spot or a unit at once or nearly: blinks, leaps, dashes, rolls,
+-- the Teleportation TP); the ability names are the ones our hero files cast (bots/heroes/hero_<name>.lua). Whether an
+-- enemy's item slots read is unsettled (docs/BOT_API_RUNTIME.md: enemy items read nothing in game 068), so the
+-- jump-skip and realm-cornered lines print jumper= for a game to show it.
+local JUMP_ITEMS = {
+	"item_blink",
+	"item_overwhelming_blink",
+	"item_swift_blink",
+	"item_arcane_blink",
+	"item_force_staff",
+	"item_hurricane_pike",
+}
+local JUMP_SPELLS = {
+	antimage_blink = true,
+	queenofpain_blink = true,
+	faceless_void_time_walk = true,
+	puck_illusory_orb = true,
+	mirana_leap = true,
+	slark_pounce = true,
+	magnataur_skewer = true,
+	sandking_burrowstrike = true,
+	storm_spirit_ball_lightning = true,
+	ember_spirit_fire_remnant = true,
+	void_spirit_astral_step = true,
+	earth_spirit_rolling_boulder = true,
+	pangolier_swashbuckle = true,
+	morphling_waveform = true,
+	phoenix_icarus_dive = true,
+	tusk_snowball = true,
+	riki_blink_strike = true,
+	phantom_assassin_phantom_strike = true,
+	chaos_knight_reality_rift = true,
+	monkey_king_tree_dance = true,
+	rattletrap_hookshot = true,
+	primal_beast_onslaught = true,
+	marci_companion_run = true,
+	kez_grappling_claw = true,
+	huskar_life_break = true,
+	furion_teleportation = true,
+	spirit_breaker_charge_of_darkness = true,
+}
+-- The casts that move the hero (for the fresh-cast check, EnemySpells via the cast callback): the jump items and
+-- spells above, except Illusory Orb, whose cast only sends the orb (the move is Ethereal Jaunt), and Fire Remnant,
+-- whose cast only sends a remnant (the move is Activate Fire Remnant); names as our hero files cast them
+-- (hero_puck.lua puck_ethereal_jaunt, hero_ember_spirit.lua ember_spirit_activate_fire_remnant).
+local JUMP_CASTS = {}
+for _, name in ipairs(JUMP_ITEMS) do
+	JUMP_CASTS[name] = true
+end
+for name in pairs(JUMP_SPELLS) do
+	JUMP_CASTS[name] = true
+end
+JUMP_CASTS.puck_illusory_orb = nil
+JUMP_CASTS.ember_spirit_fire_remnant = nil
+JUMP_CASTS.puck_ethereal_jaunt = true
+JUMP_CASTS.ember_spirit_activate_fire_remnant = true
+EnemySpells.InstallCastProbe(JUMP_CASTS)
+-- The newest jump cast the team saw this enemy hero make (EnemySpells.State: the callback's last report of it), as
+-- seconds ago and the spell, or nil.
+function X.RecentJumpCast(enemy, now)
+	local heroName = enemy:GetUnitName()
+	local bestAgo, bestName = nil, nil
+	for name in pairs(JUMP_CASTS) do
+		local _, entry = EnemySpells.State(heroName, name, now)
+		if entry ~= nil and entry.lastObs ~= nil then
+			local ago = now - entry.lastObs
+			if ago >= 0 and (bestAgo == nil or ago < bestAgo) then
+				bestAgo, bestName = ago, name
+			end
+		end
+	end
+	return bestAgo, bestName
+end
+-- The first jump item or learned jump spell of an enemy hero, or nil.
+function X.EnemyJumper(enemy)
+	for _, name in ipairs(JUMP_ITEMS) do
+		local ok, slot = pcall(enemy.FindItemSlot, enemy, name)
+		if ok and slot ~= nil and slot >= 0 and slot <= 5 then
+			return name
+		end
+	end
+	for slot = 0, 8 do
+		local ability = enemy:GetAbilityInSlot(slot)
+		if ability ~= nil and JUMP_SPELLS[ability:GetName()] and ability:GetLevel() > 0 then
+			return ability:GetName()
+		end
+	end
+	return nil
+end
+function X.SampleEnemyLastSeen(now)
+	if now - (bot._dwLastSeenAt or -999) < LAST_SEEN_EVERY then
+		return
+	end
+	bot._dwLastSeenAt = now
+	for _, playerId in ipairs(GetTeamPlayers(GetOpposingTeam()) or {}) do
+		local info = GetHeroLastSeenInfo(playerId)
+		local seen = info ~= nil and info[1] or nil
+		if seen ~= nil and seen.location ~= nil then
+			local ago = seen.time_since_seen or 0
+			local sample = enemyLastSeen[playerId]
+			if sample == nil then
+				sample = { anchor = seen.location, since = now - ago }
+				enemyLastSeen[playerId] = sample
+			elseif (seen.location - sample.anchor):Length2D() > ShadowRealmRules.LANDING_RADIUS then
+				-- A new spot: the sighting before it is kept as the approach.
+				sample.prev = { loc = sample.loc, ago = sample.ago, at = sample.at }
+				sample.anchor, sample.since = seen.location, now - ago
+			end
+			sample.loc, sample.ago, sample.at = seen.location, ago, now
+		end
+	end
+end
+-- An "appear" read: ShadowRealmRules.AppearIsJump with his last two last-seen samples, his jump item or spell and
+-- the jump cast the team last saw him make. Returns accepted, why, and the fields for the logs (seen / ago: the
+-- sighting the rule read, her distance to it, -1 none; spot: seconds since he was first seen at the newest spot, -1
+-- none; landing: yes when the newest was his landing spot and the one before it was read; jumper: his jump item or
+-- spell, or the jump cast; cast: seconds since that cast, -1 none).
+function X.CheckAppear(enemy, dist, now)
+	local playerId = enemy:GetPlayerID()
+	local sample = playerId ~= nil and enemyLastSeen[playerId] or nil
+	local o = { nowDist = dist, speed = enemy:GetCurrentMovementSpeed() or 0 }
+	if sample ~= nil then
+		o.seenDist = GetUnitToLocationDistance(bot, sample.loc)
+		o.seenAgo = sample.ago + now - sample.at
+		o.seenSpotAge = now - sample.since
+		o.seenOffset = GetUnitToLocationDistance(enemy, sample.loc)
+		if sample.prev ~= nil then
+			o.prevDist = GetUnitToLocationDistance(bot, sample.prev.loc)
+			o.prevAgo = sample.prev.ago + now - sample.prev.at
+		end
+	end
+	local jumper = X.EnemyJumper(enemy)
+	o.jumper = jumper ~= nil
+	local castAgo, castName = X.RecentJumpCast(enemy, now)
+	o.castAgo = castAgo
+	local accepted, why, seenDist, seenAgo, landing = ShadowRealmRules.AppearIsJump(o)
+	if why == "cast" then
+		jumper = castName
+	end
+	return accepted,
+		why,
+		{
+			seen = seenDist or -1,
+			ago = seenAgo or -1,
+			jumper = jumper or "-",
+			spot = o.seenSpotAge or -1,
+			landing = landing and "yes" or "no",
+			cast = castAgo or -1,
+		}
+end
+-- [SHy-DW] t= dark_willow jump-skip hero= why=walked|unseen|near|walk-reach to= seen= ago= jumper= spot= landing=
+-- cast=: an enemy came out of the fog next to her and it was read as a walk, not a jump-in (at most once per 3s per
+-- enemy). Fields as X.CheckAppear.
+function X.LogJumpSkip(enemy, why, dist, info)
+	local name = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
+	bot._dwJumpSkipLog = bot._dwJumpSkipLog or {}
+	if DotaTime() - (bot._dwJumpSkipLog[name] or -999) < 3 then
+		return
+	end
+	bot._dwJumpSkipLog[name] = DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow jump-skip hero=%s why=%s to=%d seen=%d ago=%.1f jumper=%s spot=%.1f landing=%s cast=%.1f",
+			DotaTime(),
+			name,
+			why,
+			dist,
+			info.seen,
+			info.ago,
+			info.jumper,
+			info.spot,
+			info.landing,
+			info.cast
+		)
+	)
+end
+-- [SHy-DW] t= dark_willow jump-seen hero= from= to= ago= via=tracked|cast|last-seen|jumper jumper= spot= landing=
+-- cast=: an enemy jump next to her was read, whether or not it casts the cornered realm (game 089 24:07: a 1v3
+-- jump-in printed nothing). via=tracked: his unit was seen from= away ago= seconds before (kind=jump); else an appear
+-- (X.CheckAppear: from= / ago= the sighting the rule read, -1 none). At most once per 3s per enemy.
+function X.LogJumpSeen(enemy, jump, info)
+	local name = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
+	bot._dwJumpSeenLog = bot._dwJumpSeenLog or {}
+	if DotaTime() - (bot._dwJumpSeenLog[name] or -999) < 3 then
+		return
+	end
+	bot._dwJumpSeenLog[name] = DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow jump-seen hero=%s from=%d to=%d ago=%.1f via=%s jumper=%s spot=%.1f landing=%s cast=%.1f",
+			DotaTime(),
+			name,
+			info ~= nil and info.seen or jump.from,
+			jump.dist,
+			info ~= nil and info.ago or jump.fromAgo,
+			info ~= nil and jump.why or "tracked",
+			jump.jumper,
+			info ~= nil and info.spot or -1,
+			info ~= nil and info.landing or "-",
+			info ~= nil and info.cast or -1
+		)
+	)
+end
+function X.TrackEnemyJumps()
+	local now = DotaTime()
+	local trackedAgo = bot._dwTrackAt ~= nil and now - bot._dwTrackAt or nil
+	if trackedAgo ~= nil and trackedAgo <= 0 then
+		return
+	end
+	bot._dwTrackAt = now
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			local dist = GetUnitToUnitDistance(bot, enemy)
+			local loc = enemy:GetLocation()
+			local last = enemySeen[enemy]
+			-- His own move, not the change in her distance to him: her Blink closes that gap (game 092 via=tracked).
+			local moved = nil
+			if last ~= nil and last.loc ~= nil and loc ~= nil then
+				moved = (loc - last.loc):Length2D()
+			end
+			local kind =
+				ShadowRealmRules.Jump(last and last.dist, last and now - last.at or nil, dist, trackedAgo, moved)
+			local why, info = nil, nil
+			if kind == "appear" then
+				local accepted
+				accepted, why, info = X.CheckAppear(enemy, dist, now)
+				if not accepted then
+					X.LogJumpSkip(enemy, why, dist, info)
+					kind = nil
+				end
+			end
+			if kind ~= nil then
+				bot._dwJump = {
+					at = now,
+					hero = enemy:GetUnitName(),
+					kind = kind,
+					from = last and last.dist or -1,
+					dist = dist,
+					why = why or "-",
+					seen = info and info.seen or -1,
+					ago = info and info.ago or -1,
+					jumper = info and info.jumper or "-",
+					fromAgo = last and now - last.at or -1,
+				}
+				X.LogJumpSeen(enemy, bot._dwJump, info)
+			end
+			if last == nil then
+				last = {}
+				enemySeen[enemy] = last
+			end
+			last.dist, last.at = dist, now
+			if loc ~= nil then
+				last.loc = Vector(loc.x, loc.y, loc.z or 0)
+			end
+		end
+	end
+	X.SampleEnemyLastSeen(now)
+end
+-- The cornered realm (ShadowRealmRules.Cornered): Spirit Breaker's charge on her with him within 1200, 3+ enemy
+-- heroes within 900 and none of ours within 1200, or an enemy jump-in in the last 0.5s with more of them than of
+-- us within 1200. The charge modifier on the target: the 7.42 server modifier list has both
+-- modifier_spirit_breaker_charge_of_darkness_target (it has a tooltip, "Charge of Darkness Target") and
+-- modifier_spirit_breaker_charge_of_darkness_vision; which one reads through HasModifier is unverified (mod=).
+-- Returns the trigger and the counts, or nil.
+function X.ConsiderCorneredRealm()
+	if not shadowRealmAbility:IsFullyCastable() or Fu.IsRealInvisible(bot) then
+		return nil
+	end
+	local mod = nil
+	if bot:HasModifier("modifier_spirit_breaker_charge_of_darkness_target") then
+		mod = "target"
+	elseif bot:HasModifier("modifier_spirit_breaker_charge_of_darkness_vision") then
+		mod = "vision"
+	end
+	local o = { enemiesNear = 0, alliesNear = 0, enemies = 0, ourHeroes = 1, jump = false, mod = mod }
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			local dist = GetUnitToUnitDistance(bot, enemy)
+			if dist <= ShadowRealmRules.CORNER_RADIUS then
+				o.enemiesNear = o.enemiesNear + 1
+			end
+			if dist <= ShadowRealmRules.FIGHT_RADIUS then
+				o.enemies = o.enemies + 1
+			end
+			if
+				mod ~= nil
+				and enemy:HasModifier("modifier_spirit_breaker_charge_of_darkness")
+				and (o.charge == nil or dist < o.charge)
+			then
+				o.charge = dist
+			end
+		end
+	end
+	local allyRadius = math.max(ShadowRealmRules.CORNER_ALLY_RADIUS, ShadowRealmRules.FIGHT_RADIUS)
+	for _, ally in pairs(Fu.GetNearbyHeroes(bot, allyRadius, false, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+			local dist = GetUnitToUnitDistance(bot, ally)
+			if dist <= ShadowRealmRules.CORNER_ALLY_RADIUS then
+				o.alliesNear = o.alliesNear + 1
+			end
+			if dist <= ShadowRealmRules.FIGHT_RADIUS then
+				o.ourHeroes = o.ourHeroes + 1
+			end
+		end
+	end
+	local jump = bot._dwJump
+	if jump ~= nil and DotaTime() - jump.at <= 0.5 then
+		o.jump = true
+		o.jumpInfo = jump
+	end
+	local trigger = ShadowRealmRules.Cornered(o)
+	if trigger == nil then
+		return nil
+	end
+	return trigger, o
+end
+-- [SHy-DW] t= dark_willow realm-cornered trigger=charge|crowd|jump hp= near= allies= enemies= ours= charge= mod=
+-- jump=<hero> kind=jump|appear from= to= seen= ago= why= jumper= mode=, right after the rule=cornered cast line (once per cast).
+-- near: enemy heroes within 900; allies: ours within 1200 (her not counted); enemies / ours: within 1200 (ours with
+-- her); charge: distance to the charging Spirit Breaker (-1: none); from / to: the jumper's last and current distance
+-- (from=-1: not seen before, kind=appear); seen / ago: for kind=appear, her distance to his last-seen spot and its age
+-- (GetHeroLastSeenInfo); why: last-seen | jumper (ShadowRealmRules.AppearIsJump); jumper: his jump item or spell.
+function X.LogCorneredRealm(trigger, o)
+	local jump = o.jumpInfo
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow realm-cornered trigger=%s hp=%.2f near=%d allies=%d enemies=%d ours=%d charge=%d mod=%s jump=%s kind=%s from=%d to=%d seen=%d ago=%.1f why=%s jumper=%s mode=%d",
+			DotaTime(),
+			trigger,
+			Fu.GetHP(bot),
+			o.enemiesNear,
+			o.alliesNear,
+			o.enemies,
+			o.ourHeroes,
+			o.charge or -1,
+			tostring(o.mod or "-"),
+			jump ~= nil and (string.gsub(jump.hero, "npc_dota_hero_", "")) or "-",
+			jump ~= nil and jump.kind or "-",
+			jump ~= nil and jump.from or -1,
+			jump ~= nil and jump.dist or -1,
+			jump ~= nil and jump.seen or -1,
+			jump ~= nil and jump.ago or -1,
+			jump ~= nil and jump.why or "-",
+			jump ~= nil and jump.jumper or "-",
+			bot:GetActiveMode()
+		)
+	)
+end
+-- Real enemy heroes and our heroes (her included) within ShadowRealmRules.FIGHT_RADIUS (1200).
+function X.FightCounts()
+	local radius = ShadowRealmRules.FIGHT_RADIUS
+	local enemies, ourHeroes = 0, 1
+	for _, enemy in pairs(Fu.GetNearbyHeroes(bot, radius, true, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(enemy) and not Fu.IsSuspiciousIllusion(enemy) then
+			enemies = enemies + 1
+		end
+	end
+	for _, ally in pairs(Fu.GetNearbyHeroes(bot, radius, false, BOT_MODE_NONE) or {}) do
+		if Fu.IsValidHero(ally) and ally ~= bot and not ally:IsIllusion() then
+			ourHeroes = ourHeroes + 1
+		end
+	end
+	return enemies, ourHeroes
+end
+-- [SHy-DW] t= dark_willow shadow-realm-skip kind=attack|retreat why=low-hp|outnumbered|full-hp hp= enemies= allies=
+-- (allies: our heroes within 1200, her included): a realm the old rules would have cast. Once per 5s.
+function X.LogRealmSkip(kind, why, enemies, ourHeroes)
+	if DotaTime() < (bot._dwRealmSkipLogAt or -999) then
+		return
+	end
+	bot._dwRealmSkipLogAt = DotaTime() + 5
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow shadow-realm-skip kind=%s why=%s hp=%.2f enemies=%d allies=%d mode=%d",
+			DotaTime(),
+			kind,
+			why,
+			hpRatio or -1,
+			enemies,
+			ourHeroes,
+			bot:GetActiveMode()
+		)
+	)
+end
 -- The realm she is in (bot._dwRealm): why (attack | dodge | retreat), the cast time, the target, her attack range
 -- at the cast (GetAttackRange may already add the +600 inside the realm) and the bonus values from the ability.
-function X.StartShadowRealm(why, target)
+function X.StartShadowRealm(why, target, rule)
 	local bonusRange = shadowRealmAbility:GetSpecialValueInt("attack_range_bonus")
 	if bonusRange <= 0 then
 		bonusRange = 600
@@ -318,6 +744,7 @@ function X.StartShadowRealm(why, target)
 	end
 	bot._dwRealm = {
 		why = why or "retreat",
+		rule = rule or why or "retreat",
 		at = DotaTime(),
 		target = target,
 		baseRange = bot:GetAttackRange(),
@@ -328,28 +755,60 @@ function X.StartShadowRealm(why, target)
 		tp = "-",
 		-- Deaths at the cast: a higher count later means she died in or right after the realm (#48).
 		deaths = GetHeroDeaths(bot:GetPlayerID()) or 0,
+		-- Her last attack time at the cast: a change means her own attack ended the realm (the early-drop line).
+		lastAttack = bot:GetLastAttackTime(),
+		-- The cast order (#203, game 079 t=356: re-sent 14 times in one second, every think): one order, then
+		-- ShadowRealmRules.CastStep checks it took; orders= and took= go on the end line.
+		orders = 1,
+		orderAt = 0,
 	}
+	-- An escape realm holds her other orders (#203 item 1, game 073: 4 rule=hit realms in push / defend ended by
+	-- her own attack, drop-act=4 attacked=yes): the outpost mode takes her and gives no order
+	-- (mode_outpost_generic.lua reads bot._dwEscapeHoldUntil), the item think runs only X.CastHoldTick (no last-hit,
+	-- tower-aggro or item order), and the realm tick walks her home. Cleared when the realm ends.
+	if why == "retreat" then
+		local holdUntil = DotaTime() + duration + 0.3
+		bot._dwRealm.hold = true
+		bot._dwEscapeHoldUntil = holdUntil
+		bot._castHoldUntil = holdUntil
+	else
+		-- Any realm: until the cast takes, the same item-think hold, which also skips the wrapped mode Thinks
+		-- (global_overrides.lua OhaCastGuard), so no other order replaces the cast. Cleared once it took.
+		bot._dwRealm.castHold = true
+		bot._castHoldUntil = math.max(bot._castHoldUntil or -999, DotaTime() + ShadowRealmRules.CAST_GIVE_UP + 0.1)
+	end
+	local enemies, ourHeroes = X.FightCounts()
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow shadow-realm-cast why=%s target=%s dist=%d hp=%.2f mode=%d",
+			"[SHy-DW] t=%.0f dark_willow shadow-realm-cast why=%s target=%s dist=%d hp=%.2f mode=%d rule=%s enemies=%d allies=%d",
 			DotaTime(),
 			tostring(why),
 			target ~= nil and (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")) or "-",
 			target ~= nil and GetUnitToUnitDistance(bot, target) or -1,
 			Fu.GetHP(bot),
-			bot:GetActiveMode()
+			bot:GetActiveMode(),
+			tostring(rule or why),
+			enemies,
+			ourHeroes
 		)
 	)
 end
--- [SHy-DW] t= dark_willow shadow-realm why=attack|dodge|retreat held= ended= release= tp= dist= mod= invuln=, one
+-- [SHy-DW] t= dark_willow shadow-realm why=attack|dodge|retreat held= ended= release= tp= dist= mod= invuln= ... rule=, one
 -- line per realm when it ends. held: seconds from the cast to the release order (attack) or to the end; ended: when
 -- the realm was seen to end (the hit landed; about 5.2 when it ran out, or when the modifier was never seen).
 -- release=died: she died in the realm or the tick stopped (her think doesn't run while dead); t=, held= and ended=
 -- are then from the last tick she was alive (game 068: the lines printed at respawn, 18-51s late, held=51.10).
--- endedAt: that time (default now).
+-- endedAt: that time (default now). Both reasons are kept when she dies after a release (release=mode+died).
+-- An early drop (the modifier gone before the realm could run out, release=-) adds what she was doing:
+-- drop-mode=<mode at the last tick in the realm>><mode now> drop-act=<action type then>><now> attacked=yes|no (her
+-- last attack time changed since the cast: her own attack ended it).
 function X.EndShadowRealm(realm, since, endedAt)
 	bot._dwRealm = nil
+	if realm.hold or realm.castHold then
+		bot._dwEscapeHoldUntil = nil
+		bot._castHoldUntil = nil
+	end
 	local target = realm.target
 	local dist = -1
 	if target ~= nil and not target:IsNull() and target:IsAlive() and target:CanBeSeen() then
@@ -358,19 +817,46 @@ function X.EndShadowRealm(realm, since, endedAt)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s target=%s dist=%d mod=%s invuln=%s",
+			"[SHy-DW] t=%.0f dark_willow shadow-realm why=%s held=%.2f ended=%.2f release=%s tp=%s threat=%s target=%s dist=%d mod=%s invuln=%s orders=%d took=%s hold=%s rule=%s",
 			endedAt or DotaTime(),
 			realm.why,
 			realm.releasedAt or since,
 			since,
 			tostring(realm.released or "-"),
 			tostring(realm.tp),
+			tostring(realm.tpBy or "-"),
 			target ~= nil and not target:IsNull() and (string.gsub(target:GetUnitName(), "npc_dota_hero_", "")) or "-",
 			dist,
 			realm.modSeen ~= nil and string.format("%.2f", realm.modSeen) or "no",
-			tostring(realm.invuln == true)
-		)
+			tostring(realm.invuln == true),
+			realm.orders or 1,
+			realm.tookAt ~= nil and string.format("%.2f", realm.tookAt) or "no",
+			realm.hold and "yes" or "no",
+			tostring(realm.rule or realm.why)
+		) .. (realm.drop or "")
 	)
+end
+-- What hurt or threatens her, for the realm TP: an enemy hero's hit in the last 6s, a tower's, an enemy summon within
+-- 900 (ShadowRealmRules.IsSummon: a brewling, a treant, a dominated neutral; not a lane creep or a ward) or a creep's
+-- hit. Whether WasRecentlyDamagedByCreep counts a summon's hit is unverified, so the summon test comes first.
+-- Returns "hero" | "tower" | "summon" | "creep", or nil.
+function X.RealmThreat()
+	if bot:WasRecentlyDamagedByAnyHero(6.0) then
+		return "hero"
+	end
+	if bot:WasRecentlyDamagedByTower(6.0) then
+		return "tower"
+	end
+	local enemyTeam = GetOpposingTeam()
+	for _, unit in pairs(bot:GetNearbyCreeps(900, true) or {}) do
+		if Fu.IsValid(unit) and ShadowRealmRules.IsSummon(unit:GetUnitName(), unit:GetTeam() == enemyTeam) then
+			return "summon"
+		end
+	end
+	if bot:WasRecentlyDamagedByCreep(6.0) then
+		return "creep"
+	end
+	return nil
 end
 -- Another allied hero within 1500 in the attack mode (the TP rule's attackingAllies, without herself).
 function X.AllyFighting()
@@ -402,8 +888,16 @@ end
 -- channel gates that still apply (Usage.TpGatesClosed: rooted, already teleporting, Nethertoxin, Macropyre) plus a
 -- hero script's own TP hold (bot._noTpUntil). tp=ordered until the channel shows; up to 3 orders while it fits
 -- (a TP scroll can't start rooted: items_all.txt ROOT_DISABLES), then tp=now, or tp=failed.
+-- "Hit by a hero" also takes a tower's hit, an enemy summon within 900 or a creep's hit (X.RealmThreat, threat= on the
+-- end line), and a skip-safe is looked at again every 0.25s while the TP still fits (#203, game 087 28:29: cast at
+-- 0.31 HP after her T3 dive, tp=skip-safe on the first tick, then a storm brewling's Cyclone at 28:33 and an earth
+-- brewling's Hurl Boulder at 28:34; she died to brewlings and lane creeps at 28:37 with no enemy hero near).
 function X.ShadowRealmTeleport(realm, since, castDone)
-	if not castDone or realm.tp ~= "-" and realm.tp ~= "ordered" then
+	local recheck = realm.tp == "skip-safe"
+	if not castDone or realm.tp ~= "-" and realm.tp ~= "ordered" and not recheck then
+		return false
+	end
+	if recheck and since - (realm.tpCheckAt or 0) < 0.25 then
 		return false
 	end
 	if realm.tp == "ordered" and since - realm.tpAt < 0.4 then
@@ -416,6 +910,14 @@ function X.ShadowRealmTeleport(realm, since, castDone)
 			return false
 		end
 	else
+		realm.tpCheckAt = since
+		if recheck and not fits then
+			-- Keep skip-safe: the reason it never went out.
+			return false
+		end
+		realm.tp = "-"
+		local threat = X.RealmThreat()
+		realm.tpBy = threat
 		local enemyCount = #Fu.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
 		local hpLine = math.min(0.15 + 0.24 * enemyCount, 0.45)
 		local tp = X.TeleportItem()
@@ -427,7 +929,7 @@ function X.ShadowRealmTeleport(realm, since, castDone)
 			realm.tp = "skip-hp"
 		elseif bot:DistanceFromFountain() <= 4900 then
 			realm.tp = "skip-near"
-		elseif not bot:WasRecentlyDamagedByAnyHero(6.0) then
+		elseif threat == nil then
 			realm.tp = "skip-safe"
 		elseif X.AllyFighting() then
 			realm.tp = "skip-allies"
@@ -468,12 +970,14 @@ function X.ShadowRealmTick()
 	local since = DotaTime() - realm.at
 	-- Dead, a death since the cast, or the realm older than its duration + 1s (the tick missed its end: her think
 	-- does not run while dead): end it at the last tick she was alive, release=died (release=stale when no death
-	-- was counted, e.g. the think stopped for another reason).
+	-- was counted, e.g. the think stopped for another reason). A death on the tick the duration elapses is not
+	-- visible yet (game 092 t=2074): that tick waits (ShadowRealmRules.HoldRanOut) so this check still runs.
 	local deaths = GetHeroDeaths(bot:GetPlayerID()) or 0
 	local died = not bot:IsAlive() or deaths > (realm.deaths or deaths)
 	if died or since > realm.duration + 1 then
 		local last = realm.lastTick or 0
-		realm.released, realm.releasedAt = died and "died" or "stale", realm.releasedAt or last
+		realm.released = ShadowRealmRules.JoinRelease(realm.released, died and "died" or "stale")
+		realm.releasedAt = realm.releasedAt or last
 		X.EndShadowRealm(realm, last, realm.at + last)
 		return false
 	end
@@ -485,14 +989,65 @@ function X.ShadowRealmTick()
 	end
 	-- The cast went out: the modifier is on, or the ability went on cooldown (in case the modifier name is wrong).
 	local castDone = inRealm or shadowRealmAbility:GetCooldownTimeRemaining() > 0
-	if since > 0.5 and not castDone then
-		realm.released = realm.released or "no-cast"
+	if castDone and realm.tookAt == nil then
+		realm.tookAt = since
+		if realm.castHold then
+			realm.castHold = nil
+			bot._castHoldUntil = nil
+		end
+	end
+	if not castDone then
+		-- Waiting for the one cast order to take (ShadowRealmRules.CastStep): no new order every think, at most a
+		-- spaced re-send, and the cast line is printed only once (X.StartShadowRealm). True: nothing else may
+		-- replace the order this think (the spells below, the attack mode through bot._attackHold).
+		local step = ShadowRealmRules.CastStep(since, since - (realm.orderAt or 0), realm.orders or 1)
+		if step == "give-up" then
+			realm.released = realm.released or "no-cast"
+			realm.drop = string.format(
+				" block=%s act=%d mode=%d",
+				X.CastBlocker(),
+				bot:GetCurrentActionType() or -1,
+				bot:GetActiveMode()
+			)
+			X.EndShadowRealm(realm, since)
+			return false
+		end
+		if step == "resend" and not Fu.CanNotUseAbility(bot) then
+			realm.orders = (realm.orders or 1) + 1
+			realm.orderAt = since
+			bot:Action_UseAbility(shadowRealmAbility)
+		end
+		return true
+	end
+	local ranOut = since > realm.duration + 0.2
+	local modifierGone = realm.modSeen ~= nil and not inRealm
+	if ranOut or modifierGone then
+		local early = modifierGone and ShadowRealmRules.EarlyDrop(realm.released, since, realm.duration)
+		if early then
+			realm.drop = string.format(
+				" drop-mode=%d>%d drop-act=%d>%d attacked=%s",
+				realm.tickMode or -1,
+				bot:GetActiveMode(),
+				realm.tickAct or -1,
+				bot:GetCurrentActionType() or -1,
+				bot:GetLastAttackTime() ~= realm.lastAttack and "yes" or "no"
+			)
+		end
+		-- The duration elapsed while she still reads as alive. Hold this think: a death on it is
+		-- counted after the think (game 092 t=2074, held=5.23 release=-). The next think, or the
+		-- respawn, says release=died. One line, the existing shadow-realm end line.
+		-- An attack realm runs this tick twice in one frame. The hold counts only on a later frame.
+		local heldAlready = realm.ranOutAt ~= nil and DotaTime() > realm.ranOutAt
+		if ShadowRealmRules.HoldRanOut(realm.released, heldAlready, ranOut, early) then
+			realm.ranOutAt = DotaTime()
+			realm.ranOut = true
+			return false
+		end
 		X.EndShadowRealm(realm, since)
 		return false
 	end
-	if since > realm.duration + 0.2 or realm.modSeen ~= nil and not inRealm then
-		X.EndShadowRealm(realm, since)
-		return false
+	if inRealm then
+		realm.tickMode, realm.tickAct = bot:GetActiveMode(), bot:GetCurrentActionType()
 	end
 	if realm.tp == "ordered" and bot:IsChanneling() then
 		realm.tp = "now"
@@ -501,7 +1056,16 @@ function X.ShadowRealmTick()
 		return false
 	end
 	if realm.why == "retreat" then
-		return X.ShadowRealmTeleport(realm, since, castDone)
+		if X.ShadowRealmTeleport(realm, since, castDone) then
+			return true
+		end
+		-- Move-only while the escape realm runs (#203 item 1): one move home every think, so neither her idle
+		-- auto-attack nor a mode's attack order ends the realm. Not while a TP order is going out (a move would
+		-- cancel it; the channel itself returned above). False: a spell may still go out after the move.
+		if realm.hold and realm.tp ~= "ordered" then
+			bot:Action_MoveToLocation(Fu.GetTeamFountain())
+		end
+		return false
 	end
 	if realm.why ~= "attack" or realm.released ~= nil or not castDone then
 		return false
@@ -598,6 +1162,46 @@ bot._attackHold = function()
 	end
 	realm = bot._dwRealm
 	return realm ~= nil and realm.released == nil
+end
+-- The escape realm's hold (bot._castHoldUntil): the item think calls this in place of its own steps, so only the
+-- realm tick and her spells run (X.SkillsComplement starts with the tick).
+function X.CastHoldTick()
+	X.SkillsComplement()
+end
+-- Why a realm cast never took, for the no-cast end line: stunned | silenced | hexed | channel | casting:<ability> |
+-- casting | using | queued:<n> | not-castable | -. The re-send is skipped while Fu.CanNotUseAbility is true, which
+-- also covers the casting / using / queued states.
+function X.CastBlocker()
+	if bot:IsStunned() then
+		return "stunned"
+	end
+	if bot:IsSilenced() then
+		return "silenced"
+	end
+	if bot:IsHexed() then
+		return "hexed"
+	end
+	if bot:IsChanneling() then
+		return "channel"
+	end
+	local active = bot:GetCurrentActiveAbility()
+	if active ~= nil and not active:IsNull() then
+		return "casting:" .. tostring(active:GetName())
+	end
+	if bot:IsCastingAbility() then
+		return "casting"
+	end
+	if bot:IsUsingAbility() then
+		return "using"
+	end
+	local queued = bot:NumQueuedActions() or 0
+	if queued > 0 then
+		return "queued:" .. queued
+	end
+	if not shadowRealmAbility:IsFullyCastable() then
+		return "not-castable"
+	end
+	return "-"
 end
 -- A Lua error in the realm tick (both callers pcall it): [SHy-ERROR] once per distinct message, at most 3, and the
 -- realm state is dropped so a broken hold never keeps her from attacking.
