@@ -125,6 +125,7 @@ function X.MinionThink(hMinionUnit)
 	Minion.MinionThink(hMinionUnit)
 end
 local ShadowRealmRules = require(GetScriptDirectory() .. "/lib/systems/shadow_realm_rules")
+local EnemySpells = require(GetScriptDirectory() .. "/lib/systems/enemy_spell_tracker")
 local brambleMazeAbility =
 	SafeAbility(bot:GetAbilityByName("dark_willow_bramble_maze"), "dark_willow_bramble_maze", "dark_willow")
 local shadowRealmAbility =
@@ -332,7 +333,9 @@ local enemySeen = setmetatable({}, { __mode = "k" })
 -- A unit handle does not carry a sighting across the fog (an enemy hero's handle can read IsNull out of vision,
 -- docs/BOT_API_RUNTIME.md "Enemy hero handles"; game 087 t=1108 kind=appear from=-1). So an "appear" is checked
 -- against his player's last-seen spot (GetHeroLastSeenInfo, team vision), sampled every LAST_SEEN_EVERY before the
--- sighting: player ID -> { loc, ago (time_since_seen then), at (DotaTime of the sample) }.
+-- sighting: player ID -> { loc, ago (time_since_seen then), at (DotaTime of the sample), anchor and since (the spot
+-- he was first seen at within LANDING_RADIUS, and when), prev (the last sighting before he reached that spot: loc,
+-- ago, at) }. Two sightings, because the newest can already be his landing spot (ShadowRealmRules.AppearIsJump).
 local enemyLastSeen = {}
 local LAST_SEEN_EVERY = 0.2
 -- Jump items and spells for ShadowRealmRules.AppearIsJump: a hero that has one can land next to her out of the fog.
@@ -377,6 +380,38 @@ local JUMP_SPELLS = {
 	furion_teleportation = true,
 	spirit_breaker_charge_of_darkness = true,
 }
+-- The casts that move the hero (for the fresh-cast check, EnemySpells via the cast callback): the jump items and
+-- spells above, except Illusory Orb, whose cast only sends the orb (the move is Ethereal Jaunt), and Fire Remnant,
+-- whose cast only sends a remnant (the move is Activate Fire Remnant); names as our hero files cast them
+-- (hero_puck.lua puck_ethereal_jaunt, hero_ember_spirit.lua ember_spirit_activate_fire_remnant).
+local JUMP_CASTS = {}
+for _, name in ipairs(JUMP_ITEMS) do
+	JUMP_CASTS[name] = true
+end
+for name in pairs(JUMP_SPELLS) do
+	JUMP_CASTS[name] = true
+end
+JUMP_CASTS.puck_illusory_orb = nil
+JUMP_CASTS.ember_spirit_fire_remnant = nil
+JUMP_CASTS.puck_ethereal_jaunt = true
+JUMP_CASTS.ember_spirit_activate_fire_remnant = true
+EnemySpells.InstallCastProbe(JUMP_CASTS)
+-- The newest jump cast the team saw this enemy hero make (EnemySpells.State: the callback's last report of it), as
+-- seconds ago and the spell, or nil.
+function X.RecentJumpCast(enemy, now)
+	local heroName = enemy:GetUnitName()
+	local bestAgo, bestName = nil, nil
+	for name in pairs(JUMP_CASTS) do
+		local _, entry = EnemySpells.State(heroName, name, now)
+		if entry ~= nil and entry.lastObs ~= nil then
+			local ago = now - entry.lastObs
+			if ago >= 0 and (bestAgo == nil or ago < bestAgo) then
+				bestAgo, bestName = ago, name
+			end
+		end
+	end
+	return bestAgo, bestName
+end
 -- The first jump item or learned jump spell of an enemy hero, or nil.
 function X.EnemyJumper(enemy)
 	for _, name in ipairs(JUMP_ITEMS) do
@@ -402,34 +437,61 @@ function X.SampleEnemyLastSeen(now)
 		local info = GetHeroLastSeenInfo(playerId)
 		local seen = info ~= nil and info[1] or nil
 		if seen ~= nil and seen.location ~= nil then
+			local ago = seen.time_since_seen or 0
 			local sample = enemyLastSeen[playerId]
 			if sample == nil then
-				sample = {}
+				sample = { anchor = seen.location, since = now - ago }
 				enemyLastSeen[playerId] = sample
+			elseif Fu.GetDistance(seen.location, sample.anchor) > ShadowRealmRules.LANDING_RADIUS then
+				-- A new spot: the sighting before it is kept as the approach.
+				sample.prev = { loc = sample.loc, ago = sample.ago, at = sample.at }
+				sample.anchor, sample.since = seen.location, now - ago
 			end
-			sample.loc, sample.ago, sample.at = seen.location, seen.time_since_seen or 0, now
+			sample.loc, sample.ago, sample.at = seen.location, ago, now
 		end
 	end
 end
--- An "appear" read: ShadowRealmRules.AppearIsJump with his last-seen sample and his jump item or spell. Returns
--- accepted, why, and the fields for the logs (seen: her distance to his last-seen spot, -1 none; ago; jumper).
+-- An "appear" read: ShadowRealmRules.AppearIsJump with his last two last-seen samples, his jump item or spell and
+-- the jump cast the team last saw him make. Returns accepted, why, and the fields for the logs (seen / ago: the
+-- sighting the rule read, her distance to it, -1 none; spot: seconds since he was first seen at the newest spot, -1
+-- none; landing: yes when the newest was his landing spot and the one before it was read; jumper: his jump item or
+-- spell, or the jump cast; cast: seconds since that cast, -1 none).
 function X.CheckAppear(enemy, dist, now)
 	local playerId = enemy:GetPlayerID()
 	local sample = playerId ~= nil and enemyLastSeen[playerId] or nil
-	local seenDist = sample ~= nil and GetUnitToLocationDistance(bot, sample.loc) or nil
-	local seenAgo = sample ~= nil and sample.ago + now - sample.at or nil
+	local o = { nowDist = dist, speed = enemy:GetCurrentMovementSpeed() or 0 }
+	if sample ~= nil then
+		o.seenDist = GetUnitToLocationDistance(bot, sample.loc)
+		o.seenAgo = sample.ago + now - sample.at
+		o.seenSpotAge = now - sample.since
+		o.seenOffset = GetUnitToLocationDistance(enemy, sample.loc)
+		if sample.prev ~= nil then
+			o.prevDist = GetUnitToLocationDistance(bot, sample.prev.loc)
+			o.prevAgo = sample.prev.ago + now - sample.prev.at
+		end
+	end
 	local jumper = X.EnemyJumper(enemy)
-	local accepted, why = ShadowRealmRules.AppearIsJump({
-		seenDist = seenDist,
-		seenAgo = seenAgo,
-		nowDist = dist,
-		speed = enemy:GetCurrentMovementSpeed() or 0,
-		jumper = jumper ~= nil,
-	})
-	return accepted, why, { seen = seenDist or -1, ago = seenAgo or -1, jumper = jumper or "-" }
+	o.jumper = jumper ~= nil
+	local castAgo, castName = X.RecentJumpCast(enemy, now)
+	o.castAgo = castAgo
+	local accepted, why, seenDist, seenAgo, landing = ShadowRealmRules.AppearIsJump(o)
+	if why == "cast" then
+		jumper = castName
+	end
+	return accepted,
+		why,
+		{
+			seen = seenDist or -1,
+			ago = seenAgo or -1,
+			jumper = jumper or "-",
+			spot = o.seenSpotAge or -1,
+			landing = landing and "yes" or "no",
+			cast = castAgo or -1,
+		}
 end
--- [SHy-DW] t= dark_willow jump-skip hero= why=walked|unseen|near|walk-reach to= seen= ago= jumper=: an enemy came
--- out of the fog next to her and it was read as a walk, not a jump-in (at most once per 3s per enemy).
+-- [SHy-DW] t= dark_willow jump-skip hero= why=walked|unseen|near|walk-reach to= seen= ago= jumper= spot= landing=
+-- cast=: an enemy came out of the fog next to her and it was read as a walk, not a jump-in (at most once per 3s per
+-- enemy). Fields as X.CheckAppear.
 function X.LogJumpSkip(enemy, why, dist, info)
 	local name = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
 	bot._dwJumpSkipLog = bot._dwJumpSkipLog or {}
@@ -440,14 +502,45 @@ function X.LogJumpSkip(enemy, why, dist, info)
 	pcall(
 		print,
 		string.format(
-			"[SHy-DW] t=%.0f dark_willow jump-skip hero=%s why=%s to=%d seen=%d ago=%.1f jumper=%s",
+			"[SHy-DW] t=%.0f dark_willow jump-skip hero=%s why=%s to=%d seen=%d ago=%.1f jumper=%s spot=%.1f landing=%s cast=%.1f",
 			DotaTime(),
 			name,
 			why,
 			dist,
 			info.seen,
 			info.ago,
-			info.jumper
+			info.jumper,
+			info.spot,
+			info.landing,
+			info.cast
+		)
+	)
+end
+-- [SHy-DW] t= dark_willow jump-seen hero= from= to= ago= via=tracked|cast|last-seen|jumper jumper= spot= landing=
+-- cast=: an enemy jump next to her was read, whether or not it casts the cornered realm (game 089 24:07: a 1v3
+-- jump-in printed nothing). via=tracked: his unit was seen from= away ago= seconds before (kind=jump); else an appear
+-- (X.CheckAppear: from= / ago= the sighting the rule read, -1 none). At most once per 3s per enemy.
+function X.LogJumpSeen(enemy, jump, info)
+	local name = (string.gsub(enemy:GetUnitName(), "npc_dota_hero_", ""))
+	bot._dwJumpSeenLog = bot._dwJumpSeenLog or {}
+	if DotaTime() - (bot._dwJumpSeenLog[name] or -999) < 3 then
+		return
+	end
+	bot._dwJumpSeenLog[name] = DotaTime()
+	pcall(
+		print,
+		string.format(
+			"[SHy-DW] t=%.0f dark_willow jump-seen hero=%s from=%d to=%d ago=%.1f via=%s jumper=%s spot=%.1f landing=%s cast=%.1f",
+			DotaTime(),
+			name,
+			info ~= nil and info.seen or jump.from,
+			jump.dist,
+			info ~= nil and info.ago or jump.fromAgo,
+			info ~= nil and jump.why or "tracked",
+			jump.jumper,
+			info ~= nil and info.spot or -1,
+			info ~= nil and info.landing or "-",
+			info ~= nil and info.cast or -1
 		)
 	)
 end
@@ -483,7 +576,9 @@ function X.TrackEnemyJumps()
 					seen = info and info.seen or -1,
 					ago = info and info.ago or -1,
 					jumper = info and info.jumper or "-",
+					fromAgo = last and now - last.at or -1,
 				}
+				X.LogJumpSeen(enemy, bot._dwJump, info)
 			end
 			if last == nil then
 				last = {}

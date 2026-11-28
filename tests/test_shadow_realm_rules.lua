@@ -686,3 +686,182 @@ T.test("dark willow: the realm TP counts a summon near her (#203, game 087 28:29
 	T.eq(orders[#orders], "use:item_tpscroll", "TP scroll used")
 	T.eq(bot._dwRealm.tpBy, "summon", "threat=summon")
 end)
+
+T.test("shadow realm: a landing sample is not the approach (#203, game 089 t=1015, game 091 t=757)", function()
+	local R = load()
+	local function appear(over)
+		local o = { nowDist = 144, speed = 310, jumper = false }
+		for k, v in pairs(over) do
+			o[k] = v
+		end
+		return R.AppearIsJump(o)
+	end
+	T.eq(R.IsLanding(0.1, 0), true, "a spot first seen 0.1s ago where he is now")
+	T.eq(R.IsLanding(1.3, 0), false, "a spot he has held for 1.3s")
+	T.eq(R.IsLanding(0.1, 600), false, "a fresh spot 600 from him")
+	T.eq(R.IsLanding(nil, 0), false, "no spot age")
+	-- Game 089 t=1015: Axe 144 from her, his newest last-seen spot is where he stands (seen=144 ago=0.1); the
+	-- sighting before it was 1100 away 0.4s before: a Blink.
+	local ok, why, seenDist, seenAgo, landing = appear({
+		seenDist = 144,
+		seenAgo = 0.1,
+		seenSpotAge = 0.1,
+		seenOffset = 0,
+		prevDist = 1100,
+		prevAgo = 0.4,
+		jumper = true,
+	})
+	T.eq(ok, true, "the landing spot is skipped and the approach shows the jump")
+	T.eq(why, "last-seen", "read from the sighting before the landing")
+	T.eq(seenDist, 1100, "the approach distance")
+	T.near(seenAgo, 0.4, 0.001, "the approach age")
+	T.eq(landing, true, "landing=yes")
+	-- The same landing with no earlier sighting: a Blink holder counts, a hero without a jump does not.
+	ok, why = appear({ seenDist = 144, seenAgo = 0.1, seenSpotAge = 0.1, seenOffset = 0, jumper = true })
+	T.eq(ok, true, "a Blink holder that landed out of nowhere")
+	T.eq(why, "jumper", "jumper")
+	ok, why = appear({ seenDist = 144, seenAgo = 0.1, seenSpotAge = 0.1, seenOffset = 0 })
+	T.eq(ok, false, "no jump, no approach seen")
+	T.eq(why, "unseen", "unseen")
+	-- Before the fix the landing sample was read as the approach: closed 0, a walk.
+	ok, why = appear({ seenDist = 144, seenAgo = 0.1, jumper = true })
+	T.eq(ok, false, "without the spot age the old reading stays")
+	T.eq(why, "walked", "walked")
+	-- Game 091 t=757: Puck came out of a 1s Phase Shift where he stood (phase-probe moved=0), seen=365 to=365 ago=0.2,
+	-- the spot held since before the Phase Shift: a reappear in place, not a jaunt.
+	local phaseOk, phaseWhy, _, _, phaseLanding = appear({
+		nowDist = 365,
+		seenDist = 365,
+		seenAgo = 0.2,
+		seenSpotAge = 1.4,
+		seenOffset = 0,
+		prevDist = 900,
+		prevAgo = 4,
+		jumper = true,
+	})
+	T.eq(phaseOk, false, "a Phase Shift exit in place is no jump-in")
+	T.eq(phaseWhy, "walked", "walked")
+	T.eq(phaseLanding, false, "landing=no")
+	-- A true walk out of the fog by a hero without a jump: the newest spot is fresh (where he came out), the one
+	-- before is far and old enough to walk from.
+	ok, why = appear({
+		nowDist = 418,
+		seenDist = 430,
+		seenAgo = 0.1,
+		seenSpotAge = 0.1,
+		seenOffset = 20,
+		prevDist = 3000,
+		prevAgo = 20,
+	})
+	T.eq(ok, false, "a walk out of the fog stays a walk")
+	T.eq(why, "walk-reach", "walk-reach")
+end)
+
+T.test("shadow realm: a jump cast just seen counts on its own (#203, game 091)", function()
+	local R = load()
+	local base = { nowDist = 365, seenDist = 365, seenAgo = 0.2, seenSpotAge = 1.4, seenOffset = 0, speed = 310 }
+	local function appear(over)
+		local o = {}
+		for k, v in pairs(base) do
+			o[k] = v
+		end
+		for k, v in pairs(over) do
+			o[k] = v
+		end
+		return R.AppearIsJump(o)
+	end
+	local ok, why = appear({ jumper = true, castAgo = 0.3 })
+	T.eq(ok, true, "a jaunt cast 0.3s ago")
+	T.eq(why, "cast", "why=cast")
+	ok, why = appear({ jumper = false, castAgo = 0.9 })
+	T.eq(ok, true, "the cast counts even when no jump item or spell read on him")
+	T.eq(why, "cast", "why=cast")
+	ok, why = appear({ jumper = true, castAgo = 1.5 })
+	T.eq(ok, false, "a cast 1.5s ago is not this jump")
+	T.eq(why, "walked", "walked")
+	ok, why = appear({ jumper = true, castAgo = -0.1 })
+	T.eq(ok, false, "a cast time after now is ignored")
+	T.eq(why, "walked", "walked")
+end)
+
+-- Two enemies: one 800 from her, one out of her view; GetHeroLastSeenInfo answers seen.offset / seen.ago for the
+-- second, changed between the thinks.
+local function lastSeenBot(walkerSetup)
+	local bot, X, used = castBot(BOT_MODE_PUSH_TOWER_MID, 1.0, false)
+	local near, walker = nil, nil
+	for _, hero in ipairs(T.stub.heroes) do
+		if hero._team ~= bot._team then
+			if near == nil then
+				near = hero
+			elseif walker == nil then
+				walker = hero
+			end
+		end
+	end
+	near._loc = bot._loc + Vector(800, 0, 0)
+	walker._loc = bot._loc + Vector(0, 3000, 0)
+	walker.GetAbilityInSlot = function()
+		return nil
+	end
+	if walkerSetup ~= nil then
+		walkerSetup(walker)
+	end
+	local seen = { offset = Vector(0, 3000, 0), ago = 0 }
+	local original = GetHeroLastSeenInfo
+	rawset(_G, "GetHeroLastSeenInfo", function(playerId)
+		if playerId == walker:GetPlayerID() then
+			return { { location = bot._loc + seen.offset, time_since_seen = seen.ago } }
+		end
+		return original(playerId)
+	end)
+	return bot, X, used, walker, seen
+end
+
+T.test("dark willow: a Blink landing seen by the team first is a jump-in (#203, game 089 t=1015)", function()
+	local bot, X, used, walker, seen = lastSeenBot()
+	-- Last seen 1400 away; then the team sees him at his landing spot 144 from her before she does.
+	seen.offset, seen.ago = Vector(0, 1400, 0), 0.2
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm before he shows")
+	T.stub.time = T.stub.time + 0.25
+	seen.offset, seen.ago = Vector(0, 144, 0), 0
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm: she does not see him yet")
+	T.stub.time = T.stub.time + 0.05
+	walker._loc = bot._loc + Vector(0, 144, 0)
+	X.SkillsComplement()
+	T.eq(used[1], "dark_willow_shadow_realm", "the realm after the jump-in")
+	local line = printedWith("jump-seen hero=")
+	T.ok(line ~= nil and string.find(line, "from=1400 to=144", 1, true) ~= nil, tostring(line))
+	T.ok(line ~= nil and string.find(line, "via=last-seen", 1, true) ~= nil, tostring(line))
+	T.ok(line ~= nil and string.find(line, "landing=yes", 1, true) ~= nil, tostring(line))
+	line = printedWith("realm-cornered trigger=jump")
+	T.ok(line ~= nil and string.find(line, "kind=appear from=-1 to=144 seen=1400", 1, true) ~= nil, tostring(line))
+end)
+
+T.test("dark willow: a Phase Shift exit in place is no jump-in (#203, game 091 t=757)", function()
+	local bot, X, used, walker, seen = lastSeenBot(function(unit)
+		local orb = T.stub.newAbility("puck_illusory_orb", unit, false)
+		orb.GetLevel = function()
+			return 1
+		end
+		unit.GetAbilityInSlot = function(_, slot)
+			return slot == 0 and orb or nil
+		end
+	end)
+	-- The team sees him standing 365 from her while her own list does not hold him (out of the world in Phase Shift).
+	seen.offset, seen.ago = Vector(0, 365, 0), 0
+	X.SkillsComplement()
+	T.stub.time = T.stub.time + 0.5
+	X.SkillsComplement()
+	T.stub.time = T.stub.time + 0.5
+	walker._loc = bot._loc + Vector(0, 365, 0)
+	X.SkillsComplement()
+	T.eq(#used, 0, "no realm")
+	T.eq(printedWith("realm-cornered"), nil, "no cornered line")
+	T.eq(printedWith("jump-seen hero="), nil, "no jump-seen line")
+	local line = printedWith("jump-skip hero=")
+	T.ok(line ~= nil and string.find(line, "why=walked to=365 seen=365", 1, true) ~= nil, tostring(line))
+	T.ok(line ~= nil and string.find(line, "jumper=puck_illusory_orb", 1, true) ~= nil, tostring(line))
+	T.ok(line ~= nil and string.find(line, "landing=no", 1, true) ~= nil, tostring(line))
+end)

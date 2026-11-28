@@ -168,36 +168,70 @@ end
 -- orders, kind=appear from=-1, no Blink until 31:32, and the realm went out at full HP in a 2v1). o: seenDist (her
 -- distance now to his last-seen spot, GetHeroLastSeenInfo sampled before this sighting; nil: never seen), seenAgo
 -- (seconds since that sighting), nowDist, speed (his move speed), jumper (he has a Blink item or a jump spell).
+-- The landing (#203, game 089 t=1015, 2313, 2347: Axe with a Blink Dagger showed up 107-144 from her and was read
+-- as a walk, seen == to with ago 0.0-0.1): the team's last-seen spot can already be where he landed, sampled a moment
+-- before her own sighting. seenSpotAge (seconds since he was first seen at that spot) and seenOffset (that spot to
+-- where he is now): a spot first seen under LANDING_AGE ago within LANDING_RADIUS of him is the landing, not the
+-- approach (ShadowRealmRules.IsLanding), and the sighting before it is used: prevDist / prevAgo (nil: none).
+-- A spot held longer is a reappear in place (game 091 t=757: Puck came out of a 1s Phase Shift where he stood,
+-- `phase-probe moved=0`, jump-skip seen=365 to=365): that sample stays, and it reads as a walk.
+-- castAgo: seconds since the team saw him cast a jump (a Blink item or a jump spell, enemy_spell_tracker.lua's cast
+-- callback; nil: none seen). One within JUMP_CAST_RECENT counts on its own.
 -- Proven by the last-seen spot: JUMP_CLOSED (500) or more closer, and more than he could walk in that time + 100.
 -- Else a hero with a jump counts, unless he was seen within APPEAR_RECENT less than 500 farther (that was a walk).
--- Returns true, "last-seen" | "jumper", or false, "walked" | "unseen" | "near" | "walk-reach".
+-- Returns true, "cast" | "last-seen" | "jumper", or false, "walked" | "unseen" | "near" | "walk-reach"; then the
+-- sighting it read (distance, age; nil: none) and whether the newest one was the landing.
 ShadowRealmRules.APPEAR_WALK_MARGIN = 100
 ShadowRealmRules.APPEAR_RECENT = 2.0
+-- Judgement values: a Blink lands at once, and her think samples the last-seen spot every 0.2s, so a landing spot is
+-- at most about 0.2-0.3s old when she sees him; 200 covers his walk in that time (550 move speed * 0.3 = 165).
+ShadowRealmRules.LANDING_AGE = 0.5
+ShadowRealmRules.LANDING_RADIUS = 200
+-- Blink Dagger and the jump spells have cast point 0 or near it (judgement), so the cast and the landing come within a
+-- second of each other.
+ShadowRealmRules.JUMP_CAST_RECENT = 1.0
+function ShadowRealmRules.IsLanding(spotAge, offset)
+	return spotAge ~= nil
+		and offset ~= nil
+		and spotAge < ShadowRealmRules.LANDING_AGE
+		and offset <= ShadowRealmRules.LANDING_RADIUS
+end
 function ShadowRealmRules.AppearIsJump(o)
+	local seenDist, seenAgo = o.seenDist, o.seenAgo
+	local landing = seenDist ~= nil and ShadowRealmRules.IsLanding(o.seenSpotAge, o.seenOffset)
+	if landing then
+		seenDist, seenAgo = o.prevDist, o.prevAgo
+	end
+	if seenDist == nil or seenAgo == nil then
+		seenDist, seenAgo = nil, nil
+	end
+	if o.castAgo ~= nil and o.castAgo >= 0 and o.castAgo <= ShadowRealmRules.JUMP_CAST_RECENT then
+		return true, "cast", seenDist, seenAgo, landing
+	end
 	local closed = nil
-	if o.seenDist ~= nil and o.seenAgo ~= nil then
-		closed = o.seenDist - o.nowDist
+	if seenDist ~= nil then
+		closed = seenDist - o.nowDist
 	end
 	if
 		closed ~= nil
 		and closed >= ShadowRealmRules.JUMP_CLOSED
-		and closed > (o.speed or 0) * o.seenAgo + ShadowRealmRules.APPEAR_WALK_MARGIN
+		and closed > (o.speed or 0) * seenAgo + ShadowRealmRules.APPEAR_WALK_MARGIN
 	then
-		return true, "last-seen"
+		return true, "last-seen", seenDist, seenAgo, landing
 	end
 	if o.jumper then
-		if closed ~= nil and o.seenAgo <= ShadowRealmRules.APPEAR_RECENT and closed < ShadowRealmRules.JUMP_CLOSED then
-			return false, "walked"
+		if closed ~= nil and seenAgo <= ShadowRealmRules.APPEAR_RECENT and closed < ShadowRealmRules.JUMP_CLOSED then
+			return false, "walked", seenDist, seenAgo, landing
 		end
-		return true, "jumper"
+		return true, "jumper", seenDist, seenAgo, landing
 	end
 	if closed == nil then
-		return false, "unseen"
+		return false, "unseen", seenDist, seenAgo, landing
 	end
 	if closed < ShadowRealmRules.JUMP_CLOSED then
-		return false, "near"
+		return false, "near", seenDist, seenAgo, landing
 	end
-	return false, "walk-reach"
+	return false, "walk-reach", seenDist, seenAgo, landing
 end
 
 -- An enemy summon for the realm TP gate (#203, game 087 28:29-28:37: a storm brewling's Cyclone and an earth
