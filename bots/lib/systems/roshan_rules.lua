@@ -105,8 +105,8 @@ end
 --   s.human, s.pinged, s.acked, s.onTheWay
 function RoshanRules.CountsForTake(s)
 	s = s or {}
-	if s.human and not s.pinged and not s.acked then
-		return false
+	if s.human then
+		return s.pinged == true or s.acked == true or s.onTheWay == true
 	end
 	return s.acked == true or s.onTheWay == true
 end
