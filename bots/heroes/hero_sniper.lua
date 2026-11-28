@@ -165,7 +165,6 @@ function X.SkillsComplement()
 	end
 	local context = AbilityContext.Build(bot)
 	retainMana = 280
-	aetherRange = context.aetherRange
 	botLevel = context.level
 	botTarget = context.target
 	nearbyEnemies = context.enemies
