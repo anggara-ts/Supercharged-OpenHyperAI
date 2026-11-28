@@ -17,16 +17,18 @@ function X.ConsiderStolenSpell(ability)
 		local CinderBrewDesire, CinderBrewLocation = X.ConsiderCinderBrew()
 		if CinderBrewDesire > 0 then
 			bot:Action_UseAbilityOnLocation(cinderBrewAbility, CinderBrewLocation)
-			return
+			return "cast", CinderBrewLocation
 		end
+		return true
 	end
 	if abilityName == "brewmaster_thunder_clap" then
 		thunderClapAbility = ability
 		local ThunderClapDesire = X.ConsiderThunderClap()
 		if ThunderClapDesire > 0 then
 			bot:Action_UseAbility(thunderClapAbility)
-			return
+			return "cast"
 		end
+		return true
 	end
 end
 function X.ConsiderThunderClap()
