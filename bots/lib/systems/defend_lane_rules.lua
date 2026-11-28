@@ -248,9 +248,14 @@ function DefendLaneRules.AssignRims(rims, bots, previous)
 		byLane[rim.lane] = rim
 		count[rim.lane] = 0
 	end
+	-- On a tie the base rim (the T4s and the Ancient) wins (#294, maintainer 2026-11-28: "high ground base should count
+	-- as 1 area not mid/bot/top"): heroes at the Ancient are also within reach of a lane rim, and game 091 put all five
+	-- bots on the mid rim while the four heroes hit the Ancient.
 	local heroRim = nil
 	for _, rim in ipairs(rims) do
-		if rim.why == "heroes" and (heroRim == nil or (rim.heroes or 0) > (heroRim.heroes or 0)) then
+		local heroes = rim.heroes or 0
+		local best = heroRim ~= nil and (heroRim.heroes or 0) or -1
+		if rim.why == "heroes" and (heroes > best or heroes == best and rim.lane == "base") then
 			heroRim = rim
 		end
 	end
@@ -322,6 +327,22 @@ function DefendLaneRules.LaneStayBack(now, even, backUntil, evenSince)
 		return false
 	end
 	return evenSince == nil or now - evenSince < DefendLaneRules.LANE_EVEN_SECONDS
+end
+
+-- The one base lane a bot defends while the base is under threat (#294). Two rules used to pick it on their own: the
+-- bot's base-lane gate (the lane where enemy heroes were seen) and the team's rim assignment (AssignRims). When they
+-- named different lanes each zeroed the other's, and every lane read 0. Game 091, 38:23-39:00: Zeus, Dark Willow and
+-- Winter Wyvern at full HP stood in retreat mode at 0.00 while four Radiant heroes took the Ancient from 100% to 3%
+-- (`base-lane=top(seen)` against `base-assign lane=mid ... assigned=dark_willow,...`). The assignment wins: it is the
+-- team's decision and the one that also zeroes the other lanes.
+--   assignedLane  the lane of this bot's assigned rim (nil: no assignment, or the bot is not assigned)
+--   seenLane      the lane the gate's own rule picked (nil: none)
+-- Returns the lane, its source ("assigned" | "seen"), and whether the two disagreed.
+function DefendLaneRules.ChooseBaseLane(assignedLane, seenLane)
+	if assignedLane ~= nil then
+		return assignedLane, "assigned", seenLane ~= nil and seenLane ~= assignedLane
+	end
+	return seenLane, "seen", false
 end
 
 return DefendLaneRules

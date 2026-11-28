@@ -240,3 +240,38 @@ T.test("lane defence (game 069): after a lane-back, stay back 4s unless even for
 	T.eq(R.LaneStayBack(104, true, 104, 103.9), false, "hold over")
 	T.eq(R.LaneStayBack(102, true, nil, nil), false, "no hold, even: go")
 end)
+
+T.test("base lane (#294): the team's rim assignment decides, the seen lane only without one", function()
+	local R = rules()
+	-- Game 091, 38:23: the gate saw the heroes on top, the assignment put the bot on the mid rim.
+	local lane, why, conflict = R.ChooseBaseLane("mid", "top")
+	T.eq(lane, "mid", "the assignment wins")
+	T.eq(why, "assigned")
+	T.eq(conflict, true, "the two disagreed")
+	lane, why, conflict = R.ChooseBaseLane("mid", "mid")
+	T.eq(lane, "mid")
+	T.eq(conflict, false, "same lane: no conflict")
+	lane, why, conflict = R.ChooseBaseLane(nil, "top")
+	T.eq(lane, "top", "no assignment: the seen lane")
+	T.eq(why, "seen")
+	T.eq(conflict, false)
+	T.eq((R.ChooseBaseLane(nil, nil)), nil, "nothing to pick")
+end)
+
+T.test("base split (#294): heroes at the Ancient pull the group to the base rim on a tie with a lane rim", function()
+	local R = rules()
+	local three = bots({ { "a", 3000, 3000 }, { "b", 2000, 4000 }, { "c", 4000, 2000 } })
+	-- Game 091, 38:39: four heroes counted at the mid rim and at the base rim; all bots went to mid before.
+	local rims = {
+		{ lane = "mid", why = "heroes", heroes = 4, need = 5, alive = true },
+		{ lane = "base", why = "heroes", heroes = 4, need = 5, alive = true },
+	}
+	local assign = R.AssignRims(rims, three, {})
+	T.eq(assign.a, "base")
+	T.eq(assign.b, "base")
+	T.eq(assign.c, "base")
+	-- More heroes at a lane rim still win there.
+	rims[1].heroes = 5
+	assign = R.AssignRims(rims, three, {})
+	T.eq(assign.a, "mid", "five at mid against four at the base")
+end)

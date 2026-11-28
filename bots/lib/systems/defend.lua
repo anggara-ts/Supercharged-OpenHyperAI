@@ -978,6 +978,19 @@ local function BaseModeLane(bot)
 	end
 	return Lane.Mid
 end
+-- The lane of this bot's rim in the team's base assignment, the same lane BaseAssignDesire keeps (#294), or nil
+-- when there is no assignment or the bot has no rim.
+local function AssignedBaseLane(bot)
+	local assignment = BaseAssignment()
+	if not assignment.active then
+		return nil
+	end
+	local rimLane = assignment.assign[bot:GetPlayerID()]
+	if rimLane == "base" then
+		return BaseModeLane(bot)
+	end
+	return rimLane
+end
 function Defend.ShouldDefend(bot, building, radius)
 	if not isAliveBuilding(building) then
 		return false
@@ -1428,10 +1441,35 @@ function Defend.GetDefendDesireHelper(bot, lane)
 	-- enemies at the bottom T3 out of sight, bot read 0 "no-threat", top 0.30 "base-floor"), Primal
 	-- Beast's defend mode flipped to top and he TPed from the fountain to the top T2, chatting
 	-- "Defending the base!". The bot then stays on the base lane: no "no-threat" exit below either.
+	-- #294: the team's rim assignment decides the lane when it gives this bot one, so this gate and BaseAssignDesire
+	-- keep the same lane (they used to pick different ones and zero each other's: every lane read 0).
 	local baseLane = nil
 	if baseFloor.active or enemiesAtAncient >= 2 then
-		local why
-		baseLane, why = BaseThreatLane(gameState.team, threatLane)
+		local why, seenWhy, conflict
+		local seenLane
+		seenLane, seenWhy = BaseThreatLane(gameState.team, threatLane)
+		local assignedLane = AssignedBaseLane(bot)
+		baseLane, why, conflict = DefendLaneRules.ChooseBaseLane(assignedLane, seenLane)
+		if why == "seen" then
+			why = seenWhy
+		end
+		if conflict and DotaTime() >= (bot._baseLaneConflictLogAt or -999) and not Fu.IsMeepoClone(bot) then
+			bot._baseLaneConflictLogAt = DotaTime() + 5
+			pcall(
+				print,
+				string.format(
+					"[SHy-DEFEND] t=%.0f %s base-lane-conflict own=%s(%s) assigned=%s fixed=%s hg=%d anc=%d",
+					DotaTime(),
+					(string.gsub(bot:GetUnitName(), "npc_dota_hero_", "")),
+					tostring(laneNames[seenLane]),
+					tostring(seenWhy),
+					tostring(laneNames[assignedLane]),
+					tostring(laneNames[baseLane]),
+					enemiesOnHG or 0,
+					enemiesAtAncient or 0
+				)
+			)
+		end
 		if baseLane ~= nil and lane ~= baseLane then
 			if DotaTime() >= (bot._baseLaneLogAt or -999) and not Fu.IsMeepoClone(bot) then
 				bot._baseLaneLogAt = DotaTime() + 5
