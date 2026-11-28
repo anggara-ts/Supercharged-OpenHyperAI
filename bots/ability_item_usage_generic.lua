@@ -38,6 +38,7 @@ local AbilityContext = require(GetScriptDirectory() .. "/lib/systems/ability_con
 local GlyphRules = require(GetScriptDirectory() .. "/lib/systems/glyph_rules")
 local SpecialUnits = require(GetScriptDirectory() .. "/lib/hero/special_units")
 local ForeignItems = require(GetScriptDirectory() .. "/lib/systems/foreign_items")
+local AeonHold = require(GetScriptDirectory() .. "/lib/systems/aeon_hold")
 CustomLoader.ThinkLess = CustomLoader.Enable and CustomLoader.ThinkLess or 1
 local lastHumanPingTime = -1
 -- Which bot logs the pings, re-read once a second (#52: five team members read on every item think of every bot).
@@ -11718,6 +11719,8 @@ function ItemUsageThink()
 	pcall(TrackCyclone)
 	-- Ability charges for every bot (the API has no ability-charge read); before any gate below.
 	pcall(ChargeTracker.Tick, bot)
+	-- The bot's own Aeon Disk buff turns on the hold of its pure damage spells (#47); before any gate below.
+	pcall(AeonHold.Track, bot)
 	local tWatch = PartStart()
 	pcall(Usage.TrackTeleportJump)
 	pcall(Usage.WatchStillUnderHit)
