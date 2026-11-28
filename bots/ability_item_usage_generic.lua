@@ -225,6 +225,15 @@ local function CheckArdmHeroSwap()
 	end
 	return false
 end
+-- "I will play position 1 (Safelane)": the position name from the `!pos` list (#210, maintainer 2026-11-23).
+local function PlayPosLine(position)
+	local PosRules = require(GetScriptDirectory() .. "/lib/systems/pos_command_rules")
+	return Localization.Get("say_play_pos")
+		.. tostring(position)
+		.. " ("
+		.. PosRules.Name(position, Localization.Get("pos_names"))
+		.. ")"
+end
 local function LevelUpAbilities()
 	if GetGameState() ~= GAME_STATE_PRE_GAME and GetGameState() ~= GAME_STATE_GAME_IN_PROGRESS then
 		return
@@ -276,18 +285,28 @@ local function LevelUpAbilities()
 			and bot.announcedRole ~= position
 		then
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				bot:ActionImmediate_Chat(PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
 	elseif position ~= lastPosition then
-		log("[PosSwap] %s position changed: pos%s -> pos%s", botName, lastPosition, position)
+		print(
+			string.format(
+				"[SHy-ROLE] t=%.0f %s position-change pos=%s->%s",
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(lastPosition),
+				tostring(position)
+			)
+		)
 		lastPosition = position
 		ReloadBotBuild("Position swap to pos" .. position)
 		bot.needPurchaseRebuild = true
 		if bot.isBear == nil and bot.announcedRole ~= position then
+			-- After a swap the line answers the player's command: not filtered as a repeat (game 088, #211).
+			local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
 			pcall(function()
-				bot:ActionImmediate_Chat(Localization.Get("say_play_pos") .. tostring(position), false)
+				ChatGuard.SayDirect(bot, PlayPosLine(position), false)
 				bot.announcedRole = position
 			end)
 		end
@@ -992,6 +1011,105 @@ function Usage.SetTalkMessage()
 	lastDeaths = GetHeroDeaths(playerId)
 	lastGold = bot:GetGold()
 end
+-- `!pos` (#210): every bot of the team says its position in team chat, "Pos 1 Safelane" ... "Pos 5 Hard Support".
+-- hero_selection.lua (draft and pre-game) and the reply member's chat callback (in game) put the request on the
+-- shared Role table; each bot answers it from its own think, pos 1 first (bots/lib/systems/pos_command_rules.lua).
+do
+	local PosRules = require(GetScriptDirectory() .. "/lib/systems/pos_command_rules")
+	function Usage.NotePosRequest(chatText, senderPlayerId)
+		local posCommand = PosRules.Parse(chatText)
+		if posCommand == nil then
+			return false
+		end
+		if posCommand.kind == "list" and not IsPlayerBot(senderPlayerId) and Fu.Role.IsAllyMemberID(senderPlayerId) then
+			Fu.Role.PosListRequest = { at = GameTime(), sender = senderPlayerId }
+			print(
+				string.format(
+					'[SHy-ROLE] t=%.0f %s cmd="%s" result=list-request via=bot-chat',
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					chatText
+				)
+			)
+		end
+		return true
+	end
+	function Usage.AnswerPosRequest()
+		local request = Fu.Role.PosListRequest
+		if
+			request == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local position = Fu.GetPosition(bot)
+		local now = GameTime()
+		local state = PosRules.AnswerState(request.at, bot.posRequestHandledAt, bot.posAnsweredAt, now, position)
+		if state == "none" or state == "wait" then
+			return
+		end
+		bot.posRequestHandledAt = request.at
+		if state == "drop" then
+			return
+		end
+		bot.posAnsweredAt = now
+		local line = PosRules.Line(position, Localization.Get("pos_names"), Localization.Get("say_pos_prefix"))
+		local said = pcall(function()
+			bot:ActionImmediate_Chat(line, false)
+		end)
+		print(
+			string.format(
+				'[SHy-ROLE] t=%.0f %s pos-say pos=%s said=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(position),
+				said and "yes" or "no",
+				line
+			)
+		)
+	end
+	-- A refused `!pos Y` / `!Xpos Y` (hero_selection.lua QueueSwapReply): the chosen bot says the reason in team chat,
+	-- once. Any bot drops a reply nobody said within PosRules.ReplyMaxAge, so a lost reply still leaves a log line.
+	local ChatGuard = require(GetScriptDirectory() .. "/lib/systems/chat_guard")
+	function Usage.AnswerPosSwapReply()
+		local reply = Fu.Role.PosSwapReply
+		if
+			reply == nil
+			or bot.isBear ~= nil
+			or bot:IsIllusion()
+			or Fu.IsMeepoClone(bot)
+			or bot:HasModifier("modifier_arc_warden_tempest_double")
+		then
+			return
+		end
+		local stale = GameTime() - reply.at > PosRules.ReplyMaxAge
+		if not stale and bot:GetPlayerID() ~= reply.speaker then
+			return
+		end
+		Fu.Role.PosSwapReply = nil
+		local said = "stale"
+		if not stale then
+			-- A reply to a typed command skips the repeat guard (game 088: the same command typed twice must be answered
+			-- twice), see ChatGuard.SayDirect.
+			said = pcall(function()
+				ChatGuard.SayDirect(bot, reply.line, false)
+			end) and "yes" or "error"
+		end
+		print(
+			string.format(
+				'[SHy-ROLE] t=%.0f %s swap-reply result=%s said=%s line="%s"',
+				DotaTime(),
+				(string.gsub(botName, "npc_dota_hero_", "")),
+				tostring(reply.result),
+				said,
+				reply.line
+			)
+		)
+	end
+end
 function Usage.SetReplyHumanTime(chatEvent)
 	pcall(LogHeardAny, chatEvent)
 	local chatText = chatEvent.string
@@ -1024,6 +1142,10 @@ function Usage.SetReplyHumanTime(chatEvent)
 		local command, language = Fu.Utils.TrimString(chatText):match("^(%S+)%s+(.*)$")
 		log("Set to speak: %s", language)
 		Fu.Customize.Localization = language
+		return
+	end
+	-- Position commands (#210): `!pos` asks the bots for their positions; none of them gets a chat reply.
+	if Usage.NotePosRequest(chatText, senderPlayerId) then
 		return
 	end
 	local chatCommand = Fu.Utils.TrimString(chatText or ""):lower()
@@ -1181,12 +1303,36 @@ function Usage.WatchFountainPings()
 	local team = GetTeam()
 	local shared = PingStreak.Team(team)
 	if shared.slots == nil or now >= shared.slotsAt or now < shared.slotsAt - 5 then
-		-- The humans' team slots (GetTeamMember takes a slot 1-5), re-read every 5s.
-		shared.slots, shared.slotsAt = {}, now + 5
-		for slot, playerId in ipairs(GetTeamPlayers(team)) do
-			if not IsPlayerBot(playerId) then
-				shared.slots[#shared.slots + 1] = { slot = slot, id = playerId }
+		-- The humans' team slots, re-read every 5s, from GetTeamMember itself (PingStreak.HumanSlots): the
+		-- GetTeamPlayers order is not the GetTeamMember slot order on a Dire team with a human (games 086 and 087: the
+		-- human was GetTeamMember(1) but second in GetTeamPlayers, so slot 2, Zeus, was read and no ping counted).
+		local members = {}
+		for slot = 1, #GetTeamPlayers(team) do
+			local member = GetTeamMember(slot)
+			if member ~= nil and not member:IsNull() then
+				members[slot] = { bot = member:IsBot(), id = member:GetPlayerID() }
 			end
+		end
+		local slotsKey
+		shared.slots, slotsKey = PingStreak.HumanSlots(members)
+		shared.slotsAt = now + 5
+		-- [SHy-CHAT] fountain-watch (#222): which humans the team reads pings from, once per change per team.
+		if slotsKey ~= shared.slotsKey then
+			shared.slotsKey = slotsKey
+			local playerIds = {}
+			for _, playerId in ipairs(GetTeamPlayers(team)) do
+				playerIds[#playerIds + 1] = tostring(playerId)
+			end
+			print(
+				string.format(
+					"[SHy-CHAT] t=%.0f %s fountain-watch team=%s humans=%s players=%s",
+					DotaTime(),
+					(string.gsub(botName, "npc_dota_hero_", "")),
+					team == TEAM_RADIANT and "radiant" or "dire",
+					slotsKey,
+					table.concat(playerIds, ",")
+				)
+			)
 		end
 	end
 	local fountain = Fu.GetTeamFountain()
@@ -10068,7 +10214,10 @@ end
 -- the human keeps the shared Glyph for their own call (a bot spending it would take the charge from them). The rules
 -- (values, 7.42 sources) are in bots/lib/systems/glyph_rules.lua. Our own charge count is only valid because of this
 -- guard (no one else on the team casts).
-local GlyphState = { charges = nil, towerHp = {}, pending = nil, lastWaitLog = -100 }
+-- lastAt: our last Glyph per building name; allyLoc: our heroes' locations at the last tick (walking in or not);
+-- lastHelpLog: the last glyph-skip why=no-help line per building.
+local GlyphState =
+	{ charges = nil, towerHp = {}, pending = nil, lastWaitLog = -100, lastAt = {}, allyLoc = {}, lastHelpLog = {} }
 local GLYPH_TOWERS = {
 	{ id = TOWER_TOP_1, name = "top_1", tier = 1 },
 	{ id = TOWER_MID_1, name = "mid_1", tier = 1 },
@@ -10129,13 +10278,51 @@ local function GlyphTowerAttacked(tower)
 	end
 	return false
 end
-local function GlyphCast(why, building, name, enemies, allies)
+-- Our heroes on the way to a building, who can help within its 7s of Glyph (#12, second save Glyph): alive, not
+-- retreating, within HELP_RADIUS and 100+ closer than at the last tick (walking in), or a teleport of ours landing
+-- within TP_RADIUS of it. One standing near it without fighting (game 085 t=3636: two Radiant heroes held at the
+-- fountain while Dire took the T4) does not count; one fighting there is in GlyphAlliesFighting.
+-- Returns the count and how many of them are teleports.
+local function GlyphHelpComing(building, prevLoc)
+	local count, tp, seen = 0, 0, {}
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
+		if Fu.IsValidHero(ally) and not ally:IsIllusion() and not seen[ally:GetPlayerID()] then
+			local dist = GetUnitToUnitDistance(ally, building)
+			local prev = prevLoc[ally:GetPlayerID()]
+			if
+				dist <= GlyphRules.HELP_RADIUS
+				and ally:GetActiveMode() ~= BOT_MODE_RETREAT
+				and prev ~= nil
+				and GetUnitToLocationDistance(building, prev) - dist >= 100
+			then
+				seen[ally:GetPlayerID()] = true
+				count = count + 1
+			end
+		end
+	end
+	for _, teleport in ipairs(GetIncomingTeleports() or {}) do
+		if
+			teleport ~= nil
+			and teleport.location ~= nil
+			and IsTeamPlayer(teleport.playerid)
+			and not seen[teleport.playerid]
+			and GetUnitToLocationDistance(building, teleport.location) <= GlyphRules.TP_RADIUS
+		then
+			seen[teleport.playerid] = true
+			count = count + 1
+			tp = tp + 1
+		end
+	end
+	return count, tp
+end
+local function GlyphCast(why, building, name, enemies, allies, help, tp, rule)
 	bot:ActionImmediate_Glyph()
 	GlyphRules.Spend(GlyphState.charges, DotaTime())
 	GlyphState.pending = { building = building, name = name, why = why }
+	GlyphState.lastAt[name] = DotaTime()
 	print(
 		string.format(
-			"[SHy-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d",
+			"[SHy-GLYPH] t=%.0f %s glyph why=%s tower=%s enemies=%d allies=%d hp=%.2f team=%d charges=%d help=%d tp=%d rule=%s alone=%s",
 			DotaTime(),
 			string.gsub(botName, "npc_dota_hero_", ""),
 			why,
@@ -10144,9 +10331,56 @@ local function GlyphCast(why, building, name, enemies, allies)
 			allies,
 			building:GetHealth() / building:GetMaxHealth(),
 			team,
-			GlyphState.charges.charges
+			GlyphState.charges.charges,
+			help,
+			tp,
+			rule or "none",
+			(allies < 1 and help < 1) and "yes" or "no"
 		)
 	)
+end
+-- Save a dying building (#12). A repeat on the same building within 20s, or our last charge, needs one of our heroes
+-- there or walking in (GlyphRules.ShouldSpendSave); else keep the charge and say so (at most every 10s per building).
+-- true when the Glyph was cast.
+local function GlyphTrySave(kind, building, name, radius, prevLoc, now)
+	local enemies = GlyphEnemiesNear(building, radius)
+	local allies = GlyphAlliesFighting(building, enemies)
+	local help, tp = GlyphHelpComing(building, prevLoc)
+	local last = GlyphState.lastAt[name]
+	local sinceSame = last ~= nil and now - last or nil
+	local ok, why, rule = GlyphRules.ShouldSpendSave({
+		kind = kind,
+		charges = GlyphState.charges.charges,
+		sinceSame = sinceSame,
+		allies = allies,
+		coming = help,
+	})
+	if ok then
+		GlyphCast("save", building, name, #enemies, allies, help, tp, rule)
+		return true
+	end
+	if now - (GlyphState.lastHelpLog[name] or -100) >= 10 then
+		GlyphState.lastHelpLog[name] = now
+		print(
+			string.format(
+				"[SHy-GLYPH] t=%.0f %s glyph-skip why=%s rule=%s tower=%s enemies=%d allies=%d help=%d tp=%d hp=%.2f team=%d charges=%d since=%s",
+				now,
+				string.gsub(botName, "npc_dota_hero_", ""),
+				why,
+				rule or "none",
+				name,
+				#enemies,
+				allies,
+				help,
+				tp,
+				building:GetHealth() / building:GetMaxHealth(),
+				team,
+				GlyphState.charges.charges,
+				sinceSame ~= nil and string.format("%.0f", sinceSame) or "-"
+			)
+		)
+	end
+	return false
 end
 local function UseGlyphIfNeeded()
 	if
@@ -10164,6 +10398,31 @@ local function UseGlyphIfNeeded()
 		GlyphState.charges = GlyphRules.NewCharges()
 	end
 	GlyphRules.Tick(GlyphState.charges, now)
+	-- Correct our count from what the API says (#12, game 085: our count gave a charge back 96s early).
+	local glyphCdNow = GetGlyphCooldown()
+	local syncedFrom = GlyphRules.Sync(GlyphState.charges, now, glyphCdNow)
+	if syncedFrom ~= nil then
+		print(
+			string.format(
+				"[SHy-GLYPH] t=%.0f %s charge-sync charges=%d->%d cd=%.1f team=%d",
+				now,
+				string.gsub(botName, "npc_dota_hero_", ""),
+				syncedFrom,
+				GlyphState.charges.charges,
+				glyphCdNow,
+				team
+			)
+		)
+	end
+	-- Our heroes' locations now and at the last tick (2s ago): who is walking in to a building (GlyphHelpComing).
+	local prevLoc = GlyphState.allyLoc
+	local allyLoc = {}
+	for _, ally in pairs(GetUnitList(UNIT_LIST_ALLIED_HEROES)) do
+		if Fu.IsValidHero(ally) and not ally:IsIllusion() then
+			allyLoc[ally:GetPlayerID()] = ally:GetLocation()
+		end
+	end
+	GlyphState.allyLoc = allyLoc
 	-- One tick (2s) after a cast: did the building get the Glyph, and what does GetGlyphCooldown read with 2 charges?
 	local pending = GlyphState.pending
 	if pending ~= nil then
@@ -10196,8 +10455,8 @@ local function UseGlyphIfNeeded()
 	local prevHp = GlyphState.towerHp
 	GlyphState.towerHp = towerHp
 	-- On cooldown: no cast, but the fight scan still runs so glyph-skip why=cooldown shows what the API reads.
-	local glyphCd = GetGlyphCooldown()
-	-- 1. Save a dying building (unchanged thresholds), first.
+	local glyphCd = glyphCdNow
+	-- 1. Save a dying building (unchanged thresholds), first; a repeat or our last charge only with help (#12).
 	for _, info in ipairs(GLYPH_TOWERS) do
 		local tower = GetTower(team, info.id)
 		if
@@ -10212,10 +10471,10 @@ local function UseGlyphIfNeeded()
 				tower:HasModifier("modifier_fountain_glyph")
 			)
 		then
-			local enemies =
-				GlyphEnemiesNear(tower, (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN)
-			GlyphCast("save", tower, info.name, #enemies, GlyphAlliesFighting(tower, enemies))
-			return
+			local radius = (tower:GetAttackRange() or GlyphRules.TOWER_RANGE) + GlyphRules.RANGE_MARGIN
+			if GlyphTrySave("tower", tower, info.name, radius, prevLoc, now) then
+				return
+			end
 		end
 	end
 	local barracksList = {
@@ -10236,9 +10495,9 @@ local function UseGlyphIfNeeded()
 				barracks:HasModifier("modifier_fountain_glyph")
 			)
 		then
-			local enemies = GlyphEnemiesNear(barracks, 900)
-			GlyphCast("save", barracks, info.name, #enemies, GlyphAlliesFighting(barracks, enemies))
-			return
+			if GlyphTrySave("barracks", barracks, info.name, 900, prevLoc, now) then
+				return
+			end
 		end
 	end
 	local ancient = GetAncient(team)
@@ -10253,9 +10512,9 @@ local function UseGlyphIfNeeded()
 			ancient:HasModifier("modifier_fountain_glyph")
 		)
 	then
-		local enemies = GlyphEnemiesNear(ancient, 900)
-		GlyphCast("save", ancient, "ancient", #enemies, GlyphAlliesFighting(ancient, enemies))
-		return
+		if GlyphTrySave("ancient", ancient, "ancient", 900, prevLoc, now) then
+			return
+		end
 	end
 	-- 2. Fight under one of our towers (T2 and higher: multishot).
 	local aliveEnemies = Fu.GetNumOfAliveHeroes(true)
@@ -10280,7 +10539,8 @@ local function UseGlyphIfNeeded()
 					fortified = tower:HasModifier("modifier_fountain_glyph"),
 				})
 				if ok and glyphCd <= 0 then
-					GlyphCast("fight", tower, info.name, #enemies, allies)
+					local help, tp = GlyphHelpComing(tower, prevLoc)
+					GlyphCast("fight", tower, info.name, #enemies, allies, help, tp, nil)
 					return
 				end
 				-- A fight under the tower that did not get the Glyph: say why (at most every 10s).
@@ -10432,7 +10692,7 @@ function Usage.LogStuck()
 			print,
 			string.format(
 				"[SHy-STUCK] t=%.0f %s mode=%s/%.2f action=%s moved=%d path=%d at=%.0f,%.0f hp=%.2f enemies=%d"
-					.. " queued=%d using=%s casting=%s channel=%s active=%s",
+					.. " queued=%d using=%s casting=%s channel=%s active=%s%s",
 				now,
 				(string.gsub(botName, "npc_dota_hero_", "")),
 				StuckModeName(bot:GetActiveMode()),
@@ -10448,7 +10708,9 @@ function Usage.LogStuck()
 				tostring(bot:IsUsingAbility()),
 				tostring(bot:IsCastingAbility()),
 				tostring(bot:IsChanneling()),
-				activeName
+				activeName,
+				-- A camp stack (#229) runs inside the ward mode and stands still while it waits: say so.
+				bot._stack ~= nil and (" stack=" .. tostring(bot._stack.phase)) or ""
 			)
 		)
 	end
@@ -11816,6 +12078,8 @@ function AbilityLevelUpThink()
 	if CheckArdmHeroSwap() then
 		return
 	end
+	Usage.AnswerPosRequest()
+	Usage.AnswerPosSwapReply()
 	if bot.lastLevelUpFrameProcessTime == nil then
 		bot.lastLevelUpFrameProcessTime = DotaTime()
 	end

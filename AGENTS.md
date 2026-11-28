@@ -9,7 +9,7 @@ no unit-test harness: the checks below plus a real bot game are the test.
 ## Repo map
 
 `bots/` is exactly what goes into Dota's `vscripts/bots` (`GetScriptDirectory()` is that folder in game); everything
-else is tooling, tests and docs.
+else is tooling, tests and docs. The one exception is `bots/dev/`: a test game gets it, a Workshop copy does not.
 
 | Path | What it is |
 |---|---|
@@ -24,6 +24,7 @@ else is tooling, tests and docs.
 | `bots/ability_item_usage_generic.lua`, `bots/item_purchase_generic.lua`, `bots/hero_selection.lua`, `bots/bot_generic.lua` | Item/ability use, buying, drafting, per-bot think. |
 | `bots/customize/general.lua` | User settings and **local test lineups**. |
 | `bots/customize/version.lua` | Build number shown in game. |
+| `bots/dev/` | Development-only bot scripts (the A/B measurement harness `perf_ab.lua`, #268). `tools/export-bots.js` copies them for a test game and leaves them out of a Workshop copy; nothing on `main` may require them. |
 | `tests/` | LuaJIT tests against a stub bot API (`tests/run.lua`, `tests/stub_api.lua`). |
 | `tools/` | Node.js developer tools (log splitter, build checks); see `tools/README.md`. |
 | `docs/` | Notes such as `BOT_API_RUNTIME.md` (what the bot API really exposes). |
@@ -151,14 +152,21 @@ needs `PRE_COMMIT_ALLOW_NO_CONFIG=1` to commit.
   and 084). A cache for anything a cast decision reads may not outlive the frame. In a test, a hero whose state
   changes is seen once `Stub.time` moves too (a frame is `1 / 30`).
 - **A performance change is measured in a game** (maintainer, 2026-11-25: "the lua may call fewer API but overall
-  CPU usage (API engine vs Lua) should be measured"). Fewer engine calls are not proof, and neither are two games,
-  one before and one after: two games of one build differ by 7% to 12% in script time (#153). Put the change behind
-  a switch and run it against the old code on neighbouring frames of one game with the A/B harness of #251
-  (`bots/lib/systems/perf_ab.lua`, taken out when #252 merged: `git fetch origin pull/252/head` then
-  `git show 4865f1e8:bots/lib/systems/perf_ab.lua`, its hooks in `perf.lua` in the same commit): `[SHy-AB]` prints
-  each variant's script time per frame, its difference from the old code and the standard error of that
-  difference. The `off` variant must be the old code with one test in front of it, and a build that still has the
-  switch is not merged.
+  CPU usage (API engine vs Lua) should be measured"). Fewer engine calls are not proof. Neither is a timing with the
+  tests' stub (for #251 its interpreted and its compiled run gave opposite answers), and neither are two games, one
+  before and one after: two games of one build differ by 7% to 12% in script time (#153). Put the change behind a
+  switch of the A/B harness (`PerfAb.Define` in `bots/dev/perf_ab.lua`; the steps are in
+  `docs/MEASURING_PERFORMANCE.md`): it runs the change against the old code on neighbouring frames of one game, and
+  `[SHy-AB]` prints each variant's script time per frame, its difference from the old code and the standard error of
+  that difference. Check first with `luajit tests/decision_trace.lua` that no variant changes a decision.
+  - **The harness is a development tool, off by default** (maintainer, 2026-11-26: "make the harness part of
+    development tools but should not published into the workshop"; "we should disable the harness by default"). It
+    is in `bots/dev/`, which a Workshop copy never holds, and nothing on `main` requires it, so an ordinary test game
+    does not load it either. There is no flag to set: a measurement PR's `PerfAb.Define` turns it on, in the games
+    whose test build holds that PR, and only there.
+  - **An experiment does not stay.** Its `PerfAb.Define`, its switch tests and the code path that lost come out
+    before the PR merges; a build that still has them is not merged, and `tools/export-bots.js` refuses to make a
+    Workshop copy of it.
 - Bot chat stays short (maintainer, 2026-11-23): a line that narrates a decision ("Going for X", "Pushing top",
   "Defend mid", lotus / shrine) goes through `ChatRules.SayDecision` (`bots/lib/systems/chat_rules.lua`), which says
   it only while the team's `!chatty` chat mode is on. There is no `!debug` command (maintainer, 2026-11-24: "we
@@ -359,7 +367,10 @@ came with (or a small `docs/` PR).
 
 - **Reporting.** End every summary to the maintainer with the test-game readiness as the last sentence ("Ready
   for a test game: `vscripts/bots` = export of test/next <sha>" or "Not ready yet: waiting for X"); the maintainer
-  reads the end first. Record every decision the maintainer makes on the issue card or PR it is about (a comment
+  reads the end first. The ready sentence also says where to sit (maintainer, 2026-11-27): spectating, or which
+  team, lobby slot and position to play, with the reason (a tracked item that needs a human, such as a chat
+  command or a human on Dire) and which lineup hero the seat leaves out. Pick the seat that leaves out the
+  lineup hero whose pending items matter least. Record every decision the maintainer makes on the issue card or PR it is about (a comment
   that quotes it), so later sessions and agents see it.
 - **GitHub account.** Every GitHub call in this repo uses `gh_personal` (the anggara-ts login). The tools
   (`tools/github_cli.js`) pick `gh_personal` when it is on PATH, and `gh` only when that wrapper is missing.
