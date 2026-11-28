@@ -16,6 +16,8 @@
 // .env, match logs, tests, tools, docs and uncommitted edits never get in), written to the same path below
 // vscripts/bots (bots/heroes/hero_axe.lua -> vscripts/bots/heroes/hero_axe.lua). The copy also gets LICENSE when
 // the commit has one. Before writing, every literal require / dofile target must be in the copy.
+// bots/dev/ holds development-only scripts (the A/B measurement harness, #268): a test-game copy has them, a
+// Workshop copy never does. So a build whose shipped scripts still require one of them stops at the require check.
 // Workshop copies (no --test-game): the committed bots/customize/general.lua must hold release defaults (no TEST #N
 // comments, no forced picks, Weak_Hero_Cap 1, no Debug_* = true) or the export stops; after writing, the folder must
 // hold exactly the copied files (no build_info.lua, nothing edited or added), then it prints READY TO UPLOAD.
@@ -31,6 +33,8 @@ const cp = require("child_process");
 const ROOT = path.join(__dirname, "..");
 // The repo folder whose content is vscripts/bots. Paths in a copy (the Map keys below) are relative to it.
 const BOTS_DIR = "bots/";
+// Development-only bot scripts: in a test-game copy, never in a Workshop copy (#268).
+const DEV_DIR = "bots/dev/";
 // Repo files that go into every copy besides the bot scripts, at the top of the copy: the licence notice (MIT asks
 // for it in all copies, #215).
 const NOTICE_FILES = ["LICENSE"];
@@ -66,8 +70,14 @@ function isBotScript(file) {
 	return file.startsWith(BOTS_DIR) && file.endsWith(".lua");
 }
 
-// A repo path that goes into the copy, and where (null: not in the copy).
-function exportPath(file) {
+// A repo path that is a development-only bot script.
+function isDevScript(file) {
+	return isBotScript(file) && file.startsWith(DEV_DIR);
+}
+
+// A repo path that goes into the copy, and where (null: not in the copy). withDev: a test-game copy.
+function exportPath(file, withDev = false) {
+	if (isDevScript(file) && !withDev) return null;
 	if (isBotScript(file)) return file.slice(BOTS_DIR.length);
 	if (NOTICE_FILES.includes(file)) return file;
 	return null;
@@ -85,8 +95,9 @@ function unplacedLua(files) {
 		!NOT_RUNTIME_DIRS.some((dir) => file.startsWith(dir)));
 }
 
-// Reads the bot scripts of one commit: Map(path -> Buffer), plus the counts of what was left out.
-function collect(ref) {
+// Reads the bot scripts of one commit: Map(path -> Buffer), plus the counts of what was left out. withDev: the
+// development-only scripts too (a test-game copy).
+function collect(ref, withDev = false) {
 	const commit = gitText(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
 	const entries = git(["ls-tree", "-r", "-z", "--full-tree", commit], { encoding: "utf8" })
 		.split("\0")
@@ -113,19 +124,20 @@ function collect(ref) {
 	const selected = [];
 	const leftOut = {};
 	for (const entry of entries) {
-		if (exportPath(entry.file) !== null) {
+		if (exportPath(entry.file, withDev) !== null) {
 			if (entry.type !== "blob" || entry.mode === "120000") {
 				throw new Error(`${entry.file} is a ${entry.mode === "120000" ? "symlink" : entry.type}, not a file`);
 			}
 			selected.push(entry);
 		} else {
-			const top = entry.file.includes("/") ? entry.file.split("/")[0] + "/" : "(root files)";
+			const top = isDevScript(entry.file) ? DEV_DIR
+				: entry.file.includes("/") ? entry.file.split("/")[0] + "/" : "(root files)";
 			leftOut[top] = (leftOut[top] || 0) + 1;
 		}
 	}
 	const blobs = readBlobs(selected.map((entry) => entry.sha));
 	const files = new Map();
-	selected.forEach((entry, i) => files.set(exportPath(entry.file), blobs[i]));
+	selected.forEach((entry, i) => files.set(exportPath(entry.file, withDev), blobs[i]));
 	return { commit, files, leftOut };
 }
 
@@ -423,7 +435,7 @@ function uncommittedChanges() {
 		.map((line) => ({ isNew: line.startsWith("??"), file: line.slice(3).replace(/^.* -> /, "").replace(/^"|"$/g, "") }));
 	const unplaced = new Set(unplacedLua(changed.map((c) => c.file)));
 	return changed
-		.filter((c) => c.file !== LINEUP_REPO_FILE && (exportPath(c.file) !== null || unplaced.has(c.file)))
+		.filter((c) => c.file !== LINEUP_REPO_FILE && (exportPath(c.file, true) !== null || unplaced.has(c.file)))
 		.map((c) => (c.isNew ? `${c.file} (new)` : c.file));
 }
 
@@ -510,7 +522,7 @@ function main(args) {
 	}
 
 	const ref = args.ref || (args.testGame ? "HEAD" : "origin/main");
-	const { commit, files, leftOut } = collect(ref);
+	const { commit, files, leftOut } = collect(ref, args.testGame);
 	const short = commit.slice(0, 7);
 	const date = gitText(["log", "-1", "--format=%cd", "--date=format:%Y.%m.%d", commit]);
 	const notes = [];
@@ -541,10 +553,14 @@ function main(args) {
 	}
 	const missing = missingRequires(files);
 	if (missing.length > 0) {
+		const devOnly = missing.some((m) => (BOTS_DIR + m.target).startsWith(DEV_DIR));
 		throw new Error(
 			"required files missing from the copy:\n" +
 				missing.map((m) => `  ${m.file} -> ${m.target}`).join("\n") +
-				`\n(a runtime file outside ${BOTS_DIR}? the game only gets ${BOTS_DIR})`
+				(devOnly
+					? `\n(${DEV_DIR} is development-only and never in a Workshop copy: an A/B experiment is still in ` +
+						"this build. Take it out first, docs/MEASURING_PERFORMANCE.md)"
+					: `\n(a runtime file outside ${BOTS_DIR}? the game only gets ${BOTS_DIR})`)
 		);
 	}
 	const steps = plan(dest, files, manifest.get(dest), args.force);
@@ -560,7 +576,7 @@ function main(args) {
 		.sort((a, b) => b[1] - a[1])
 		.map(([top, n]) => `${top} ${n}`)
 		.join(", ");
-	console.log(`  left out (not bot scripts): ${skipped}`);
+	console.log(`  left out (not bot scripts${args.testGame ? "" : `, or development-only ${DEV_DIR}`}): ${skipped}`);
 	for (const note of notes) console.log(`  ${note}`);
 	if (!args.dryRun) {
 		apply(dest, files, steps, manifest, { ref, commit, at: new Date().toISOString(), testGame: args.testGame });
@@ -619,6 +635,19 @@ function selfTest() {
 		missing.length === 1 && missing[0].target === "customize/general");
 	sources.set("customize/general.lua", Buffer.from("return {}"));
 	check("requires: nothing missing once the file is there", missingRequires(sources).length === 0);
+
+	const dev = "bots/dev/perf_ab.lua";
+	check("dev: a development-only script is out of a Workshop copy and in a test-game copy",
+		isBotScript(dev) && exportPath(dev) === null && exportPath(dev, true) === "dev/perf_ab.lua" &&
+			exportPath("bots/heroes/hero_axe.lua", true) === "heroes/hero_axe.lua" && unplacedLua([dev]).length === 0);
+	const measuring = new Map([
+		["lib/cache.lua", Buffer.from('local PerfAb = require(GetScriptDirectory() .. "/dev/perf_ab")')],
+	]);
+	const devMissing = missingRequires(measuring);
+	check("dev: a Workshop copy whose scripts still require the harness is stopped by the require check",
+		devMissing.length === 1 && devMissing[0].target === "dev/perf_ab");
+	measuring.set("dev/perf_ab.lua", Buffer.from("return {}"));
+	check("dev: a test-game copy has the harness, so the same scripts pass", missingRequires(measuring).length === 0);
 
 	const cleanLineup = [
 		"--[[ Examples:", '  Customize.Debug_Ally_Heros = { "npc_dota_hero_phoenix" }', "--]]",

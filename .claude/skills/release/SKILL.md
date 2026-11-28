@@ -53,24 +53,31 @@ Show the maintainer: the new version and the two version-file values, the tidied
 in one line each. Stop here unless publishing was asked for.
 
 ## 5. Ready to publish?
-- `main` CI is green (`gh run list --branch main --limit 3`), and a game on a build of `main` alone ran clean
+- `main` CI is green (`gh_personal run list --branch main --limit 3`), and a game on a build of `main` alone ran clean
   (no freeze, no `[SHy-ERROR]`): if not, say so and stop.
 - No open PR the maintainer named as part of this release is still open.
 
 ## 6. Release PR
-- Branch `chore/release-vX.Y` from `origin/main` (own worktree; never commit on main). Bump the version files
+- Branch `chore/release-vX.Y` from `origin/main` in `.worktree/release-vX.Y` (never commit on main). Bump the version files
   (step 1: `number` and `release` in `bots/customize/version.lua`, `bots/lib/systems/version.lua`), signed commit
-  `chore(release): vX.Y`, push, PR with the notes as description, CI green, squash-merge (`gh pr merge --squash --delete-branch`).
+  `chore(release): vX.Y`, push, PR with the notes as description, CI green, squash-merge (`gh_personal pr merge --squash --delete-branch`).
 
 ## 7. Tag and release
 - `git fetch origin`; tag the merge commit: `git tag -s vX.Y -m "vX.Y" origin/main` (signed, like the commits),
   `git push origin vX.Y`.
-- `gh release create vX.Y --title "vX.Y" --notes-file <notes.md> --verify-tag`.
+- `gh_personal release create vX.Y --title "vX.Y" --notes-file <notes.md> --verify-tag`.
 
 ## 8. Workshop copy
 Ask the maintainer whether to put the release into `vscripts/bots` for the Workshop upload now; on yes, run the
 `/prepare-workshop` skill with the new tag (`--ref vX.Y`). It stops first if a test game is prepared or running.
 Never upload: the maintainer does that in the Workshop Tools.
+
+Also give the maintainer the Workshop change notes: the release notes from step 3 in Steam BBCode
+(`[h3]` per section, `[list][*]...[/list]`, `[b]` for hero names and commands, `[url=...]...[/url]`), saved to a
+file and shown in a code block. Leave out the PR links (a bare `#N` means nothing on Steam), and end with one link to
+the GitHub release instead. The heading is always `[h2]vX.Y (Dota 2 patch <patch>)[/h2]`, e.g.
+`[h2]v0.9 (Dota 2 patch 7.42a)[/h2]`, with the patch from `bots/lib/systems/version.lua`. Put no date in it: the
+Workshop page prints the date of each change note itself (maintainer, v0.9).
 
 ## 9. Report
 The release URL, the version, what is not in it (open PRs that wait for the next release), and the Workshop

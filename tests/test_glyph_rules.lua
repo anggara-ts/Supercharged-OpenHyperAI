@@ -78,3 +78,65 @@ T.test("glyph rules: own charge count", function()
 	T.eq(R.Tick(s, 100 + 2 * R.CHARGE_TIME + 5), 2, "both back")
 	T.eq(s.nextAt, nil, "full: no replenish running")
 end)
+
+-- A second save Glyph on the same fight (games 072, 081, 084, 085): only with one of our heroes there or walking in.
+local function save(over)
+	local s = { kind = "tower", charges = 2, sinceSame = nil, allies = 0, coming = 0 }
+	for k, v in pairs(over or {}) do
+		s[k] = v
+	end
+	return s
+end
+
+T.test("glyph rules: second save Glyph needs help", function()
+	local R = load()
+	-- The first save with both charges: as before, no help needed.
+	local ok, why, rule = R.ShouldSpendSave(save())
+	T.eq(ok, true, "first save, two charges")
+	T.eq(why, "save", "why=save")
+	T.eq(rule, nil, "no rule asked for help")
+	-- Game 084 t=942/950: Radiant's mid T1, five Dire heroes, nobody of ours; second Glyph 8s after the first.
+	ok, why, rule = R.ShouldSpendSave(save({ charges = 1, sinceSame = 8 }))
+	T.eq(ok, false, "8s after the first, nobody coming: keep the charge")
+	T.eq(why, "no-help", "why=no-help")
+	T.eq(rule, "repeat", "rule=repeat")
+	-- Game 084 t=3052/3062: a fight Glyph, then a save on the same tower 10s later with nobody left there.
+	T.eq(R.ShouldSpendSave(save({ charges = 1, sinceSame = 10 })), false, "fight Glyph then save, nobody there")
+	-- Game 085 t=2760/2770: Shadow Fiend at the tower and four defenders walking in: the second Glyph is right.
+	T.eq(R.ShouldSpendSave(save({ charges = 1, sinceSame = 10, allies = 1 })), true, "an ally fighting there")
+	T.eq(R.ShouldSpendSave(save({ charges = 1, sinceSame = 10, coming = 2 })), true, "allies walking in")
+	-- A repeat with both charges (one came back in between) still needs help.
+	local _, _, both = R.ShouldSpendSave(save({ charges = 2, sinceSame = 12 }))
+	T.eq(both, "repeat", "repeat with two charges")
+	T.eq(R.SaveNeedsHelp("tower", 2, R.REPEAT_WINDOW), nil, "20s after: a new fight")
+	-- The last charge on a tower nobody can defend.
+	ok, why, rule = R.ShouldSpendSave(save({ charges = 1 }))
+	T.eq(ok, false, "last charge, nobody coming")
+	T.eq(rule, "last-charge", "rule=last-charge")
+	T.eq(R.ShouldSpendSave(save({ charges = 1, coming = 1 })), true, "last charge with help on the way")
+	T.eq(R.ShouldSpendSave(save({ kind = "barracks", charges = 1 })), false, "barracks: same rule")
+	-- The Ancient: always (7s can bring a respawn or a buyback; nothing to keep the charge for).
+	T.eq(R.ShouldSpendSave(save({ kind = "ancient", charges = 1, sinceSame = 8 })), true, "Ancient, repeat, alone")
+end)
+
+T.test("glyph rules: charge count follows GetGlyphCooldown", function()
+	local R = load()
+	-- Game 085 (Dire): our count gave a charge back at t=1884, the API's cooldown said t=1980.
+	local s = { charges = 1, nextAt = 2244 }
+	T.eq(R.Sync(s, 1885, 95.4), 1, "cooldown above 7s: corrected, was 1")
+	T.eq(s.charges, 0, "no charge left")
+	T.near(s.nextAt, 1980.4, 0.01, "back when the API says")
+	T.eq(R.Sync(s, 1887, 93.4), nil, "same reading 2s later: no change")
+	T.eq(R.Tick(s, 1981), 1, "the charge comes back at the API's time")
+	-- 2s after a cast with a charge left the API reads the 7s between uses (cd=5.0): not a restore time.
+	local t = { charges = 1, nextAt = 1302 }
+	T.eq(R.Sync(t, 944, 5.0), nil, "between-uses cooldown: no change")
+	T.eq(t.charges, 1, "still one")
+	-- Our count says none, the API says ready: one is there.
+	local u = { charges = 0, nextAt = 2000 }
+	T.eq(R.Sync(u, 1900, 0), 0, "ready while we counted none")
+	T.eq(u.charges, 1, "one charge")
+	T.eq(u.nextAt, 2000, "the second one's time stays")
+	local full = R.NewCharges()
+	T.eq(R.Sync(full, 100, 0), nil, "full and ready: no change")
+end)

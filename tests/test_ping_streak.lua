@@ -112,9 +112,9 @@ T.test("ping streak: the item think answers five fountain pings once, in team ch
 	-- One team member other than this bot is a human (the stub's players are all bots).
 	local humanSlot = GetTeamMember(1) == bot and 2 or 1
 	local human = GetTeamMember(humanSlot)
-	local humanId = GetTeamPlayers(GetTeam())[humanSlot]
-	IsPlayerBot = function(playerId)
-		return playerId ~= humanId
+	-- Humans are found by GetTeamMember(slot):IsBot() (#222, game 087), not by IsPlayerBot on GetTeamPlayers.
+	human.IsBot = function()
+		return false
 	end
 	local said = {}
 	bot.ActionImmediate_Chat = function(_, text, allChat)
@@ -179,9 +179,9 @@ T.test("ping streak: the item think finds the fountain building and counts pings
 	local bot = GetBot()
 	local humanSlot = GetTeamMember(1) == bot and 2 or 1
 	local human = GetTeamMember(humanSlot)
-	local humanId = GetTeamPlayers(GetTeam())[humanSlot]
-	IsPlayerBot = function(playerId)
-		return playerId ~= humanId
+	-- Humans are found by GetTeamMember(slot):IsBot() (#222, game 087), not by IsPlayerBot on GetTeamPlayers.
+	human.IsBot = function()
+		return false
 	end
 	local said = {}
 	bot.ActionImmediate_Chat = function(_, text)
@@ -265,9 +265,9 @@ T.test("ping streak: the item think logs fountain-ping for each fountain ping", 
 	local bot = GetBot()
 	local humanSlot = GetTeamMember(1) == bot and 2 or 1
 	local human = GetTeamMember(humanSlot)
-	local humanId = GetTeamPlayers(GetTeam())[humanSlot]
-	IsPlayerBot = function(playerId)
-		return playerId ~= humanId
+	-- Humans are found by GetTeamMember(slot):IsBot() (#222, game 087), not by IsPlayerBot on GetTeamPlayers.
+	human.IsBot = function()
+		return false
 	end
 	bot.ActionImmediate_Chat = function() end
 	local fountain = Fu.GetTeamFountain()
@@ -300,4 +300,78 @@ T.test("ping streak: the item think logs fountain-ping for each fountain ping", 
 	T.ok(steps[1] ~= nil and steps[1]:find("count=1 near=true gap=- ", 1, true) ~= nil, "the first: count 1")
 	T.ok(steps[3] ~= nil and steps[3]:find("count=3 near=true gap=1.2 ", 1, true) ~= nil, "the third: count 3")
 	T.ok(steps[4] ~= nil and steps[4]:find("count=0 near=false", 1, true) ~= nil, "the far ping: count 0")
+end)
+
+-- Games 086 and 087 (#222): a Dire human (player 1) pinged our fountain 8 times and no fountain-ping line printed.
+-- GetTeamPlayers read 6,1,7,8,9 (the human second) while GetTeamMember(1) was the human and GetTeamMember(2) Zeus,
+-- so the watch read Zeus' pings. The humans now come from GetTeamMember itself.
+T.test("ping streak: HumanSlots takes the slots from GetTeamMember (game 087, Dire)", function()
+	local Streak = Load()
+	local members = {
+		{ bot = false, id = 1 },
+		{ bot = true, id = 6 },
+		{ bot = true, id = 7 },
+		{ bot = true, id = 8 },
+		{ bot = true, id = 9 },
+	}
+	local list, key = Streak.HumanSlots(members)
+	T.eq(#list, 1, "one human")
+	T.eq(list[1] and list[1].slot, 1, "in slot 1")
+	T.eq(list[1] and list[1].id, 1, "player 1")
+	T.eq(key, "1@1", "the log key")
+	members[4] = { bot = false, id = 0 }
+	list, key = Streak.HumanSlots(members)
+	T.eq(#list, 2, "two humans")
+	T.eq(key, "1@1,0@4", "both, in slot order")
+	list, key = Streak.HumanSlots({ { bot = true, id = 6 }, nil, { bot = true, id = 7 } })
+	T.eq(#list, 0, "no human")
+	T.eq(key, "-", "no human: -")
+end)
+
+T.test("ping streak: a human whose GetTeamPlayers index is not its slot still gets the line", function()
+	T.stub.reset({ hero = "npc_dota_hero_lich", time = 600 })
+	local Usage = dofile("bots/ability_item_usage_generic.lua")
+	local Streak = require(GetScriptDirectory() .. "/lib/systems/ping_streak")
+	local Fu = require(GetScriptDirectory() .. "/lib/func_utils")
+	local bot = GetBot()
+	local humanSlot = GetTeamMember(1) == bot and 2 or 1
+	local otherSlot = humanSlot == 1 and 3 or 1
+	local human = GetTeamMember(humanSlot)
+	human.IsBot = function()
+		return false
+	end
+	-- GetTeamPlayers lists the human at another index (game 087: the human second, GetTeamMember(1) the human).
+	local ids = GetTeamPlayers(GetTeam())
+	ids[humanSlot], ids[otherSlot] = ids[otherSlot], ids[humanSlot]
+	GetTeamPlayers = function()
+		return { ids[1], ids[2], ids[3], ids[4], ids[5] }
+	end
+	-- The bot at the human's GetTeamPlayers index pings elsewhere; reading it must not count.
+	GetTeamMember(otherSlot).GetMostRecentPing = function()
+		return { time = -100, location = Vector(0, 0, 0), normal_ping = true }
+	end
+	local said = {}
+	bot.ActionImmediate_Chat = function(_, text)
+		said[#said + 1] = text
+	end
+	local fountain = Fu.GetTeamFountain()
+	local pingTime = -100
+	human.GetMostRecentPing = function()
+		return { time = pingTime, location = Vector(fountain.x + 200, fountain.y, 0), normal_ping = false }
+	end
+	Usage.WatchFountainPings()
+	for _ = 1, Streak.COUNT do
+		T.stub.time = T.stub.time + 1.2
+		pingTime = GameTime() - 0.2
+		Usage.WatchFountainPings()
+	end
+	T.eq(#said, 1, "five pings: the line")
+	T.eq(said[1], Streak.Line(), "the credit line")
+	local watch = nil
+	for _, line in ipairs(T.stub.printed) do
+		if line:find("fountain-watch team=", 1, true) then
+			watch = line
+		end
+	end
+	T.ok(watch ~= nil and watch:find("humans=" .. human:GetPlayerID() .. "@" .. humanSlot, 1, true) ~= nil, "logged")
 end)

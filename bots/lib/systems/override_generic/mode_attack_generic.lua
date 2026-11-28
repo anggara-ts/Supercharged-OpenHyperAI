@@ -85,11 +85,9 @@ function AttackMode.GetDesire()
 	botName = bot:GetUnitName()
 	botLocation = bot:GetLocation()
 	local isCore = Fu.IsCore(bot)
-	local nearbyAllyHeroes = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
 	local alliesNearby = Fu.GetAlliesNearLoc(botLocation, 1600)
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
 	local enemiesNearby = Fu.GetEnemiesNearLoc(botLocation, 1600)
-	local enemyLaneCreeps = bot:GetNearbyLaneCreeps(1600, true)
 	local enemyTowers = bot:GetNearbyTowers(1600, true)
 	local bestTarget = nil
 	local bestScore = 0
@@ -543,7 +541,6 @@ function AttackMode.Think()
 		end
 	end
 	local nearbyEnemyHeroes = bot:GetNearbyHeroes(1600, true, BOT_MODE_NONE)
-	local enemyTowers = bot:GetNearbyTowers(1600, true)
 	if bot:HasModifier("modifier_pugna_life_drain") then
 		for _, enemyHero in ipairs(nearbyEnemyHeroes) do
 			if
